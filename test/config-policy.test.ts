@@ -61,11 +61,52 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.protectedUserIds], [USER_ID])
   assert.equal(config.allowAdministration, true)
   assert.equal(config.allowDeletions, true)
+  assert.equal(config.allowGateway, false)
   assert.equal(config.allowInteractions, true)
   assert.equal(config.interactionMaxWritesPerMinute, 12)
   assert.equal(config.interactionMinWriteIntervalMs, 750)
   assert.equal(config.expectedApplicationId, "300000000000000001")
+  assert.equal(config.gatewayEventBufferSize, 100)
   assert.equal(config.auditFile, "/test/state/discord-mcp/activity.jsonl")
+})
+
+test("configuration keeps Gateway disabled and requires pinned bounded scope when enabled", () => {
+  const enabled = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_GATEWAY: "true",
+    DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE: "250",
+  }, { homeDirectory: "/test/home" })
+  assert.equal(enabled.allowGateway, true)
+  assert.equal(enabled.gatewayEventBufferSize, 250)
+
+  for (const environment of [
+    {
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+    },
+    {
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+      DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    },
+  ]) {
+    assert.throws(
+      () => loadConnectorConfig(environment, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  }
+  for (const value of ["0", "1001", "1.5"]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE: value,
+      }, { homeDirectory: "/test/home" }),
+      /must be an integer between 1 and 1000/,
+    )
+  }
 })
 
 test("configuration rejects deletion channels outside a read channel allowlist", () => {
@@ -123,6 +164,8 @@ test("configuration and policy require an exact administration guild and protect
     allowedGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    gatewayEnabled: false,
+    gatewayEventBufferSize: 100,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -239,6 +282,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     allowedGuildIds: [GUILD_ID],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
+    gatewayEnabled: false,
+    gatewayEventBufferSize: 100,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,

@@ -170,6 +170,8 @@ export function registerDiscordResources(
           "",
           "Read and search only inside configured guild and channel scope. Resource discovery never enumerates messages; reading a message resource requires an exact channel ID and message ID.",
           "",
+          "The optional Gateway feed requires pinned identity and exact local scope, requests no privileged intents, stores no Discord content, and reports cursor discontinuities instead of claiming false continuity.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",

@@ -1,0 +1,546 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import {
+  DISCORD_GATEWAY_INTENT_MASK,
+  DISCORD_GATEWAY_URL,
+} from "../src/constants.js"
+import {
+  DiscordGateway,
+  normalizeGatewayResumeUrl,
+  type GatewayScheduler,
+  type GatewaySocket,
+} from "../src/discord-gateway.js"
+import { GatewayEventStore } from "../src/gateway-events.js"
+
+const APPLICATION_ID = "100000000000000001"
+const GUILD_ID = "200000000000000001"
+const CHANNEL_ID = "300000000000000001"
+const MESSAGE_ID = "400000000000000001"
+const TOKEN = "test-discord-token"
+
+class FakeScheduler implements GatewayScheduler {
+  #nextId = 1
+  readonly jobs = new Map<number, { at: number; handler: () => void }>()
+  now = 0
+
+  clearTimeout(handle: unknown): void {
+    if (typeof handle === "number") this.jobs.delete(handle)
+  }
+
+  setTimeout(handler: () => void, milliseconds: number): unknown {
+    const id = this.#nextId
+    this.#nextId += 1
+    this.jobs.set(id, { at: this.now + milliseconds, handler })
+    return id
+  }
+
+  runNext(): number {
+    const next = [...this.jobs.entries()].sort((left, right) => (
+      left[1].at - right[1].at || left[0] - right[0]
+    ))[0]
+    if (!next) throw new Error("No scheduled Gateway task")
+    const [id, job] = next
+    this.jobs.delete(id)
+    this.now = job.at
+    job.handler()
+    return this.now
+  }
+}
+
+class FakeSocket implements GatewaySocket {
+  onclose: ((event: { code: number }) => void) | null = null
+  onerror: (() => void) | null = null
+  onmessage: ((event: { data: unknown }) => void) | null = null
+  onopen: (() => void) | null = null
+  readyState = 0
+  readonly sent: string[] = []
+
+  open(): void {
+    this.readyState = 1
+    this.onopen?.()
+  }
+
+  message(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
+
+  rawMessage(data: unknown): void {
+    this.onmessage?.({ data })
+  }
+
+  serverClose(code: number): void {
+    this.readyState = 3
+    this.onclose?.({ code })
+  }
+
+  error(): void {
+    this.onerror?.()
+  }
+
+  close(code = 1_000): void {
+    this.serverClose(code)
+  }
+
+  send(data: string): void {
+    if (this.readyState !== 1) throw new Error("Socket is not open")
+    this.sent.push(data)
+  }
+}
+
+function payloads(socket: FakeSocket): Array<Record<string, unknown>> {
+  return socket.sent.map((value) => JSON.parse(value) as Record<string, unknown>)
+}
+
+function fixture(options: { random?: number } = {}) {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const urls: string[] = []
+  const logs: string[] = []
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    bufferSize: 10,
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "gatewaytest1",
+    enabled: true,
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowGateway: true,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+    eventStore,
+    logger(message) {
+      logs.push(message)
+    },
+    random: () => options.random ?? 0,
+    scheduler,
+    webSocketFactory(url) {
+      urls.push(url)
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+  return { eventStore, gateway, logs, scheduler, sockets, urls }
+}
+
+function hello(socket: FakeSocket, heartbeatInterval = 45_000): void {
+  socket.open()
+  socket.message({
+    d: { heartbeat_interval: heartbeatInterval },
+    op: 10,
+    s: null,
+    t: null,
+  })
+}
+
+function ready(socket: FakeSocket, overrides: Record<string, unknown> = {}): void {
+  socket.message({
+    d: {
+      application: { id: APPLICATION_ID },
+      resume_gateway_url: "wss://gateway-us-east1-b.discord.gg",
+      session_id: "private-session-id",
+      ...overrides,
+    },
+    op: 0,
+    s: 1,
+    t: "READY",
+  })
+}
+
+test("Gateway construction independently enforces scope and enabled-state invariants", () => {
+  assert.throws(
+    () => new DiscordGateway({
+      applicationId: APPLICATION_ID,
+      config: {
+        allowedChannelIds: new Set(),
+        allowedGuildIds: new Set(),
+        allowGateway: true,
+        gatewayEventBufferSize: 10,
+        token: TOKEN,
+      },
+    }),
+    /exact guild or channel scope/,
+  )
+
+  const disabledStore = new GatewayEventStore({
+    allowedChannelIds: new Set(),
+    allowedGuildIds: new Set(),
+    enabled: false,
+  })
+  assert.throws(
+    () => new DiscordGateway({
+      applicationId: APPLICATION_ID,
+      config: {
+        allowedChannelIds: new Set([CHANNEL_ID]),
+        allowedGuildIds: new Set(),
+        allowGateway: true,
+        gatewayEventBufferSize: 10,
+        token: TOKEN,
+      },
+      eventStore: disabledStore,
+    }),
+    /enabled states must match/,
+  )
+})
+
+test("Gateway identifies with fixed nonprivileged intents and exposes no session material", async () => {
+  const { gateway, logs, sockets, urls } = fixture()
+  gateway.start()
+  assert.deepEqual(urls, [DISCORD_GATEWAY_URL])
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+
+  const identify = payloads(socket)[0]
+  assert.equal(identify?.op, 2)
+  const data = identify?.d as Record<string, unknown>
+  assert.equal(data.intents, DISCORD_GATEWAY_INTENT_MASK)
+  assert.equal((Number(data.intents) & (1 << 24)) !== 0, true)
+  assert.equal((Number(data.intents) & (1 << 15)) === 0, true)
+  assert.equal((Number(data.intents) & (1 << 1)) === 0, true)
+  assert.equal((Number(data.intents) & (1 << 8)) === 0, true)
+  assert.deepEqual(data.properties, {
+    browser: "discord-mcp",
+    device: "discord-mcp",
+    os: process.platform,
+  })
+  ready(socket)
+
+  const status = gateway.getStatus()
+  assert.equal(status.connection.state, "ready")
+  assert.equal(status.connection.identifies, 1)
+  assert.equal(status.privacy.privilegedIntentsRequested, false)
+  const rendered = JSON.stringify(status)
+  assert.doesNotMatch(rendered, new RegExp(TOKEN))
+  assert.doesNotMatch(rendered, /private-session-id|gateway-us-east/)
+  assert.deepEqual(logs, [])
+  await gateway.stop()
+})
+
+test("Gateway accepts events only after READY identity validation and drops content", async () => {
+  const { gateway, sockets } = fixture()
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  socket.message({
+    d: {
+      channel_id: CHANNEL_ID,
+      content: TOKEN,
+      guild_id: GUILD_ID,
+      id: MESSAGE_ID,
+    },
+    op: 0,
+    s: 1,
+    t: "MESSAGE_CREATE",
+  })
+  assert.equal(gateway.listEvents().events.length, 0)
+  ready(socket)
+  socket.message({
+    d: {
+      author: { username: TOKEN },
+      channel_id: CHANNEL_ID,
+      content: TOKEN,
+      guild_id: GUILD_ID,
+      id: MESSAGE_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "MESSAGE_CREATE",
+  })
+
+  assert.deepEqual(gateway.listEvents().events[0], {
+    channelId: CHANNEL_ID,
+    cursor: "gw1.gatewaytest1.0.1",
+    guildId: GUILD_ID,
+    kind: "message-created",
+    messageId: MESSAGE_ID,
+    receivedAt: "1970-01-01T00:00:00.000Z",
+  })
+  assert.doesNotMatch(JSON.stringify(gateway.listEvents()), new RegExp(TOKEN))
+  await gateway.stop()
+})
+
+test("Gateway heartbeats with the latest sequence and reconnects on a missing ACK", async () => {
+  const { gateway, scheduler, sockets } = fixture()
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  ready(socket)
+
+  assert.equal(scheduler.runNext(), 0)
+  assert.deepEqual(payloads(socket).at(-1), { d: 1, op: 1 })
+  assert.equal(scheduler.runNext(), 45_000)
+  assert.equal(gateway.getStatus().connection.state, "reconnecting")
+  assert.equal(gateway.getStatus().connection.lastError?.category, "heartbeat-timeout")
+  assert.equal(scheduler.runNext(), 45_800)
+  assert.equal(sockets.length, 2)
+  await gateway.stop()
+})
+
+test("Gateway heartbeat ACKs keep the connection alive", async () => {
+  const { gateway, scheduler, sockets } = fixture()
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  ready(socket)
+
+  scheduler.runNext()
+  socket.message({ d: null, op: 11, s: null, t: null })
+  scheduler.runNext()
+  assert.equal(payloads(socket).filter((payload) => payload.op === 1).length, 2)
+  assert.equal(gateway.getStatus().connection.state, "ready")
+  await gateway.stop()
+})
+
+test("Gateway reconnects after bounded connection and authentication deadlines", async () => {
+  const connecting = fixture()
+  connecting.gateway.start()
+  assert.equal(connecting.scheduler.runNext(), 30_000)
+  assert.equal(connecting.gateway.getStatus().connection.state, "reconnecting")
+  assert.equal(
+    connecting.gateway.getStatus().connection.lastError?.category,
+    "connection-timeout",
+  )
+
+  const authenticating = fixture({ random: 1 })
+  authenticating.gateway.start()
+  const socket = authenticating.sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  assert.equal(authenticating.scheduler.runNext(), 30_000)
+  assert.equal(authenticating.gateway.getStatus().connection.state, "reconnecting")
+  assert.equal(
+    authenticating.gateway.getStatus().connection.lastError?.category,
+    "authentication-timeout",
+  )
+
+  await connecting.gateway.stop()
+  await authenticating.gateway.stop()
+})
+
+test("Gateway resumes with only vetted Discord origins", async () => {
+  const { gateway, scheduler, sockets, urls } = fixture()
+  gateway.start()
+  const first = sockets[0]
+  assert.ok(first)
+  hello(first)
+  ready(first)
+  first.serverClose(1_006)
+
+  assert.equal(scheduler.runNext(), 800)
+  const second = sockets[1]
+  assert.ok(second)
+  assert.equal(urls[1], "wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json")
+  hello(second)
+  const resume = payloads(second)[0]
+  assert.equal(resume?.op, 6)
+  assert.deepEqual(resume?.d, {
+    seq: 1,
+    session_id: "private-session-id",
+    token: TOKEN,
+  })
+  second.message({
+    d: {
+      channel_id: CHANNEL_ID,
+      guild_id: GUILD_ID,
+      id: MESSAGE_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "MESSAGE_DELETE",
+  })
+  second.message({ d: {}, op: 0, s: 3, t: "RESUMED" })
+  assert.equal(gateway.getStatus().connection.state, "ready")
+  assert.equal(gateway.getStatus().connection.identifies, 1)
+  assert.equal(gateway.getStatus().connection.resumes, 1)
+  assert.equal(gateway.getStatus().buffer.continuityGaps, 0)
+  assert.equal(gateway.listEvents().events[0]?.messageId, MESSAGE_ID)
+  await gateway.stop()
+})
+
+test("Gateway rejects READY during Resume instead of hiding a continuity gap", async () => {
+  const { gateway, scheduler, sockets } = fixture()
+  gateway.start()
+  const first = sockets[0]
+  assert.ok(first)
+  hello(first)
+  ready(first)
+  first.serverClose(1_006)
+
+  scheduler.runNext()
+  const second = sockets[1]
+  assert.ok(second)
+  hello(second)
+  ready(second)
+
+  assert.equal(gateway.getStatus().connection.state, "failed")
+  assert.equal(gateway.getStatus().connection.lastError?.category, "protocol-error")
+  assert.equal(gateway.getStatus().buffer.continuityGaps, 1)
+  await gateway.stop()
+})
+
+test("Gateway invalid sessions re-identify only after Discord's delay and local spacing", async () => {
+  const { gateway, scheduler, sockets, urls } = fixture()
+  gateway.start()
+  const first = sockets[0]
+  assert.ok(first)
+  hello(first)
+  ready(first)
+  first.message({ d: false, op: 9, s: null, t: null })
+  assert.equal(gateway.getStatus().buffer.continuityGaps, 1)
+
+  assert.equal(scheduler.runNext(), 1_000)
+  const second = sockets[1]
+  assert.ok(second)
+  assert.equal(urls[1], DISCORD_GATEWAY_URL)
+  hello(second)
+  assert.equal(scheduler.runNext(), 1_000)
+  assert.deepEqual(payloads(second)[0], { d: null, op: 1 })
+  second.message({ d: null, op: 11, s: null, t: null })
+  assert.equal(scheduler.runNext(), 5_000)
+  assert.equal(payloads(second)[1]?.op, 2)
+  assert.equal(gateway.getStatus().connection.identifies, 2)
+  await gateway.stop()
+})
+
+test("Gateway rejects wrong READY identities and untrusted resume origins", async () => {
+  for (const [overrides, category] of [
+    [{ application: { id: "100000000000000002" } }, "invalid-ready-identity"],
+    [{ resume_gateway_url: "wss://gateway.discord.gg.evil.example" }, "invalid-resume-origin"],
+  ] as const) {
+    const { gateway, logs, scheduler, sockets } = fixture()
+    gateway.start()
+    const socket = sockets[0]
+    assert.ok(socket)
+    hello(socket)
+    ready(socket, overrides)
+    assert.equal(gateway.getStatus().connection.state, "failed")
+    assert.equal(gateway.getStatus().connection.lastError?.category, category)
+    assert.equal(scheduler.jobs.size, 0)
+    assert.deepEqual(logs, [`[gateway] stopped: ${category}`])
+    assert.doesNotMatch(JSON.stringify({ logs, status: gateway.getStatus() }), new RegExp(TOKEN))
+    await gateway.stop()
+  }
+})
+
+test("Gateway fatal close codes stop reconnect loops while recoverable codes back off", async () => {
+  const fatal = fixture()
+  fatal.gateway.start()
+  const fatalSocket = fatal.sockets[0]
+  assert.ok(fatalSocket)
+  fatalSocket.serverClose(4_014)
+  assert.equal(fatal.gateway.getStatus().connection.state, "failed")
+  assert.equal(fatal.gateway.getStatus().connection.lastError?.category, "disallowed-intents")
+  assert.equal(fatal.scheduler.jobs.size, 0)
+
+  const recoverable = fixture()
+  recoverable.gateway.start()
+  const recoverableSocket = recoverable.sockets[0]
+  assert.ok(recoverableSocket)
+  recoverableSocket.serverClose(4_008)
+  assert.equal(recoverable.gateway.getStatus().connection.state, "reconnecting")
+  assert.equal(recoverable.gateway.getStatus().connection.lastError?.category, "rate-limited")
+  assert.equal(recoverable.scheduler.runNext(), 800)
+  assert.equal(recoverable.sockets.length, 2)
+
+  await fatal.gateway.stop()
+  await recoverable.gateway.stop()
+})
+
+test("Gateway Identify budget terminates repeated invalid-session loops", async () => {
+  const { gateway, scheduler, sockets } = fixture({ random: 1 })
+  gateway.start()
+  let socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  for (let identify = 1; identify <= 10; identify += 1) {
+    assert.equal(payloads(socket).at(-1)?.op, 2)
+    socket.message({ d: false, op: 9, s: null, t: null })
+    assert.equal(scheduler.runNext(), identify * 5_000)
+    socket = sockets[identify]
+    assert.ok(socket)
+    hello(socket)
+  }
+
+  assert.equal(gateway.getStatus().connection.identifies, 10)
+  assert.equal(gateway.getStatus().connection.state, "failed")
+  assert.equal(
+    gateway.getStatus().connection.lastError?.category,
+    "identify-budget-exhausted",
+  )
+  assert.equal(scheduler.jobs.size, 0)
+  await gateway.stop()
+})
+
+test("Gateway rejects malformed or oversized payloads without reflecting them", async () => {
+  for (const value of ["not-json", "x".repeat(1_048_577)]) {
+    const { gateway, logs, scheduler, sockets } = fixture()
+    gateway.start()
+    const socket = sockets[0]
+    assert.ok(socket)
+    socket.open()
+    socket.rawMessage(value)
+    assert.equal(gateway.getStatus().connection.state, "failed")
+    assert.equal(gateway.getStatus().connection.lastError?.category, "invalid-gateway-payload")
+    assert.equal(scheduler.jobs.size, 0)
+    assert.deepEqual(logs, ["[gateway] stopped: invalid-gateway-payload"])
+    await gateway.stop()
+  }
+})
+
+test("Gateway stop closes the socket, cancels timers, and prevents reconnection", async () => {
+  const { gateway, scheduler, sockets } = fixture()
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  ready(socket)
+  await gateway.stop()
+
+  assert.equal(gateway.getStatus().connection.state, "stopped")
+  assert.equal(scheduler.jobs.size, 0)
+  assert.equal(sockets.length, 1)
+
+  gateway.start()
+  const restarted = sockets[1]
+  assert.ok(restarted)
+  hello(restarted)
+  assert.deepEqual(payloads(restarted), [])
+  scheduler.runNext()
+  scheduler.runNext()
+  assert.deepEqual(payloads(restarted).map((payload) => payload.op), [1, 2])
+  await gateway.stop()
+})
+
+test("Gateway resume URL validation accepts only credential-free Discord WSS hosts", () => {
+  assert.equal(
+    normalizeGatewayResumeUrl("wss://gateway.discord.gg/custom?bad=true"),
+    "wss://gateway.discord.gg/?v=10&encoding=json",
+  )
+  assert.equal(
+    normalizeGatewayResumeUrl("wss://gateway-eu-west.discord.gg"),
+    "wss://gateway-eu-west.discord.gg/?v=10&encoding=json",
+  )
+  for (const value of [
+    "https://gateway.discord.gg",
+    "wss://token@gateway.discord.gg",
+    "wss://gateway.discord.gg:444",
+    "wss://api.discord.gg",
+    "wss://discord.gg.evil.example",
+    "wss://notgateway.discord.gg",
+    "not-a-url",
+  ]) {
+    assert.equal(normalizeGatewayResumeUrl(value), undefined)
+  }
+})

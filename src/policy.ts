@@ -1,4 +1,5 @@
 import type { ConnectorConfig } from "./config.js"
+import { GATEWAY_DEFAULTS } from "./constants.js"
 import { PolicyError } from "./errors.js"
 import type { DiscordChannel, DiscordGuild } from "./types.js"
 
@@ -9,6 +10,8 @@ export interface PolicyDescription {
   allowedGuildIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
+  gatewayEnabled: boolean
+  gatewayEventBufferSize: number
   interactionChannelIds: string[]
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -26,10 +29,12 @@ export class ScopePolicy {
   readonly #allowAdministration: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
+  readonly #allowGateway: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
+  readonly #gatewayEventBufferSize: number
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #protectedUserIds: ReadonlySet<string>
 
@@ -47,17 +52,20 @@ export class ScopePolicy {
     | "interactionMinWriteIntervalMs"
     | "mentionUserIds"
     | "protectedUserIds"
-  >) {
+  > & Partial<Pick<ConnectorConfig, "allowGateway" | "gatewayEventBufferSize">>) {
     this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
+    this.#allowGateway = config.allowGateway ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
+    this.#gatewayEventBufferSize = config.gatewayEventBufferSize
+      ?? GATEWAY_DEFAULTS.eventBufferSize
     this.#mentionUserIds = config.mentionUserIds
     this.#protectedUserIds = config.protectedUserIds
   }
@@ -70,6 +78,8 @@ export class ScopePolicy {
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
+      gatewayEnabled: this.#allowGateway,
+      gatewayEventBufferSize: this.#gatewayEventBufferSize,
       interactionChannelIds: [...this.#interactionChannelIds].sort(),
       interactionMaxWritesPerMinute: this.#interactionMaxWritesPerMinute,
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,

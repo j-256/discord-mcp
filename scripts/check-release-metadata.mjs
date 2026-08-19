@@ -46,10 +46,12 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
   "DISCORD_MCP_ALLOW_ADMINISTRATION",
   "DISCORD_MCP_ALLOW_DELETIONS",
+  "DISCORD_MCP_ALLOW_GATEWAY",
   "DISCORD_MCP_ALLOW_INTERACTIONS",
   "DISCORD_MCP_APPLICATION_ID",
   "DISCORD_MCP_AUDIT_FILE",
   "DISCORD_MCP_DELETE_CHANNEL_IDS",
+  "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
@@ -231,7 +233,7 @@ async function checkRegistryManifest(packageJson) {
     invariant(entry.isSecret === undefined, `${entry.name} must not be marked secret`)
   }
   assertEqual(byName.get("DISCORD_BOT_TOKEN"), {
-    description: "Discord bot token used only with the fixed Discord API origin",
+    description: "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
     format: "string",
     isRequired: true,
     isSecret: true,
@@ -240,6 +242,7 @@ async function checkRegistryManifest(packageJson) {
   for (const name of [
     "DISCORD_MCP_ALLOW_ADMINISTRATION",
     "DISCORD_MCP_ALLOW_DELETIONS",
+    "DISCORD_MCP_ALLOW_GATEWAY",
     "DISCORD_MCP_ALLOW_INTERACTIONS",
   ]) {
     const entry = byName.get(name)
@@ -259,6 +262,14 @@ async function checkRegistryManifest(packageJson) {
   ]) {
     invariant(byName.get(name)?.format === "string", `${name} must use string registry input`)
   }
+  assertEqual(
+    {
+      default: byName.get("DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE")?.default,
+      format: byName.get("DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE")?.format,
+    },
+    { default: "100", format: "number" },
+    "registry Gateway buffer metadata is invalid",
+  )
   assertEqual(
     {
       default: byName.get("DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE")?.default,

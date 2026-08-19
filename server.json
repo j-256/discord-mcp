@@ -32,7 +32,7 @@
       "environmentVariables": [
         {
           "name": "DISCORD_BOT_TOKEN",
-          "description": "Discord bot token used only with the fixed Discord API origin",
+          "description": "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
           "isRequired": true,
           "isSecret": true,
           "format": "string"
@@ -51,6 +51,21 @@
           "name": "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
           "description": "Comma- or whitespace-separated read channel allowlist",
           "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_GATEWAY",
+          "description": "Enable a scoped, content-free Gateway event feed with only nonprivileged intents",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
+          "description": "Process-local content-free Gateway event capacity from 1 through 1000",
+          "default": "100",
+          "format": "number"
         },
         {
           "name": "DISCORD_MCP_ALLOW_ADMINISTRATION",

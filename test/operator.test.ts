@@ -54,6 +54,8 @@ function status(
       allowedGuildIds: [GUILD_ID],
       deleteChannelIds: [],
       deletionsEnabled: false,
+      gatewayEnabled: false,
+      gatewayEventBufferSize: 100,
       interactionChannelIds: [],
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 500,
@@ -232,6 +234,33 @@ test("doctor and setup explain exact administration scope without Discord writes
   assert.match(setup.warnings.join("\n"), /administration-guild allowlist/)
 })
 
+test("doctor reports the privacy-safe Gateway policy without opening a connection", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+      DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE: "250",
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+  })
+
+  const enabledCheck = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.gatewayPolicy,
+  )
+  assert.equal(enabledCheck?.status, "pass")
+  assert.match(enabledCheck?.summary || "", /250-event content-free buffer/)
+  assert.match(enabledCheck?.summary || "", /nonprivileged intents/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.gatewayPolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+})
+
 test("doctor verifies identity online and redacts online failures", async () => {
   let calls = 0
   const verified = await diagnoseConnector({
@@ -328,6 +357,8 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /DISCORD_MCP_ALLOW_ADMINISTRATION/)
   assert.match(result, /DISCORD_MCP_ADMIN_GUILD_IDS/)
   assert.match(result, /DISCORD_MCP_PROTECTED_USER_IDS/)
+  assert.match(result, /DISCORD_MCP_ALLOW_GATEWAY/)
+  assert.match(result, /DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE/)
   assert.match(result, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(result, new RegExp(TOKEN))
   assert.throws(
@@ -378,7 +409,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 17)
+  assert.equal(report.toolCount, 19)
   assert.deepEqual(report.promptNames, [
     "review_member_moderation",
     "review_message_deletion",
@@ -389,6 +420,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://connector/activity",
     "discord://connector/policy",
     "discord://connector/safety",
+    "discord://gateway/events",
+    "discord://gateway/status",
     "discord://guilds",
   ])
   assert.deepEqual(report.resourceTemplateUris, [

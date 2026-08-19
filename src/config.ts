@@ -5,6 +5,7 @@ import {
   CONNECTOR_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
   ENVIRONMENT_NAMES,
+  GATEWAY_DEFAULTS,
   INTERACTION_DEFAULTS,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
@@ -15,10 +16,12 @@ export interface ConnectorConfig {
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
   allowDeletions: boolean
+  allowGateway: boolean
   allowInteractions: boolean
   auditFile: string
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
+  gatewayEventBufferSize: number
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -158,6 +161,20 @@ export function loadConnectorConfig(
   const expectedApplicationId = applicationIdValue?.trim()
     ? parseId(applicationIdValue, ENVIRONMENT_NAMES.applicationId)
     : undefined
+  const allowGateway = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGateway],
+    ENVIRONMENT_NAMES.allowGateway,
+  )
+  if (allowGateway && !expectedApplicationId) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowGateway} requires ${ENVIRONMENT_NAMES.applicationId}`,
+    )
+  }
+  if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowGateway} requires an exact guild or channel read allowlist`,
+    )
+  }
 
   return {
     adminGuildIds,
@@ -171,6 +188,7 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowDeletions],
       ENVIRONMENT_NAMES.allowDeletions,
     ),
+    allowGateway,
     allowInteractions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
@@ -182,6 +200,13 @@ export function loadConnectorConfig(
     ),
     deleteChannelIds,
     expectedApplicationId,
+    gatewayEventBufferSize: parseInteger(
+      environment[ENVIRONMENT_NAMES.gatewayEventBufferSize],
+      ENVIRONMENT_NAMES.gatewayEventBufferSize,
+      GATEWAY_DEFAULTS.eventBufferSize,
+      1,
+      CONNECTOR_LIMITS.gatewayEventBufferSize,
+    ),
     interactionChannelIds,
     interactionMaxWritesPerMinute: parseInteger(
       environment[ENVIRONMENT_NAMES.interactionMaxWritesPerMinute],

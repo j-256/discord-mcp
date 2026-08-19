@@ -3,6 +3,7 @@ export const CONNECTOR_VERSION = "0.1.0"
 export const SCHEMA_VERSION = 1
 
 export const DISCORD_API_BASE_URL = "https://discord.com/api/v10"
+export const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 export const DISCORD_WEB_BASE_URL = "https://discord.com"
 export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION})`
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
@@ -14,10 +15,12 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
   allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
+  allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
   auditFile: "DISCORD_MCP_AUDIT_FILE",
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
+  gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   interactionChannelIds: "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
@@ -59,6 +62,10 @@ export const CONNECTOR_LIMITS = Object.freeze({
   activityPageDefault: 25,
   activeThreads: 100,
   contentPreviewCharacters: 240,
+  gatewayChannelMappings: 10_000,
+  gatewayCursorCharacters: 128,
+  gatewayEventBufferSize: 1_000,
+  gatewayEventPage: 100,
   idempotencyKeyCharacters: 128,
   idempotencyKeyMinimumCharacters: 16,
   interactionEmojiCharacters: 100,
@@ -74,6 +81,33 @@ export const CONNECTOR_LIMITS = Object.freeze({
   searchFilterStrings: 25,
   threadPageDefault: 50,
 })
+
+export const GATEWAY_DEFAULTS = Object.freeze({
+  authenticationTimeoutMs: 30_000,
+  connectionTimeoutMs: 30_000,
+  eventBufferSize: 100,
+  eventPage: 50,
+  heartbeatMaximumMs: 120_000,
+  heartbeatMinimumMs: 1_000,
+  identifyBudget: 10,
+  identifyBudgetWindowMs: 60 * 60 * 1_000,
+  identifyMinimumIntervalMs: 5_000,
+  maximumPayloadBytes: 1_048_576,
+  reconnectMaximumMs: 30_000,
+  reconnectMinimumMs: 1_000,
+})
+
+export const DISCORD_GATEWAY_INTENTS = Object.freeze({
+  guildMessages: 1 << 9,
+  guildMessagePolls: 1 << 24,
+  guildMessageReactions: 1 << 10,
+  guilds: 1 << 0,
+})
+
+export const DISCORD_GATEWAY_INTENT_MASK = DISCORD_GATEWAY_INTENTS.guilds
+  | DISCORD_GATEWAY_INTENTS.guildMessages
+  | DISCORD_GATEWAY_INTENTS.guildMessagePolls
+  | DISCORD_GATEWAY_INTENTS.guildMessageReactions
 
 export const ADMINISTRATION_LIMITS = Object.freeze({
   timeoutMinutes: 28 * 24 * 60 - 1,

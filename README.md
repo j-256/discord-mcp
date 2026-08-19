@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes an optional privacy-safe real-time Gateway feed, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -15,6 +15,9 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and destructive prompts stop after read-only planning
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
+- Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
+- The Gateway requests only the nonprivileged `GUILDS`, `GUILD_MESSAGES`, `GUILD_MESSAGE_REACTIONS`, and `GUILD_MESSAGE_POLLS` intents, uses no Discord client cache, and immediately reduces dispatches to scoped identifiers and fixed event kinds
+- Gateway events remain in a bounded process-local buffer; content, profile data, emoji, URLs, raw payloads, session IDs, sequence numbers, and resume URLs are never returned or persisted
 - Message interactions are disabled unless an explicit environment toggle and exact interaction-channel allowlist are both present
 - Interaction scope never inherits from a thread parent, mentions notify nobody by default, and roles, `@everyone`, and `@here` cannot be enabled
 - Every actual send, edit, or reaction write requires a pending content-free activity record and passes process-local anti-spam guards
@@ -40,7 +43,7 @@ Treat message deletion and member moderation as consequential even though the co
 - A Discord application with a bot user
 - The bot token available as `DISCORD_BOT_TOKEN`
 - `View Channels` and `Read Message History` in every channel the connector should read
-- The Message Content privileged intent enabled for full message bodies
+- The Message Content privileged intent enabled for full message bodies and native search; the optional content-free Gateway feed does not request it
 - `Send Messages` only in channels where message sends or edits will be enabled
 - `Add Reactions` only in channels where reaction writes will be enabled
 - `Manage Messages` only in channels where deletion will eventually be enabled
@@ -48,7 +51,7 @@ Treat message deletion and member moderation as consequential even though the co
 
 Do not grant the bot `Administrator`. Restrict its Discord role at the category or channel level wherever possible.
 
-The application public key is not used by this local REST connector. It becomes relevant only if Discord Interaction webhooks or slash commands are added later.
+The application public key is not used by the local REST or Gateway connections. It becomes relevant only if Discord Interaction webhooks or slash commands are added later.
 
 ## Discord bot setup
 
@@ -62,7 +65,7 @@ The application public key is not used by this local REST connector. It becomes 
 
 Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Messages` only after selecting deletion channels. Add only the specific member permission needed for planned guild administration, keep the bot's highest role above eligible targets, and keep the local administration toggle disabled until exact guild and protected-user IDs are configured.
 
-Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), message content access in its [Gateway reference](https://docs.discord.com/developers/events/gateway), message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message), and member moderation in its [guild resource reference](https://docs.discord.com/developers/resources/guild).
+The optional real-time feed needs no additional privileged intent in the Developer Portal. Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), Gateway connection behavior in its [Gateway reference](https://docs.discord.com/developers/events/gateway), message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message), and member moderation in its [guild resource reference](https://docs.discord.com/developers/resources/guild).
 
 ## Install
 
@@ -96,7 +99,7 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels or reading messages.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, Gateway policy, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord or open a Gateway connection. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, or opening a Gateway connection.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
@@ -112,6 +115,8 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_APPLICATION_ID` | Recommended | Reject a token belonging to a different application |
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
+| `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
+| `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_ADMINISTRATION` | For member moderation | Must be exactly `true` to enable reviewed member administration |
 | `DISCORD_MCP_ADMIN_GUILD_IDS` | For member moderation | Non-empty exact administration-guild allowlist and a subset of the read guild allowlist when one exists |
 | `DISCORD_MCP_PROTECTED_USER_IDS` | No | Exact user IDs that member administration must never target; defaults empty and is bounded to 100 configured IDs |
@@ -139,6 +144,8 @@ env_vars = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+  "DISCORD_MCP_ALLOW_GATEWAY",
+  "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   "DISCORD_MCP_ALLOW_ADMINISTRATION",
   "DISCORD_MCP_ADMIN_GUILD_IDS",
   "DISCORD_MCP_PROTECTED_USER_IDS",
@@ -173,6 +180,8 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 | Tool | Access | Purpose |
 | --- | --- | --- |
 | `get_connector_status` | Discord read | Verify application and bot identity and report effective policy |
+| `get_gateway_status` | Local read | Report optional Gateway health, intent privacy, reconnect and continuity-gap counters, and bounded-buffer state |
+| `get_gateway_events` | Local read | Page through retained content-free events after an optional process-bound cursor |
 | `list_guilds` | Discord read | List scoped bot guild memberships |
 | `list_channels` | Discord read | List scoped channels, thread metadata, and forum configuration without message content |
 | `list_active_threads` | Discord read | List a bounded set of active threads and forum posts, optionally beneath one parent |
@@ -199,6 +208,8 @@ MCP resource discovery lists only stable metadata. Listing resources or template
 | `discord://connector/safety` | Static | Explain trust boundaries and reviewed workflows without identity or Discord data |
 | `discord://connector/policy` | Local | Report effective scope and write policy without credentials or Discord access |
 | `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
+| `discord://gateway/status` | Local | Report Gateway state, privacy guarantees, and content-free counters |
+| `discord://gateway/events` | Gateway buffer | Return the most recent retained in-scope event kinds and identifiers |
 | `discord://guilds` | Discord read | Return one bounded page of normalized in-scope guild metadata |
 
 Live templates are non-enumerable and require exact IDs:
@@ -212,6 +223,18 @@ Live templates are non-enumerable and require exact IDs:
 Every Discord-backed JSON resource carries an `untrusted-external-data` classification and an instruction to treat returned strings as data. The exact-message resource is deliberately compact: it includes message content, author identity, timestamps, jump URL, compact attachment metadata, and counts while omitting attachment URLs and raw embeds, components, reactions, and mention payloads. Existing service checks still verify the bot identity, exact returned IDs, guild and channel scope, and fixed Discord API origin before the resource is returned.
 
 Resource payloads and failures pass through the same recursive token-redaction boundary as tools. Live reads use private zero-lifetime cache hints. Only the identity-free static safety guide is eligible for shared caching.
+
+## Real-time Gateway events
+
+Set `DISCORD_MCP_ALLOW_GATEWAY=true` only after `DISCORD_MCP_APPLICATION_ID` and at least one exact guild or channel read allowlist are configured. The stdio server then opens one native WebSocket connection to Discord. Constructing the MCP adapter, running `doctor`, running `setup`, and running `smoke` never open that connection. Initial connections use Discord's fixed Gateway origin; resume URLs received from Discord are accepted only for credential-free `wss` hosts in Discord's Gateway host family.
+
+The connection implements bounded connection and authentication deadlines, jittered heartbeats, acknowledgement timeouts, session resume, invalid-session delay, capped reconnect backoff, fatal close handling, idempotent shutdown on stdio termination, and a conservative process-local Identify budget. READY must identify the configured application before the feed accepts dispatches. Replayed dispatches received during a valid Resume are normalized instead of dropped. `get_gateway_status` distinguishes `disabled`, `connecting`, `authenticating`, `ready`, `reconnecting`, `failed`, and `stopped`, and reports only fixed error categories. It never returns the token, raw errors, WebSocket address, session ID, or Discord Gateway sequence.
+
+The feed handles guild, channel, thread, role, message, bulk-deletion, reaction, and poll-vote lifecycle changes. Startup guild and thread synchronization records only a bounded ephemeral channel-to-parent identifier map so an allowlisted parent can grant read scope to child threads. Direct messages, out-of-scope guilds, unknown out-of-scope channels, malformed dispatches, and raw Discord strings are discarded. Public records contain a local receipt time, a fixed event kind, an opaque cursor, and only the relevant guild, channel, parent, role, or message IDs.
+
+Opaque cursors belong to one running process and never reuse Discord's sequence. If a cursor belongs to another process, predates retained history, crosses a connection gap, is malformed, or points ahead of the local feed, `get_gateway_events` returns retained events with `resetRequired`, an exact reset reason, and a new cursor. A successful Resume preserves cursor continuity; fallback Identify, terminal failure, and stopping an established session rotate the cursor generation. Buffer overflow and connection gaps have separate content-free counters instead of pretending uninterrupted delivery.
+
+Both Gateway resources are listed and readable even while the feature is disabled. When enabled, the server advertises resource subscription support. Legacy clients may subscribe to either exact URI through `resources/subscribe`; modern clients may include the URI in `subscriptions/listen`. Keyed leading-and-trailing coalescing limits notification traffic while preserving every retained event in the readable buffer. A notification contains only the resource URI and tells the client to read the bounded snapshot.
 
 ## Prompts
 
@@ -334,7 +357,7 @@ node dist/cli.js doctor --online
 node dist/cli.js smoke
 ```
 
-`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, intent state, tool names, resource URIs, template URIs, and prompt names but never print the token. No default live command fetches message or search content.
+`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, intent state, tool names, resource URIs, template URIs, and prompt names but never print the token. No default live command fetches message or search content, and the online doctor does not start the optional Gateway.
 
 ## Release integrity
 
@@ -371,7 +394,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Gateway subscriptions, channel and role administration through the reviewed-plan core, slash commands, and client-native progressive discovery can be added without changing the interaction, deletion, member-moderation, resource, prompt, or distribution safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Channel and role administration through the reviewed-plan core, slash commands, richer observability, and additional client-native progressive discovery can be added without changing the Gateway, interaction, deletion, member-moderation, resource, prompt, or distribution safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

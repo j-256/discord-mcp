@@ -34,6 +34,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   deletionPolicy: "deletion-policy",
   guildAccess: "guild-access",
   guildScope: "guild-scope",
+  gatewayPolicy: "gateway-policy",
   interactionPolicy: "interaction-policy",
   messageContentIntent: "message-content-intent",
   nodeVersion: "node-version",
@@ -308,6 +309,17 @@ export async function diagnoseConnector(
         `Message interactions are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a ${config.interactionMaxWritesPerMinute}-write rolling budget`,
       ))
     }
+    checks.push(config.allowGateway
+      ? check(
+        DOCTOR_CHECK_IDS.gatewayPolicy,
+        "pass",
+        `Discord Gateway events are enabled with a ${config.gatewayEventBufferSize}-event content-free buffer and only nonprivileged intents`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.gatewayPolicy,
+        "pass",
+        "Discord Gateway events are disabled",
+      ))
   }
 
   let identity: IdentitySummary | null = null
@@ -397,6 +409,8 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.mentionUserIds,
     ENVIRONMENT_NAMES.interactionMaxWritesPerMinute,
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
+    ENVIRONMENT_NAMES.allowGateway,
+    ENVIRONMENT_NAMES.gatewayEventBufferSize,
     ENVIRONMENT_NAMES.auditFile,
   ]
   const environmentLines = environmentVariables.map((name, index) => (

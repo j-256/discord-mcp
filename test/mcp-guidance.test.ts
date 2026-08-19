@@ -127,6 +127,8 @@ function guidanceService(options: {
         allowedGuildIds: [GUILD_ID],
         deleteChannelIds: [],
         deletionsEnabled: false,
+        gatewayEnabled: false,
+        gatewayEventBufferSize: 100,
         interactionChannelIds: [],
         interactionMaxWritesPerMinute: 10,
         interactionMinWriteIntervalMs: 500,
@@ -326,6 +328,8 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
     resources.resources.map(({ name, uri }) => ({ name, uri })).sort((a, b) => a.name.localeCompare(b.name)),
     [
       { name: MCP_RESOURCE_NAMES.activity, uri: MCP_RESOURCE_URIS.activity },
+      { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
+      { name: MCP_RESOURCE_NAMES.gatewayStatus, uri: MCP_RESOURCE_URIS.gatewayStatus },
       { name: MCP_RESOURCE_NAMES.guilds, uri: MCP_RESOURCE_URIS.guilds },
       { name: MCP_RESOURCE_NAMES.policy, uri: MCP_RESOURCE_URIS.policy },
       { name: MCP_RESOURCE_NAMES.safety, uri: MCP_RESOURCE_URIS.safety },

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import process from "node:process"
+import { PassThrough } from "node:stream"
 import test, { type TestContext } from "node:test"
 
 import {
@@ -17,8 +18,10 @@ import {
 import {
   createDiscordMcpServer,
   runDiscordMcpServer,
+  type DiscordMcpRunOptions,
   type DiscordToolService,
 } from "../src/mcp.js"
+import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import {
   DISCORD_PERMISSIONS,
@@ -154,6 +157,8 @@ function fixturePolicy(): PolicyDescription {
     allowedGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    gatewayEnabled: false,
+    gatewayEventBufferSize: 100,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -431,11 +436,13 @@ async function connectedFixture(
       content?: { approve: boolean }
     }>
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
+    gateway?: GatewayEventSource
   } = {},
 ) {
   const serviceData = serviceFixture(options.serviceOverrides)
   const server = createDiscordMcpServer({
     environment: { DISCORD_BOT_TOKEN: TOKEN },
+    ...(options.gateway ? { gateway: options.gateway } : {}),
     requestStateKey: new Uint8Array(32).fill(9),
     service: serviceData.service,
   })
@@ -480,6 +487,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     result.tools.map((tool) => tool.name),
     [
       "get_connector_status",
+      "get_gateway_status",
+      "get_gateway_events",
       "list_guilds",
       "list_channels",
       "list_active_threads",
@@ -536,6 +545,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  for (const name of ["get_gateway_status", "get_gateway_events"]) {
+    const gatewayTool = result.tools.find((tool) => tool.name === name)
+    assert.deepEqual(gatewayTool?.annotations, {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    })
+  }
   const activity = result.tools.find((tool) => tool.name === "list_activity")
   assert.equal(activity?.annotations?.openWorldHint, false)
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
@@ -614,6 +632,48 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     search: 0,
     send: 0,
   })
+})
+
+test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {
+  const gateway = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    clock: () => new Date("2026-08-19T00:00:00.000Z"),
+    cursorNamespace: "mcptooltest1",
+    enabled: true,
+  })
+  const { client } = await connectedFixture(context, { gateway })
+  gateway.transition("ready")
+  gateway.ingestDispatch("MESSAGE_CREATE", {
+    author: { username: TOKEN },
+    channel_id: CHANNEL_ID,
+    content: TOKEN,
+    guild_id: GUILD_ID,
+    id: MESSAGE_ID,
+  })
+
+  const status = structuredContent(await client.callTool({
+    arguments: {},
+    name: "get_gateway_status",
+  }))
+  const events = structuredContent(await client.callTool({
+    arguments: {
+      afterCursor: "gw1.foreigncursor.0.0",
+      limit: 10,
+    },
+    name: "get_gateway_events",
+  }))
+  assert.equal(
+    (status.connection as Record<string, unknown>).state,
+    "ready",
+  )
+  assert.equal(
+    (events.page as Record<string, unknown>).resetReason,
+    "foreign-cursor",
+  )
+  assert.equal((events.events as unknown[]).length, 1)
+  assert.doesNotMatch(JSON.stringify({ events, status }), new RegExp(TOKEN))
+  assert.doesNotMatch(JSON.stringify(events), /author|attachment|embed|component|emoji|userId/)
 })
 
 test("MCP interaction tools enforce bounded schemas and invoke idempotent services", async (context) => {
@@ -1125,9 +1185,9 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 17)
+  assert.equal(tools.tools.length, 19)
   assert.equal(prompts.prompts.length, 4)
-  assert.equal(resources.resources.length, 4)
+  assert.equal(resources.resources.length, 6)
   assert.equal(templates.resourceTemplates.length, 3)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
@@ -1155,4 +1215,54 @@ test("MCP stdio startup fails before reporting ready when the token is absent", 
     /DISCORD_BOT_TOKEN is required/,
   )
   assert.equal(diagnostics, "")
+})
+
+test("MCP stdio runner stops its Gateway on stdin termination and closes idempotently", async () => {
+  const feed = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    cursorNamespace: "runnergateway",
+    enabled: true,
+  })
+  let starts = 0
+  let stops = 0
+  let reportStopped: (() => void) | undefined
+  const stopped = new Promise<void>((resolve) => {
+    reportStopped = resolve
+  })
+  const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
+    enabled: true,
+    getStatus: () => feed.getStatus(),
+    listEvents: (options) => feed.listEvents(options),
+    start() {
+      starts += 1
+    },
+    async stop() {
+      stops += 1
+      reportStopped?.()
+    },
+    subscribe: (listener) => feed.subscribe(listener),
+  }
+  let diagnostics = ""
+  const stdin = new PassThrough()
+  const stdout = new PassThrough()
+  const handle = runDiscordMcpServer({
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    gatewayRuntime,
+    stdin,
+    stderr: {
+      write(value) {
+        diagnostics += String(value)
+        return true
+      },
+    },
+    stdout,
+  })
+
+  assert.equal(starts, 1)
+  assert.match(diagnostics, /stdio server ready/)
+  stdin.end()
+  await stopped
+  await handle.close()
+  assert.equal(stops, 1)
 })
