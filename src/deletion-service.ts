@@ -29,6 +29,14 @@ import type {
 } from "./types.js"
 
 const PLAN_DIGEST_PREFIX = "hmac-sha256:"
+const RESPONSE_IDENTITY_MISMATCH = "response-identity-mismatch"
+
+class DiscordDeletionIdentityError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "DiscordDeletionIdentityError"
+  }
+}
 
 export interface DeletionOperation {
   kind: "bulk" | "individual"
@@ -216,12 +224,23 @@ export class DeletionService {
   ): Promise<DeletionPlan> {
     const messageIds = normalizeMessageIds(requestedMessageIds)
     const channel: DiscordChannel = await this.#client.getChannel(channelId, options)
+    if (channel.id !== channelId) {
+      throw new DiscordDeletionIdentityError(
+        "Discord returned a different deletion channel than requested",
+      )
+    }
     const guildId = this.#policy.assertChannelDeletable(channel)
     const messages: DiscordMessage[] = []
     for (const messageId of messageIds) {
       const message = await this.#client.getMessage(channelId, messageId, options)
-      if (message.channel_id !== channelId) {
-        throw new Error(`Discord returned message ${message.id} for the wrong channel`)
+      if (
+        message.id !== messageId
+        || message.channel_id !== channelId
+        || Boolean(message.guild_id && message.guild_id !== guildId)
+      ) {
+        throw new DiscordDeletionIdentityError(
+          "Discord returned a different message than requested for deletion",
+        )
       }
       messages.push(message)
     }
@@ -253,6 +272,9 @@ export class DeletionService {
     } catch (error) {
       if (error instanceof DiscordApiError && error.status === 404) {
         throw new DeletionPlanChangedError(expectedDigest, "message-unavailable")
+      }
+      if (error instanceof DiscordDeletionIdentityError) {
+        throw new DeletionPlanChangedError(expectedDigest, RESPONSE_IDENTITY_MISMATCH)
       }
       throw error
     }

@@ -166,6 +166,46 @@ test("deletion ID normalization enforces core bounds without the MCP schema", ()
   assert.throws(() => normalizeMessageIds(["not-a-snowflake"]), /valid snowflakes/)
 })
 
+test("deletion planning rejects Discord responses outside exact requested identities", async () => {
+  const wrongChannel = fixture([
+    message(MESSAGE_ONE, "2026-08-14T11:00:00.000Z"),
+  ])
+  wrongChannel.client.getChannel = async () => ({
+    guild_id: GUILD_ID,
+    id: "200000000000000002",
+    type: 0,
+  })
+  const wrongMessage = fixture([
+    message(MESSAGE_ONE, "2026-08-14T11:00:00.000Z"),
+  ])
+  wrongMessage.client.getMessage = async () => (
+    message(MESSAGE_TWO, "2026-08-14T11:00:00.000Z")
+  )
+  const wrongGuild = fixture([
+    message(MESSAGE_ONE, "2026-08-14T11:00:00.000Z"),
+  ])
+  wrongGuild.client.getMessage = async () => ({
+    ...message(MESSAGE_ONE, "2026-08-14T11:00:00.000Z"),
+    guild_id: "100000000000000002",
+  })
+
+  await assert.rejects(
+    () => wrongChannel.service.plan(CHANNEL_ID, [MESSAGE_ONE]),
+    /different deletion channel than requested/,
+  )
+  await assert.rejects(
+    () => wrongMessage.service.plan(CHANNEL_ID, [MESSAGE_ONE]),
+    /different message than requested for deletion/,
+  )
+  await assert.rejects(
+    () => wrongGuild.service.plan(CHANNEL_ID, [MESSAGE_ONE]),
+    /different message than requested for deletion/,
+  )
+  assert.deepEqual(wrongChannel.activityStore.entries, [])
+  assert.deepEqual(wrongMessage.activityStore.entries, [])
+  assert.deepEqual(wrongGuild.activityStore.entries, [])
+})
+
 test("deletion execution journals before writing and uses age-safe strategies", async () => {
   const recentOne = message(MESSAGE_ONE, "2026-08-14T11:00:00.000Z", "private-one")
   const recentTwo = message(MESSAGE_TWO, "2026-08-14T10:00:00.000Z", "private-two")
@@ -229,6 +269,27 @@ test("deletion execution treats a missing reviewed message as a changed plan", a
       && error.actualDigest === "message-unavailable"
     ),
   )
+  assert.deepEqual(data.calls.individual, [])
+  assert.deepEqual(data.activityStore.entries, [])
+})
+
+test("deletion execution treats response identity mismatch as a changed plan", async () => {
+  const data = fixture([
+    message(MESSAGE_ONE, "2026-08-14T11:00:00.000Z"),
+  ])
+  const plan = await data.service.plan(CHANNEL_ID, [MESSAGE_ONE])
+  data.client.getMessage = async () => (
+    message(MESSAGE_TWO, "2026-08-14T11:00:00.000Z")
+  )
+
+  await assert.rejects(
+    () => data.service.execute(CHANNEL_ID, [MESSAGE_ONE], plan.digest),
+    (error: unknown) => (
+      error instanceof DeletionPlanChangedError
+      && error.actualDigest === "response-identity-mismatch"
+    ),
+  )
+  assert.deepEqual(data.calls.bulk, [])
   assert.deepEqual(data.calls.individual, [])
   assert.deepEqual(data.activityStore.entries, [])
 })
