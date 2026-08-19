@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 
 import type {
   ActivityStore,
@@ -19,16 +19,18 @@ import {
 import {
   deletionPreview,
   deletionSnapshot,
-  stableString,
 } from "./normalize.js"
 import type { ScopePolicy } from "./policy.js"
+import {
+  createReviewedPlanKey,
+  reviewedPlanDigest,
+} from "./reviewed-plan.js"
 import type {
   DiscordChannel,
   DiscordMessage,
   RequestOptions,
 } from "./types.js"
 
-const PLAN_DIGEST_PREFIX = "hmac-sha256:"
 const RESPONSE_IDENTITY_MISMATCH = "response-identity-mismatch"
 
 class DiscordDeletionIdentityError extends Error {
@@ -154,10 +156,7 @@ function digestPlan(
     messages: messages.map(deletionSnapshot),
     operations,
   }
-  const digest = createHmac("sha256", key)
-    .update(stableString(payload))
-    .digest("hex")
-  return `${PLAN_DIGEST_PREFIX}${digest}`
+  return reviewedPlanDigest(key, payload)
 }
 
 function strategyNames(operations: readonly DeletionOperation[]): string[] {
@@ -213,7 +212,7 @@ export class DeletionService {
     this.#activityStore = options.activityStore
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
-    this.#planKey = options.planKey || randomBytes(32)
+    this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId || randomUUID
   }

@@ -3,6 +3,13 @@ import type {
   ActivityStore,
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
+import type {
+  AdministrationServiceOptions,
+  MemberModerationPlan,
+  MemberModerationRequest,
+  MemberModerationResult,
+} from "./administration-service.js"
+import { AdministrationService } from "./administration-service.js"
 import type { ConnectorConfig } from "./config.js"
 import {
   CONNECTOR_LIMITS,
@@ -54,22 +61,29 @@ import type {
 export interface DiscordServiceClient {
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
+  createGuildBan: DiscordClient["createGuildBan"]
   createMessage: DiscordClient["createMessage"]
   deleteMessage: DiscordClient["deleteMessage"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
+  getGuild: DiscordClient["getGuild"]
+  getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
   getGuildRoles: DiscordClient["getGuildRoles"]
   getMessage: DiscordClient["getMessage"]
+  getUser: DiscordClient["getUser"]
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listMessages: DiscordClient["listMessages"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
+  modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  removeGuildBan: DiscordClient["removeGuildBan"]
+  removeGuildMember: DiscordClient["removeGuildMember"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
 }
 
@@ -88,6 +102,10 @@ export interface ArchivedThreadListOptions extends RequestOptions {
 }
 
 export interface ConnectorServiceOptions {
+  administrationOptions?: Pick<
+    AdministrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   activityStore?: ActivityStore
   client?: DiscordServiceClient
   clientOptions?: Omit<DiscordClientOptions, "token">
@@ -198,6 +216,7 @@ function normalizedGuildChannel(channel: DiscordChannel, guildId: string) {
 }
 
 export class ConnectorService {
+  readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
@@ -214,6 +233,12 @@ export class ConnectorService {
     })
     this.#policy = options.policy || new ScopePolicy(options.config)
     this.#activityStore = options.activityStore || new JsonlActivityLog(options.config.auditFile)
+    this.#administrationService = new AdministrationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      policy: this.#policy,
+      ...options.administrationOptions,
+    })
     this.#deletionService = new DeletionService({
       activityStore: this.#activityStore,
       client: this.#client,
@@ -648,6 +673,28 @@ export class ConnectorService {
   ): Promise<DeletionPlan> {
     await this.#verifyIdentity(options)
     return this.#deletionService.plan(channelId, messageIds, options)
+  }
+
+  async planMemberModeration(
+    request: MemberModerationRequest,
+    options: RequestOptions = {},
+  ): Promise<MemberModerationPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#administrationService.plan(identity.bot.id, request, options)
+  }
+
+  async executeMemberModeration(
+    request: MemberModerationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MemberModerationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#administrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
   }
 
   async deleteMessages(

@@ -4,6 +4,8 @@ import test from "node:test"
 import {
   DISCORD_PERMISSIONS,
   evaluateBotChannelPermissions,
+  evaluateGuildMemberPermissions,
+  hasGuildPermission,
 } from "../src/permissions.js"
 import type {
   DiscordChannel,
@@ -229,4 +231,65 @@ test("permission evaluator requires CONNECT to read voice-channel messages", () 
 
   assert.equal(result.canReadMessages, false)
   assert.deepEqual(result.missingReadPermissions, ["CONNECT"])
+})
+
+test("guild permission evaluator unions arbitrary-width roles and exposes strict hierarchy evidence", () => {
+  const futurePermission = 1n << 70n
+  const result = evaluateGuildMemberPermissions({
+    guildId: GUILD_ID,
+    member: member([ROLE_ID]),
+    roles: [
+      role(GUILD_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "@everyone"),
+      {
+        ...role(
+          ROLE_ID,
+          DISCORD_PERMISSIONS.KICK_MEMBERS | futurePermission,
+        ),
+        position: 7,
+      },
+    ],
+  })
+
+  assert.equal(result.complete, true)
+  assert.equal(result.highestRolePosition, 7)
+  assert.deepEqual(result.highestRoleIds, [ROLE_ID])
+  assert.equal(hasGuildPermission(result, "KICK_MEMBERS"), true)
+  assert.equal(hasGuildPermission(result, "BAN_MEMBERS"), false)
+  assert.equal(
+    BigInt(result.effectivePermissions) & futurePermission,
+    futurePermission,
+  )
+})
+
+test("guild permission evaluator fails completeness for missing and duplicate role evidence", () => {
+  const missing = evaluateGuildMemberPermissions({
+    guildId: GUILD_ID,
+    member: member([ROLE_ID, ROLE_ID, "invalid-role-id"]),
+    roles: [role(GUILD_ID, 0n, "@everyone")],
+  })
+  const duplicate = evaluateGuildMemberPermissions({
+    guildId: GUILD_ID,
+    member: member(),
+    roles: [
+      role(GUILD_ID, 0n, "@everyone"),
+      role(GUILD_ID, DISCORD_PERMISSIONS.ADMINISTRATOR, "duplicate"),
+    ],
+  })
+
+  assert.equal(missing.complete, false)
+  assert.match(missing.warnings.join("\n"), /duplicate role/)
+  assert.match(missing.warnings.join("\n"), /invalid role ID/)
+  assert.match(missing.warnings.join("\n"), /missing role/)
+  assert.equal(duplicate.complete, false)
+})
+
+test("guild permission evaluator treats administrator as satisfying action permissions", () => {
+  const result = evaluateGuildMemberPermissions({
+    guildId: GUILD_ID,
+    member: member(),
+    roles: [role(GUILD_ID, DISCORD_PERMISSIONS.ADMINISTRATOR, "@everyone")],
+  })
+
+  assert.equal(result.administrator, true)
+  assert.equal(hasGuildPermission(result, "MODERATE_MEMBERS"), true)
 })

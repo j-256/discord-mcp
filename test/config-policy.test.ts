@@ -37,6 +37,8 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_BOT_TOKEN: `  ${TOKEN}  `,
     DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID}, ${OTHER_CHANNEL_ID} ${CHANNEL_ID}`,
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
     DISCORD_MCP_ALLOW_INTERACTIONS: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
@@ -45,15 +47,19 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
     DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "750",
     DISCORD_MCP_MENTION_USER_IDS: USER_ID,
+    DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
     XDG_STATE_HOME: "/test/state",
   }, { homeDirectory: "/test/home" })
 
   assert.equal(config.token, TOKEN)
   assert.deepEqual([...config.allowedChannelIds], [CHANNEL_ID, OTHER_CHANNEL_ID])
   assert.deepEqual([...config.allowedGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.adminGuildIds], [GUILD_ID])
   assert.deepEqual([...config.deleteChannelIds], [CHANNEL_ID])
   assert.deepEqual([...config.interactionChannelIds], [OTHER_CHANNEL_ID])
   assert.deepEqual([...config.mentionUserIds], [USER_ID])
+  assert.deepEqual([...config.protectedUserIds], [USER_ID])
+  assert.equal(config.allowAdministration, true)
   assert.equal(config.allowDeletions, true)
   assert.equal(config.allowInteractions, true)
   assert.equal(config.interactionMaxWritesPerMinute, 12)
@@ -71,6 +77,61 @@ test("configuration rejects deletion channels outside a read channel allowlist",
     }, { homeDirectory: "/test/home" }),
     ConfigurationError,
   )
+})
+
+test("configuration and policy require an exact administration guild and protect exact users", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ADMIN_GUILD_IDS: "999999999999999999",
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertMemberAdministrationAllowed(GUILD_ID, USER_ID),
+    /administration is disabled/,
+  )
+
+  const policy = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+    DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => policy.assertMemberAdministrationAllowed(GUILD_ID, USER_ID),
+    /protected from administration/,
+  )
+  policy.assertMemberAdministrationAllowed(GUILD_ID, "400000000000000002")
+  assert.throws(
+    () => policy.assertMemberAdministrationAllowed(
+      "999999999999999999",
+      "400000000000000002",
+    ),
+    /outside the administration scope/,
+  )
+  assert.deepEqual(policy.describe(), {
+    administrationEnabled: true,
+    administrationGuildIds: [GUILD_ID],
+    allowedChannelIds: [],
+    allowedGuildIds: [],
+    deleteChannelIds: [],
+    deletionsEnabled: false,
+    interactionChannelIds: [],
+    interactionMaxWritesPerMinute: 10,
+    interactionMinWriteIntervalMs: 500,
+    interactionsEnabled: false,
+    mentionUserCount: 0,
+    protectedUserCount: 1,
+    readChannelScope: "all-visible",
+    readGuildScope: "all-visible",
+  })
 })
 
 test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
@@ -104,6 +165,13 @@ test("configuration rejects interaction channels outside exact read scope and in
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_MENTION_USER_IDS: tooManyMentionUsers,
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_PROTECTED_USER_IDS: tooManyMentionUsers,
     }, { homeDirectory: "/test/home" }),
     /at most 100 unique IDs/,
   )
@@ -165,6 +233,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     /outside the configured read scope/,
   )
   assert.deepEqual(policy.describe(), {
+    administrationEnabled: false,
+    administrationGuildIds: [],
     allowedChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
     allowedGuildIds: [GUILD_ID],
     deleteChannelIds: [CHANNEL_ID],
@@ -174,6 +244,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     mentionUserCount: 0,
+    protectedUserCount: 0,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",
   })

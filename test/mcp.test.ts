@@ -9,6 +9,7 @@ import {
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
 import {
+  AdministrationExecutionError,
   DiscordApiError,
   InteractionExecutionError,
   InteractionRateLimitError,
@@ -29,6 +30,8 @@ const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const MESSAGE_ID = "300000000000000001"
+const USER_ID = "400000000000000001"
+const AUDIT_REASON = "Reviewed safety incident 42"
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
 
@@ -106,7 +109,42 @@ function plan(digest = DIGEST) {
   }
 }
 
+function moderationPlan(digest = DIGEST) {
+  return {
+    action: "kick" as const,
+    auditReason: AUDIT_REASON,
+    createdAt: "2026-08-14T00:00:00.000Z",
+    digest,
+    guildId: GUILD_ID,
+    parameters: {
+      deleteMessageSeconds: null,
+      durationMinutes: null,
+      estimatedTimeoutUntil: null,
+    },
+    permission: {
+      botAdministrator: false,
+      botHighestRolePosition: 2,
+      required: "KICK_MEMBERS" as const,
+      targetAdministrator: false,
+      targetHighestRolePosition: 1,
+    },
+    schemaVersion: 1,
+    status: "planned" as const,
+    target: {
+      banState: "not-banned" as const,
+      bot: false,
+      currentTimeoutUntil: null,
+      globalName: null,
+      id: USER_ID,
+      membership: "member" as const,
+      nickname: null,
+      username: "member",
+    },
+  }
+}
+
 function serviceFixture(overrides: {
+  administrationError?: Error
   activityError?: Error
   interactionError?: Error
   messageContent?: string
@@ -116,6 +154,8 @@ function serviceFixture(overrides: {
     active: 0,
     addReaction: 0,
     archived: 0,
+    administrationExecute: 0,
+    administrationPlan: 0,
     delete: 0,
     edit: 0,
     explain: 0,
@@ -147,6 +187,20 @@ function serviceFixture(overrides: {
         planDigest,
         schemaVersion: 1,
         status: "completed",
+      }
+    },
+    async executeMemberModeration(request, planDigest) {
+      if (overrides.administrationError) throw overrides.administrationError
+      calls.administrationExecute += 1
+      return {
+        action: request.action,
+        activityId: "activity-moderation",
+        guildId: request.guildId,
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        timeoutUntil: null,
+        userId: request.userId,
       }
     },
     async explainChannelAccess(channelId) {
@@ -210,6 +264,8 @@ function serviceFixture(overrides: {
         bot: { id: "600000000000000001", username: "bot" },
         guildPage: { accessible: 1, inScope: 1 },
         policy: {
+          administrationEnabled: false,
+          administrationGuildIds: [],
           allowedChannelIds: [],
           allowedGuildIds: [],
           deleteChannelIds: [],
@@ -219,6 +275,7 @@ function serviceFixture(overrides: {
           interactionMinWriteIntervalMs: 500,
           interactionsEnabled: false,
           mentionUserCount: 0,
+          protectedUserCount: 0,
           readChannelScope: "all-visible",
           readGuildScope: "all-visible",
         },
@@ -291,6 +348,10 @@ function serviceFixture(overrides: {
     async planMessageDeletion() {
       calls.plan += 1
       return plan(overrides.planDigest)
+    },
+    async planMemberModeration() {
+      calls.administrationPlan += 1
+      return moderationPlan(overrides.planDigest || DIGEST)
     },
     async readMessages() {
       return {
@@ -424,15 +485,31 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "add_reaction",
       "plan_message_deletion",
       "delete_messages",
+      "plan_member_moderation",
+      "execute_member_moderation",
       "list_activity",
     ],
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
-  assert.deepEqual(deletion?.annotations, {
-    destructiveHint: true,
+  const administration = result.tools.find((tool) => (
+    tool.name === "execute_member_moderation"
+  ))
+  for (const tool of [deletion, administration]) {
+    assert.deepEqual(tool?.annotations, {
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    })
+  }
+  const administrationPlan = result.tools.find((tool) => (
+    tool.name === "plan_member_moderation"
+  ))
+  assert.deepEqual(administrationPlan?.annotations, {
+    destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
-    readOnlyHint: false,
+    readOnlyHint: true,
   })
   const send = result.tools.find((tool) => tool.name === "send_message")
   const reaction = result.tools.find((tool) => tool.name === "add_reaction")
@@ -519,6 +596,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
   assert.deepEqual(calls, {
     active: 1,
     addReaction: 0,
+    administrationExecute: 0,
+    administrationPlan: 0,
     archived: 1,
     delete: 0,
     edit: 0,
@@ -763,6 +842,207 @@ test("MCP deletion refuses a changed plan before requesting confirmation", async
   assert.equal(calls.delete, 0)
 })
 
+test("MCP member moderation plans exact targets and enforces action-specific schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const planned = await client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      userId: USER_ID,
+    },
+    name: "plan_member_moderation",
+  })
+  const invalid = await client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      deleteMessageSeconds: 0,
+      guildId: GUILD_ID,
+      userId: USER_ID,
+    },
+    name: "plan_member_moderation",
+  })
+  const oversizedReason = await client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: "é".repeat(200),
+      guildId: GUILD_ID,
+      userId: USER_ID,
+    },
+    name: "plan_member_moderation",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(calls.administrationPlan, 1)
+  assert.equal(invalid.isError, true)
+  assert.equal(oversizedReason.isError, true)
+  assert.equal(calls.administrationPlan, 1)
+})
+
+test("MCP member moderation binds signed confirmation to target, action, reason, and digest", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.administrationPlan, 1)
+  assert.equal(calls.administrationExecute, 1)
+  assert.match(confirmationMessage, /Action: kick/)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+})
+
+test("MCP member moderation declines or rejects approval without invoking execution", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.administrationExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.administrationExecute, 0)
+})
+
+test("MCP member moderation refuses a changed plan before eliciting confirmation", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { planDigest: DIFFERENT_DIGEST },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+
+  assert.equal(structuredContent(result).status, "plan-changed")
+  assert.equal(result.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.administrationExecute, 0)
+})
+
+test("MCP member moderation reports uncertain and rate-limited execution outcomes", async (context) => {
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      administrationError: new AdministrationExecutionError(
+        "Discord moderation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "DELETE",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/members/${USER_ID}`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      administrationError: new AdministrationExecutionError(
+        "Discord moderation was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+  const limitedStructured = structuredContent(limitedResult)
+  assert.equal(limitedStructured.status, "rate-limited")
+  assert.equal(
+    (limitedStructured.error as Record<string, unknown>).retryAfterMs,
+    2_500,
+  )
+})
+
 test("MCP tool errors redact the Discord token", async (context) => {
   const { client } = await connectedFixture(context, {
     serviceOverrides: {
@@ -831,7 +1111,7 @@ test("MCP stdio entrypoint negotiates without stdout noise", async (context) => 
   await client.connect(transport)
   const result = await client.listTools()
 
-  assert.equal(result.tools.length, 15)
+  assert.equal(result.tools.length, 17)
   assert.match(diagnostics, /stdio server ready/)
   assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
 })

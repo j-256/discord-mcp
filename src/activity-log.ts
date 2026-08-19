@@ -6,7 +6,12 @@ import {
 } from "node:fs/promises"
 import { dirname } from "node:path"
 
-import { CONNECTOR_LIMITS, SCHEMA_VERSION } from "./constants.js"
+import {
+  CONNECTOR_LIMITS,
+  MEMBER_MODERATION_ACTIONS,
+  SCHEMA_VERSION,
+  type MemberModerationAction,
+} from "./constants.js"
 import { AuditLogError, errorMessage } from "./errors.js"
 
 const MAX_ACTIVITY_READ_BYTES = 1_048_576
@@ -46,7 +51,30 @@ export interface InteractionActivity {
   timestamp: string
 }
 
-export type ActivityEntry = DeletionActivity | InteractionActivity
+export type MemberModerationActivityAction = MemberModerationAction
+export type MemberModerationActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface MemberModerationActivity {
+  action: MemberModerationActivityAction
+  deleteMessageSeconds: number | null
+  durationMinutes: number | null
+  error: string | null
+  guildId: string
+  id: string
+  kind: "member-moderation"
+  planDigest: string
+  schemaVersion: number
+  status: MemberModerationActivityStatus
+  timeoutUntil: string | null
+  timestamp: string
+  userId: string
+}
+
+export type ActivityEntry = DeletionActivity | InteractionActivity | MemberModerationActivity
 
 export interface ActivityList {
   entries: ActivityEntry[]
@@ -142,6 +170,45 @@ function parseInteractionActivity(value: unknown): InteractionActivity | undefin
   }
 }
 
+function parseMemberModerationActivity(
+  value: unknown,
+): MemberModerationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "member-moderation"
+    || typeof record.id !== "string"
+    || typeof record.timestamp !== "string"
+    || !MEMBER_MODERATION_ACTIONS.includes(record.action as MemberModerationAction)
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || typeof record.userId !== "string"
+    || typeof record.planDigest !== "string"
+    || !(record.deleteMessageSeconds === null || typeof record.deleteMessageSeconds === "number")
+    || !(record.durationMinutes === null || typeof record.durationMinutes === "number")
+    || !(record.timeoutUntil === null || typeof record.timeoutUntil === "string")
+    || !(record.error === null || typeof record.error === "string")
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as MemberModerationActivityAction,
+    deleteMessageSeconds: record.deleteMessageSeconds,
+    durationMinutes: record.durationMinutes,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "member-moderation",
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as MemberModerationActivityStatus,
+    timeoutUntil: record.timeoutUntil,
+    timestamp: record.timestamp,
+    userId: record.userId,
+  }
+}
+
 export class JsonlActivityLog implements ActivityStore {
   readonly #file: string
 
@@ -203,7 +270,9 @@ export class JsonlActivityLog implements ActivityStore {
         if (!line.trim()) continue
         try {
           const value: unknown = JSON.parse(line)
-          const entry = parseDeletionActivity(value) || parseInteractionActivity(value)
+          const entry = parseDeletionActivity(value)
+            || parseInteractionActivity(value)
+            || parseMemberModerationActivity(value)
           if (entry) entries.push(entry)
           else skippedLines += 1
         } catch {

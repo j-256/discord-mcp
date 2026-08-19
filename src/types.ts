@@ -8,6 +8,11 @@ export interface DiscordApplication {
   verify_key?: string
 }
 
+export interface DiscordBan {
+  reason?: string | null
+  user: DiscordUser
+}
+
 export interface DiscordAttachment {
   content_type?: string | null
   description?: string | null
@@ -72,11 +77,13 @@ export interface DiscordGuild {
   id: string
   name: string
   owner?: boolean
+  owner_id?: string
   permissions?: string
 }
 
 export interface DiscordGuildMember {
   communication_disabled_until?: string | null
+  nick?: string | null
   roles: string[]
   user?: DiscordUser
 }

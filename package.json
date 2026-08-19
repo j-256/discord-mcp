@@ -2,7 +2,7 @@
   "name": "discord-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "A least-privilege MCP server for reading and safely moderating Discord messages",
+  "description": "A least-privilege MCP server for safely accessing and moderating Discord guilds",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {

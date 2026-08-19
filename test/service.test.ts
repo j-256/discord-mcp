@@ -136,6 +136,7 @@ function serviceFixture(overrides: {
     editMessage: 0,
     guilds: 0,
     listMessages: 0,
+    removeMember: 0,
     user: 0,
   }
   const client: DiscordServiceClient = {
@@ -143,6 +144,7 @@ function serviceFixture(overrides: {
       calls.addReaction += 1
     },
     async bulkDeleteMessages() {},
+    async createGuildBan() {},
     async createMessage(_channelId, input) {
       calls.createMessage += 1
       return message({
@@ -170,6 +172,12 @@ function serviceFixture(overrides: {
       calls.user += 1
       return bot()
     },
+    async getGuild() {
+      return { ...guild(), owner_id: "700000000000000001" }
+    },
+    async getGuildBan(_guildId, userId) {
+      return { user: { id: userId, username: "target" } }
+    },
     async getGuildChannels() {
       return [channel()]
     },
@@ -185,6 +193,9 @@ function serviceFixture(overrides: {
     },
     async getMessage() {
       return message()
+    },
+    async getUser(userId) {
+      return { id: userId, username: "target" }
     },
     async listActiveGuildThreads() {
       return { threads: [] }
@@ -205,6 +216,17 @@ function serviceFixture(overrides: {
     },
     async listPublicArchivedThreads() {
       return { has_more: false, threads: [] }
+    },
+    async modifyGuildMemberTimeout(_guildId, userId, input) {
+      return {
+        communication_disabled_until: input.communicationDisabledUntil,
+        roles: [],
+        user: { id: userId, username: "target" },
+      }
+    },
+    async removeGuildBan() {},
+    async removeGuildMember() {
+      calls.removeMember += 1
     },
     async searchGuildMessages() {
       return {
@@ -279,6 +301,57 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.user, 1)
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 1)
+})
+
+test("service verifies identity before planning and executing exact member moderation", async () => {
+  const targetId = "700000000000000002"
+  const botRoleId = "800000000000000001"
+  const targetRoleId = "800000000000000002"
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildMember(_guildId, userId) {
+        return userId === BOT_ID
+          ? { roles: [botRoleId], user: bot() }
+          : {
+              roles: [targetRoleId],
+              user: { id: targetId, username: "target" },
+            }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(botRoleId, DISCORD_PERMISSIONS.KICK_MEMBERS, "bot-role"),
+            position: 10,
+          },
+          { ...role(targetRoleId, 0n, "target-role"), position: 1 },
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+    },
+  })
+  const request = {
+    action: "kick" as const,
+    auditReason: "Reviewed safety incident 42",
+    guildId: GUILD_ID,
+    userId: targetId,
+  }
+
+  const plan = await service.planMemberModeration(request)
+  const result = await service.executeMemberModeration(request, plan.digest)
+
+  assert.equal(plan.target.id, targetId)
+  assert.equal(result.status, "completed")
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.removeMember, 1)
 })
 
 test("service verifies identity once and reports scope without message reads", async () => {

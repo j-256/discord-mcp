@@ -385,6 +385,130 @@ test("Discord client sends deletion bodies and audit reasons without response pa
   ])
 })
 
+test("Discord client sends exact member moderation routes, bodies, and encoded reasons", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const method = init?.method || "GET"
+      const url = String(input)
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url,
+      })
+      if (method === "GET" && url.endsWith("/guilds/100")) {
+        return jsonResponse({ id: "100", name: "guild", owner_id: "500" })
+      }
+      if (method === "GET" && url.endsWith("/users/400")) {
+        return jsonResponse({ id: "400", username: "target" })
+      }
+      if (method === "GET") {
+        return jsonResponse({ user: { id: "400", username: "target" } })
+      }
+      if (method === "PATCH") {
+        return jsonResponse({
+          communication_disabled_until: "2026-08-20T00:00:00.000Z",
+          roles: [],
+          user: { id: "400", username: "target" },
+        })
+      }
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+  const reason = "Safety review / case 42"
+
+  await client.getGuild("100")
+  await client.getUser("400")
+  await client.getGuildBan("100", "400")
+  await client.removeGuildMember("100", "400", reason)
+  await client.createGuildBan("100", "400", 3_600, reason)
+  await client.removeGuildBan("100", "400", reason)
+  await client.modifyGuildMemberTimeout(
+    "100",
+    "400",
+    { communicationDisabledUntil: "2026-08-20T00:00:00.000Z" },
+    reason,
+  )
+
+  assert.deepEqual(requests, [
+    { body: null, method: "GET", reason: null, url: `${API_BASE_URL}/guilds/100` },
+    { body: null, method: "GET", reason: null, url: `${API_BASE_URL}/users/400` },
+    { body: null, method: "GET", reason: null, url: `${API_BASE_URL}/guilds/100/bans/400` },
+    {
+      body: null,
+      method: "DELETE",
+      reason: "Safety%20review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/members/400`,
+    },
+    {
+      body: { delete_message_seconds: 3_600 },
+      method: "PUT",
+      reason: "Safety%20review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/bans/400`,
+    },
+    {
+      body: null,
+      method: "DELETE",
+      reason: "Safety%20review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/bans/400`,
+    },
+    {
+      body: { communication_disabled_until: "2026-08-20T00:00:00.000Z" },
+      method: "PATCH",
+      reason: "Safety%20review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/members/400`,
+    },
+  ])
+})
+
+test("Discord client rejects invalid moderation parameters and audit reasons before fetching", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createGuildBan("100", "400", 604_801, "reviewed"),
+    /between 0 and 604800/,
+  )
+  assert.throws(
+    () => client.modifyGuildMemberTimeout(
+      "100",
+      "400",
+      { communicationDisabledUntil: "not-a-timestamp" },
+      "reviewed",
+    ),
+    /ISO 8601 timestamp/,
+  )
+  await assert.rejects(
+    () => client.removeGuildMember("100", "400", " "),
+    /must not be blank/,
+  )
+  await assert.rejects(
+    () => client.removeGuildMember("100", "400", "x".repeat(513)),
+    /must not exceed 512 URL-encoded characters/,
+  )
+  await assert.rejects(
+    () => client.removeGuildMember("100", "400", "\ud800"),
+    /invalid Unicode/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client sends safe message, edit, and own-reaction wire contracts", async () => {
   const requests: Array<{ body: unknown; method: string; url: string }> = []
   const client = new DiscordClient({

@@ -10,6 +10,28 @@ export class AuditLogError extends Error {
   override name = "AuditLogError"
 }
 
+export class AdministrationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord member snapshot does not match the reviewed administration plan")
+    this.name = "AdministrationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class AdministrationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AdministrationExecutionError"
+    this.result = result
+  }
+}
+
 export class DiscordApiError extends Error {
   readonly code: number | undefined
   readonly method: string

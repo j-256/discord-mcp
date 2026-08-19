@@ -22,6 +22,7 @@ export const OPERATOR_REPORT_SCHEMA_VERSION = 1
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
+  administrationPolicy: "administration-policy",
   applicationIdentity: "application-identity",
   channelScope: "channel-scope",
   configuration: "configuration",
@@ -145,6 +146,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowDeletions && config.deleteChannelIds.size === 0) {
     warnings.push("The deletion toggle is enabled but deletion remains blocked because no deletion-channel allowlist is configured")
   }
+  if (config.allowAdministration && config.adminGuildIds.size === 0) {
+    warnings.push("The administration toggle is enabled but administration remains blocked because no administration-guild allowlist is configured")
+  }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
@@ -239,6 +243,25 @@ export async function diagnoseConnector(
         "warn",
         "Local channel allowlist is open; Discord permissions are the channel boundary",
       ))
+    if (!config.allowAdministration) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.administrationPolicy,
+        "pass",
+        "Member administration is disabled",
+      ))
+    } else if (config.adminGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.administrationPolicy,
+        "warn",
+        "Administration toggle is enabled, but the required administration-guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.administrationPolicy,
+        "pass",
+        `Member administration is constrained to ${config.adminGuildIds.size} guilds with ${config.protectedUserIds.size} protected users`,
+      ))
+    }
     if (!config.allowDeletions) {
       checks.push(check(
         DOCTOR_CHECK_IDS.deletionPolicy,
@@ -356,6 +379,9 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.token,
     ENVIRONMENT_NAMES.allowedGuildIds,
     ENVIRONMENT_NAMES.allowedChannelIds,
+    ENVIRONMENT_NAMES.allowAdministration,
+    ENVIRONMENT_NAMES.adminGuildIds,
+    ENVIRONMENT_NAMES.protectedUserIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowInteractions,
@@ -461,15 +487,17 @@ export async function smokeConnector(
     ))) {
       throw new Error("MCP smoke check found a tool without complete risk annotations")
     }
-    const deletion = listed.tools.find((tool) => tool.name === "delete_messages")
-    if (
-      !deletion
-      || deletion.annotations?.destructiveHint !== true
-      || deletion.annotations.idempotentHint !== true
-      || deletion.annotations.openWorldHint !== true
-      || deletion.annotations.readOnlyHint !== false
-    ) {
-      throw new Error("MCP smoke check found invalid delete_messages annotations")
+    for (const name of ["delete_messages", "execute_member_moderation"]) {
+      const tool = listed.tools.find((entry) => entry.name === name)
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== true
+        || tool.annotations.idempotentHint !== true
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error(`MCP smoke check found invalid ${name} annotations`)
+      }
     }
     const interactionAnnotations = [
       ["send_message", false],

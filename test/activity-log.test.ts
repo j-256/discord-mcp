@@ -13,6 +13,7 @@ import {
   JsonlActivityLog,
   type DeletionActivity,
   type InteractionActivity,
+  type MemberModerationActivity,
 } from "../src/activity-log.js"
 
 function activity(id: string, status: DeletionActivity["status"]): DeletionActivity {
@@ -46,6 +47,27 @@ function interaction(id: string, status: InteractionActivity["status"]): Interac
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
+  }
+}
+
+function moderation(
+  id: string,
+  status: MemberModerationActivity["status"],
+): MemberModerationActivity {
+  return {
+    action: "timeout",
+    deleteMessageSeconds: null,
+    durationMinutes: 60,
+    error: null,
+    guildId: "100",
+    id,
+    kind: "member-moderation",
+    planDigest: "hmac-sha256:test",
+    schemaVersion: 1,
+    status,
+    timeoutUntil: status === "pending" ? null : "2026-08-14T01:00:00.000Z",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    userId: "400",
   }
 }
 
@@ -104,6 +126,34 @@ test("JSONL activity log accepts content-free interaction records without surfac
 
   assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
   assert.doesNotMatch(JSON.stringify(result), /must-not-surface|secret/)
+})
+
+test("JSONL activity log strips profile data and reasons from member moderation records", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(moderation("1", "pending"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...moderation("2", "completed"),
+      auditReason: "private reason",
+      nickname: "private nickname",
+      roleNames: ["private role"],
+      username: "private username",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private reason|private nickname|private role|private username/,
+  )
+  assert.equal(result.entries[0]?.kind, "member-moderation")
 })
 
 test("JSONL activity log returns an empty result before the first deletion", async (context) => {

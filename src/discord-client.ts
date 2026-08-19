@@ -11,6 +11,7 @@ import {
 import { DiscordApiError, errorMessage, redactText } from "./errors.js"
 import type {
   DiscordApplication,
+  DiscordBan,
   DiscordChannel,
   DiscordErrorBody,
   DiscordGuild,
@@ -181,6 +182,10 @@ export interface CreateMessageInput {
 export interface EditMessageInput {
   allowedMentions: DiscordAllowedMentions
   content: string
+}
+
+export interface ModifyGuildMemberTimeoutInput {
+  communicationDisabledUntil: string | null
 }
 
 interface RequestParameters extends RequestOptions {
@@ -364,6 +369,24 @@ function assertMessageContent(content: string): void {
   }
 }
 
+export function encodeDiscordAuditReason(auditReason: string): string {
+  if (!auditReason.trim()) {
+    throw new RangeError("Discord audit reason must not be blank")
+  }
+  let encoded: string
+  try {
+    encoded = encodeURIComponent(auditReason)
+  } catch (error) {
+    throw new RangeError("Discord audit reason contains invalid Unicode", { cause: error })
+  }
+  if (encoded.length > DISCORD_LIMITS.auditReasonEncodedCharacters) {
+    throw new RangeError(
+      `Discord audit reason must not exceed ${DISCORD_LIMITS.auditReasonEncodedCharacters} URL-encoded characters`,
+    )
+  }
+  return encoded
+}
+
 function assertAllowedMentions(allowedMentions: DiscordAllowedMentions): void {
   if ("parse" in allowedMentions) {
     if (allowedMentions.parse.length !== 0) {
@@ -424,8 +447,8 @@ export class DiscordClient {
         body = JSON.stringify(parameters.body)
         headers.set("Content-Type", "application/json")
       }
-      if (parameters.auditReason) {
-        headers.set("X-Audit-Log-Reason", encodeURIComponent(parameters.auditReason))
+      if (parameters.auditReason !== undefined) {
+        headers.set("X-Audit-Log-Reason", encodeDiscordAuditReason(parameters.auditReason))
       }
 
       let response: Response
@@ -489,6 +512,10 @@ export class DiscordClient {
     return this.#request("/users/@me", options)
   }
 
+  getUser(userId: string, options: RequestOptions = {}): Promise<DiscordUser> {
+    return this.#request(`/users/${userId}`, options)
+  }
+
   listCurrentUserGuilds(options: GuildPageOptions = {}): Promise<DiscordGuild[]> {
     assertBoundedLimit(
       options.limit,
@@ -509,6 +536,10 @@ export class DiscordClient {
     return this.#request(`/guilds/${guildId}/channels`, options)
   }
 
+  getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {
+    return this.#request(`/guilds/${guildId}`, options)
+  }
+
   getGuildMember(
     guildId: string,
     userId: string,
@@ -519,6 +550,84 @@ export class DiscordClient {
 
   getGuildRoles(guildId: string, options: RequestOptions = {}): Promise<DiscordRole[]> {
     return this.#request(`/guilds/${guildId}/roles`, options)
+  }
+
+  getGuildBan(
+    guildId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordBan> {
+    return this.#request(`/guilds/${guildId}/bans/${userId}`, options)
+  }
+
+  modifyGuildMemberTimeout(
+    guildId: string,
+    userId: string,
+    input: ModifyGuildMemberTimeoutInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildMember> {
+    if (input.communicationDisabledUntil !== null) {
+      assertIsoTimestamp(
+        input.communicationDisabledUntil,
+        "Discord member timeout expiration",
+      )
+    }
+    return this.#request(`/guilds/${guildId}/members/${userId}`, {
+      ...options,
+      auditReason,
+      body: {
+        communication_disabled_until: input.communicationDisabledUntil,
+      },
+      method: "PATCH",
+    })
+  }
+
+  async removeGuildMember(
+    guildId: string,
+    userId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    await this.#request<void>(`/guilds/${guildId}/members/${userId}`, {
+      ...options,
+      auditReason,
+      method: "DELETE",
+    })
+  }
+
+  async createGuildBan(
+    guildId: string,
+    userId: string,
+    deleteMessageSeconds: number,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertIntegerRange(
+      deleteMessageSeconds,
+      0,
+      DISCORD_LIMITS.banDeleteMessageSeconds,
+      "Discord ban message-history deletion seconds",
+    )
+    await this.#request<void>(`/guilds/${guildId}/bans/${userId}`, {
+      ...options,
+      auditReason,
+      body: { delete_message_seconds: deleteMessageSeconds },
+      method: "PUT",
+    })
+  }
+
+  async removeGuildBan(
+    guildId: string,
+    userId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    await this.#request<void>(`/guilds/${guildId}/bans/${userId}`, {
+      ...options,
+      auditReason,
+      method: "DELETE",
+    })
   }
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {

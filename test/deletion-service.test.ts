@@ -87,8 +87,10 @@ function message(
 
 function policy(): ScopePolicy {
   return new ScopePolicy({
+    adminGuildIds: new Set(),
     allowedChannelIds: new Set([CHANNEL_ID]),
     allowedGuildIds: new Set([GUILD_ID]),
+    allowAdministration: false,
     allowDeletions: true,
     allowInteractions: false,
     deleteChannelIds: new Set([CHANNEL_ID]),
@@ -96,6 +98,7 @@ function policy(): ScopePolicy {
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     mentionUserIds: new Set(),
+    protectedUserIds: new Set(),
   })
 }
 

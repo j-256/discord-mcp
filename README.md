@@ -1,6 +1,6 @@
 # Discord MCP
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, a deliberately narrow deletion path for exact reviewed message IDs, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -22,9 +22,13 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - MCP host write approval and signed MCP elicitation both precede deletion
 - The connector re-reads the plan immediately before writing
 - A content-free pending activity record must succeed before deletion starts
-- The bot token, message content, content hashes, embeds, components, attachment URLs, emoji, notification user IDs, raw idempotency keys, and Discord Interaction public key are never written to the activity log
+- Member administration is disabled unless a separate toggle and non-empty exact guild allowlist are both configured
+- Kick, ban, timeout, timeout removal, and unban accept exact guild and user IDs only, reject the bot, guild owner, and configured protected users, and fail closed on incomplete permission or role-hierarchy evidence
+- Every moderation write is bound to a keyed snapshot of the exact action, target state, permission evidence, action parameters, and Discord audit-log reason
+- MCP host write approval, signed MCP elicitation, a final fresh plan match, and a content-free pending activity record all precede member moderation
+- The bot token, message content, content hashes, embeds, components, attachment URLs, emoji, notification user IDs, raw idempotency keys, Discord audit-log reasons, profile names, role names, and Discord Interaction public key are never written to the activity log
 
-Treat message deletion as irreversible even though the connector records identifiers and outcomes.
+Treat message deletion and member moderation as consequential even though the connector records identifiers and outcomes.
 
 ## Requirements
 
@@ -36,6 +40,7 @@ Treat message deletion as irreversible even though the connector records identif
 - `Send Messages` only in channels where message sends or edits will be enabled
 - `Add Reactions` only in channels where reaction writes will be enabled
 - `Manage Messages` only in channels where deletion will eventually be enabled
+- `Kick Members`, `Ban Members`, or `Moderate Members` only in exact guilds where the corresponding member administration action will be enabled
 
 Do not grant the bot `Administrator`. Restrict its Discord role at the category or channel level wherever possible.
 
@@ -51,9 +56,9 @@ The application public key is not used by this local REST connector. It becomes 
 6. Restrict the bot role to the intended categories or channels.
 7. Run `discord-mcp setup` and confirm that Discord reports the expected application, bot, and scoped guild access.
 
-Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Messages` only after selecting deletion channels. Keep each local feature toggle disabled until its exact channel IDs are configured.
+Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Messages` only after selecting deletion channels. Add only the specific member permission needed for planned guild administration, keep the bot's highest role above eligible targets, and keep the local administration toggle disabled until exact guild and protected-user IDs are configured.
 
-Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), message content access in its [Gateway reference](https://docs.discord.com/developers/events/gateway), and message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message).
+Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), message content access in its [Gateway reference](https://docs.discord.com/developers/events/gateway), message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message), and member moderation in its [guild resource reference](https://docs.discord.com/developers/resources/guild).
 
 ## Install
 
@@ -77,7 +82,7 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, interaction policy, and deletion policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels or reading messages.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels or reading messages.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
@@ -93,6 +98,9 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_APPLICATION_ID` | Recommended | Reject a token belonging to a different application |
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
+| `DISCORD_MCP_ALLOW_ADMINISTRATION` | For member moderation | Must be exactly `true` to enable reviewed member administration |
+| `DISCORD_MCP_ADMIN_GUILD_IDS` | For member moderation | Non-empty exact administration-guild allowlist and a subset of the read guild allowlist when one exists |
+| `DISCORD_MCP_PROTECTED_USER_IDS` | No | Exact user IDs that member administration must never target; defaults empty and is bounded to 100 configured IDs |
 | `DISCORD_MCP_ALLOW_INTERACTIONS` | For interactions | Must be exactly `true` to enable sends, own-message edits, or own-reaction adds |
 | `DISCORD_MCP_INTERACTION_CHANNEL_IDS` | For interactions | Non-empty exact interaction-channel or thread allowlist and a subset of the read channel allowlist when one exists |
 | `DISCORD_MCP_MENTION_USER_IDS` | No | Exact user IDs that interaction calls may explicitly notify; defaults empty and is bounded to 100 configured IDs |
@@ -117,6 +125,9 @@ env_vars = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+  "DISCORD_MCP_ALLOW_ADMINISTRATION",
+  "DISCORD_MCP_ADMIN_GUILD_IDS",
+  "DISCORD_MCP_PROTECTED_USER_IDS",
   "DISCORD_MCP_ALLOW_INTERACTIONS",
   "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   "DISCORD_MCP_MENTION_USER_IDS",
@@ -154,7 +165,9 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 | `add_reaction` | Discord write | Idempotently add the bot's own single reaction to one exact message |
 | `plan_message_deletion` | Discord read | Prepare exact previews and a keyed deletion digest |
 | `delete_messages` | Discord write | Confirm, revalidate, journal, and delete the reviewed IDs |
-| `list_activity` | Local read | Read content-free deletion and interaction activity |
+| `plan_member_moderation` | Discord read | Verify one exact target, permission and hierarchy evidence, action state, and keyed moderation digest |
+| `execute_member_moderation` | Discord write | Confirm, revalidate, journal, and execute the reviewed exact-ID member action |
+| `list_activity` | Local read | Read content-free deletion, interaction, and member-moderation activity |
 
 ## Search
 
@@ -211,6 +224,26 @@ Discord does not offer a conditional message-delete operation. The connector per
 
 Discord's bulk deletion endpoint is used only for messages safely inside its supported age window. The connector deletes other reviewed messages individually and stops bounded individual execution after a failure.
 
+## Member moderation workflow
+
+Member moderation uses one reviewed action at a time and has no immediate-call path. Set `DISCORD_MCP_ALLOW_ADMINISTRATION=true`, list every eligible guild in `DISCORD_MCP_ADMIN_GUILD_IDS`, and list the bot operators, service accounts, break-glass accounts, or other ineligible targets in `DISCORD_MCP_PROTECTED_USER_IDS`. The administration guild allowlist must be a subset of `DISCORD_MCP_ALLOWED_GUILD_IDS` when the read allowlist is present.
+
+Supported actions are `kick`, `ban`, `timeout`, `remove-timeout`, and `unban`. Ban accepts `deleteMessageSeconds` from 0 through 604800 and defaults to 0. Timeout requires `durationMinutes` from 1 through 40319, staying conservatively below Discord's 28-day limit. Every action requires a non-blank Discord audit-log reason whose URL-encoded form fits Discord's 512-character limit.
+
+1. Call `plan_member_moderation` with the exact guild ID, user ID, action, audit reason, and action parameters.
+2. Review the target ID and untrusted profile preview, current member, ban, or timeout state, required bot permission, role positions, parameters, reason, and keyed digest.
+3. Call `execute_member_moderation` with identical inputs plus the digest.
+4. Approve the signed MCP confirmation only if the exact target, action, parameters, reason, and digest remain intended.
+5. Review the returned activity ID and outcome before attempting any follow-up.
+
+Planning verifies the guild owner, current connector bot membership, complete guild roles, the exact target identity, and the action's current state. `KICK_MEMBERS` is required for kick, `BAN_MEMBERS` for ban and unban, and `MODERATE_MEMBERS` for timeout changes unless the bot has `ADMINISTRATOR`, which is still discouraged. For actions against a current member, the bot's highest role must be strictly above the target's highest role. The guild owner, the connector bot, configured protected IDs, and administrators targeted by timeout actions are rejected.
+
+Kick, timeout, and timeout removal require a current exact member. Ban accepts a current member or an exact Discord user outside the guild, but rejects an existing ban. Unban requires an existing exact ban, and timeout removal requires a currently active timeout. Missing roles, duplicate or invalid role evidence, unknown member role IDs, mismatched Discord response identities, and equal role positions all fail closed.
+
+The plan digest is process-keyed and covers the action, exact IDs, audit reason, numeric parameters, guild owner, bot and target roles, effective permissions, current ban state, and current timeout state. Display names and avatars do not affect freshness. Timeout plans bind the reviewed duration rather than an early wall-clock expiration; execution calculates the final expiration after approval. A connector restart invalidates outstanding digests.
+
+Immediately before mutation, the service rebuilds the complete plan and requires the same digest. It then writes a pending activity record containing only IDs, action, digest, numeric parameters, timestamps, and status. Audit reasons, usernames, nicknames, role names, avatars, and Discord content are never persisted. Known Discord 4xx rejections are `failed`, transport failures and Discord 5xx responses are `uncertain`, and Discord 429 results preserve `retryAfterMs`. Do not retry an uncertain action until the target's current Discord state has been inspected.
+
 ## Verification
 
 The default suite uses injected transports and does not contact Discord:
@@ -230,7 +263,7 @@ node dist/cli.js help
 node dist/cli.js version
 ```
 
-The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, and read-only protocol path without listing channels or reading messages:
+The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, and read-only protocol path without listing channels, reading messages, or performing member moderation:
 
 ```sh
 node dist/cli.js doctor --online
@@ -249,7 +282,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Gateway subscriptions, administrative plan-review-execute workflows, slash commands, MCP resources and prompts, and a distributable MCP host integration can be added without changing the interaction or deletion safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Gateway subscriptions, channel and role administration through the reviewed-plan core, slash commands, MCP resources and prompts, and a distributable MCP host integration can be added without changing the interaction, deletion, or member-moderation safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

@@ -3,6 +3,8 @@ import { PolicyError } from "./errors.js"
 import type { DiscordChannel, DiscordGuild } from "./types.js"
 
 export interface PolicyDescription {
+  administrationEnabled: boolean
+  administrationGuildIds: string[]
   allowedChannelIds: string[]
   allowedGuildIds: string[]
   deleteChannelIds: string[]
@@ -12,13 +14,16 @@ export interface PolicyDescription {
   interactionMinWriteIntervalMs: number
   interactionsEnabled: boolean
   mentionUserCount: number
+  protectedUserCount: number
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
 }
 
 export class ScopePolicy {
+  readonly #adminGuildIds: ReadonlySet<string>
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
+  readonly #allowAdministration: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
@@ -26,11 +31,14 @@ export class ScopePolicy {
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
   readonly #mentionUserIds: ReadonlySet<string>
+  readonly #protectedUserIds: ReadonlySet<string>
 
   constructor(config: Pick<
     ConnectorConfig,
+    | "adminGuildIds"
     | "allowedChannelIds"
     | "allowedGuildIds"
+    | "allowAdministration"
     | "allowDeletions"
     | "allowInteractions"
     | "deleteChannelIds"
@@ -38,9 +46,12 @@ export class ScopePolicy {
     | "interactionMaxWritesPerMinute"
     | "interactionMinWriteIntervalMs"
     | "mentionUserIds"
+    | "protectedUserIds"
   >) {
+    this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
+    this.#allowAdministration = config.allowAdministration
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#deleteChannelIds = config.deleteChannelIds
@@ -48,10 +59,13 @@ export class ScopePolicy {
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
     this.#mentionUserIds = config.mentionUserIds
+    this.#protectedUserIds = config.protectedUserIds
   }
 
   describe(): PolicyDescription {
     return {
+      administrationEnabled: this.#allowAdministration && this.#adminGuildIds.size > 0,
+      administrationGuildIds: [...this.#adminGuildIds].sort(),
       allowedChannelIds: [...this.#allowedChannelIds].sort(),
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
@@ -61,6 +75,7 @@ export class ScopePolicy {
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
       interactionsEnabled: this.#allowInteractions && this.#interactionChannelIds.size > 0,
       mentionUserCount: this.#mentionUserIds.size,
+      protectedUserCount: this.#protectedUserIds.size,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
     }
@@ -84,6 +99,22 @@ export class ScopePolicy {
   assertGuildAllowed(guildId: string): void {
     if (!this.guildAllowed(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the configured read scope`)
+    }
+  }
+
+  assertMemberAdministrationAllowed(guildId: string, userId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowAdministration) {
+      throw new PolicyError("Discord administration is disabled by connector configuration")
+    }
+    if (this.#adminGuildIds.size === 0) {
+      throw new PolicyError("Discord administration requires an explicit guild allowlist")
+    }
+    if (!this.#adminGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the administration scope`)
+    }
+    if (this.#protectedUserIds.has(userId)) {
+      throw new PolicyError(`Discord user ${userId} is protected from administration`)
     }
   }
 

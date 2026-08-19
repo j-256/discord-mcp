@@ -9,8 +9,10 @@ export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 
 export const ENVIRONMENT_NAMES = Object.freeze({
+  adminGuildIds: "DISCORD_MCP_ADMIN_GUILD_IDS",
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
+  allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
@@ -20,16 +22,19 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
   mentionUserIds: "DISCORD_MCP_MENTION_USER_IDS",
+  protectedUserIds: "DISCORD_MCP_PROTECTED_USER_IDS",
   token: "DISCORD_BOT_TOKEN",
 })
 
 export const DISCORD_LIMITS = Object.freeze({
   allowedMentionUsers: 100,
+  auditReasonEncodedCharacters: 512,
   automaticRetryWaitMs: 5_000,
   archivedThreads: 100,
   archivedThreadsMinimum: 2,
   bulkDeleteAgeMs: 14 * 24 * 60 * 60 * 1_000,
   bulkDeleteSafetyMarginMs: 60_000,
+  banDeleteMessageSeconds: 7 * 24 * 60 * 60,
   channelMessages: 100,
   currentUserGuilds: 200,
   deletionMessages: 100,
@@ -61,10 +66,25 @@ export const CONNECTOR_LIMITS = Object.freeze({
   interactionMinWriteIntervalMs: 60_000,
   interactionNotificationUsers: 10,
   mentionUserAllowlist: 100,
+  protectedUserAllowlist: 100,
   searchFilterIds: 25,
   searchFilterStrings: 25,
   threadPageDefault: 50,
 })
+
+export const ADMINISTRATION_LIMITS = Object.freeze({
+  timeoutMinutes: 28 * 24 * 60 - 1,
+})
+
+export const MEMBER_MODERATION_ACTIONS = [
+  "ban",
+  "kick",
+  "remove-timeout",
+  "timeout",
+  "unban",
+] as const
+
+export type MemberModerationAction = typeof MEMBER_MODERATION_ACTIONS[number]
 
 export const INTERACTION_DEFAULTS = Object.freeze({
   maxWritesPerMinute: 10,

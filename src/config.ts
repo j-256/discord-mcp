@@ -10,8 +10,10 @@ import {
 import { ConfigurationError } from "./errors.js"
 
 export interface ConnectorConfig {
+  adminGuildIds: ReadonlySet<string>
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
+  allowAdministration: boolean
   allowDeletions: boolean
   allowInteractions: boolean
   auditFile: string
@@ -21,6 +23,7 @@ export interface ConnectorConfig {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   mentionUserIds: ReadonlySet<string>
+  protectedUserIds: ReadonlySet<string>
   token: string
 }
 
@@ -109,6 +112,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowedGuildIds],
     ENVIRONMENT_NAMES.allowedGuildIds,
   )
+  const adminGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.adminGuildIds],
+    ENVIRONMENT_NAMES.adminGuildIds,
+  )
   const deleteChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.deleteChannelIds],
     ENVIRONMENT_NAMES.deleteChannelIds,
@@ -122,6 +129,18 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.mentionUserIds,
     CONNECTOR_LIMITS.mentionUserAllowlist,
   )
+  const protectedUserIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.protectedUserIds],
+    ENVIRONMENT_NAMES.protectedUserIds,
+    CONNECTOR_LIMITS.protectedUserAllowlist,
+  )
+
+  for (const guildId of adminGuildIds) {
+    if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.adminGuildIds} must be a subset of ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+    )
+  }
 
   for (const [name, channelIds] of [
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
@@ -141,8 +160,13 @@ export function loadConnectorConfig(
     : undefined
 
   return {
+    adminGuildIds,
     allowedChannelIds,
     allowedGuildIds,
+    allowAdministration: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowAdministration],
+      ENVIRONMENT_NAMES.allowAdministration,
+    ),
     allowDeletions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowDeletions],
       ENVIRONMENT_NAMES.allowDeletions,
@@ -174,6 +198,7 @@ export function loadConnectorConfig(
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
     ),
     mentionUserIds,
+    protectedUserIds,
     token,
   }
 }

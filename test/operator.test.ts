@@ -48,6 +48,8 @@ function status(
       inScope,
     },
     policy: {
+      administrationEnabled: false,
+      administrationGuildIds: [],
       allowedChannelIds: [CHANNEL_ID],
       allowedGuildIds: [GUILD_ID],
       deleteChannelIds: [],
@@ -57,6 +59,7 @@ function status(
       interactionMinWriteIntervalMs: 500,
       interactionsEnabled: false,
       mentionUserCount: 0,
+      protectedUserCount: 0,
       readChannelScope: "allowlist",
       readGuildScope: "allowlist",
     },
@@ -81,6 +84,7 @@ function toolService(): DiscordToolService {
     addReaction: unexpected,
     deleteMessages: unexpected,
     editOwnMessage: unexpected,
+    executeMemberModeration: unexpected,
     explainChannelAccess: unexpected,
     getMessage: unexpected,
     async getStatus() {
@@ -92,6 +96,7 @@ function toolService(): DiscordToolService {
     listChannels: unexpected,
     listGuilds: unexpected,
     planMessageDeletion: unexpected,
+    planMemberModeration: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
     sendMessage: unexpected,
@@ -189,6 +194,41 @@ test("doctor and setup explain effective interaction policy without Discord writ
   assert.match(setup.warnings.join("\n"), /interaction-channel allowlist/)
 })
 
+test("doctor and setup explain exact administration scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+      DISCORD_MCP_PROTECTED_USER_IDS: "400000000000000001",
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+
+  const administration = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.administrationPolicy,
+  )
+  assert.equal(administration?.status, "pass")
+  assert.match(administration?.summary || "", /1 guilds with 1 protected users/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.administrationPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /administration-guild allowlist/)
+})
+
 test("doctor verifies identity online and redacts online failures", async () => {
   let calls = 0
   const verified = await diagnoseConnector({
@@ -282,6 +322,9 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /default_tools_approval_mode = "writes"/)
   assert.match(result, /required = true/)
   assert.match(result, /DISCORD_BOT_TOKEN/)
+  assert.match(result, /DISCORD_MCP_ALLOW_ADMINISTRATION/)
+  assert.match(result, /DISCORD_MCP_ADMIN_GUILD_IDS/)
+  assert.match(result, /DISCORD_MCP_PROTECTED_USER_IDS/)
   assert.match(result, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(result, new RegExp(TOKEN))
   assert.throws(
@@ -332,8 +375,12 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 15)
-  assert.deepEqual(report.destructiveTools, ["delete_messages", "edit_own_message"])
+  assert.equal(report.toolCount, 17)
+  assert.deepEqual(report.destructiveTools, [
+    "delete_messages",
+    "edit_own_message",
+    "execute_member_moderation",
+  ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 

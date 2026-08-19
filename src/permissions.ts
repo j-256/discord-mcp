@@ -1,4 +1,7 @@
-import { DISCORD_CHANNEL_TYPES } from "./constants.js"
+import {
+  DISCORD_CHANNEL_TYPES,
+  DISCORD_SNOWFLAKE_PATTERN,
+} from "./constants.js"
 import type {
   DiscordChannel,
   DiscordGuildMember,
@@ -108,6 +111,23 @@ export interface EvaluateBotChannelPermissionsOptions {
   roles: readonly DiscordRole[]
 }
 
+export interface EvaluateGuildMemberPermissionsOptions {
+  guildId: string
+  member: DiscordGuildMember
+  roles: readonly DiscordRole[]
+}
+
+export interface GuildMemberPermissionResult {
+  administrator: boolean
+  appliedRoleIds: string[]
+  complete: boolean
+  effectivePermissionNames: DiscordPermissionName[]
+  effectivePermissions: string
+  highestRoleIds: string[]
+  highestRolePosition: number
+  warnings: string[]
+}
+
 interface PermissionBits {
   allow: bigint
   deny: bigint
@@ -168,6 +188,97 @@ function permissionNames(bits: bigint): DiscordPermissionName[] {
   return PERMISSION_ENTRIES
     .filter(([, permission]) => (bits & permission) === permission)
     .map(([name]) => name)
+}
+
+export function evaluateGuildMemberPermissions(
+  options: EvaluateGuildMemberPermissionsOptions,
+): GuildMemberPermissionResult {
+  const warnings: string[] = []
+  let complete = true
+  const rolesById = new Map<string, DiscordRole>()
+  for (const role of options.roles) {
+    if (!DISCORD_SNOWFLAKE_PATTERN.test(role.id)) {
+      complete = false
+      warnings.push("Discord role evidence contains an invalid role ID")
+    }
+    if (rolesById.has(role.id)) {
+      complete = false
+      warnings.push(`Discord role evidence contains duplicate role ${role.id}`)
+      continue
+    }
+    if (!Number.isInteger(role.position) || role.position < 0) {
+      complete = false
+      warnings.push(`Discord role ${role.id} has an invalid position`)
+    }
+    rolesById.set(role.id, role)
+  }
+
+  const memberRoleIds = new Set<string>()
+  for (const roleId of options.member.roles) {
+    if (!DISCORD_SNOWFLAKE_PATTERN.test(roleId)) {
+      complete = false
+      warnings.push("Discord member evidence contains an invalid role ID")
+    }
+    if (memberRoleIds.has(roleId)) {
+      complete = false
+      warnings.push(`Discord member evidence contains duplicate role ${roleId}`)
+    }
+    memberRoleIds.add(roleId)
+  }
+
+  const everyone = rolesById.get(options.guildId)
+  let effective = 0n
+  const appliedRoles: DiscordRole[] = []
+  if (!everyone) {
+    complete = false
+    warnings.push("Discord role evidence omitted the guild @everyone role")
+  } else {
+    effective |= parsePermissionBits(everyone.permissions, "@everyone role")
+    appliedRoles.push(everyone)
+  }
+  for (const roleId of [...memberRoleIds].sort()) {
+    if (roleId === options.guildId) continue
+    const role = rolesById.get(roleId)
+    if (!role) {
+      complete = false
+      warnings.push(`Discord member evidence references missing role ${roleId}`)
+      continue
+    }
+    effective |= parsePermissionBits(role.permissions, `role ${roleId}`)
+    appliedRoles.push(role)
+  }
+
+  const highestRolePosition = appliedRoles.reduce(
+    (highest, role) => Math.max(highest, role.position),
+    0,
+  )
+  const highestRoleIds = appliedRoles
+    .filter((role) => role.position === highestRolePosition)
+    .map((role) => role.id)
+    .sort()
+  const administrator = (
+    effective & DISCORD_PERMISSIONS.ADMINISTRATOR
+  ) === DISCORD_PERMISSIONS.ADMINISTRATOR
+  return {
+    administrator,
+    appliedRoleIds: appliedRoles.map((role) => role.id).sort(),
+    complete,
+    effectivePermissionNames: permissionNames(effective),
+    effectivePermissions: effective.toString(),
+    highestRoleIds,
+    highestRolePosition,
+    warnings,
+  }
+}
+
+export function hasGuildPermission(
+  result: GuildMemberPermissionResult,
+  permission: DiscordPermissionName,
+): boolean {
+  if (result.administrator) return true
+  const effective = BigInt(result.effectivePermissions)
+  const required = DISCORD_PERMISSIONS[permission]
+  return (effective & required) === required
 }
 
 function requiredReadPermissions(channelType: number): DiscordPermissionName[] {

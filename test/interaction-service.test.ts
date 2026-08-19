@@ -99,8 +99,10 @@ function policy(options: {
   mentionUserIds?: readonly string[]
 } = {}): ScopePolicy {
   return new ScopePolicy({
+    adminGuildIds: new Set(),
     allowedChannelIds: new Set([CHANNEL_ID, OTHER_CHANNEL_ID]),
     allowedGuildIds: new Set([GUILD_ID]),
+    allowAdministration: false,
     allowDeletions: false,
     allowInteractions: true,
     deleteChannelIds: new Set(),
@@ -108,6 +110,7 @@ function policy(options: {
     interactionMaxWritesPerMinute: 60,
     interactionMinWriteIntervalMs: 0,
     mentionUserIds: new Set(options.mentionUserIds || []),
+    protectedUserIds: new Set(),
   })
 }
 
