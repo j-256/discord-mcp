@@ -384,3 +384,107 @@ test("Discord client sends deletion bodies and audit reasons without response pa
     },
   ])
 })
+
+test("Discord client sends safe message, edit, and own-reaction wire contracts", async () => {
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({ body, method: init?.method || "GET", url: String(input) })
+      if (init?.method === "PUT") return new Response(null, { status: 204 })
+      return jsonResponse({
+        author: { bot: true, id: "400", username: "bot" },
+        channel_id: "200",
+        content: body.content,
+        id: "300",
+        nonce: body.nonce,
+        timestamp: "2026-08-14T00:00:00.000Z",
+        type: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  await client.createMessage("200", {
+    allowedMentions: { parse: [], replied_user: false },
+    content: "safe reply",
+    nonce: "stable-nonce",
+    reply: { guildId: "100", messageId: "299" },
+  })
+  await client.editMessage("200", "300", {
+    allowedMentions: { replied_user: false, users: ["401"] },
+    content: "hello <@401>",
+  })
+  await client.addOwnReaction("200", "300", "🔥")
+
+  assert.deepEqual(requests, [
+    {
+      body: {
+        allowed_mentions: { parse: [], replied_user: false },
+        content: "safe reply",
+        enforce_nonce: true,
+        message_reference: {
+          channel_id: "200",
+          fail_if_not_exists: true,
+          guild_id: "100",
+          message_id: "299",
+          type: 0,
+        },
+        nonce: "stable-nonce",
+      },
+      method: "POST",
+      url: `${API_BASE_URL}/channels/200/messages`,
+    },
+    {
+      body: {
+        allowed_mentions: { replied_user: false, users: ["401"] },
+        content: "hello <@401>",
+      },
+      method: "PATCH",
+      url: `${API_BASE_URL}/channels/200/messages/300`,
+    },
+    {
+      body: null,
+      method: "PUT",
+      url: `${API_BASE_URL}/channels/200/messages/300/reactions/%F0%9F%94%A5/@me`,
+    },
+  ])
+})
+
+test("Discord client rejects unsafe message wire inputs before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(
+    () => client.createMessage("200", {
+      allowedMentions: { parse: [], replied_user: false },
+      content: " ",
+      nonce: "nonce",
+    }),
+    /must not be blank/,
+  )
+  assert.throws(
+    () => client.createMessage("200", {
+      allowedMentions: { parse: [], replied_user: false },
+      content: "hello",
+      nonce: "x".repeat(26),
+    }),
+    /nonce/,
+  )
+  assert.throws(
+    () => client.editMessage("200", "300", {
+      allowedMentions: { replied_user: false, users: ["401", "401"] },
+      content: "hello",
+    }),
+    /must not contain duplicates/,
+  )
+  assert.equal(requests, 0)
+})

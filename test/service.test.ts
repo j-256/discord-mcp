@@ -130,14 +130,35 @@ function serviceFixture(overrides: {
   environment?: NodeJS.ProcessEnv
 } = {}) {
   const calls = {
+    addReaction: 0,
     application: 0,
+    createMessage: 0,
+    editMessage: 0,
     guilds: 0,
     listMessages: 0,
     user: 0,
   }
   const client: DiscordServiceClient = {
+    async addOwnReaction() {
+      calls.addReaction += 1
+    },
     async bulkDeleteMessages() {},
+    async createMessage(_channelId, input) {
+      calls.createMessage += 1
+      return message({
+        author: bot(),
+        content: input.content,
+        nonce: input.nonce,
+      })
+    },
     async deleteMessage() {},
+    async editMessage(_channelId, _messageId, input) {
+      calls.editMessage += 1
+      return message({
+        author: bot(),
+        content: input.content,
+      })
+    },
     async getChannel() {
       return overrides.channel || channel()
     },
@@ -228,6 +249,36 @@ test("service rejects a token for the wrong Discord application before data acce
     ),
   )
   assert.equal(calls.guilds, 0)
+})
+
+test("service verifies bot identity before delegating safe message interactions", async () => {
+  const { calls, service } = serviceFixture({
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    },
+  })
+
+  const sent = await service.sendMessage({
+    channelId: CHANNEL_ID,
+    content: "safe service send",
+    idempotencyKey: "request-1234567890",
+  })
+  const reaction = await service.addReaction({
+    channelId: CHANNEL_ID,
+    emoji: "🔥",
+    messageId: MESSAGE_ID,
+  })
+
+  assert.equal(sent.messageId, MESSAGE_ID)
+  assert.equal(reaction.messageId, MESSAGE_ID)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.createMessage, 1)
+  assert.equal(calls.addReaction, 1)
 })
 
 test("service verifies identity once and reports scope without message reads", async () => {

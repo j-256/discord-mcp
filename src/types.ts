@@ -101,12 +101,14 @@ export interface DiscordMessage {
     message_id?: string
     type?: number
   }
+  nonce?: number | string | null
   pinned?: boolean
   reactions?: unknown[]
   referenced_message?: DiscordMessage | null
   timestamp: string
   tts?: boolean
   type: number
+  webhook_id?: string
 }
 
 export interface DiscordMessageSearchIndexing {

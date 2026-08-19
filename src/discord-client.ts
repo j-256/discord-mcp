@@ -1,8 +1,10 @@
 import { setTimeout as wait } from "node:timers/promises"
 
 import {
+  CONNECTOR_LIMITS,
   DISCORD_API_BASE_URL,
   DISCORD_LIMITS,
+  DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_USER_AGENT,
 } from "./constants.js"
@@ -154,6 +156,31 @@ export interface GuildMessageSearchOptions extends RequestOptions {
 export interface ArchivedThreadPageOptions extends RequestOptions {
   before?: string
   limit?: number
+}
+
+export type DiscordAllowedMentions =
+  | {
+    parse: readonly []
+    replied_user: boolean
+  }
+  | {
+    replied_user: boolean
+    users: readonly string[]
+  }
+
+export interface CreateMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  content: string
+  nonce: string
+  reply?: {
+    guildId: string
+    messageId: string
+  }
+}
+
+export interface EditMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  content: string
 }
 
 interface RequestParameters extends RequestOptions {
@@ -328,6 +355,36 @@ function assertExclusiveCursors(
   }
 }
 
+function assertMessageContent(content: string): void {
+  if (!content.trim()) throw new RangeError("Discord message content must not be blank")
+  if (content.length > DISCORD_LIMITS.messageContentCharacters) {
+    throw new RangeError(
+      `Discord message content must not exceed ${DISCORD_LIMITS.messageContentCharacters} characters`,
+    )
+  }
+}
+
+function assertAllowedMentions(allowedMentions: DiscordAllowedMentions): void {
+  if ("parse" in allowedMentions) {
+    if (allowedMentions.parse.length !== 0) {
+      throw new RangeError("Discord allowed mention parsing must be empty")
+    }
+    return
+  }
+  assertBoundedArray(
+    allowedMentions.users,
+    DISCORD_LIMITS.allowedMentionUsers,
+    "Discord allowed mention user IDs",
+  )
+  assertSearchSnowflakes(
+    allowedMentions.users,
+    "Discord allowed mention user IDs",
+  )
+  if (new Set(allowedMentions.users).size !== allowedMentions.users.length) {
+    throw new RangeError("Discord allowed mention user IDs must be unique")
+  }
+}
+
 export class DiscordClient {
   readonly #apiBaseUrl: string
   readonly #fetch: FetchImplementation
@@ -494,6 +551,81 @@ export class DiscordClient {
     options: RequestOptions = {},
   ): Promise<DiscordMessage> {
     return this.#request(`/channels/${channelId}/messages/${messageId}`, options)
+  }
+
+  createMessage(
+    channelId: string,
+    input: CreateMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertMessageContent(input.content)
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertAllowedMentions(input.allowedMentions)
+    const messageReference = input.reply
+      ? {
+          channel_id: channelId,
+          fail_if_not_exists: true,
+          guild_id: input.reply.guildId,
+          message_id: input.reply.messageId,
+          type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+        }
+      : undefined
+    return this.#request(`/channels/${channelId}/messages`, {
+      ...options,
+      body: {
+        allowed_mentions: input.allowedMentions,
+        content: input.content,
+        enforce_nonce: true,
+        ...(messageReference ? { message_reference: messageReference } : {}),
+        nonce: input.nonce,
+      },
+      method: "POST",
+    })
+  }
+
+  editMessage(
+    channelId: string,
+    messageId: string,
+    input: EditMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertMessageContent(input.content)
+    assertAllowedMentions(input.allowedMentions)
+    return this.#request(`/channels/${channelId}/messages/${messageId}`, {
+      ...options,
+      body: {
+        allowed_mentions: input.allowedMentions,
+        content: input.content,
+      },
+      method: "PATCH",
+    })
+  }
+
+  async addOwnReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    if (!emoji || emoji.length > CONNECTOR_LIMITS.interactionEmojiCharacters) {
+      throw new RangeError(
+        `Discord reaction emoji must contain between 1 and ${CONNECTOR_LIMITS.interactionEmojiCharacters} characters`,
+      )
+    }
+    let encodedEmoji: string
+    try {
+      encodedEmoji = encodeURIComponent(emoji)
+    } catch (error) {
+      throw new RangeError("Discord reaction emoji contains invalid Unicode", { cause: error })
+    }
+    await this.#request<void>(
+      `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`,
+      { ...options, method: "PUT" },
+    )
   }
 
   searchGuildMessages(

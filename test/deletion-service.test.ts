@@ -90,7 +90,12 @@ function policy(): ScopePolicy {
     allowedChannelIds: new Set([CHANNEL_ID]),
     allowedGuildIds: new Set([GUILD_ID]),
     allowDeletions: true,
+    allowInteractions: false,
     deleteChannelIds: new Set([CHANNEL_ID]),
+    interactionChannelIds: new Set(),
+    interactionMaxWritesPerMinute: 10,
+    interactionMinWriteIntervalMs: 500,
+    mentionUserIds: new Set(),
   })
 }
 

@@ -28,6 +28,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   deletionPolicy: "deletion-policy",
   guildAccess: "guild-access",
   guildScope: "guild-scope",
+  interactionPolicy: "interaction-policy",
   messageContentIntent: "message-content-intent",
   nodeVersion: "node-version",
   token: "token",
@@ -144,6 +145,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowDeletions && config.deleteChannelIds.size === 0) {
     warnings.push("The deletion toggle is enabled but deletion remains blocked because no deletion-channel allowlist is configured")
   }
+  if (config.allowInteractions && config.interactionChannelIds.size === 0) {
+    warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
+  }
   return warnings
 }
 
@@ -254,6 +258,25 @@ export async function diagnoseConnector(
         `Message deletion is constrained to ${config.deleteChannelIds.size} channels`,
       ))
     }
+    if (!config.allowInteractions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.interactionPolicy,
+        "pass",
+        "Message interactions are disabled",
+      ))
+    } else if (config.interactionChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.interactionPolicy,
+        "warn",
+        "Interaction toggle is enabled, but the required interaction-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.interactionPolicy,
+        "pass",
+        `Message interactions are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a ${config.interactionMaxWritesPerMinute}-write rolling budget`,
+      ))
+    }
   }
 
   let identity: IdentitySummary | null = null
@@ -335,6 +358,11 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.allowedChannelIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
+    ENVIRONMENT_NAMES.allowInteractions,
+    ENVIRONMENT_NAMES.interactionChannelIds,
+    ENVIRONMENT_NAMES.mentionUserIds,
+    ENVIRONMENT_NAMES.interactionMaxWritesPerMinute,
+    ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
     ENVIRONMENT_NAMES.auditFile,
   ]
   const environmentLines = environmentVariables.map((name, index) => (
@@ -442,6 +470,23 @@ export async function smokeConnector(
       || deletion.annotations.readOnlyHint !== false
     ) {
       throw new Error("MCP smoke check found invalid delete_messages annotations")
+    }
+    const interactionAnnotations = [
+      ["send_message", false],
+      ["add_reaction", false],
+      ["edit_own_message", true],
+    ] as const
+    for (const [name, destructiveHint] of interactionAnnotations) {
+      const tool = listed.tools.find((entry) => entry.name === name)
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== destructiveHint
+        || tool.annotations.idempotentHint !== true
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error(`MCP smoke check found invalid ${name} annotations`)
+      }
     }
     const result = await client.callTool({
       arguments: {},

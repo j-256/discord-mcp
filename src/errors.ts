@@ -57,6 +57,34 @@ export class DeletionExecutionError extends Error {
   }
 }
 
+export class InteractionConflictError extends Error {
+  override name = "InteractionConflictError"
+}
+
+export class InteractionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "InteractionExecutionError"
+    this.result = result
+  }
+}
+
+export class InteractionIdentityError extends Error {
+  override name = "InteractionIdentityError"
+}
+
+export class InteractionRateLimitError extends Error {
+  readonly retryAfterMs: number
+
+  constructor(retryAfterMs: number) {
+    super(`Local Discord interaction guard requires a retry after ${retryAfterMs} ms`)
+    this.name = "InteractionRateLimitError"
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
 export function redactText(value: string, secrets: readonly (string | undefined)[]): string {
   let output = value
   for (const secret of secrets) {

@@ -25,6 +25,13 @@ import type {
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
 import { ConfigurationError } from "./errors.js"
+import type {
+  AddReactionRequest,
+  EditOwnMessageRequest,
+  InteractionServiceOptions,
+  SendMessageRequest,
+} from "./interaction-service.js"
+import { InteractionService } from "./interaction-service.js"
 import {
   normalizeChannel,
   normalizeGuild,
@@ -45,8 +52,11 @@ import type {
 } from "./types.js"
 
 export interface DiscordServiceClient {
+  addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
+  createMessage: DiscordClient["createMessage"]
   deleteMessage: DiscordClient["deleteMessage"]
+  editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
@@ -83,6 +93,10 @@ export interface ConnectorServiceOptions {
   clientOptions?: Omit<DiscordClientOptions, "token">
   config: ConnectorConfig
   deletionOptions?: Pick<DeletionServiceOptions, "clock" | "planKey" | "randomId">
+  interactionOptions?: Pick<
+    InteractionServiceOptions,
+    "clock" | "ledgerTtlMs" | "limiter" | "randomId"
+  >
   policy?: ScopePolicy
 }
 
@@ -189,6 +203,7 @@ export class ConnectorService {
   readonly #config: ConnectorConfig
   readonly #deletionService: DeletionService
   #identityPromise: Promise<VerifiedIdentity> | undefined
+  readonly #interactionService: InteractionService
   readonly #policy: ScopePolicy
 
   constructor(options: ConnectorServiceOptions) {
@@ -204,6 +219,14 @@ export class ConnectorService {
       client: this.#client,
       policy: this.#policy,
       ...options.deletionOptions,
+    })
+    this.#interactionService = new InteractionService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      maxWritesPerMinute: options.config.interactionMaxWritesPerMinute,
+      minWriteIntervalMs: options.config.interactionMinWriteIntervalMs,
+      policy: this.#policy,
+      ...options.interactionOptions,
     })
   }
 
@@ -635,6 +658,30 @@ export class ConnectorService {
   ): Promise<DeletionResult> {
     await this.#verifyIdentity(options)
     return this.#deletionService.execute(channelId, messageIds, planDigest, options)
+  }
+
+  async sendMessage(
+    request: SendMessageRequest,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.sendMessage(identity.bot.id, request, options)
+  }
+
+  async editOwnMessage(
+    request: EditOwnMessageRequest,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.editOwnMessage(identity.bot.id, request, options)
+  }
+
+  async addReaction(
+    request: AddReactionRequest,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#interactionService.addReaction(request, options)
   }
 
   listActivity(limit?: number): Promise<ActivityList> {

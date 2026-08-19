@@ -191,6 +191,7 @@ function activityEntry(options: {
     failedMessageId: options.failedMessageId ?? null,
     guildId: options.guildId,
     id: options.activityId,
+    kind: "message-deletion",
     messageIds: [...options.messageIds],
     planDigest: options.planDigest,
     schemaVersion: SCHEMA_VERSION,

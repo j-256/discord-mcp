@@ -52,6 +52,11 @@ function status(
       allowedGuildIds: [GUILD_ID],
       deleteChannelIds: [],
       deletionsEnabled: false,
+      interactionChannelIds: [],
+      interactionMaxWritesPerMinute: 10,
+      interactionMinWriteIntervalMs: 500,
+      interactionsEnabled: false,
+      mentionUserCount: 0,
       readChannelScope: "allowlist",
       readGuildScope: "allowlist",
     },
@@ -73,7 +78,9 @@ function toolService(): DiscordToolService {
     throw new Error("Unexpected smoke service call")
   }
   return {
+    addReaction: unexpected,
     deleteMessages: unexpected,
+    editOwnMessage: unexpected,
     explainChannelAccess: unexpected,
     getMessage: unexpected,
     async getStatus() {
@@ -87,6 +94,7 @@ function toolService(): DiscordToolService {
     planMessageDeletion: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
+    sendMessage: unexpected,
   }
 }
 
@@ -148,6 +156,37 @@ test("doctor distinguishes valid scoped configuration from safe warnings", async
     open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.status,
     "warn",
   )
+})
+
+test("doctor and setup explain effective interaction policy without Discord writes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
+  })
+  const report = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warning = await diagnoseConnector({
+    environment: environment({ DISCORD_MCP_ALLOW_INTERACTIONS: "true" }),
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: environment({ DISCORD_MCP_ALLOW_INTERACTIONS: "true" }),
+    service: statusProvider(),
+  })
+
+  const interaction = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.interactionPolicy,
+  )
+  assert.equal(interaction?.status, "pass")
+  assert.match(interaction?.summary || "", /12-write rolling budget/)
+  assert.equal(
+    warning.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.interactionPolicy)?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /interaction-channel allowlist/)
 })
 
 test("doctor verifies identity online and redacts online failures", async () => {
@@ -293,8 +332,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 12)
-  assert.deepEqual(report.destructiveTools, ["delete_messages"])
+  assert.equal(report.toolCount, 15)
+  assert.deepEqual(report.destructiveTools, ["delete_messages", "edit_own_message"])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 

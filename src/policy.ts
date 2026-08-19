@@ -7,6 +7,11 @@ export interface PolicyDescription {
   allowedGuildIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
+  interactionChannelIds: string[]
+  interactionMaxWritesPerMinute: number
+  interactionMinWriteIntervalMs: number
+  interactionsEnabled: boolean
+  mentionUserCount: number
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
 }
@@ -15,16 +20,34 @@ export class ScopePolicy {
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowDeletions: boolean
+  readonly #allowInteractions: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
+  readonly #interactionChannelIds: ReadonlySet<string>
+  readonly #interactionMaxWritesPerMinute: number
+  readonly #interactionMinWriteIntervalMs: number
+  readonly #mentionUserIds: ReadonlySet<string>
 
   constructor(config: Pick<
     ConnectorConfig,
-    "allowedChannelIds" | "allowedGuildIds" | "allowDeletions" | "deleteChannelIds"
+    | "allowedChannelIds"
+    | "allowedGuildIds"
+    | "allowDeletions"
+    | "allowInteractions"
+    | "deleteChannelIds"
+    | "interactionChannelIds"
+    | "interactionMaxWritesPerMinute"
+    | "interactionMinWriteIntervalMs"
+    | "mentionUserIds"
   >) {
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowDeletions = config.allowDeletions
+    this.#allowInteractions = config.allowInteractions
     this.#deleteChannelIds = config.deleteChannelIds
+    this.#interactionChannelIds = config.interactionChannelIds
+    this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
+    this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
+    this.#mentionUserIds = config.mentionUserIds
   }
 
   describe(): PolicyDescription {
@@ -33,6 +56,11 @@ export class ScopePolicy {
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
+      interactionChannelIds: [...this.#interactionChannelIds].sort(),
+      interactionMaxWritesPerMinute: this.#interactionMaxWritesPerMinute,
+      interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
+      interactionsEnabled: this.#allowInteractions && this.#interactionChannelIds.size > 0,
+      mentionUserCount: this.#mentionUserIds.size,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
     }
@@ -112,5 +140,27 @@ export class ScopePolicy {
       throw new PolicyError(`Discord channel ${channel.id} is outside the deletion scope`)
     }
     return guildId
+  }
+
+  assertChannelInteractable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowInteractions) {
+      throw new PolicyError("Discord interactions are disabled by connector configuration")
+    }
+    if (this.#interactionChannelIds.size === 0) {
+      throw new PolicyError("Discord interactions require an explicit interaction-channel allowlist")
+    }
+    if (!this.#interactionChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the interaction scope`)
+    }
+    return guildId
+  }
+
+  assertNotificationUsers(userIds: readonly string[]): void {
+    for (const userId of userIds) {
+      if (!this.#mentionUserIds.has(userId)) {
+        throw new PolicyError(`Discord user ${userId} is outside the notification scope`)
+      }
+    }
   }
 }

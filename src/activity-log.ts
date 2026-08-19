@@ -20,6 +20,7 @@ export interface DeletionActivity {
   failedMessageId: string | null
   guildId: string
   id: string
+  kind: "message-deletion"
   messageIds: string[]
   planDigest: string
   schemaVersion: number
@@ -28,14 +29,33 @@ export interface DeletionActivity {
   timestamp: string
 }
 
+export type InteractionActivityKind = "message-edit" | "message-send" | "reaction-add"
+export type InteractionActivityStatus = "completed" | "failed" | "noop" | "pending" | "uncertain"
+
+export interface InteractionActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: InteractionActivityKind
+  messageId: string | null
+  nonce: string | null
+  replyToMessageId: string | null
+  schemaVersion: number
+  status: InteractionActivityStatus
+  timestamp: string
+}
+
+export type ActivityEntry = DeletionActivity | InteractionActivity
+
 export interface ActivityList {
-  entries: DeletionActivity[]
+  entries: ActivityEntry[]
   file: string
   skippedLines: number
 }
 
 export interface ActivityStore {
-  append(entry: DeletionActivity): Promise<void>
+  append(entry: ActivityEntry): Promise<void>
   list(limit?: number): Promise<ActivityList>
 }
 
@@ -57,6 +77,7 @@ function parseDeletionActivity(value: unknown): DeletionActivity | undefined {
   const record = value as Record<string, unknown>
   if (
     record.schemaVersion !== SCHEMA_VERSION
+    || ![undefined, "message-deletion"].includes(record.kind as string | undefined)
     || typeof record.id !== "string"
     || typeof record.timestamp !== "string"
     || !["completed", "failed", "partial", "pending"].includes(String(record.status))
@@ -78,11 +99,45 @@ function parseDeletionActivity(value: unknown): DeletionActivity | undefined {
     failedMessageId: record.failedMessageId,
     guildId: record.guildId,
     id: record.id,
+    kind: "message-deletion",
     messageIds: [...record.messageIds],
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as DeletionActivityStatus,
     strategies: [...record.strategies],
+    timestamp: record.timestamp,
+  }
+}
+
+function parseInteractionActivity(value: unknown): InteractionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || typeof record.id !== "string"
+    || typeof record.timestamp !== "string"
+    || !["message-edit", "message-send", "reaction-add"].includes(String(record.kind))
+    || !["completed", "failed", "noop", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.channelId !== "string"
+    || typeof record.guildId !== "string"
+    || !(record.messageId === null || typeof record.messageId === "string")
+    || !(record.nonce === null || typeof record.nonce === "string")
+    || !(record.replyToMessageId === null || typeof record.replyToMessageId === "string")
+    || !(record.error === null || typeof record.error === "string")
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: record.kind as InteractionActivityKind,
+    messageId: record.messageId,
+    nonce: record.nonce,
+    replyToMessageId: record.replyToMessageId,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as InteractionActivityStatus,
     timestamp: record.timestamp,
   }
 }
@@ -94,7 +149,7 @@ export class JsonlActivityLog implements ActivityStore {
     this.#file = file
   }
 
-  async append(entry: DeletionActivity): Promise<void> {
+  async append(entry: ActivityEntry): Promise<void> {
     try {
       await mkdir(dirname(this.#file), { mode: 0o700, recursive: true })
       const handle = await open(this.#file, "a", 0o600)
@@ -106,7 +161,7 @@ export class JsonlActivityLog implements ActivityStore {
       await chmod(this.#file, 0o600)
     } catch (error) {
       throw new AuditLogError(
-        `Unable to append Discord deletion activity: ${errorMessage(error)}`,
+        `Unable to append Discord activity: ${errorMessage(error)}`,
         { cause: error },
       )
     }
@@ -122,7 +177,7 @@ export class JsonlActivityLog implements ActivityStore {
         return { entries: [], file: this.#file, skippedLines: 0 }
       }
       throw new AuditLogError(
-        `Unable to inspect Discord deletion activity: ${errorMessage(error)}`,
+        `Unable to inspect Discord activity: ${errorMessage(error)}`,
         { cause: error },
       )
     }
@@ -142,13 +197,13 @@ export class JsonlActivityLog implements ActivityStore {
 
       const lines = text.split("\n")
       if (offset > 0) lines.shift()
-      const entries: DeletionActivity[] = []
+      const entries: ActivityEntry[] = []
       let skippedLines = 0
       for (const line of lines) {
         if (!line.trim()) continue
         try {
           const value: unknown = JSON.parse(line)
-          const entry = parseDeletionActivity(value)
+          const entry = parseDeletionActivity(value) || parseInteractionActivity(value)
           if (entry) entries.push(entry)
           else skippedLines += 1
         } catch {
@@ -163,7 +218,7 @@ export class JsonlActivityLog implements ActivityStore {
     } catch (error) {
       if (error instanceof AuditLogError) throw error
       throw new AuditLogError(
-        `Unable to read Discord deletion activity: ${errorMessage(error)}`,
+        `Unable to read Discord activity: ${errorMessage(error)}`,
         { cause: error },
       )
     }

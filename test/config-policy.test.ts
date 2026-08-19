@@ -10,6 +10,7 @@ const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const OTHER_CHANNEL_ID = "200000000000000002"
+const USER_ID = "400000000000000001"
 
 function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
   return {
@@ -37,8 +38,13 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID}, ${OTHER_CHANNEL_ID} ${CHANNEL_ID}`,
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
+    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
     DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_INTERACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
+    DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "750",
+    DISCORD_MCP_MENTION_USER_IDS: USER_ID,
     XDG_STATE_HOME: "/test/state",
   }, { homeDirectory: "/test/home" })
 
@@ -46,7 +52,12 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.allowedChannelIds], [CHANNEL_ID, OTHER_CHANNEL_ID])
   assert.deepEqual([...config.allowedGuildIds], [GUILD_ID])
   assert.deepEqual([...config.deleteChannelIds], [CHANNEL_ID])
+  assert.deepEqual([...config.interactionChannelIds], [OTHER_CHANNEL_ID])
+  assert.deepEqual([...config.mentionUserIds], [USER_ID])
   assert.equal(config.allowDeletions, true)
+  assert.equal(config.allowInteractions, true)
+  assert.equal(config.interactionMaxWritesPerMinute, 12)
+  assert.equal(config.interactionMinWriteIntervalMs, 750)
   assert.equal(config.expectedApplicationId, "300000000000000001")
   assert.equal(config.auditFile, "/test/state/discord-mcp/activity.jsonl")
 })
@@ -59,6 +70,42 @@ test("configuration rejects deletion channels outside a read channel allowlist",
       DISCORD_MCP_DELETE_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
     ConfigurationError,
+  )
+})
+
+test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  const invalidLimits: Array<[string, string]> = [
+    ["DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE", "0"],
+    ["DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE", "1.5"],
+    ["DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS", "60001"],
+  ]
+  for (const [name, value] of invalidLimits) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        [name]: value,
+      }, { homeDirectory: "/test/home" }),
+      /must be an integer between/,
+    )
+  }
+  const tooManyMentionUsers = Array.from(
+    { length: 101 },
+    (_value, index) => String(500000000000000000n + BigInt(index)),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_MENTION_USER_IDS: tooManyMentionUsers,
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/,
   )
 })
 
@@ -122,9 +169,36 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     allowedGuildIds: [GUILD_ID],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
+    interactionChannelIds: [],
+    interactionMaxWritesPerMinute: 10,
+    interactionMinWriteIntervalMs: 500,
+    interactionsEnabled: false,
+    mentionUserCount: 0,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",
   })
+})
+
+test("scope policy requires exact interaction channels and exact notification users", () => {
+  const policy = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_INTERACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    DISCORD_MCP_MENTION_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" }))
+
+  assert.equal(policy.assertChannelInteractable(channel({ id: OTHER_CHANNEL_ID })), GUILD_ID)
+  assert.throws(
+    () => policy.assertChannelInteractable(channel()),
+    /outside the interaction scope/,
+  )
+  policy.assertNotificationUsers([USER_ID])
+  assert.throws(
+    () => policy.assertNotificationUsers(["400000000000000002"]),
+    /outside the notification scope/,
+  )
 })
 
 test("scope policy inherits parent read scope for threads but keeps deletion exact-ID gated", () => {

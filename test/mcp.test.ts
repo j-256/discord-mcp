@@ -9,6 +9,11 @@ import {
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
 import {
+  DiscordApiError,
+  InteractionExecutionError,
+  InteractionRateLimitError,
+} from "../src/errors.js"
+import {
   createDiscordMcpServer,
   runDiscordMcpServer,
   type DiscordToolService,
@@ -103,18 +108,35 @@ function plan(digest = DIGEST) {
 
 function serviceFixture(overrides: {
   activityError?: Error
+  interactionError?: Error
   messageContent?: string
   planDigest?: string
 } = {}) {
   const calls = {
     active: 0,
+    addReaction: 0,
     archived: 0,
     delete: 0,
+    edit: 0,
     explain: 0,
     plan: 0,
     search: 0,
+    send: 0,
   }
   const service: DiscordToolService = {
+    async addReaction(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.addReaction += 1
+      return {
+        activityId: "activity-reaction",
+        channelId: input.channelId,
+        guildId: GUILD_ID,
+        messageId: input.messageId,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
+      }
+    },
     async deleteMessages(channelId, messageIds, planDigest) {
       calls.delete += 1
       return {
@@ -155,6 +177,19 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async editOwnMessage(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.edit += 1
+      return {
+        activityId: "activity-edit",
+        channelId: input.channelId,
+        guildId: GUILD_ID,
+        messageId: input.messageId,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
+      }
+    },
     async getMessage() {
       return {
         channel: normalizeChannel(rawChannel()),
@@ -179,6 +214,11 @@ function serviceFixture(overrides: {
           allowedGuildIds: [],
           deleteChannelIds: [],
           deletionsEnabled: false,
+          interactionChannelIds: [],
+          interactionMaxWritesPerMinute: 10,
+          interactionMinWriteIntervalMs: 500,
+          interactionsEnabled: false,
+          mentionUserCount: 0,
           readChannelScope: "all-visible",
           readGuildScope: "all-visible",
         },
@@ -287,6 +327,21 @@ function serviceFixture(overrides: {
         threads: [],
       }
     },
+    async sendMessage(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.send += 1
+      return {
+        activityId: "activity-send",
+        channelId: input.channelId,
+        guildId: GUILD_ID,
+        localReplay: false,
+        messageId: MESSAGE_ID,
+        nonce: "stable-nonce",
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
+      }
+    },
   }
   return { calls, service }
 }
@@ -364,6 +419,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "read_messages",
       "search_messages",
       "get_message",
+      "send_message",
+      "edit_own_message",
+      "add_reaction",
       "plan_message_deletion",
       "delete_messages",
       "list_activity",
@@ -371,6 +429,23 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   assert.deepEqual(deletion?.annotations, {
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const send = result.tools.find((tool) => tool.name === "send_message")
+  const reaction = result.tools.find((tool) => tool.name === "add_reaction")
+  for (const tool of [send, reaction]) {
+    assert.deepEqual(tool?.annotations, {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    })
+  }
+  const edit = result.tools.find((tool) => tool.name === "edit_own_message")
+  assert.deepEqual(edit?.annotations, {
     destructiveHint: true,
     idempotentHint: true,
     openWorldHint: true,
@@ -443,12 +518,155 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
   assert.equal(structuredContent(access).status, "ok")
   assert.deepEqual(calls, {
     active: 1,
+    addReaction: 0,
     archived: 1,
     delete: 0,
+    edit: 0,
     explain: 1,
     plan: 0,
     search: 0,
+    send: 0,
   })
+})
+
+test("MCP interaction tools enforce bounded schemas and invoke idempotent services", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const sent = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "safe message",
+      idempotencyKey: "request-1234567890",
+    },
+    name: "send_message",
+  })
+  const edited = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "replacement",
+      messageId: MESSAGE_ID,
+    },
+    name: "edit_own_message",
+  })
+  const reacted = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emoji: "🔥",
+      messageId: MESSAGE_ID,
+    },
+    name: "add_reaction",
+  })
+  const invalid = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "unsafe retry key",
+      idempotencyKey: "short",
+    },
+    name: "send_message",
+  })
+
+  assert.equal(structuredContent(sent).status, "completed")
+  assert.equal(structuredContent(edited).status, "completed")
+  assert.equal(structuredContent(reacted).status, "completed")
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.send, 1)
+  assert.equal(calls.edit, 1)
+  assert.equal(calls.addReaction, 1)
+})
+
+test("MCP interaction errors expose local retry timing without secrets", async (context) => {
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      interactionError: new InteractionRateLimitError(750),
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "safe message",
+      idempotencyKey: "request-1234567890",
+    },
+    name: "send_message",
+  })
+  const structured = structuredContent(result)
+
+  assert.equal(result.isError, true)
+  assert.equal(structured.status, "rate-limited")
+  assert.equal((structured.error as Record<string, unknown>).retryAfterMs, 750)
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("MCP interaction errors preserve Discord rate-limit timing", async (context) => {
+  const discordError = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "POST",
+    retryAfterMs: 1_250,
+    route: `/channels/${CHANNEL_ID}/messages`,
+    status: 429,
+  })
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      interactionError: new InteractionExecutionError(
+        "Discord interaction did not complete with a verified outcome",
+        {
+          activityId: "activity-rate-limit",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          messageId: null,
+          retryAfterMs: 1_250,
+          schemaVersion: 1,
+          status: "failed",
+        },
+        { cause: discordError },
+      ),
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "safe message",
+      idempotencyKey: "request-1234567890",
+    },
+    name: "send_message",
+  })
+  const structured = structuredContent(result)
+
+  assert.equal(result.isError, true)
+  assert.equal(structured.status, "rate-limited")
+  assert.equal((structured.error as Record<string, unknown>).retryAfterMs, 1_250)
+})
+
+test("MCP interaction errors distinguish uncertain external outcomes", async (context) => {
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      interactionError: new InteractionExecutionError(
+        "Discord interaction outcome is uncertain",
+        {
+          activityId: "activity-uncertain",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          messageId: null,
+          retryAfterMs: null,
+          schemaVersion: 1,
+          status: "uncertain",
+        },
+      ),
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "safe message",
+      idempotencyKey: "request-1234567890",
+    },
+    name: "send_message",
+  })
+
+  assert.equal(result.isError, true)
+  assert.equal(structuredContent(result).status, "outcome-uncertain")
 })
 
 test("MCP deletion elicits exact confirmation before invoking the write service", async (context) => {
@@ -613,7 +831,7 @@ test("MCP stdio entrypoint negotiates without stdout noise", async (context) => 
   await client.connect(transport)
   const result = await client.listTools()
 
-  assert.equal(result.tools.length, 12)
+  assert.equal(result.tools.length, 15)
   assert.match(diagnostics, /stdio server ready/)
   assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
 })

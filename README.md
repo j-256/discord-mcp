@@ -1,6 +1,6 @@
 # Discord MCP
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes a credential-safe operator CLI, compact bounded search, a deliberately narrow deletion path for exact reviewed message IDs, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, a deliberately narrow deletion path for exact reviewed message IDs, and content-free local activity records.
 
 ## Safety model
 
@@ -11,13 +11,18 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Discord names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
+- Message interactions are disabled unless an explicit environment toggle and exact interaction-channel allowlist are both present
+- Interaction scope never inherits from a thread parent, mentions notify nobody by default, and roles, `@everyone`, and `@here` cannot be enabled
+- Every actual send, edit, or reaction write requires a pending content-free activity record and passes process-local anti-spam guards
+- Sends require caller-provided idempotency keys, coalesce concurrent retries, and use deterministic Discord nonces with uniqueness enforcement
+- Only non-webhook messages owned by the verified bot can be edited
 - Deletion is disabled unless an explicit environment toggle and deletion-channel allowlist are both present
 - Deletion accepts exact message IDs rather than free-form filters
 - A keyed snapshot digest detects message edits or replacements
 - MCP host write approval and signed MCP elicitation both precede deletion
 - The connector re-reads the plan immediately before writing
 - A content-free pending activity record must succeed before deletion starts
-- The bot token, message content, embeds, components, attachment URLs, and interaction public key are never written to the activity log
+- The bot token, message content, content hashes, embeds, components, attachment URLs, emoji, notification user IDs, raw idempotency keys, and Discord Interaction public key are never written to the activity log
 
 Treat message deletion as irreversible even though the connector records identifiers and outcomes.
 
@@ -28,11 +33,13 @@ Treat message deletion as irreversible even though the connector records identif
 - The bot token available as `DISCORD_BOT_TOKEN`
 - `View Channels` and `Read Message History` in every channel the connector should read
 - The Message Content privileged intent enabled for full message bodies
+- `Send Messages` only in channels where message sends or edits will be enabled
+- `Add Reactions` only in channels where reaction writes will be enabled
 - `Manage Messages` only in channels where deletion will eventually be enabled
 
 Do not grant the bot `Administrator`. Restrict its Discord role at the category or channel level wherever possible.
 
-The application public key is not used by this local REST connector. It becomes relevant only if interaction webhooks or slash commands are added later.
+The application public key is not used by this local REST connector. It becomes relevant only if Discord Interaction webhooks or slash commands are added later.
 
 ## Discord bot setup
 
@@ -44,7 +51,7 @@ The application public key is not used by this local REST connector. It becomes 
 6. Restrict the bot role to the intended categories or channels.
 7. Run `discord-mcp setup` and confirm that Discord reports the expected application, bot, and scoped guild access.
 
-Add `Manage Messages` later through the server role only after selecting deletion channels. Keep deletion disabled locally until those channel IDs are configured.
+Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Messages` only after selecting deletion channels. Keep each local feature toggle disabled until its exact channel IDs are configured.
 
 Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), message content access in its [Gateway reference](https://docs.discord.com/developers/events/gateway), and message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message).
 
@@ -70,11 +77,11 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, and deletion policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels or reading messages.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, interaction policy, and deletion policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels or reading messages.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
-`smoke` connects an official MCP client to the real adapter over linked protocol transports, lists the tool contracts, validates the destructive annotation on `delete_messages`, and calls only `get_connector_status`. It does not list channels, read messages, or write to Discord.
+`smoke` connects an official MCP client to the real adapter over linked protocol transports, lists the tool contracts, validates every write tool's risk annotations, and calls only `get_connector_status`. It does not list channels, read messages, or write to Discord.
 
 Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
 
@@ -86,6 +93,11 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_APPLICATION_ID` | Recommended | Reject a token belonging to a different application |
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
+| `DISCORD_MCP_ALLOW_INTERACTIONS` | For interactions | Must be exactly `true` to enable sends, own-message edits, or own-reaction adds |
+| `DISCORD_MCP_INTERACTION_CHANNEL_IDS` | For interactions | Non-empty exact interaction-channel or thread allowlist and a subset of the read channel allowlist when one exists |
+| `DISCORD_MCP_MENTION_USER_IDS` | No | Exact user IDs that interaction calls may explicitly notify; defaults empty and is bounded to 100 configured IDs |
+| `DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE` | No | Process-local rolling interaction budget from 1 to 60; defaults to 10 |
+| `DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS` | No | Process-local spacing per interaction channel from 0 to 60000 milliseconds; defaults to 500 |
 | `DISCORD_MCP_ALLOW_DELETIONS` | For deletion | Must be exactly `true` to enable deletion |
 | `DISCORD_MCP_DELETE_CHANNEL_IDS` | For deletion | Non-empty deletion-channel allowlist and a subset of the read channel allowlist when one exists |
 | `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; defaults under the user's local state directory |
@@ -105,6 +117,11 @@ env_vars = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+  "DISCORD_MCP_ALLOW_INTERACTIONS",
+  "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
+  "DISCORD_MCP_MENTION_USER_IDS",
+  "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
+  "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
   "DISCORD_MCP_ALLOW_DELETIONS",
   "DISCORD_MCP_DELETE_CHANNEL_IDS",
   "DISCORD_MCP_AUDIT_FILE",
@@ -132,9 +149,12 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 | `read_messages` | Discord read | Read a bounded page of normalized messages |
 | `search_messages` | Discord read | Search indexed guild history with bounded official Discord filters and compact results |
 | `get_message` | Discord read | Read one exact message |
+| `send_message` | Discord write | Send one idempotent plain-text message or exact reply with notifications suppressed by default |
+| `edit_own_message` | Discord write | Replace one exact non-webhook message owned by the verified bot |
+| `add_reaction` | Discord write | Idempotently add the bot's own single reaction to one exact message |
 | `plan_message_deletion` | Discord read | Prepare exact previews and a keyed deletion digest |
 | `delete_messages` | Discord write | Confirm, revalidate, journal, and delete the reviewed IDs |
-| `list_activity` | Local read | Read content-free deletion activity |
+| `list_activity` | Local read | Read content-free deletion and interaction activity |
 
 ## Search
 
@@ -159,6 +179,22 @@ An allowlisted parent grants local read scope to its child threads. This inherit
 `explain_channel_access` evaluates only the authenticated connector bot. It unions the guild `@everyone` role with the bot's roles, applies channel overwrites in Discord's documented everyone, combined-role, and member order, and treats permission bitfields as arbitrary-width integers. `ADMINISTRATOR` bypasses channel overwrites, unknown future bits are preserved and reported, and incomplete role or overwrite evidence yields `partial` confidence instead of a false access claim.
 
 Threads use their parent's overwrites. A successful lookup of a private thread is also reported as evidence that Discord exposed that thread to the bot. The explanation identifies required and missing read permissions, but it remains a diagnostic snapshot rather than a guarantee that a later Discord request will succeed. See Discord's [permissions reference](https://docs.discord.com/developers/topics/permissions).
+
+## Safe message interactions
+
+Message interactions are a separate exact-ID policy boundary from reads and deletion. Set `DISCORD_MCP_ALLOW_INTERACTIONS=true` and list every writable channel or thread by its own ID in `DISCORD_MCP_INTERACTION_CHANNEL_IDS`. An allowlisted parent grants read access to its threads but never grants interaction access to them. The MCP host treats all three tools as writes, so the recommended `default_tools_approval_mode = "writes"` keeps client approval in front of each call.
+
+`send_message` accepts plain text only and requires an idempotency key between 16 and 128 safe ASCII characters. Generate one key for one intended message, such as a UUID, and reuse that exact key with unchanged arguments for every retry. The connector derives a channel-bound 25-character nonce without sending, logging, or returning the raw key. Matching concurrent and recent in-process calls share one result. Discord also enforces nonce uniqueness for the past few minutes, which covers a connector restart inside that window. Reusing a key with different arguments is rejected, including when Discord returns an earlier nonce match whose content differs.
+
+Idempotency is intentionally bounded rather than permanent. The local result ledger retains identifiers for ten minutes, and Discord documents only a past-few-minutes nonce window. If an uncertain send is left unresolved beyond those windows, inspect `list_activity` and the target channel before retrying. Never choose a fresh key merely because a result was uncertain, since that would authorize a second message.
+
+All mention classes are suppressed by default. A call can notify only exact IDs present in `DISCORD_MCP_MENTION_USER_IDS`, up to ten per message, and each ID must also appear as a visible `<@user-id>` mention in the submitted content. Role, `@everyone`, and `@here` notifications remain suppressed. Reply-author notification is a separate explicit boolean; the connector fetches the exact reply target and permits that notification only when its author ID is configured. Replies use Discord's fail-if-target-missing behavior.
+
+`edit_own_message` replaces the complete plain-text content of one exact message after a fresh ownership check. Webhook messages and messages owned by anyone other than the verified bot are rejected. An exact same-content request with no notification users is a journaled no-op that consumes no write budget. `add_reaction` accepts one Unicode emoji or custom `name:snowflake` value and uses Discord's naturally idempotent own-reaction PUT.
+
+Every actual interaction write first reserves a local rolling budget and per-channel interval. These limits reject immediately with `retryAfterMs`; they do not sleep and are not hardcoded assumptions about Discord's dynamic rate limits. A content-free pending activity record must then succeed before the request leaves the process. Terminal records distinguish completed, failed, and uncertain outcomes. A success whose terminal journal write fails is reported as `completed-audit-failed` rather than hiding the external write.
+
+The interaction tools return identifiers, jump URLs, status, activity IDs, and send nonces, but do not echo message content. Discord's [message resource reference](https://docs.discord.com/developers/resources/message) documents allowed mentions, enforced nonces, replies, edits, reactions, and dynamic rate-limit behavior.
 
 ## Deletion workflow
 
@@ -213,7 +249,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Gateway subscriptions, safe message interactions, administrative plan-review-execute workflows, slash commands, MCP resources and prompts, and a distributable MCP host integration can be added without changing the deletion safety path. Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Gateway subscriptions, administrative plan-review-execute workflows, slash commands, MCP resources and prompts, and a distributable MCP host integration can be added without changing the interaction or deletion safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 
