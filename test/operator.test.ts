@@ -83,6 +83,9 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     deleteMessages: unexpected,
+    describePolicy() {
+      return status().policy
+    },
     editOwnMessage: unexpected,
     executeMemberModeration: unexpected,
     explainChannelAccess: unexpected,
@@ -376,6 +379,23 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.toolCount, 17)
+  assert.deepEqual(report.promptNames, [
+    "review_member_moderation",
+    "review_message_deletion",
+    "search_guild_messages",
+    "summarize_channel",
+  ])
+  assert.deepEqual(report.resourceUris, [
+    "discord://connector/activity",
+    "discord://connector/policy",
+    "discord://connector/safety",
+    "discord://guilds",
+  ])
+  assert.deepEqual(report.resourceTemplateUris, [
+    "discord://channels/{channelId}/access",
+    "discord://channels/{channelId}/messages/{messageId}",
+    "discord://guilds/{guildId}/channels",
+  ])
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
     "edit_own_message",

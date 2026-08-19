@@ -67,7 +67,10 @@ function smokeReport(): SmokeReport {
     destructiveTools: ["delete_messages"],
     guildsAccessibleOnFirstPage: 1,
     guildsInScopeOnFirstPage: 1,
+    promptNames: ["summarize_channel"],
     readOnlyTools: ["get_connector_status"],
+    resourceTemplateUris: ["discord://channels/{channelId}/access"],
+    resourceUris: ["discord://connector/safety"],
     schemaVersion: 1,
     status: "ok",
     toolCount: 12,
@@ -238,6 +241,8 @@ test("CLI renders smoke, help, and version output", async () => {
   }), 0)
 
   assert.match(smokeOutput.value(), /Discord MCP smoke: ok/)
+  assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
+  assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \[--online\]/)
   assert.match(versionOutput.value(), /0\.1\.0/)
 })

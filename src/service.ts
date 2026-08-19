@@ -255,6 +255,10 @@ export class ConnectorService {
     })
   }
 
+  describePolicy() {
+    return this.#policy.describe()
+  }
+
   async #verifyIdentity(options: RequestOptions = {}): Promise<VerifiedIdentity> {
     if (!this.#identityPromise) {
       this.#identityPromise = Promise.all([
@@ -304,7 +308,7 @@ export class ConnectorService {
         accessible: guilds.length,
         inScope: scopedGuilds.length,
       },
-      policy: this.#policy.describe(),
+      policy: this.describePolicy(),
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }

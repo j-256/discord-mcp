@@ -1,6 +1,6 @@
 # Discord MCP
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -9,6 +9,8 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Production requests always target Discord API v10 at a fixed origin
 - Direct-message channels are rejected
 - Discord names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
+- Resource discovery is content-free; live resource templates require exact IDs and never enumerate messages
+- Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and destructive prompts stop after read-only planning
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Message interactions are disabled unless an explicit environment toggle and exact interaction-channel allowlist are both present
@@ -86,7 +88,7 @@ node dist/cli.js smoke
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
-`smoke` connects an official MCP client to the real adapter over linked protocol transports, lists the tool contracts, validates every write tool's risk annotations, and calls only `get_connector_status`. It does not list channels, read messages, or write to Discord.
+`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the tool, resource, resource-template, and prompt catalogs, checks every write tool's risk annotations, and calls only `get_connector_status`. Catalog discovery is local and content-free. The command does not list Discord channels, read messages, or write to Discord.
 
 Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
 
@@ -168,6 +170,42 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 | `plan_member_moderation` | Discord read | Verify one exact target, permission and hierarchy evidence, action state, and keyed moderation digest |
 | `execute_member_moderation` | Discord write | Confirm, revalidate, journal, and execute the reviewed exact-ID member action |
 | `list_activity` | Local read | Read content-free deletion, interaction, and member-moderation activity |
+
+## Resources
+
+MCP resource discovery lists only stable metadata. Listing resources or templates does not call the connector service or Discord. Fixed resources are:
+
+| Resource | Source | Purpose |
+| --- | --- | --- |
+| `discord://connector/safety` | Static | Explain trust boundaries and reviewed workflows without identity or Discord data |
+| `discord://connector/policy` | Local | Report effective scope and write policy without credentials or Discord access |
+| `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
+| `discord://guilds` | Discord read | Return one bounded page of normalized in-scope guild metadata |
+
+Live templates are non-enumerable and require exact IDs:
+
+| Resource template | Purpose |
+| --- | --- |
+| `discord://guilds/{guildId}/channels` | Read normalized in-scope channel metadata for one guild |
+| `discord://channels/{channelId}/access` | Explain the verified bot's effective access to one channel or thread |
+| `discord://channels/{channelId}/messages/{messageId}` | Read one exact message from one permitted channel |
+
+Every Discord-backed JSON resource carries an `untrusted-external-data` classification and an instruction to treat returned strings as data. The exact-message resource is deliberately compact: it includes message content, author identity, timestamps, jump URL, compact attachment metadata, and counts while omitting attachment URLs and raw embeds, components, reactions, and mention payloads. Existing service checks still verify the bot identity, exact returned IDs, guild and channel scope, and fixed Discord API origin before the resource is returned.
+
+Resource payloads and failures pass through the same recursive token-redaction boundary as tools. Live reads use private zero-lifetime cache hints. Only the identity-free static safety guide is eligible for shared caching.
+
+## Prompts
+
+MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned.
+
+| Prompt | Workflow boundary |
+| --- | --- |
+| `summarize_channel` | Read one bounded message page, cite evidence, and make no search or write call |
+| `search_guild_messages` | Run one bounded native content search, preserve indexing status, and make no write call |
+| `review_message_deletion` | Build and review an exact keyed deletion plan, then stop before execution |
+| `review_member_moderation` | Build and review one exact keyed moderation plan, then stop before execution |
+
+The deletion and moderation prompts do not collapse approval stages. They explicitly forbid their execution tools, leaving client write approval, signed elicitation, fresh-plan verification, interactive confirmation, and pending content-free journaling on the separate destructive call.
 
 ## Search
 
@@ -263,14 +301,14 @@ node dist/cli.js help
 node dist/cli.js version
 ```
 
-The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, and read-only protocol path without listing channels, reading messages, or performing member moderation:
+The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, content-free MCP catalogs, and read-only protocol path without listing Discord channels, reading messages, or performing member moderation:
 
 ```sh
 node dist/cli.js doctor --online
 node dist/cli.js smoke
 ```
 
-`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, intent state, and tool names but never print the token. No default live command fetches message or search content.
+`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, intent state, tool names, resource URIs, template URIs, and prompt names but never print the token. No default live command fetches message or search content.
 
 ## Expansion
 
@@ -282,7 +320,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Gateway subscriptions, channel and role administration through the reviewed-plan core, slash commands, MCP resources and prompts, and a distributable MCP host integration can be added without changing the interaction, deletion, or member-moderation safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Gateway subscriptions, channel and role administration through the reviewed-plan core, slash commands, client-native progressive discovery, and distributable packages can be added without changing the interaction, deletion, member-moderation, resource, or prompt safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

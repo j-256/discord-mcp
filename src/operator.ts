@@ -13,6 +13,11 @@ import {
 } from "./constants.js"
 import { ConfigurationError, errorMessage, redactText } from "./errors.js"
 import {
+  MCP_PROMPT_NAMES,
+  MCP_RESOURCE_TEMPLATE_URIS,
+  MCP_RESOURCE_URIS,
+} from "./mcp-guidance.js"
+import {
   createDiscordMcpServer,
   type DiscordToolService,
 } from "./mcp.js"
@@ -80,7 +85,10 @@ export interface SetupReport {
 
 export interface SmokeReport extends IdentitySummary {
   destructiveTools: string[]
+  promptNames: string[]
   readOnlyTools: string[]
+  resourceTemplateUris: string[]
+  resourceUris: string[]
   schemaVersion: number
   status: "ok"
   toolCount: number
@@ -461,6 +469,21 @@ function numberProperty(value: unknown, property: string): number | undefined {
   return typeof record?.[property] === "number" ? record[property] : undefined
 }
 
+function assertExactCatalog(
+  actual: readonly string[],
+  expected: readonly string[],
+  label: string,
+): void {
+  const normalizedActual = [...new Set(actual)].sort()
+  const normalizedExpected = [...new Set(expected)].sort()
+  if (
+    normalizedActual.length !== actual.length
+    || JSON.stringify(normalizedActual) !== JSON.stringify(normalizedExpected)
+  ) {
+    throw new Error(`MCP smoke check found an invalid ${label} catalog`)
+  }
+}
+
 export async function smokeConnector(
   options: SmokeOptions = {},
 ): Promise<SmokeReport> {
@@ -478,7 +501,23 @@ export async function smokeConnector(
   try {
     await server.connect(serverTransport)
     await client.connect(clientTransport)
-    const listed = await client.listTools()
+    const [listed, listedPrompts, listedResources, listedTemplates] = await Promise.all([
+      client.listTools(),
+      client.listPrompts(),
+      client.listResources(),
+      client.listResourceTemplates(),
+    ])
+    const promptNames = listedPrompts.prompts.map((prompt) => prompt.name)
+    const resourceUris = listedResources.resources.map((resource) => resource.uri)
+    const resourceTemplateUris = listedTemplates.resourceTemplates
+      .map((template) => template.uriTemplate)
+    assertExactCatalog(promptNames, Object.values(MCP_PROMPT_NAMES), "prompt")
+    assertExactCatalog(resourceUris, Object.values(MCP_RESOURCE_URIS), "resource")
+    assertExactCatalog(
+      resourceTemplateUris,
+      Object.values(MCP_RESOURCE_TEMPLATE_URIS),
+      "resource-template",
+    )
     if (listed.tools.some((tool) => (
       typeof tool.annotations?.destructiveHint !== "boolean"
       || typeof tool.annotations.idempotentHint !== "boolean"
@@ -548,10 +587,13 @@ export async function smokeConnector(
         .sort(),
       guildsAccessibleOnFirstPage: guildsAccessible,
       guildsInScopeOnFirstPage: guildsInScope,
+      promptNames: promptNames.sort(),
       readOnlyTools: listed.tools
         .filter((tool) => tool.annotations?.readOnlyHint === true)
         .map((tool) => tool.name)
         .sort(),
+      resourceTemplateUris: resourceTemplateUris.sort(),
+      resourceUris: resourceUris.sort(),
       schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
       status: "ok",
       toolCount: listed.tools.length,

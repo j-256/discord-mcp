@@ -188,7 +188,7 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp setup [--client host] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot and print a credential-free MCP host MCP configuration fragment."
   }
   if (topic === "smoke") {
-    return "Usage: discord-mcp smoke [--json]\n\nNegotiate through the MCP adapter and call only the read-only connector status tool."
+    return "Usage: discord-mcp smoke [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool."
   }
   if (topic === "serve") {
     return "Usage: discord-mcp serve\n\nRun the local stdio MCP server. This is also the default command."
@@ -241,6 +241,9 @@ function renderSmoke(report: SmokeReport): string {
     `Tools: ${report.toolCount}`,
     `Read-only tools: ${report.readOnlyTools.join(", ")}`,
     `Destructive tools: ${report.destructiveTools.join(", ")}`,
+    `Resources: ${report.resourceUris.join(", ")}`,
+    `Resource templates: ${report.resourceTemplateUris.join(", ")}`,
+    `Prompts: ${report.promptNames.join(", ")}`,
   ].join("\n")
 }
 

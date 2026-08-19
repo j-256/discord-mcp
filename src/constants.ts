@@ -51,10 +51,12 @@ export const DISCORD_LIMITS = Object.freeze({
   searchFilterStrings: 100,
   searchOffset: 9_975,
   searchSlop: 100,
+  snowflakeCharacters: 20,
 })
 
 export const CONNECTOR_LIMITS = Object.freeze({
   activityEntries: 100,
+  activityPageDefault: 25,
   activeThreads: 100,
   contentPreviewCharacters: 240,
   idempotencyKeyCharacters: 128,
@@ -66,6 +68,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   interactionMinWriteIntervalMs: 60_000,
   interactionNotificationUsers: 10,
   mentionUserAllowlist: 100,
+  messagePageDefault: 50,
   protectedUserAllowlist: 100,
   searchFilterIds: 25,
   searchFilterStrings: 25,

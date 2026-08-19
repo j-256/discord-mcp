@@ -24,9 +24,12 @@ import {
   DISCORD_PERMISSIONS,
   evaluateBotChannelPermissions,
 } from "../src/permissions.js"
+import type { PolicyDescription } from "../src/policy.js"
 import type { DiscordChannel, DiscordMessage } from "../src/types.js"
 
 const TOKEN = "test-discord-token"
+const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
+const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const MESSAGE_ID = "300000000000000001"
@@ -143,6 +146,25 @@ function moderationPlan(digest = DIGEST) {
   }
 }
 
+function fixturePolicy(): PolicyDescription {
+  return {
+    administrationEnabled: false,
+    administrationGuildIds: [],
+    allowedChannelIds: [],
+    allowedGuildIds: [],
+    deleteChannelIds: [],
+    deletionsEnabled: false,
+    interactionChannelIds: [],
+    interactionMaxWritesPerMinute: 10,
+    interactionMinWriteIntervalMs: 500,
+    interactionsEnabled: false,
+    mentionUserCount: 0,
+    protectedUserCount: 0,
+    readChannelScope: "all-visible",
+    readGuildScope: "all-visible",
+  }
+}
+
 function serviceFixture(overrides: {
   administrationError?: Error
   activityError?: Error
@@ -189,6 +211,7 @@ function serviceFixture(overrides: {
         status: "completed",
       }
     },
+    describePolicy: fixturePolicy,
     async executeMemberModeration(request, planDigest) {
       if (overrides.administrationError) throw overrides.administrationError
       calls.administrationExecute += 1
@@ -263,22 +286,7 @@ function serviceFixture(overrides: {
         auditFile: "/memory/activity.jsonl",
         bot: { id: "600000000000000001", username: "bot" },
         guildPage: { accessible: 1, inScope: 1 },
-        policy: {
-          administrationEnabled: false,
-          administrationGuildIds: [],
-          allowedChannelIds: [],
-          allowedGuildIds: [],
-          deleteChannelIds: [],
-          deletionsEnabled: false,
-          interactionChannelIds: [],
-          interactionMaxWritesPerMinute: 10,
-          interactionMinWriteIntervalMs: 500,
-          interactionsEnabled: false,
-          mentionUserCount: 0,
-          protectedUserCount: 0,
-          readChannelScope: "all-visible",
-          readGuildScope: "all-visible",
-        },
+        policy: fixturePolicy(),
         schemaVersion: 1,
         status: "ok",
       }
@@ -1080,7 +1088,7 @@ test("MCP tool results redact the Discord token if Discord returns it as data", 
   assert.match(JSON.stringify(result), /\[redacted\]/)
 })
 
-test("MCP stdio entrypoint negotiates without stdout noise", async (context) => {
+test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", async (context) => {
   const transport = new StdioClientTransport({
     args: ["--import", "tsx", "src/cli.ts", "serve"],
     command: process.execPath,
@@ -1109,9 +1117,24 @@ test("MCP stdio entrypoint negotiates without stdout noise", async (context) => 
   })
 
   await client.connect(transport)
-  const result = await client.listTools()
+  const [tools, prompts, resources, templates, safety] = await Promise.all([
+    client.listTools(),
+    client.listPrompts(),
+    client.listResources(),
+    client.listResourceTemplates(),
+    client.readResource({ uri: "discord://connector/safety" }),
+  ])
 
-  assert.equal(result.tools.length, 17)
+  assert.equal(tools.tools.length, 17)
+  assert.equal(prompts.prompts.length, 4)
+  assert.equal(resources.resources.length, 4)
+  assert.equal(templates.resourceTemplates.length, 3)
+  for (const catalog of [tools, prompts, resources, templates]) {
+    assert.equal(catalog.cacheScope, "public")
+    assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)
+  }
+  assert.equal(safety.cacheScope, "public")
+  assert.equal(safety.ttlMs, STATIC_RESOURCE_CACHE_TTL_MS)
   assert.match(diagnostics, /stdio server ready/)
   assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
 })
