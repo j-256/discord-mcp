@@ -4,7 +4,13 @@ import type {
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
 import type { ConnectorConfig } from "./config.js"
-import { DISCORD_LIMITS, SCHEMA_VERSION } from "./constants.js"
+import {
+  CONNECTOR_LIMITS,
+  DISCORD_APPLICATION_FLAGS,
+  DISCORD_CHANNEL_TYPES,
+  DISCORD_LIMITS,
+  SCHEMA_VERSION,
+} from "./constants.js"
 import type {
   DeletionPlan,
   DeletionResult,
@@ -14,6 +20,7 @@ import { DeletionService } from "./deletion-service.js"
 import type {
   DiscordClientOptions,
   GuildPageOptions,
+  GuildMessageSearchOptions,
   MessagePageOptions,
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
@@ -22,13 +29,17 @@ import {
   normalizeChannel,
   normalizeGuild,
   normalizeMessage,
+  normalizeSearchMessage,
 } from "./normalize.js"
+import { evaluateBotChannelPermissions } from "./permissions.js"
 import { ScopePolicy } from "./policy.js"
 import type {
   DiscordApplication,
   DiscordChannel,
   DiscordGuild,
+  DiscordMessageSearchIndexing,
   DiscordMessage,
+  DiscordThreadList,
   DiscordUser,
   RequestOptions,
 } from "./types.js"
@@ -40,9 +51,30 @@ export interface DiscordServiceClient {
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuildChannels: DiscordClient["getGuildChannels"]
+  getGuildMember: DiscordClient["getGuildMember"]
+  getGuildRoles: DiscordClient["getGuildRoles"]
   getMessage: DiscordClient["getMessage"]
+  listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
+  listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listMessages: DiscordClient["listMessages"]
+  listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
+  listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
+  searchGuildMessages: DiscordClient["searchGuildMessages"]
+}
+
+export interface ActiveThreadListOptions extends RequestOptions {
+  limit?: number
+  parentChannelId?: string
+}
+
+export type ArchivedThreadVisibility = "joined-private" | "private" | "public"
+
+export interface ArchivedThreadListOptions extends RequestOptions {
+  beforeThreadId?: string
+  beforeTimestamp?: string
+  limit?: number
+  visibility?: ArchivedThreadVisibility
 }
 
 export interface ConnectorServiceOptions {
@@ -57,6 +89,98 @@ export interface ConnectorServiceOptions {
 interface VerifiedIdentity {
   application: DiscordApplication
   bot: DiscordUser
+}
+
+function applicationMessageContentIntent(
+  application: DiscordApplication,
+): "disabled" | "enabled" | "unknown" {
+  let flags: bigint
+  try {
+    if (application.flags_new !== undefined) flags = BigInt(application.flags_new)
+    else if (application.flags !== undefined) flags = BigInt(application.flags)
+    else return "unknown"
+  } catch {
+    return "unknown"
+  }
+  const intentFlags = DISCORD_APPLICATION_FLAGS.gatewayMessageContent
+    | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited
+  return (flags & intentFlags) !== 0n ? "enabled" : "disabled"
+}
+
+function assertConnectorLimit(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  name: string,
+): void {
+  if (
+    value !== undefined
+    && (!Number.isInteger(value) || value < minimum || value > maximum)
+  ) {
+    throw new RangeError(`${name} must be an integer between ${minimum} and ${maximum}`)
+  }
+}
+
+function hasSearchFilter(options: GuildMessageSearchOptions): boolean {
+  return Boolean(
+    options.content?.trim()
+    || options.channelIds?.length
+    || options.authorIds?.length
+    || options.authorTypes?.length
+    || options.mentionUserIds?.length
+    || options.mentionRoleIds?.length
+    || options.repliedToUserIds?.length
+    || options.repliedToMessageIds?.length
+    || options.has?.length
+    || options.embedTypes?.length
+    || options.embedProviders?.length
+    || options.linkHostnames?.length
+    || options.attachmentFilenames?.length
+    || options.attachmentExtensions?.length
+    || options.minId
+    || options.maxId
+    || options.pinned !== undefined
+    || options.mentionEveryone !== undefined
+  )
+}
+
+function searchIndexing(
+  value: DiscordMessageSearchIndexing | unknown,
+): value is DiscordMessageSearchIndexing {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "code" in value
+    && value.code === 110000,
+  )
+}
+
+function isThreadType(type: number): boolean {
+  const threadTypes: readonly number[] = [
+    DISCORD_CHANNEL_TYPES.announcementThread,
+    DISCORD_CHANNEL_TYPES.privateThread,
+    DISCORD_CHANNEL_TYPES.publicThread,
+  ]
+  return threadTypes.includes(type)
+}
+
+const ARCHIVED_THREAD_VISIBILITIES: ReadonlySet<string> = new Set([
+  "joined-private",
+  "private",
+  "public",
+])
+const THREAD_PARENT_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.text,
+])
+
+function normalizedGuildChannel(channel: DiscordChannel, guildId: string) {
+  return normalizeChannel({
+    ...channel,
+    guild_id: channel.guild_id || guildId,
+  })
 }
 
 export class ConnectorService {
@@ -120,6 +244,7 @@ export class ConnectorService {
     return {
       application: {
         id: identity.application.id,
+        messageContentIntent: applicationMessageContentIntent(identity.application),
         name: identity.application.name,
       },
       auditFile: this.#config.auditFile,
@@ -158,10 +283,12 @@ export class ConnectorService {
     await this.#verifyIdentity(options)
     this.#policy.assertGuildAllowed(guildId)
     const channels: DiscordChannel[] = await this.#client.getGuildChannels(guildId, options)
-    const scopedChannels = this.#policy.filterChannels(channels)
+    const scopedChannels = this.#policy.filterChannels(
+      channels.filter((channel) => !channel.guild_id || channel.guild_id === guildId),
+    )
     return {
       channels: scopedChannels
-        .map(normalizeChannel)
+        .map((channel) => normalizedGuildChannel(channel, guildId))
         .sort((left, right) => (
           (left.position ?? Number.MAX_SAFE_INTEGER)
           - (right.position ?? Number.MAX_SAFE_INTEGER)
@@ -175,12 +302,21 @@ export class ConnectorService {
   async readMessages(channelId: string, options: MessagePageOptions = {}) {
     await this.#verifyIdentity(options)
     const channel = await this.#client.getChannel(channelId, options)
+    if (channel.id !== channelId) {
+      throw new ConfigurationError("Discord returned a different channel for message history")
+    }
     const guildId = this.#policy.assertChannelReadable(channel)
     const messages: DiscordMessage[] = await this.#client.listMessages(channelId, options)
+    if (messages.some((message) => (
+      message.channel_id !== channelId
+      || Boolean(message.guild_id && message.guild_id !== guildId)
+    ))) {
+      throw new ConfigurationError("Discord returned message history outside the requested channel")
+    }
     return {
-      channel: normalizeChannel(channel),
+      channel: normalizedGuildChannel(channel, guildId),
       guildId,
-      messages: messages.map(normalizeMessage),
+      messages: messages.map((message) => normalizeMessage(message, guildId)),
       page: {
         after: options.after ?? null,
         around: options.around ?? null,
@@ -200,16 +336,283 @@ export class ConnectorService {
   ) {
     await this.#verifyIdentity(options)
     const channel = await this.#client.getChannel(channelId, options)
+    if (channel.id !== channelId) {
+      throw new ConfigurationError("Discord returned a different channel for message lookup")
+    }
     const guildId = this.#policy.assertChannelReadable(channel)
     const message: DiscordMessage = await this.#client.getMessage(
       channelId,
       messageId,
       options,
     )
+    if (
+      message.id !== messageId
+      || message.channel_id !== channelId
+      || Boolean(message.guild_id && message.guild_id !== guildId)
+    ) {
+      throw new ConfigurationError("Discord returned a different message than requested")
+    }
     return {
-      channel: normalizeChannel(channel),
+      channel: normalizedGuildChannel(channel, guildId),
       guildId,
-      message: normalizeMessage(message),
+      message: normalizeMessage(message, guildId),
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+    }
+  }
+
+  async searchMessages(
+    guildId: string,
+    options: GuildMessageSearchOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    this.#policy.assertGuildAllowed(guildId)
+    if (!hasSearchFilter(options)) {
+      throw new ConfigurationError("Discord message search requires at least one substantive filter")
+    }
+    const channelIds = this.#policy.constrainSearchChannelIds(
+      options.channelIds,
+      DISCORD_LIMITS.searchChannelIds,
+    )
+    const response = await this.#client.searchGuildMessages(guildId, {
+      ...options,
+      ...(channelIds ? { channelIds } : {}),
+    })
+    if (searchIndexing(response)) {
+      return {
+        documentsIndexed: response.documents_indexed ?? null,
+        guildId,
+        retryAfterMs: Math.max(0, Math.ceil(response.retry_after * 1_000)),
+        schemaVersion: SCHEMA_VERSION,
+        status: "indexing" as const,
+      }
+    }
+
+    const responseThreads = (response.threads || []).filter((thread) => (
+      !thread.guild_id || thread.guild_id === guildId
+    ))
+    const threadParents = new Map(
+      responseThreads.map((thread) => [thread.id, thread.parent_id ?? null]),
+    )
+    const outboundChannelIds = channelIds ? new Set(channelIds) : undefined
+    const messagesById = new Map<string, DiscordMessage>()
+    for (const message of response.messages.flat()) {
+      if (message.guild_id && message.guild_id !== guildId) continue
+      const parentId = threadParents.get(message.channel_id)
+      if (
+        outboundChannelIds
+        && !outboundChannelIds.has(message.channel_id)
+        && !(parentId && outboundChannelIds.has(parentId))
+      ) continue
+      if (!this.#policy.channelIdReadable(
+        message.channel_id,
+        parentId,
+      )) continue
+      if (!messagesById.has(message.id)) messagesById.set(message.id, message)
+    }
+    const requestedLimit = options.limit ?? DISCORD_LIMITS.guildMessageSearch
+    const messages = [...messagesById.values()]
+      .slice(0, requestedLimit)
+      .map((message) => normalizeSearchMessage(message, guildId))
+    const returnedChannelIds = new Set(messages.map((message) => message.channelId))
+    const threads = responseThreads
+      .filter((thread) => returnedChannelIds.has(thread.id))
+      .filter((thread) => this.#policy.channelIdReadable(thread.id, thread.parent_id))
+      .map((thread) => normalizedGuildChannel(thread, guildId))
+    const offset = options.offset ?? 0
+    const candidateNextOffset = offset + requestedLimit
+    const nextOffset = candidateNextOffset <= DISCORD_LIMITS.searchOffset
+      && candidateNextOffset < response.total_results
+      ? candidateNextOffset
+      : null
+    return {
+      documentsIndexed: response.documents_indexed ?? null,
+      doingDeepHistoricalIndex: response.doing_deep_historical_index,
+      guildId,
+      messages,
+      page: {
+        nextOffset,
+        offset,
+        requestedLimit,
+        returned: messages.length,
+        totalResultsEstimate: response.total_results,
+      },
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok" as const,
+      threads,
+    }
+  }
+
+  async listActiveThreads(
+    guildId: string,
+    options: ActiveThreadListOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    this.#policy.assertGuildAllowed(guildId)
+    assertConnectorLimit(
+      options.limit,
+      1,
+      CONNECTOR_LIMITS.activeThreads,
+      "Active thread result limit",
+    )
+    if (options.parentChannelId) {
+      const parent = await this.#client.getChannel(options.parentChannelId, options)
+      if (parent.id !== options.parentChannelId) {
+        throw new ConfigurationError("Discord returned a different thread parent channel")
+      }
+      const parentGuildId = this.#policy.assertChannelReadable(parent)
+      if (parentGuildId !== guildId) {
+        throw new ConfigurationError("Discord thread parent does not belong to the requested guild")
+      }
+      if (!THREAD_PARENT_TYPES.has(parent.type)) {
+        throw new ConfigurationError("Discord channel type does not support threads")
+      }
+    }
+    const response = await this.#client.listActiveGuildThreads(guildId, options)
+    const visible = response.threads
+      .filter((thread) => !thread.guild_id || thread.guild_id === guildId)
+      .filter((thread) => this.#policy.channelIdReadable(thread.id, thread.parent_id))
+      .filter((thread) => (
+        !options.parentChannelId || thread.parent_id === options.parentChannelId
+      ))
+    const limit = options.limit ?? CONNECTOR_LIMITS.threadPageDefault
+    return {
+      guildId,
+      page: {
+        requestedLimit: limit,
+        returned: Math.min(visible.length, limit),
+        totalVisible: visible.length,
+        truncated: visible.length > limit,
+      },
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+      threads: visible
+        .slice(0, limit)
+        .map((thread) => normalizedGuildChannel(thread, guildId)),
+    }
+  }
+
+  async listArchivedThreads(
+    channelId: string,
+    options: ArchivedThreadListOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    assertConnectorLimit(
+      options.limit,
+      DISCORD_LIMITS.archivedThreadsMinimum,
+      DISCORD_LIMITS.archivedThreads,
+      "Archived thread result limit",
+    )
+    const visibility = options.visibility ?? "public"
+    if (!ARCHIVED_THREAD_VISIBILITIES.has(visibility)) {
+      throw new ConfigurationError("Archived thread visibility is not supported")
+    }
+    if (visibility === "joined-private" && options.beforeTimestamp) {
+      throw new ConfigurationError("Joined-private archived threads use beforeThreadId")
+    }
+    if (visibility !== "joined-private" && options.beforeThreadId) {
+      throw new ConfigurationError("Public and private archived threads use beforeTimestamp")
+    }
+    const parent = await this.#client.getChannel(channelId, options)
+    if (parent.id !== channelId) {
+      throw new ConfigurationError("Discord returned a different archived-thread parent channel")
+    }
+    const guildId = this.#policy.assertChannelReadable(parent)
+    if (visibility === "public" && !THREAD_PARENT_TYPES.has(parent.type)) {
+      throw new ConfigurationError("Discord channel type does not support public archived threads")
+    }
+    if (
+      visibility !== "public"
+      && parent.type !== DISCORD_CHANNEL_TYPES.text
+    ) {
+      throw new ConfigurationError("Discord private archived threads require a guild text channel")
+    }
+    const before = visibility === "joined-private"
+      ? options.beforeThreadId
+      : options.beforeTimestamp
+    const pageOptions = {
+      ...(before ? { before } : {}),
+      ...(options.limit ? { limit: options.limit } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    }
+    let response: DiscordThreadList
+    if (visibility === "joined-private") {
+      response = await this.#client.listJoinedPrivateArchivedThreads(channelId, pageOptions)
+    } else if (visibility === "private") {
+      response = await this.#client.listPrivateArchivedThreads(channelId, pageOptions)
+    } else {
+      response = await this.#client.listPublicArchivedThreads(channelId, pageOptions)
+    }
+    const threads = response.threads
+      .filter((thread) => thread.parent_id === channelId)
+      .filter((thread) => !thread.guild_id || thread.guild_id === guildId)
+      .filter((thread) => this.#policy.channelIdReadable(thread.id, thread.parent_id))
+      .map((thread) => normalizedGuildChannel(thread, guildId))
+    const lastRaw = response.threads.at(-1)
+    const cursorValue = visibility === "joined-private"
+      ? lastRaw?.id
+      : lastRaw?.thread_metadata?.archive_timestamp
+    return {
+      channel: normalizedGuildChannel(parent, guildId),
+      guildId,
+      page: {
+        hasMore: response.has_more || false,
+        nextCursor: response.has_more && cursorValue
+          ? { value: cursorValue, visibility }
+          : null,
+        requestedLimit: options.limit ?? null,
+        returned: threads.length,
+      },
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+      threads,
+      visibility,
+    }
+  }
+
+  async explainChannelAccess(
+    channelId: string,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    const channel = await this.#client.getChannel(channelId, options)
+    if (channel.id !== channelId) {
+      throw new ConfigurationError("Discord returned a different channel for permission evaluation")
+    }
+    const guildId = this.#policy.assertChannelReadable(channel)
+    let permissionChannel = channel
+    if (isThreadType(channel.type)) {
+      if (!channel.parent_id) {
+        throw new ConfigurationError("Discord thread omitted its parent channel ID")
+      }
+      permissionChannel = await this.#client.getChannel(channel.parent_id, options)
+      if (permissionChannel.id !== channel.parent_id) {
+        throw new ConfigurationError("Discord returned a different thread permission source")
+      }
+      const parentGuildId = this.#policy.assertChannelReadable(permissionChannel)
+      if (parentGuildId !== guildId) {
+        throw new ConfigurationError("Discord thread parent belongs to another guild")
+      }
+    }
+    const [member, roles] = await Promise.all([
+      this.#client.getGuildMember(guildId, identity.bot.id, options),
+      this.#client.getGuildRoles(guildId, options),
+    ])
+    if (member.user && member.user.id !== identity.bot.id) {
+      throw new ConfigurationError("Discord returned a different guild member for permission evaluation")
+    }
+    return {
+      botId: identity.bot.id,
+      channel: normalizedGuildChannel(channel, guildId),
+      guildId,
+      permissions: evaluateBotChannelPermissions({
+        botId: identity.bot.id,
+        channel,
+        guildId,
+        member,
+        permissionChannel,
+        roles,
+      }),
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }

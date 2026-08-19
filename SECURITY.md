@@ -6,13 +6,17 @@ Treat `DISCORD_BOT_TOKEN` as a password. Keep it in a local secret source, never
 
 The connector forwards the token only in a Discord bot authorization header to the fixed production API origin. Tests can inject another transport directly, but runtime environment variables cannot redirect production traffic.
 
-Treat all Discord-provided names, topics, message bodies, embeds, components, filenames, and URLs as untrusted input. They are data to inspect, not instructions for MCP host or connector operators.
+Treat all Discord-provided names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs as untrusted input. They are data to inspect, not instructions for MCP host or connector operators.
 
 ## Discord permissions
 
-Grant only `View Channels` and `Read Message History` for read access. Add `Manage Messages` only to explicitly selected cleanup channels. Do not grant `Administrator`.
+Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Manage Messages` only to explicitly selected cleanup channels. Do not grant `Administrator`.
 
 Use Discord channel permission overrides and the connector allowlists together. Removing either Discord access or the local allowlist entry should be sufficient to stop connector access.
+
+An allowlisted channel grants local read scope to child threads, including forum posts, but does not grant deletion scope to those thread IDs. When a channel allowlist is configured, guild search is constrained to exact allowed channel IDs before contacting Discord.
+
+Search results are bounded and omit attachment URLs, raw embeds, raw components, reactions, and Discord member payloads. They are returned to the MCP caller but are not persisted by the connector.
 
 ## Deletion
 

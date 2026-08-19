@@ -70,7 +70,7 @@ function smokeReport(): SmokeReport {
     readOnlyTools: ["get_connector_status"],
     schemaVersion: 1,
     status: "ok",
-    toolCount: 8,
+    toolCount: 12,
   }
 }
 

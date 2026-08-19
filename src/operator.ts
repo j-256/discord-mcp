@@ -28,6 +28,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   deletionPolicy: "deletion-policy",
   guildAccess: "guild-access",
   guildScope: "guild-scope",
+  messageContentIntent: "message-content-intent",
   nodeVersion: "node-version",
   token: "token",
 })
@@ -275,6 +276,19 @@ export async function diagnoseConnector(
             ? `Verified application ${status.application.id}, bot ${status.bot.id}, and ${status.guildPage.inScope} in-scope guilds on the first page`
             : `Verified application ${status.application.id} and bot ${status.bot.id}, but no accessible guilds are in local scope`,
         ))
+        checks.push(status.application.messageContentIntent === "enabled"
+          ? check(
+            DOCTOR_CHECK_IDS.messageContentIntent,
+            "pass",
+            "Discord application advertises Message Content intent for native search",
+          )
+          : check(
+            DOCTOR_CHECK_IDS.messageContentIntent,
+            "warn",
+            status.application.messageContentIntent === "disabled"
+              ? "Discord application does not advertise Message Content intent; native message search may be unavailable"
+              : "Discord application did not expose enough flags to diagnose Message Content intent",
+          ))
       } catch (error) {
         checks.push(check(
           DOCTOR_CHECK_IDS.guildAccess,
@@ -369,7 +383,12 @@ export async function prepareSetup(
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName,
     status: "ok",
-    warnings: policyWarnings(config),
+    warnings: [
+      ...policyWarnings(config),
+      ...(status.application.messageContentIntent === "enabled"
+        ? []
+        : ["Discord application does not advertise confirmed Message Content intent, so native search may be unavailable"]),
+    ],
   }
 }
 

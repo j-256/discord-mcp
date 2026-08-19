@@ -81,6 +81,178 @@ test("Discord client enforces pagination bounds outside the MCP adapter", () => 
   )
 })
 
+test("Discord client encodes native guild search filters as repeated bounded query values", async () => {
+  let requestUrl = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      requestUrl = String(input)
+      return jsonResponse({
+        doing_deep_historical_index: false,
+        messages: [],
+        total_results: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  await client.searchGuildMessages("100", {
+    attachmentExtensions: ["log", "txt"],
+    authorIds: ["300", "301"],
+    authorTypes: ["bot", "-webhook"],
+    channelIds: ["200", "201"],
+    content: "deploy failed",
+    has: ["file", "-poll"],
+    includeNsfw: false,
+    limit: 25,
+    maxId: "999",
+    mentionEveryone: false,
+    minId: "100",
+    offset: 25,
+    pinned: true,
+    slop: 3,
+    sortBy: "timestamp",
+    sortOrder: "desc",
+  })
+
+  const url = new URL(requestUrl)
+  assert.equal(url.pathname, "/api/v10/guilds/100/messages/search")
+  assert.deepEqual(url.searchParams.getAll("channel_id"), ["200", "201"])
+  assert.deepEqual(url.searchParams.getAll("author_id"), ["300", "301"])
+  assert.deepEqual(url.searchParams.getAll("author_type"), ["bot", "-webhook"])
+  assert.deepEqual(url.searchParams.getAll("has"), ["file", "-poll"])
+  assert.deepEqual(url.searchParams.getAll("attachment_extension"), ["log", "txt"])
+  assert.equal(url.searchParams.get("content"), "deploy failed")
+  assert.equal(url.searchParams.get("include_nsfw"), "false")
+  assert.equal(url.searchParams.get("mention_everyone"), "false")
+  assert.equal(url.searchParams.get("pinned"), "true")
+  assert.equal(url.searchParams.get("sort_by"), "timestamp")
+  assert.equal(url.searchParams.get("sort_order"), "desc")
+})
+
+test("Discord client rejects invalid native search bounds and runtime enum values", () => {
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({}),
+    token: TOKEN,
+  })
+
+  assert.throws(
+    () => client.searchGuildMessages("100", { limit: 26 }),
+    /between 1 and 25/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", { offset: 9_976 }),
+    /between 0 and 9975/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", { content: "find", slop: 101 }),
+    /between 0 and 100/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", { slop: 2 }),
+    /requires content/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", {
+      sortBy: "relevance",
+      sortOrder: "desc",
+    }),
+    /cannot accompany relevance/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", {
+      authorTypes: ["robot" as never],
+    }),
+    /unsupported value "robot"/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", { channelIds: ["not-a-snowflake"] }),
+    /values must be Discord snowflakes/,
+  )
+  assert.throws(
+    () => client.searchGuildMessages("100", { maxId: "100", minId: "100" }),
+    /minimum ID must be less than maximum ID/,
+  )
+})
+
+test("Discord client returns Discord search indexing progress without retrying", async () => {
+  let calls = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      return jsonResponse({
+        code: 110000,
+        documents_indexed: 42,
+        message: "Index not yet available",
+        retry_after: 1.25,
+      }, 202)
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.searchGuildMessages("100", { content: "deploy" })
+
+  assert.deepEqual(result, {
+    code: 110000,
+    documents_indexed: 42,
+    message: "Index not yet available",
+    retry_after: 1.25,
+  })
+  assert.equal(calls, 1)
+})
+
+test("Discord client targets role, member, active-thread, and archived-thread routes", async () => {
+  const requests: string[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.endsWith("/roles")) return jsonResponse([])
+      if (url.includes("/members/")) return jsonResponse({ roles: [] })
+      return jsonResponse({ has_more: false, threads: [] })
+    },
+    token: TOKEN,
+  })
+
+  await client.getGuildRoles("100")
+  await client.getGuildMember("100", "101")
+  await client.listActiveGuildThreads("100")
+  await client.listPublicArchivedThreads("200", {
+    before: "2026-08-14T00:00:00.000Z",
+    limit: 25,
+  })
+  await client.listPrivateArchivedThreads("200", { limit: 20 })
+  await client.listJoinedPrivateArchivedThreads("200", { before: "300", limit: 15 })
+
+  assert.deepEqual(requests, [
+    `${API_BASE_URL}/guilds/100/roles`,
+    `${API_BASE_URL}/guilds/100/members/101`,
+    `${API_BASE_URL}/guilds/100/threads/active`,
+    `${API_BASE_URL}/channels/200/threads/archived/public?before=2026-08-14T00%3A00%3A00.000Z&limit=25`,
+    `${API_BASE_URL}/channels/200/threads/archived/private?limit=20`,
+    `${API_BASE_URL}/channels/200/users/@me/threads/archived/private?before=300&limit=15`,
+  ])
+  assert.throws(
+    () => client.listPublicArchivedThreads("200", { limit: 101 }),
+    /between 2 and 100/,
+  )
+  assert.throws(
+    () => client.listPublicArchivedThreads("200", { limit: 1 }),
+    /between 2 and 100/,
+  )
+  assert.throws(
+    () => client.listPublicArchivedThreads("200", { before: "tomorrow" }),
+    /ISO 8601 timestamp/,
+  )
+  assert.throws(
+    () => client.listJoinedPrivateArchivedThreads("200", { before: "not-a-snowflake" }),
+    /Discord snowflake/,
+  )
+})
+
 test("Discord client retries short rate limits using Discord retry timing", async () => {
   const waits: number[] = []
   let calls = 0
@@ -142,7 +314,7 @@ test("Discord client redacts the bot token from API and network errors", async (
     fetchImplementation: async () => jsonResponse({
       code: 50_013,
       message: `Missing permissions for ${TOKEN}`,
-    }, 403),
+    }, 403, { "x-ratelimit-reset-after": "0.1" }),
     token: TOKEN,
   })
   await assert.rejects(
@@ -150,6 +322,7 @@ test("Discord client redacts the bot token from API and network errors", async (
     (error: unknown) => (
       error instanceof DiscordApiError
       && error.code === 50_013
+      && error.retryAfterMs === undefined
       && error.message.includes("[redacted]")
       && !error.message.includes(TOKEN)
     ),

@@ -2,6 +2,7 @@ export interface DiscordApplication {
   bot?: DiscordUser
   description: string
   flags?: number
+  flags_new?: string
   id: string
   name: string
   verify_key?: string
@@ -20,23 +21,49 @@ export interface DiscordAttachment {
 }
 
 export interface DiscordChannel {
+  applied_tags?: string[]
+  available_tags?: DiscordForumTag[]
+  default_auto_archive_duration?: number | null
+  default_forum_layout?: number
+  default_reaction_emoji?: DiscordDefaultReaction | null
+  default_sort_order?: number | null
+  flags?: number
   guild_id?: string
   id: string
   last_message_id?: string | null
+  member_count?: number
+  message_count?: number
   name?: string | null
   nsfw?: boolean
+  owner_id?: string
   parent_id?: string | null
-  permission_overwrites?: unknown[]
+  permission_overwrites?: DiscordPermissionOverwrite[]
   position?: number
+  rate_limit_per_user?: number | null
   thread_metadata?: {
     archive_timestamp?: string
     archived?: boolean
     auto_archive_duration?: number
+    create_timestamp?: string | null
     invitable?: boolean
     locked?: boolean
   }
   topic?: string | null
+  total_message_sent?: number
   type: number
+}
+
+export interface DiscordDefaultReaction {
+  emoji_id?: string | null
+  emoji_name?: string | null
+}
+
+export interface DiscordForumTag {
+  emoji_id?: string | null
+  emoji_name?: string | null
+  id: string
+  moderated: boolean
+  name: string
 }
 
 export interface DiscordGuild {
@@ -46,6 +73,12 @@ export interface DiscordGuild {
   name: string
   owner?: boolean
   permissions?: string
+}
+
+export interface DiscordGuildMember {
+  communication_disabled_until?: string | null
+  roles: string[]
+  user?: DiscordUser
 }
 
 export interface DiscordMessage {
@@ -74,6 +107,43 @@ export interface DiscordMessage {
   timestamp: string
   tts?: boolean
   type: number
+}
+
+export interface DiscordMessageSearchIndexing {
+  code: 110000
+  documents_indexed?: number
+  message: string
+  retry_after: number
+}
+
+export interface DiscordMessageSearchResponse {
+  documents_indexed?: number
+  doing_deep_historical_index: boolean
+  members?: unknown[]
+  messages: DiscordMessage[][]
+  threads?: DiscordChannel[]
+  total_results: number
+}
+
+export interface DiscordPermissionOverwrite {
+  allow?: string | null
+  deny?: string | null
+  id: string
+  type: number
+}
+
+export interface DiscordRole {
+  id: string
+  managed: boolean
+  name: string
+  permissions: string
+  position: number
+}
+
+export interface DiscordThreadList {
+  has_more?: boolean
+  members?: unknown[]
+  threads: DiscordChannel[]
 }
 
 export interface DiscordUser {

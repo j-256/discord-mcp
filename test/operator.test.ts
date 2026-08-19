@@ -30,10 +30,12 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 
 function status(
   inScope = 1,
+  messageContentIntent: "disabled" | "enabled" | "unknown" = "enabled",
 ): Awaited<ReturnType<ConnectorService["getStatus"]>> {
   return {
     application: {
       id: APPLICATION_ID,
+      messageContentIntent,
       name: "Connector",
     },
     auditFile: "/test/activity.jsonl",
@@ -72,15 +74,19 @@ function toolService(): DiscordToolService {
   }
   return {
     deleteMessages: unexpected,
+    explainChannelAccess: unexpected,
     getMessage: unexpected,
     async getStatus() {
       return status()
     },
     listActivity: unexpected,
+    listActiveThreads: unexpected,
+    listArchivedThreads: unexpected,
     listChannels: unexpected,
     listGuilds: unexpected,
     planMessageDeletion: unexpected,
     readMessages: unexpected,
+    searchMessages: unexpected,
   }
 }
 
@@ -181,6 +187,34 @@ test("doctor verifies identity online and redacts online failures", async () => 
   assert.match(JSON.stringify(failed), /\[redacted\]/)
 })
 
+test("doctor and setup report Message Content intent needed by native search", async () => {
+  const report = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
+  const setup = await prepareSetup({
+    environment: environment(),
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
+
+  assert.equal(report.status, "warning")
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.messageContentIntent)?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /Message Content intent/)
+})
+
 test("doctor fails online verification when local scope contains no accessible guild", async () => {
   const report = await diagnoseConnector({
     environment: environment(),
@@ -259,7 +293,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 8)
+  assert.equal(report.toolCount, 12)
   assert.deepEqual(report.destructiveTools, ["delete_messages"])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))

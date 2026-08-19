@@ -43,8 +43,9 @@ export class ScopePolicy {
   }
 
   filterChannels(channels: readonly DiscordChannel[]): DiscordChannel[] {
-    return channels.filter((channel) => (
-      this.#allowedChannelIds.size === 0 || this.#allowedChannelIds.has(channel.id)
+    return channels.filter((channel) => this.channelIdReadable(
+      channel.id,
+      channel.parent_id,
     ))
   }
 
@@ -58,11 +59,42 @@ export class ScopePolicy {
     }
   }
 
+  channelIdReadable(channelId: string, parentId?: string | null): boolean {
+    return this.#allowedChannelIds.size === 0
+      || this.#allowedChannelIds.has(channelId)
+      || Boolean(parentId && this.#allowedChannelIds.has(parentId))
+  }
+
+  constrainSearchChannelIds(
+    requestedChannelIds: readonly string[] | undefined,
+    maximum: number,
+  ): string[] | undefined {
+    if (this.#allowedChannelIds.size === 0) {
+      return requestedChannelIds ? [...requestedChannelIds] : undefined
+    }
+    if (requestedChannelIds) {
+      for (const channelId of requestedChannelIds) {
+        if (!this.#allowedChannelIds.has(channelId)) {
+          throw new PolicyError(
+            `Discord channel ${channelId} is outside the exact configured search scope`,
+          )
+        }
+      }
+      return [...requestedChannelIds]
+    }
+    if (this.#allowedChannelIds.size > maximum) {
+      throw new PolicyError(
+        `Configured channel scope exceeds Discord's ${maximum}-channel search filter; provide an exact subset`,
+      )
+    }
+    return [...this.#allowedChannelIds].sort()
+  }
+
   assertChannelReadable(channel: DiscordChannel): string {
     const guildId = channel.guild_id
     if (!guildId) throw new PolicyError("Direct-message channels are outside connector scope")
     this.assertGuildAllowed(guildId)
-    if (this.#allowedChannelIds.size > 0 && !this.#allowedChannelIds.has(channel.id)) {
+    if (!this.channelIdReadable(channel.id, channel.parent_id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the configured read scope`)
     }
     return guildId

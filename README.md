@@ -1,6 +1,6 @@
 # Discord MCP
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guild channels and messages through a dedicated bot. It includes a credential-safe operator CLI, a deliberately narrow deletion path for exact reviewed message IDs, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes a credential-safe operator CLI, compact bounded search, a deliberately narrow deletion path for exact reviewed message IDs, and content-free local activity records.
 
 ## Safety model
 
@@ -8,8 +8,9 @@ The connector treats Discord permissions as its outer boundary and adds local po
 
 - Production requests always target Discord API v10 at a fixed origin
 - Direct-message channels are rejected
-- Discord names, topics, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
+- Discord names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
 - Optional guild and channel allowlists can narrow read access
+- Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Deletion is disabled unless an explicit environment toggle and deletion-channel allowlist are both present
 - Deletion accepts exact message IDs rather than free-form filters
 - A keyed snapshot digest detects message edits or replacements
@@ -69,7 +70,7 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, and deletion policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, and first guild-membership page without listing channels or reading messages.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, and deletion policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels or reading messages.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
@@ -124,12 +125,40 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 | --- | --- | --- |
 | `get_connector_status` | Discord read | Verify application and bot identity and report effective policy |
 | `list_guilds` | Discord read | List scoped bot guild memberships |
-| `list_channels` | Discord read | List scoped channels without message content |
+| `list_channels` | Discord read | List scoped channels, thread metadata, and forum configuration without message content |
+| `list_active_threads` | Discord read | List a bounded set of active threads and forum posts, optionally beneath one parent |
+| `list_archived_threads` | Discord read | Page through public, private, or joined-private archived threads with typed cursors |
+| `explain_channel_access` | Discord read | Explain the current bot's effective permissions and evidence confidence |
 | `read_messages` | Discord read | Read a bounded page of normalized messages |
+| `search_messages` | Discord read | Search indexed guild history with bounded official Discord filters and compact results |
 | `get_message` | Discord read | Read one exact message |
 | `plan_message_deletion` | Discord read | Prepare exact previews and a keyed deletion digest |
 | `delete_messages` | Discord write | Confirm, revalidate, journal, and delete the reviewed IDs |
 | `list_activity` | Local read | Read content-free deletion activity |
+
+## Search
+
+`search_messages` uses Discord's native guild search endpoint rather than scanning a recent-message window. It requires at least one substantive filter and supports content, channel, author, mention, reply, attachment, embed, link, pin, message-ID, and sort filters. The connector accepts at most 25 filters of each list type through MCP and at most 25 returned messages per request, even where Discord permits larger filter arrays.
+
+Search is scoped before the request leaves the process. If a local channel allowlist exists and the call omits `channelIds`, the connector injects the exact allowlist into Discord's request. A caller-supplied channel list must be an exact subset. If the configured allowlist exceeds Discord's channel-filter capacity, the caller must provide a bounded subset instead of falling back to guild-wide search.
+
+Results include message content, author identity, jump URLs, counts, and compact attachment metadata. They omit attachment URLs, raw embeds, raw components, reactions, and Discord's member payload. Discord can report approximate totals, return fewer results than requested, or answer with an indexing status. The connector advances pagination by the requested page size and returns indexing progress plus a retry delay without sleeping inside an MCP call.
+
+Discord restricts native search based on the application's Message Content privileged intent. `get_connector_status`, online `doctor`, and `setup` report whether the application flags confirm that intent. See Discord's [message search reference](https://docs.discord.com/developers/resources/message#search-guild-messages).
+
+## Threads and forums
+
+`list_active_threads` returns a bounded view of active guild threads and can restrict results to one permitted parent. Forum and media posts are represented by Discord as public threads, so normalized results preserve their parent IDs and applied tag IDs. `list_channels` also preserves forum tag definitions, default reaction, layout, sort order, auto-archive duration, slowmode, and channel jump URLs.
+
+`list_archived_threads` supports three views. `public` includes archived forum and media posts and uses an ISO 8601 timestamp cursor. `private` lists all private archived threads and additionally requires Discord's `Manage Threads` permission. `joined-private` lists only private threads joined by the bot and uses a thread-ID cursor. The result returns a visibility-tagged next cursor so callers cannot accidentally reuse the wrong cursor type.
+
+An allowlisted parent grants local read scope to its child threads. This inheritance does not broaden deletion: a thread must still appear by its own exact ID in the deletion-channel allowlist. Discord's [channel resource reference](https://docs.discord.com/developers/resources/channel) documents thread and forum behavior.
+
+## Permission explanations
+
+`explain_channel_access` evaluates only the authenticated connector bot. It unions the guild `@everyone` role with the bot's roles, applies channel overwrites in Discord's documented everyone, combined-role, and member order, and treats permission bitfields as arbitrary-width integers. `ADMINISTRATOR` bypasses channel overwrites, unknown future bits are preserved and reported, and incomplete role or overwrite evidence yields `partial` confidence instead of a false access claim.
+
+Threads use their parent's overwrites. A successful lookup of a private thread is also reported as evidence that Discord exposed that thread to the bot. The explanation identifies required and missing read permissions, but it remains a diagnostic snapshot rather than a guarantee that a later Discord request will succeed. See Discord's [permissions reference](https://docs.discord.com/developers/topics/permissions).
 
 ## Deletion workflow
 
@@ -172,7 +201,7 @@ node dist/cli.js doctor --online
 node dist/cli.js smoke
 ```
 
-`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, and tool names but never print the token.
+`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, intent state, and tool names but never print the token. No default live command fetches message or search content.
 
 ## Expansion
 
@@ -184,7 +213,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Gateway subscriptions, archived-thread traversal, message search, slash commands, and a distributable MCP host integration can be added without changing the deletion safety path. Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Gateway subscriptions, safe message interactions, administrative plan-review-execute workflows, slash commands, MCP resources and prompts, and a distributable MCP host integration can be added without changing the deletion safety path. Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

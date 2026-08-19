@@ -1,9 +1,14 @@
-import { CHANNEL_TYPE_NAMES, CONNECTOR_LIMITS } from "./constants.js"
+import {
+  CHANNEL_TYPE_NAMES,
+  CONNECTOR_LIMITS,
+  DISCORD_WEB_BASE_URL,
+} from "./constants.js"
 import type {
   DiscordAttachment,
   DiscordChannel,
   DiscordGuild,
   DiscordMessage,
+  DiscordForumTag,
   DiscordUser,
 } from "./types.js"
 
@@ -30,6 +35,28 @@ function normalizeAttachment(attachment: DiscordAttachment) {
   }
 }
 
+function normalizeForumTag(tag: DiscordForumTag) {
+  return {
+    emojiId: tag.emoji_id ?? null,
+    emojiName: tag.emoji_name ?? null,
+    id: tag.id,
+    moderated: tag.moderated,
+    name: tag.name,
+  }
+}
+
+export function discordChannelUrl(guildId: string, channelId: string): string {
+  return `${DISCORD_WEB_BASE_URL}/channels/${guildId}/${channelId}`
+}
+
+export function discordMessageUrl(
+  guildId: string,
+  channelId: string,
+  messageId: string,
+): string {
+  return `${discordChannelUrl(guildId, channelId)}/${messageId}`
+}
+
 export function normalizeGuild(guild: DiscordGuild) {
   return {
     features: [...(guild.features || [])].sort(),
@@ -42,30 +69,52 @@ export function normalizeGuild(guild: DiscordGuild) {
 
 export function normalizeChannel(channel: DiscordChannel) {
   const typeName = CHANNEL_TYPE_NAMES[channel.type as keyof typeof CHANNEL_TYPE_NAMES]
+  const guildId = channel.guild_id ?? null
   return {
-    guildId: channel.guild_id ?? null,
+    appliedTagIds: [...(channel.applied_tags || [])],
+    availableTags: (channel.available_tags || []).map(normalizeForumTag),
+    defaultAutoArchiveDuration: channel.default_auto_archive_duration ?? null,
+    defaultForumLayout: channel.default_forum_layout ?? null,
+    defaultReaction: channel.default_reaction_emoji
+      ? {
+          emojiId: channel.default_reaction_emoji.emoji_id ?? null,
+          emojiName: channel.default_reaction_emoji.emoji_name ?? null,
+        }
+      : null,
+    defaultSortOrder: channel.default_sort_order ?? null,
+    flags: channel.flags ?? 0,
+    guildId,
     id: channel.id,
     lastMessageId: channel.last_message_id ?? null,
+    memberCount: channel.member_count ?? null,
+    messageCount: channel.message_count ?? null,
     name: channel.name ?? null,
     nsfw: channel.nsfw || false,
+    ownerId: channel.owner_id ?? null,
     parentId: channel.parent_id ?? null,
+    permissionOverwriteCount: channel.permission_overwrites?.length ?? null,
     position: channel.position ?? null,
+    rateLimitPerUser: channel.rate_limit_per_user ?? null,
     thread: channel.thread_metadata
       ? {
           archiveTimestamp: channel.thread_metadata.archive_timestamp ?? null,
           archived: channel.thread_metadata.archived || false,
           autoArchiveDuration: channel.thread_metadata.auto_archive_duration ?? null,
+          createTimestamp: channel.thread_metadata.create_timestamp ?? null,
           invitable: channel.thread_metadata.invitable ?? null,
           locked: channel.thread_metadata.locked || false,
         }
       : null,
     topic: channel.topic ?? null,
+    totalMessageSent: channel.total_message_sent ?? null,
     type: channel.type,
     typeName: typeName || "unknown",
+    url: guildId ? discordChannelUrl(guildId, channel.id) : null,
   }
 }
 
-export function normalizeMessage(message: DiscordMessage) {
+export function normalizeMessage(message: DiscordMessage, fallbackGuildId?: string) {
+  const guildId = message.guild_id ?? fallbackGuildId ?? null
   return {
     attachments: (message.attachments || []).map(normalizeAttachment),
     author: normalizeUser(message.author),
@@ -75,8 +124,11 @@ export function normalizeMessage(message: DiscordMessage) {
     editedTimestamp: message.edited_timestamp ?? null,
     embeds: message.embeds || [],
     flags: message.flags ?? 0,
-    guildId: message.guild_id ?? null,
+    guildId,
     id: message.id,
+    jumpUrl: guildId
+      ? discordMessageUrl(guildId, message.channel_id, message.id)
+      : null,
     mentionEveryone: message.mention_everyone || false,
     mentionRoleIds: message.mention_roles || [],
     mentions: (message.mentions || []).map(normalizeUser),
@@ -93,6 +145,35 @@ export function normalizeMessage(message: DiscordMessage) {
     referencedMessageId: message.referenced_message?.id ?? null,
     timestamp: message.timestamp,
     tts: message.tts || false,
+    type: message.type,
+  }
+}
+
+export function normalizeSearchMessage(
+  message: DiscordMessage,
+  guildId: string,
+) {
+  return {
+    attachmentCount: message.attachments?.length ?? 0,
+    attachments: (message.attachments || []).map((attachment) => ({
+      contentType: attachment.content_type ?? null,
+      filename: attachment.filename,
+      id: attachment.id,
+      size: attachment.size,
+    })),
+    author: normalizeUser(message.author),
+    channelId: message.channel_id,
+    componentCount: message.components?.length ?? 0,
+    content: message.content,
+    editedTimestamp: message.edited_timestamp ?? null,
+    embedCount: message.embeds?.length ?? 0,
+    flags: message.flags ?? 0,
+    guildId,
+    id: message.id,
+    jumpUrl: discordMessageUrl(guildId, message.channel_id, message.id),
+    mentionEveryone: message.mention_everyone || false,
+    pinned: message.pinned || false,
+    timestamp: message.timestamp,
     type: message.type,
   }
 }

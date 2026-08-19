@@ -13,6 +13,12 @@ import {
   runDiscordMcpServer,
   type DiscordToolService,
 } from "../src/mcp.js"
+import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
+import {
+  DISCORD_PERMISSIONS,
+  evaluateBotChannelPermissions,
+} from "../src/permissions.js"
+import type { DiscordChannel, DiscordMessage } from "../src/types.js"
 
 const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
@@ -20,6 +26,49 @@ const CHANNEL_ID = "200000000000000001"
 const MESSAGE_ID = "300000000000000001"
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
+
+function rawChannel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
+  return {
+    guild_id: GUILD_ID,
+    id: CHANNEL_ID,
+    last_message_id: MESSAGE_ID,
+    name: "general",
+    nsfw: false,
+    parent_id: null,
+    permission_overwrites: [],
+    position: 1,
+    type: 0,
+    ...overrides,
+  }
+}
+
+function rawMessage(content = "hello"): DiscordMessage {
+  return {
+    attachments: [],
+    author: {
+      bot: false,
+      global_name: null,
+      id: "400000000000000001",
+      username: "member",
+    },
+    channel_id: CHANNEL_ID,
+    components: [],
+    content,
+    edited_timestamp: null,
+    embeds: [],
+    flags: 0,
+    guild_id: GUILD_ID,
+    id: MESSAGE_ID,
+    mention_everyone: false,
+    mention_roles: [],
+    mentions: [],
+    pinned: false,
+    reactions: [],
+    timestamp: "2026-08-14T00:00:00.000Z",
+    tts: false,
+    type: 0,
+  }
+}
 
 function plan(digest = DIGEST) {
   return {
@@ -58,8 +107,12 @@ function serviceFixture(overrides: {
   planDigest?: string
 } = {}) {
   const calls = {
+    active: 0,
+    archived: 0,
     delete: 0,
+    explain: 0,
     plan: 0,
+    search: 0,
   }
   const service: DiscordToolService = {
     async deleteMessages(channelId, messageIds, planDigest) {
@@ -74,56 +127,50 @@ function serviceFixture(overrides: {
         status: "completed",
       }
     },
+    async explainChannelAccess(channelId) {
+      calls.explain += 1
+      const discordChannel = rawChannel({ id: channelId })
+      return {
+        botId: "600000000000000001",
+        channel: normalizeChannel(discordChannel),
+        guildId: GUILD_ID,
+        permissions: evaluateBotChannelPermissions({
+          botId: "600000000000000001",
+          channel: discordChannel,
+          guildId: GUILD_ID,
+          member: { roles: [] },
+          permissionChannel: discordChannel,
+          roles: [{
+            id: GUILD_ID,
+            managed: false,
+            name: "@everyone",
+            permissions: (
+              DISCORD_PERMISSIONS.VIEW_CHANNEL
+              | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            ).toString(),
+            position: 0,
+          }],
+        }),
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async getMessage() {
       return {
-        channel: {
-          guildId: GUILD_ID,
-          id: CHANNEL_ID,
-          lastMessageId: MESSAGE_ID,
-          name: "general",
-          nsfw: false,
-          parentId: null,
-          position: 1,
-          thread: null,
-          topic: null,
-          type: 0,
-          typeName: "guild-text",
-        },
+        channel: normalizeChannel(rawChannel()),
         guildId: GUILD_ID,
-        message: {
-          attachments: [],
-          author: {
-            bot: false,
-            globalName: null,
-            id: "400000000000000001",
-            username: "member",
-          },
-          channelId: CHANNEL_ID,
-          components: [],
-          content: overrides.messageContent ?? "hello",
-          editedTimestamp: null,
-          embeds: [],
-          flags: 0,
-          guildId: GUILD_ID,
-          id: MESSAGE_ID,
-          mentionEveryone: false,
-          mentionRoleIds: [],
-          mentions: [],
-          messageReference: null,
-          pinned: false,
-          reactions: [],
-          referencedMessageId: null,
-          timestamp: "2026-08-14T00:00:00.000Z",
-          tts: false,
-          type: 0,
-        },
+        message: normalizeMessage(rawMessage(overrides.messageContent), GUILD_ID),
         schemaVersion: 1,
         status: "ok",
       }
     },
     async getStatus() {
       return {
-        application: { id: "500000000000000001", name: "Connector" },
+        application: {
+          id: "500000000000000001",
+          messageContentIntent: "enabled" as const,
+          name: "Connector",
+        },
         auditFile: "/memory/activity.jsonl",
         bot: { id: "600000000000000001", username: "bot" },
         guildPage: { accessible: 1, inScope: 1 },
@@ -145,6 +192,39 @@ function serviceFixture(overrides: {
         entries: [],
         file: "/memory/activity.jsonl",
         skippedLines: 0,
+      }
+    },
+    async listActiveThreads(guildId, options) {
+      calls.active += 1
+      return {
+        guildId,
+        page: {
+          requestedLimit: options?.limit ?? 50,
+          returned: 0,
+          totalVisible: 0,
+          truncated: false,
+        },
+        schemaVersion: 1,
+        status: "ok",
+        threads: [],
+      }
+    },
+    async listArchivedThreads(channelId, options) {
+      calls.archived += 1
+      const visibility = options?.visibility ?? "public"
+      return {
+        channel: normalizeChannel(rawChannel({ id: channelId })),
+        guildId: GUILD_ID,
+        page: {
+          hasMore: false,
+          nextCursor: null,
+          requestedLimit: options?.limit ?? null,
+          returned: 0,
+        },
+        schemaVersion: 1,
+        status: "ok",
+        threads: [],
+        visibility,
       }
     },
     async listChannels(guildId) {
@@ -174,19 +254,7 @@ function serviceFixture(overrides: {
     },
     async readMessages() {
       return {
-        channel: {
-          guildId: GUILD_ID,
-          id: CHANNEL_ID,
-          lastMessageId: MESSAGE_ID,
-          name: "general",
-          nsfw: false,
-          parentId: null,
-          position: 1,
-          thread: null,
-          topic: null,
-          type: 0,
-          typeName: "guild-text",
-        },
+        channel: normalizeChannel(rawChannel()),
         guildId: GUILD_ID,
         messages: [],
         page: {
@@ -198,6 +266,25 @@ function serviceFixture(overrides: {
         },
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async searchMessages(guildId, options) {
+      calls.search += 1
+      return {
+        documentsIndexed: null,
+        doingDeepHistoricalIndex: false,
+        guildId,
+        messages: [],
+        page: {
+          nextOffset: null,
+          offset: options?.offset ?? 0,
+          requestedLimit: options?.limit ?? 25,
+          returned: 0,
+          totalResultsEstimate: 0,
+        },
+        schemaVersion: 1,
+        status: "ok",
+        threads: [],
       }
     },
   }
@@ -271,7 +358,11 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_connector_status",
       "list_guilds",
       "list_channels",
+      "list_active_threads",
+      "list_archived_threads",
+      "explain_channel_access",
       "read_messages",
+      "search_messages",
       "get_message",
       "plan_message_deletion",
       "delete_messages",
@@ -288,6 +379,76 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const activity = result.tools.find((tool) => tool.name === "list_activity")
   assert.equal(activity?.annotations?.openWorldHint, false)
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("MCP message search requires a substantive filter and forwards bounded input", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const valid = await client.callTool({
+    arguments: {
+      content: "deploy",
+      guildId: GUILD_ID,
+      limit: 12,
+      sortBy: "timestamp",
+    },
+    name: "search_messages",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "search_messages",
+  })
+
+  assert.equal(structuredContent(valid).status, "ok")
+  assert.equal(calls.search, 1)
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.search, 1)
+})
+
+test("MCP thread and permission tools validate cursors and invoke read-only services", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const active = await client.callTool({
+    arguments: {
+      guildId: GUILD_ID,
+      limit: 3,
+      parentChannelId: CHANNEL_ID,
+    },
+    name: "list_active_threads",
+  })
+  const archived = await client.callTool({
+    arguments: {
+      beforeTimestamp: "2026-08-14T00:00:00.000Z",
+      channelId: CHANNEL_ID,
+      limit: 4,
+      visibility: "public",
+    },
+    name: "list_archived_threads",
+  })
+  const invalidCursor = await client.callTool({
+    arguments: {
+      beforeTimestamp: "not-an-iso-timestamp",
+      channelId: CHANNEL_ID,
+      visibility: "public",
+    },
+    name: "list_archived_threads",
+  })
+  const access = await client.callTool({
+    arguments: { channelId: CHANNEL_ID },
+    name: "explain_channel_access",
+  })
+
+  assert.equal(structuredContent(active).status, "ok")
+  assert.equal(structuredContent(archived).status, "ok")
+  assert.equal(invalidCursor.isError, true)
+  assert.equal(structuredContent(access).status, "ok")
+  assert.deepEqual(calls, {
+    active: 1,
+    archived: 1,
+    delete: 0,
+    explain: 1,
+    plan: 0,
+    search: 0,
+  })
 })
 
 test("MCP deletion elicits exact confirmation before invoking the write service", async (context) => {
@@ -452,7 +613,7 @@ test("MCP stdio entrypoint negotiates without stdout noise", async (context) => 
   await client.connect(transport)
   const result = await client.listTools()
 
-  assert.equal(result.tools.length, 8)
+  assert.equal(result.tools.length, 12)
   assert.match(diagnostics, /stdio server ready/)
   assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
 })

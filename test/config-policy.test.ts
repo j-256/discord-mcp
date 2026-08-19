@@ -126,3 +126,59 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     readGuildScope: "allowlist",
   })
 })
+
+test("scope policy inherits parent read scope for threads but keeps deletion exact-ID gated", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_DELETIONS: "true",
+    DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+  const thread = channel({
+    id: OTHER_CHANNEL_ID,
+    parent_id: CHANNEL_ID,
+    type: 11,
+  })
+
+  assert.equal(policy.assertChannelReadable(thread), GUILD_ID)
+  assert.deepEqual(policy.filterChannels([channel(), thread]), [channel(), thread])
+  assert.throws(
+    () => policy.assertChannelDeletable(thread),
+    /outside the deletion scope/,
+  )
+})
+
+test("scope policy attenuates native search to exact configured channel IDs", () => {
+  const thirdChannelId = "200000000000000003"
+  const scoped = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${OTHER_CHANNEL_ID},${CHANNEL_ID}`,
+  }, { homeDirectory: "/test/home" }))
+  const open = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+
+  assert.deepEqual(
+    scoped.constrainSearchChannelIds(undefined, 500),
+    [CHANNEL_ID, OTHER_CHANNEL_ID],
+  )
+  assert.deepEqual(
+    scoped.constrainSearchChannelIds([OTHER_CHANNEL_ID], 500),
+    [OTHER_CHANNEL_ID],
+  )
+  assert.throws(
+    () => scoped.constrainSearchChannelIds([thirdChannelId], 500),
+    /outside the exact configured search scope/,
+  )
+  assert.throws(
+    () => scoped.constrainSearchChannelIds(undefined, 1),
+    /provide an exact subset/,
+  )
+  assert.equal(open.constrainSearchChannelIds(undefined, 500), undefined)
+  assert.deepEqual(
+    open.constrainSearchChannelIds([thirdChannelId], 500),
+    [thirdChannelId],
+  )
+})

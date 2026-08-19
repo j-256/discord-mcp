@@ -3,6 +3,7 @@ export const CONNECTOR_VERSION = "0.1.0"
 export const SCHEMA_VERSION = 1
 
 export const DISCORD_API_BASE_URL = "https://discord.com/api/v10"
+export const DISCORD_WEB_BASE_URL = "https://discord.com"
 export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION})`
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
 
@@ -18,32 +19,68 @@ export const ENVIRONMENT_NAMES = Object.freeze({
 
 export const DISCORD_LIMITS = Object.freeze({
   automaticRetryWaitMs: 5_000,
+  archivedThreads: 100,
+  archivedThreadsMinimum: 2,
   bulkDeleteAgeMs: 14 * 24 * 60 * 60 * 1_000,
   bulkDeleteSafetyMarginMs: 60_000,
   channelMessages: 100,
   currentUserGuilds: 200,
   deletionMessages: 100,
+  guildMessageSearch: 25,
   requestTimeoutMs: 30_000,
   retries: 3,
+  searchChannelIds: 500,
+  searchContentCharacters: 1_024,
+  searchFilenameCharacters: 1_024,
+  searchFilterCharacters: 256,
+  searchFilterIds: 100,
+  searchFilterStrings: 100,
+  searchOffset: 9_975,
+  searchSlop: 100,
 })
 
 export const CONNECTOR_LIMITS = Object.freeze({
   activityEntries: 100,
+  activeThreads: 100,
   contentPreviewCharacters: 240,
+  searchFilterIds: 25,
+  searchFilterStrings: 25,
+  threadPageDefault: 50,
+})
+
+export const DISCORD_APPLICATION_FLAGS = Object.freeze({
+  gatewayMessageContent: 1n << 18n,
+  gatewayMessageContentLimited: 1n << 19n,
+})
+
+export const DISCORD_CHANNEL_TYPES = Object.freeze({
+  announcement: 5,
+  announcementThread: 10,
+  category: 4,
+  directory: 14,
+  dm: 1,
+  forum: 15,
+  groupDm: 3,
+  media: 16,
+  privateThread: 12,
+  publicThread: 11,
+  stageVoice: 13,
+  text: 0,
+  voice: 2,
 })
 
 export const CHANNEL_TYPE_NAMES = Object.freeze({
-  0: "guild-text",
-  1: "dm",
-  2: "guild-voice",
-  3: "group-dm",
-  4: "guild-category",
-  5: "guild-announcement",
-  10: "announcement-thread",
-  11: "public-thread",
-  12: "private-thread",
-  13: "guild-stage-voice",
-  14: "guild-directory",
-  15: "guild-forum",
-  16: "guild-media",
+  [DISCORD_CHANNEL_TYPES.text]: "guild-text",
+  [DISCORD_CHANNEL_TYPES.dm]: "dm",
+  [DISCORD_CHANNEL_TYPES.voice]: "guild-voice",
+  [DISCORD_CHANNEL_TYPES.groupDm]: "group-dm",
+  [DISCORD_CHANNEL_TYPES.category]: "guild-category",
+  [DISCORD_CHANNEL_TYPES.announcement]: "guild-announcement",
+  [DISCORD_CHANNEL_TYPES.announcementThread]: "announcement-thread",
+  [DISCORD_CHANNEL_TYPES.publicThread]: "public-thread",
+  [DISCORD_CHANNEL_TYPES.privateThread]: "private-thread",
+  [DISCORD_CHANNEL_TYPES.stageVoice]: "guild-stage-voice",
+  [DISCORD_CHANNEL_TYPES.directory]: "guild-directory",
+  [DISCORD_CHANNEL_TYPES.forum]: "guild-forum",
+  [DISCORD_CHANNEL_TYPES.media]: "guild-media",
 } as const)
