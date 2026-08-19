@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "discord-mcp": "dist/mcp.js"
+    "discord-mcp": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -24,18 +24,18 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "mcp": "node dist/mcp.js",
-    "probe:live": "node dist/live-probe.js",
+    "mcp": "node dist/cli.js serve",
+    "probe:live": "node dist/cli.js doctor --online --json",
     "test": "tsx --test test/*.test.ts",
     "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=80 test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "26.2.0",
     "tsx": "4.23.12",
     "typescript": "7.0.2"

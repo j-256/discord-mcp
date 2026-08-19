@@ -1,6 +1,6 @@
 # Discord MCP
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guild channels and messages through a dedicated bot. It includes a deliberately narrow deletion path for exact, reviewed message IDs and keeps the bot token and message content out of local activity storage.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guild channels and messages through a dedicated bot. It includes a credential-safe operator CLI, a deliberately narrow deletion path for exact reviewed message IDs, and content-free local activity records.
 
 ## Safety model
 
@@ -41,7 +41,7 @@ The application public key is not used by this local REST connector. It becomes 
 4. Select `View Channels` and `Read Message History` as the initial bot permissions.
 5. Use the generated install link while signed in as a server administrator and add the bot to the intended server.
 6. Restrict the bot role to the intended categories or channels.
-7. Run the live probe and confirm that Discord reports the expected guild membership.
+7. Run `discord-mcp setup` and confirm that Discord reports the expected application, bot, and scoped guild access.
 
 Add `Manage Messages` later through the server role only after selecting deletion channels. Keep deletion disabled locally until those channel IDs are configured.
 
@@ -56,7 +56,26 @@ npm test
 npm run build
 ```
 
-The compiled entrypoint is `dist/mcp.js`.
+The compiled CLI entrypoint is `dist/cli.js`. Running it without a command starts the stdio MCP server.
+
+## Operator CLI
+
+The CLI provides a safe path from environment configuration to a verified MCP connection:
+
+```sh
+node dist/cli.js doctor
+node dist/cli.js doctor --online
+node dist/cli.js setup
+node dist/cli.js smoke
+```
+
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, and deletion policy. Offline checks do not contact Discord. Add `--online` to verify the application, bot identity, and first guild-membership page without listing channels or reading messages.
+
+`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
+
+`smoke` connects an official MCP client to the real adapter over linked protocol transports, lists the tool contracts, validates the destructive annotation on `delete_messages`, and calls only `get_connector_status`. It does not list channels, read messages, or write to Discord.
+
+Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
 
 ## Configuration
 
@@ -77,7 +96,10 @@ Configure the MCP host with a local stdio server:
 ```toml
 [mcp_servers.discord]
 command = "node"
-args = ["/absolute/path/to/discord-mcp/dist/mcp.js"]
+args = ["/absolute/path/to/discord-mcp/dist/cli.js", "serve"]
+required = true
+startup_timeout_sec = 30
+tool_timeout_sec = 180
 env_vars = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
@@ -87,7 +109,6 @@ env_vars = [
   "DISCORD_MCP_AUDIT_FILE",
 ]
 default_tools_approval_mode = "writes"
-tool_timeout_sec = 180
 
 [mcp_servers.discord.env]
 DISCORD_MCP_APPLICATION_ID = "your-application-id"
@@ -95,7 +116,7 @@ DISCORD_MCP_APPLICATION_ID = "your-application-id"
 
 Restart the local MCP host after changing MCP configuration. Use `/mcp` in the MCP host to inspect the connected server.
 
-The [MCP documentation](https://modelcontextprotocol.io/docs) describes the shared local MCP host configuration and write-aware approval modes.
+The [official MCP host configuration reference](https://modelcontextprotocol.io/docs) documents the stdio command, argument, environment-forwarding, approval, required-server, and timeout fields emitted by `setup`.
 
 ## Tools
 
@@ -132,16 +153,26 @@ The default suite uses injected transports and does not contact Discord:
 ```sh
 npm run typecheck
 npm test
+npm run test:coverage
 npm run build
 ```
 
-The live probe verifies the token, expected application ID, bot identity, and guild membership page without listing channels or reading messages:
+After building, verify the compiled CLI without contacting Discord:
 
 ```sh
-DISCORD_MCP_APPLICATION_ID=your-application-id npm run probe:live
+node dist/cli.js doctor
+node dist/cli.js help
+node dist/cli.js version
 ```
 
-The probe prints identifiers, counts, and effective policy but never prints the token.
+The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, and read-only protocol path without listing channels or reading messages:
+
+```sh
+node dist/cli.js doctor --online
+node dist/cli.js smoke
+```
+
+`npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, and tool names but never print the token.
 
 ## Expansion
 

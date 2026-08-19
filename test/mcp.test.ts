@@ -423,7 +423,7 @@ test("MCP tool results redact the Discord token if Discord returns it as data", 
 
 test("MCP stdio entrypoint negotiates without stdout noise", async (context) => {
   const transport = new StdioClientTransport({
-    args: ["--import", "tsx", "src/mcp.ts"],
+    args: ["--import", "tsx", "src/cli.ts", "serve"],
     command: process.execPath,
     cwd: process.cwd(),
     env: {
