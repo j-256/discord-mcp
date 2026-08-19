@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "19 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+  NPM_CONFIG_REPLACE_REGISTRY_HOST: never
+
+jobs:
+  source:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - "22.0.0"
+          - "24"
+          - "26"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm run deps:locked
+      - run: npm run metadata:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  package:
+    name: Package on Node ${{ matrix.node }}
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - "22.0.0"
+          - "24.19.0"
+          - "26"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm run deps:locked
+      - run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/package"
+          npm run pack:verify -- --output "$RUNNER_TEMP/package"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/package/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  package-identity:
+    name: Cross-runtime package identity
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: package-node-*
+          path: packages
+      - name: Require byte-identical package payloads
+        run: |
+          set -eu
+          set -- packages/package-node-*/*.tgz
+          test "$#" -eq 3
+          reference="$1"
+          shift
+          reference_tar="$RUNNER_TEMP/reference.tar"
+          candidate_tar="$RUNNER_TEMP/candidate.tar"
+          gzip -dc "$reference" > "$reference_tar"
+          for candidate in "$@"
+          do
+            gzip -dc "$candidate" > "$candidate_tar"
+            cmp "$reference_tar" "$candidate_tar"
+          done
+
+  security:
+    name: Dependency security
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run security:check
+      - run: npm run --silent sbom > /dev/null
+
+  gate:
+    name: CI gate
+    if: ${{ always() }}
+    needs:
+      - source
+      - package
+      - package-identity
+      - security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every verification job
+        env:
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          PACKAGE_IDENTITY_RESULT: ${{ needs.package-identity.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          SOURCE_RESULT: ${{ needs.source.result }}
+        run: |
+          set -eu
+          test "$SOURCE_RESULT" = success
+          test "$PACKAGE_RESULT" = success
+          test "$PACKAGE_IDENTITY_RESULT" = success
+          test "$SECURITY_RESULT" = success

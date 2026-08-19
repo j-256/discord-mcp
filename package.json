@@ -1,10 +1,29 @@
 {
-  "name": "discord-mcp",
+  "name": "@j-256/discord-mcp",
   "version": "0.1.0",
-  "private": true,
   "description": "A least-privilege MCP server for safely accessing and moderating Discord guilds",
   "license": "AGPL-3.0-only",
+  "author": "j-256",
+  "homepage": "https://github.com/j-256/discord-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/j-256/discord-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j-256/discord-mcp.git"
+  },
+  "keywords": [
+    "discord",
+    "mcp",
+    "model-context-protocol",
+    "host",
+    "moderation",
+    "least-privilege"
+  ],
+  "mcpName": "io.github.j-256/discord-mcp",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,15 +36,27 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "SECURITY.md",
+    "server.json"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
     "mcp": "node dist/cli.js serve",
+    "metadata:check": "node scripts/check-release-metadata.mjs",
+    "pack:verify": "node scripts/pack-and-verify.mjs",
+    "prepack": "npm run metadata:check && npm run build",
     "probe:live": "node dist/cli.js doctor --online --json",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "security:check": "npm audit --audit-level=moderate && npm audit signatures",
     "test": "tsx --test test/*.test.ts",
     "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=80 test/*.test.ts",
     "typecheck": "tsc --noEmit"
@@ -39,5 +70,9 @@
     "@types/node": "26.2.0",
     "tsx": "4.23.12",
     "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents": false
   }
 }

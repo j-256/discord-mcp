@@ -4,4 +4,6 @@ coverage/
 .env
 .env.*
 *.log
+*.tgz
+sbom.spdx.json
 .DS_Store

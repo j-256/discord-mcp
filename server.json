@@ -1,0 +1,127 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.j-256/discord-mcp",
+  "title": "Discord MCP",
+  "description": "Least-privilege Discord access with bounded reads and reviewed, audited writes",
+  "repository": {
+    "url": "https://github.com/j-256/discord-mcp",
+    "source": "github",
+    "id": "1334461127"
+  },
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/j-256/discord-mcp",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "1254x1254"
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@j-256/discord-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DISCORD_BOT_TOKEN",
+          "description": "Discord bot token used only with the fixed Discord API origin",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_APPLICATION_ID",
+          "description": "Expected Discord application ID; startup rejects a token for another application",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOWED_GUILD_IDS",
+          "description": "Comma- or whitespace-separated read guild allowlist",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+          "description": "Comma- or whitespace-separated read channel allowlist",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_ADMINISTRATION",
+          "description": "Enable reviewed member administration when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ADMIN_GUILD_IDS",
+          "description": "Exact guild IDs eligible for reviewed member administration",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_PROTECTED_USER_IDS",
+          "description": "Exact user IDs that member administration must never target",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_INTERACTIONS",
+          "description": "Enable bounded sends, own-message edits, and own-reaction adds in exact channels",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
+          "description": "Exact channel or thread IDs eligible for message interactions",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_MENTION_USER_IDS",
+          "description": "Exact user IDs that interaction calls may explicitly notify",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
+          "description": "Process-local rolling interaction budget from 1 through 60",
+          "default": "10",
+          "format": "number"
+        },
+        {
+          "name": "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
+          "description": "Process-local per-channel interaction spacing from 0 through 60000 milliseconds",
+          "default": "500",
+          "format": "number"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_DELETIONS",
+          "description": "Enable exact-ID reviewed deletion when an exact channel allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_DELETE_CHANNEL_IDS",
+          "description": "Exact channel IDs eligible for reviewed deletion",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_AUDIT_FILE",
+          "description": "Content-free local activity JSONL path",
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

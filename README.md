@@ -1,5 +1,7 @@
 # Discord MCP
 
+<img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
+
 Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
@@ -64,14 +66,24 @@ Discord documents bot installation in its [getting started guide](https://docs.d
 
 ## Install
 
+After a release is published, run an exact version from npm:
+
 ```sh
-npm ci
+npx --yes @j-256/discord-mcp@0.1.0 help
+```
+
+Pinning the version keeps the executable stable across restarts. The MCP Registry manifest uses the same exact npm version.
+
+For development from source:
+
+```sh
+npm run deps:locked
 npm run typecheck
 npm test
 npm run build
 ```
 
-The compiled CLI entrypoint is `dist/cli.js`. Running it without a command starts the stdio MCP server.
+The source build's CLI entrypoint is `dist/cli.js`. Running either entrypoint without a command starts the stdio MCP server.
 
 ## Operator CLI
 
@@ -143,6 +155,13 @@ default_tools_approval_mode = "writes"
 
 [mcp_servers.discord.env]
 DISCORD_MCP_APPLICATION_ID = "your-application-id"
+```
+
+For the published package, replace the local `command` and `args` fields with an exact npm version:
+
+```toml
+command = "npx"
+args = ["--yes", "@j-256/discord-mcp@0.1.0", "serve"]
 ```
 
 Restart the local MCP host after changing MCP configuration. Use `/mcp` in the MCP host to inspect the connected server.
@@ -287,11 +306,18 @@ Immediately before mutation, the service rebuilds the complete plan and requires
 The default suite uses injected transports and does not contact Discord:
 
 ```sh
+npm run metadata:check
 npm run typecheck
 npm test
 npm run test:coverage
 npm run build
+npm run pack:verify
+npm run security:check
 ```
+
+`pack:verify` rebuilds and packs twice under one npm toolchain, requires byte-identical archives, enforces the published-file allowlist, scans for sensitive environment values, installs the archive without lifecycle scripts, exercises the packaged CLI, negotiates the installed MCP catalogs, and reads only the static safety resource. CI also requires byte-identical decompressed tar payloads across supported Node lines because npm patch releases can encode the same payload with different gzip bytes. Neither check contacts Discord.
+
+Generate and validate an SPDX production-dependency SBOM with `npm run --silent sbom -- --output sbom.spdx.json`. The release workflow attests the verified archive with that SBOM.
 
 After building, verify the compiled CLI without contacting Discord:
 
@@ -310,6 +336,31 @@ node dist/cli.js smoke
 
 `npm run probe:live` remains an alias for the online doctor JSON report. Operator reports print identifiers, counts, effective policy diagnostics, intent state, tool names, resource URIs, template URIs, and prompt names but never print the token. No default live command fetches message or search content.
 
+## Release integrity
+
+The npm package, source constant, lockfile root, MCP Registry manifest, versioned icon URL, and release tag are checked as one identity. Production and development dependencies are exactly pinned to the public npm registry. Dependency installation disables lifecycle scripts and explicitly rebuilds only the reviewed esbuild version. CI also audits known vulnerabilities and npm registry signatures.
+
+Release candidates are reconstructed from the selected tag, packed twice, installed into an isolated consumer, accompanied by an SPDX SBOM, and signed through GitHub artifact attestations. Normal npm releases use trusted publishing to create a private stage. A human approves that stage with two-factor authentication before a separate workflow proves npm's SHA-512 integrity and registers the exact metadata through GitHub OIDC.
+
+To verify a downloaded release archive:
+
+```sh
+npm pack @j-256/discord-mcp@0.1.0
+gh attestation verify j-256-discord-mcp-0.1.0.tgz \
+  --repo j-256/discord-mcp \
+  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 \
+  --deny-self-hosted-runners
+gh attestation verify j-256-discord-mcp-0.1.0.tgz \
+  --repo j-256/discord-mcp \
+  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 \
+  --deny-self-hosted-runners \
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+The [release runbook](docs/releasing.md) covers the one-time bootstrap, protected npm staging, human approval, registry registration, and independent verification.
+
 ## Expansion
 
 New Discord capabilities should follow the existing layers:
@@ -320,7 +371,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Gateway subscriptions, channel and role administration through the reviewed-plan core, slash commands, client-native progressive discovery, and distributable packages can be added without changing the interaction, deletion, member-moderation, resource, or prompt safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Gateway subscriptions, channel and role administration through the reviewed-plan core, slash commands, and client-native progressive discovery can be added without changing the interaction, deletion, member-moderation, resource, prompt, or distribution safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

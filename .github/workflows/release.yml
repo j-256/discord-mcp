@@ -1,0 +1,229 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Release operation
+        required: true
+        type: choice
+        options:
+          - bootstrap
+          - stage
+          - register
+      tag:
+        description: Exact stable release tag such as v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+  NPM_CONFIG_REPLACE_REGISTRY_HOST: never
+
+jobs:
+  release:
+    name: ${{ inputs.operation }} ${{ inputs.tag }}
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      attestations: write # Store signed release attestations
+      contents: read
+      id-token: write # Authenticate npm, attestations, and MCP Registry with OIDC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify public repository and exact tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -eu
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          test "$GITHUB_REPOSITORY" = "j-256/discord-mcp"
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+          test "$REPOSITORY_PRIVATE" = "false"
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+
+      - name: Verify versioned public icon
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          public_icon="$RUNNER_TEMP/discord-mcp-icon.png"
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
+            -fsSLo "$public_icon" \
+            "https://raw.githubusercontent.com/j-256/discord-mcp/$RELEASE_TAG/assets/discord-mcp-icon.png"
+          cmp assets/discord-mcp-icon.png "$public_icon"
+
+      - name: Install reviewed dependencies
+        run: npm run deps:locked
+      - name: Verify source and metadata
+        run: |
+          set -eu
+          npm run metadata:check
+          npm run typecheck
+          npm run test:coverage
+          npm run security:check
+      - name: Build verified release candidate
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/release"
+          npm run pack:verify -- --output "$RUNNER_TEMP/release"
+          npm run --silent sbom -- --output "$RUNNER_TEMP/release/sbom.spdx.json"
+          set -- "$RUNNER_TEMP"/release/*.tgz
+          test "$#" -eq 1
+          test -f "$1"
+          printf 'TARBALL=%s\n' "$1" >> "$GITHUB_ENV"
+
+      - name: Install and verify MCP Registry publisher
+        run: |
+          set -eu
+          test "$(uname -m)" = "x86_64"
+          publisher_archive="$RUNNER_TEMP/mcp-publisher_linux_amd64.tar.gz"
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
+            -fsSLo "$publisher_archive" \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+          printf '%s  %s\n' \
+            a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc \
+            "$publisher_archive" | sha256sum -c -
+          tar -xzf "$publisher_archive" -C "$RUNNER_TEMP" mcp-publisher
+          "$RUNNER_TEMP/mcp-publisher" --version 2>&1 | grep -F "mcp-publisher 1.8.1 "
+          "$RUNNER_TEMP/mcp-publisher" validate server.json
+
+      - name: Attest release candidate
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.TARBALL }}
+      - name: Attest SPDX SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.TARBALL }}
+          sbom-path: ${{ runner.temp }}/release/sbom.spdx.json
+      - name: Retain candidate for review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-${{ inputs.operation }}-${{ inputs.tag }}
+          path: |
+            ${{ env.TARBALL }}
+            ${{ runner.temp }}/release/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require a clean bootstrap state
+        if: ${{ inputs.operation == 'bootstrap' }}
+        env:
+          NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          set -eu
+          test -n "$NPM_BOOTSTRAP_TOKEN"
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package missing \
+            --expect-npm missing \
+            --expect-registry missing
+      - name: Publish the first npm version
+        if: ${{ inputs.operation == 'bootstrap' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          set -eu
+          npmrc="$RUNNER_TEMP/npmrc"
+          cleanup_npmrc() {
+            rm -f "$npmrc"
+          }
+          trap cleanup_npmrc EXIT
+          # shellcheck disable=SC2016
+          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$npmrc"
+          NPM_CONFIG_USERCONFIG="$npmrc" npm publish "$TARBALL" --access public --provenance
+      - name: Verify the bootstrapped npm artifact
+        if: ${{ inputs.operation == 'bootstrap' }}
+        run: |
+          set -eu
+          attempt=1
+          until node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-registry missing
+          do
+            test "$attempt" -lt 6
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+
+      - name: Require a clean staged-release state
+        if: ${{ inputs.operation == 'stage' }}
+        run: |
+          set -eu
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm missing \
+            --expect-registry missing
+      - name: Stage the npm candidate for human approval
+        if: ${{ inputs.operation == 'stage' }}
+        run: npm stage publish "$TARBALL" --access public --provenance
+
+      - name: Verify promoted npm artifact and registry state
+        if: ${{ inputs.operation == 'register' }}
+        run: |
+          set -eu
+          state_file="$RUNNER_TEMP/published-state.json"
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-registry missing-or-matching \
+            --json > "$state_file"
+          cat "$state_file"
+          registry_state="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).registryVersion" "$state_file")"
+          printf 'REGISTRY_STATE=%s\n' "$registry_state" >> "$GITHUB_ENV"
+      - name: Authenticate to MCP Registry
+        if: ${{ inputs.operation == 'register' && env.REGISTRY_STATE == 'missing' }}
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+      - name: Register exact MCP metadata
+        if: ${{ inputs.operation == 'register' && env.REGISTRY_STATE == 'missing' }}
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" publish server.json
+      - name: Verify exact MCP Registry metadata
+        if: ${{ inputs.operation == 'register' }}
+        run: |
+          set -eu
+          attempt=1
+          until node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-registry matching
+          do
+            test "$attempt" -lt 6
+            attempt=$((attempt + 1))
+            sleep 10
+          done
