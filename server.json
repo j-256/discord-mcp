@@ -68,6 +68,140 @@
           "format": "number"
         },
         {
+          "name": "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
+          "description": "Enable manual privacy-safe OTLP trace and metric export",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_OBSERVABILITY_LOGS",
+          "description": "Emit one-line privacy-safe operational JSON records to stderr",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+          "description": "Credential-free base collector URL; HTTPS is required except for loopback",
+          "default": "http://localhost:4318",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+          "description": "Credential-free exact OTLP trace endpoint overriding the base URL",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+          "description": "Credential-free exact OTLP metric endpoint overriding the base URL",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_HEADERS",
+          "description": "Percent-encoded collector authentication headers shared by traces and metrics",
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+          "description": "Percent-encoded collector authentication headers overriding shared trace headers",
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+          "description": "Percent-encoded collector authentication headers overriding shared metric headers",
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_PROTOCOL",
+          "description": "Shared OTLP protocol; this connector accepts only http/protobuf",
+          "default": "http/protobuf",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+          "description": "Trace OTLP protocol override; this connector accepts only http/protobuf",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+          "description": "Metric OTLP protocol override; this connector accepts only http/protobuf",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_COMPRESSION",
+          "description": "Shared OTLP request compression",
+          "default": "none",
+          "choices": [
+            "none",
+            "gzip"
+          ]
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION",
+          "description": "Trace request compression overriding the shared setting",
+          "choices": [
+            "none",
+            "gzip"
+          ]
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION",
+          "description": "Metric request compression overriding the shared setting",
+          "choices": [
+            "none",
+            "gzip"
+          ]
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_TIMEOUT",
+          "description": "Shared OTLP export timeout from 1 through 60000 milliseconds",
+          "default": "10000",
+          "format": "number"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+          "description": "Trace export timeout overriding the shared setting",
+          "format": "number"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
+          "description": "Metric export timeout overriding the shared setting",
+          "format": "number"
+        },
+        {
+          "name": "OTEL_SERVICE_NAME",
+          "description": "Safe service name without snowflake-like numeric identifiers",
+          "default": "discord-mcp",
+          "format": "string"
+        },
+        {
+          "name": "OTEL_TRACES_SAMPLER",
+          "description": "Bounded OpenTelemetry trace sampler",
+          "default": "parentbased_always_on",
+          "choices": [
+            "always_off",
+            "always_on",
+            "parentbased_always_off",
+            "parentbased_always_on",
+            "parentbased_traceidratio",
+            "traceidratio"
+          ]
+        },
+        {
+          "name": "OTEL_TRACES_SAMPLER_ARG",
+          "description": "Trace ID sampling ratio from 0 through 1",
+          "default": "1",
+          "format": "number"
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_ADMINISTRATION",
           "description": "Enable reviewed member administration when an exact guild allowlist is also set",
           "default": "false",

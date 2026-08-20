@@ -22,7 +22,10 @@ import {
   type DiscordToolService,
 } from "../src/mcp.js"
 import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
+import { MCP_RESOURCE_URIS } from "../src/mcp-guidance.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
+import { loadObservabilityConfig } from "../src/observability-config.js"
+import { OperationalTelemetry } from "../src/observability.js"
 import {
   DISCORD_PERMISSIONS,
   evaluateBotChannelPermissions,
@@ -487,6 +490,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     result.tools.map((tool) => tool.name),
     [
       "get_connector_status",
+      "get_observability_status",
       "get_gateway_status",
       "get_gateway_events",
       "list_guilds",
@@ -545,7 +549,11 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
-  for (const name of ["get_gateway_status", "get_gateway_events"]) {
+  for (const name of [
+    "get_gateway_status",
+    "get_gateway_events",
+    "get_observability_status",
+  ]) {
     const gatewayTool = result.tools.find((tool) => tool.name === name)
     assert.deepEqual(gatewayTool?.annotations, {
       destructiveHint: false,
@@ -674,6 +682,94 @@ test("MCP Gateway tools expose local health and cursor continuity without conten
   assert.equal((events.events as unknown[]).length, 1)
   assert.doesNotMatch(JSON.stringify({ events, status }), new RegExp(TOKEN))
   assert.doesNotMatch(JSON.stringify(events), /author|attachment|embed|component|emoji|userId/)
+})
+
+test("MCP observability reports successful, returned-error, and thrown-error tool outcomes", async (context) => {
+  const privateDetail = "private activity failure 999999999999999999"
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: { activityError: new Error(privateDetail) },
+  })
+
+  await client.callTool({ arguments: {}, name: "list_guilds" })
+  const returnedError = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageIds: [MESSAGE_ID],
+      planDigest: DIFFERENT_DIGEST,
+    },
+    name: "delete_messages",
+  })
+  assert.equal(returnedError.isError, true)
+  const thrownError = await client.callTool({ arguments: {}, name: "list_activity" })
+  assert.equal(thrownError.isError, true)
+
+  const statusResult = await client.callTool({
+    arguments: {},
+    name: "get_observability_status",
+  })
+  const status = structuredContent(statusResult) as unknown as {
+    operations: {
+      mcpTools: Array<{
+        active: number
+        calls: number
+        duration: unknown
+        errors: number
+        operation: string
+        outcomes: Record<string, number>
+        retries: number
+      }>
+    }
+    privacy: Record<string, boolean>
+  }
+  const byName = new Map(status.operations.mcpTools.map((entry) => [entry.operation, entry]))
+  assert.deepEqual(byName.get("list_guilds")?.outcomes, {
+    error: 0,
+    ok: 1,
+    "tool-error": 0,
+  })
+  assert.deepEqual(byName.get("delete_messages")?.outcomes, {
+    error: 0,
+    ok: 0,
+    "tool-error": 1,
+  })
+  assert.deepEqual(byName.get("list_activity")?.outcomes, {
+    error: 1,
+    ok: 0,
+    "tool-error": 0,
+  })
+  assert.deepEqual(byName.get("get_observability_status"), {
+    active: 1,
+    calls: 0,
+    duration: byName.get("get_observability_status")?.duration,
+    errors: 0,
+    operation: "get_observability_status",
+    outcomes: { error: 0, ok: 0, "tool-error": 0 },
+    retries: 0,
+  })
+  assert.deepEqual(status.privacy, {
+    argumentsStored: false,
+    contentStored: false,
+    discordIdentifiersStored: false,
+    errorDetailsStored: false,
+    persistent: false,
+    rawRoutesStored: false,
+  })
+  assert.equal(JSON.stringify(status).includes(privateDetail), false)
+
+  const resource = await client.readResource({ uri: MCP_RESOURCE_URIS.observability })
+  const content = resource.contents[0]
+  assert.ok(content && "text" in content)
+  if (!content || !("text" in content)) throw new Error("Expected observability text")
+  const envelope = JSON.parse(content.text) as {
+    data: { operations: { mcpTools: Array<{ active: number; calls: number; operation: string }> } }
+  }
+  const completedStatus = envelope.data.operations.mcpTools.find(
+    ({ operation }) => operation === "get_observability_status",
+  )
+  assert.equal(completedStatus?.active, 0)
+  assert.equal(completedStatus?.calls, 1)
+  assert.equal(content.text.includes(privateDetail), false)
+  assert.equal(content.text.includes(TOKEN), false)
 })
 
 test("MCP interaction tools enforce bounded schemas and invoke idempotent services", async (context) => {
@@ -1185,9 +1281,9 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 19)
+  assert.equal(tools.tools.length, 20)
   assert.equal(prompts.prompts.length, 4)
-  assert.equal(resources.resources.length, 6)
+  assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 3)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
@@ -1217,7 +1313,7 @@ test("MCP stdio startup fails before reporting ready when the token is absent", 
   assert.equal(diagnostics, "")
 })
 
-test("MCP stdio runner stops its Gateway on stdin termination and closes idempotently", async () => {
+test("MCP stdio runner stops Gateway and observability runtimes idempotently", async () => {
   const feed = new GatewayEventStore({
     allowedChannelIds: new Set([CHANNEL_ID]),
     allowedGuildIds: new Set([GUILD_ID]),
@@ -1243,6 +1339,25 @@ test("MCP stdio runner stops its Gateway on stdin termination and closes idempot
     },
     subscribe: (listener) => feed.subscribe(listener),
   }
+  let flushes = 0
+  let telemetryStops = 0
+  const observabilityRuntime = new OperationalTelemetry({
+    config: loadObservabilityConfig({
+      DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
+    }, [TOKEN]),
+    otlpFactory(_config, sink) {
+      sink.transitionExporter("running")
+      return {
+        async forceFlush() {
+          flushes += 1
+        },
+        async shutdown() {
+          telemetryStops += 1
+          sink.transitionExporter("stopped")
+        },
+      }
+    },
+  })
   let diagnostics = ""
   const stdin = new PassThrough()
   const stdout = new PassThrough()
@@ -1250,6 +1365,7 @@ test("MCP stdio runner stops its Gateway on stdin termination and closes idempot
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     gatewayRuntime,
     stdin,
+    observabilityRuntime,
     stderr: {
       write(value) {
         diagnostics += String(value)
@@ -1260,9 +1376,13 @@ test("MCP stdio runner stops its Gateway on stdin termination and closes idempot
   })
 
   assert.equal(starts, 1)
+  assert.equal(observabilityRuntime.getObservabilityStatus().exporter.state, "running")
   assert.match(diagnostics, /stdio server ready/)
   stdin.end()
   await stopped
   await handle.close()
   assert.equal(stops, 1)
+  assert.equal(flushes, 1)
+  assert.equal(telemetryStops, 1)
+  assert.equal(observabilityRuntime.getObservabilityStatus().exporter.state, "stopped")
 })

@@ -261,6 +261,48 @@ test("doctor reports the privacy-safe Gateway policy without opening a connectio
   )
 })
 
+test("doctor and setup report observability without opening collectors or exposing headers", async () => {
+  const collectorHeader = "Bearer private-collector-credential"
+  const configuredEnvironment = environment({
+    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
+    DISCORD_MCP_OBSERVABILITY_LOGS: "true",
+    OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test/otlp",
+    OTEL_EXPORTER_OTLP_HEADERS: `authorization=${encodeURIComponent(collectorHeader)}`,
+  })
+  const enabled = await diagnoseConnector({
+    environment: configuredEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+  })
+  const defaultCollector = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
+    }),
+    service: statusProvider(),
+  })
+
+  const enabledCheck = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.observability,
+  )
+  assert.equal(enabledCheck?.status, "pass")
+  assert.match(enabledCheck?.summary || "", /OTLP\/HTTP protobuf export is enabled/)
+  assert.match(enabledCheck?.summary || "", /explicit collector endpoints/)
+  assert.match(enabledCheck?.summary || "", /configured authentication headers/)
+  assert.match(enabledCheck?.summary || "", /structured stderr logs are enabled/)
+  assert.equal(JSON.stringify(enabled).includes("collector.example.test"), false)
+  assert.equal(JSON.stringify(enabled).includes(collectorHeader), false)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.observability,
+    )?.summary || "",
+    /OTLP export is disabled/,
+  )
+  assert.match(defaultCollector.warnings.join("\n"), /default loopback collector/)
+})
+
 test("doctor verifies identity online and redacts online failures", async () => {
   let calls = 0
   const verified = await diagnoseConnector({
@@ -359,6 +401,12 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /DISCORD_MCP_PROTECTED_USER_IDS/)
   assert.match(result, /DISCORD_MCP_ALLOW_GATEWAY/)
   assert.match(result, /DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE/)
+  assert.match(result, /DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT/)
+  assert.match(result, /DISCORD_MCP_OBSERVABILITY_LOGS/)
+  assert.match(result, /OTEL_EXPORTER_OTLP_HEADERS/)
+  assert.match(result, /OTEL_EXPORTER_OTLP_TRACES_ENDPOINT/)
+  assert.match(result, /OTEL_EXPORTER_OTLP_METRICS_ENDPOINT/)
+  assert.match(result, /OTEL_TRACES_SAMPLER/)
   assert.match(result, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(result, new RegExp(TOKEN))
   assert.throws(
@@ -409,7 +457,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 19)
+  assert.equal(report.toolCount, 20)
   assert.deepEqual(report.promptNames, [
     "review_member_moderation",
     "review_message_deletion",
@@ -418,6 +466,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   ])
   assert.deepEqual(report.resourceUris, [
     "discord://connector/activity",
+    "discord://connector/observability",
     "discord://connector/policy",
     "discord://connector/safety",
     "discord://gateway/events",
@@ -435,6 +484,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_member_moderation",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
+  assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(

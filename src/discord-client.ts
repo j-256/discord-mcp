@@ -9,6 +9,15 @@ import {
   DISCORD_USER_AGENT,
 } from "./constants.js"
 import { DiscordApiError, errorMessage, redactText } from "./errors.js"
+import {
+  DISCORD_REST_OPERATIONS,
+  type DiscordRestOperation,
+} from "./observability-catalog.js"
+import type {
+  OperationObservation,
+  OperationalErrorCategory,
+  OperationalObserver,
+} from "./observability.js"
 import type {
   DiscordApplication,
   DiscordBan,
@@ -41,6 +50,7 @@ export interface DiscordClientOptions {
   fetchImplementation?: FetchImplementation
   maxAutomaticRetryWaitMs?: number
   maxRetries?: number
+  observer?: Pick<OperationalObserver, "startDiscordRequest">
   requestTimeoutMs?: number
   sleep?: SleepImplementation
   token: string
@@ -191,7 +201,40 @@ export interface ModifyGuildMemberTimeoutInput {
 interface RequestParameters extends RequestOptions {
   auditReason?: string
   body?: unknown
-  method?: string
+}
+
+class DiscordTransportError extends Error {
+  readonly operationalCategory: OperationalErrorCategory
+
+  constructor(
+    message: string,
+    operationalCategory: OperationalErrorCategory,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = "DiscordTransportError"
+    this.operationalCategory = operationalCategory
+  }
+}
+
+function finishObservation(
+  observation: OperationObservation | undefined,
+  completion: Parameters<OperationObservation["end"]>[0],
+): void {
+  try {
+    observation?.end(completion)
+  } catch {}
+}
+
+function requestErrorCategory(error: unknown): OperationalErrorCategory {
+  if (error instanceof DiscordTransportError) return error.operationalCategory
+  if (error instanceof DiscordApiError) {
+    if (error.status === 429) return "discord-rate-limited"
+    if (error.status >= 500) return "discord-server-error"
+    return "discord-client-error"
+  }
+  if (error instanceof Error && error.name === "AbortError") return "cancelled"
+  return "network-error"
 }
 
 function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -413,6 +456,7 @@ export class DiscordClient {
   readonly #fetch: FetchImplementation
   readonly #maxAutomaticRetryWaitMs: number
   readonly #maxRetries: number
+  readonly #observer: Pick<OperationalObserver, "startDiscordRequest"> | undefined
   readonly #requestTimeoutMs: number
   readonly #sleep: SleepImplementation
   readonly #token: string
@@ -423,97 +467,134 @@ export class DiscordClient {
     this.#maxAutomaticRetryWaitMs = options.maxAutomaticRetryWaitMs
       ?? DISCORD_LIMITS.automaticRetryWaitMs
     this.#maxRetries = options.maxRetries ?? DISCORD_LIMITS.retries
+    this.#observer = options.observer
     this.#requestTimeoutMs = options.requestTimeoutMs ?? DISCORD_LIMITS.requestTimeoutMs
     this.#sleep = options.sleep || defaultSleep
     this.#token = options.token
   }
 
-  async #request<T>(route: string, parameters: RequestParameters = {}): Promise<T> {
-    const method = parameters.method || "GET"
+  async #request<T>(
+    operation: DiscordRestOperation,
+    route: string,
+    parameters: RequestParameters = {},
+  ): Promise<T> {
+    const method = DISCORD_REST_OPERATIONS[operation]
     const url = new URL(`${this.#apiBaseUrl}${route}`)
+    const headers = new Headers({
+      Accept: "application/json",
+      Authorization: `Bot ${this.#token}`,
+      "User-Agent": DISCORD_USER_AGENT,
+    })
+    let body: string | undefined
+    if (parameters.body !== undefined) {
+      body = JSON.stringify(parameters.body)
+      headers.set("Content-Type", "application/json")
+    }
+    if (parameters.auditReason !== undefined) {
+      headers.set("X-Audit-Log-Reason", encodeDiscordAuditReason(parameters.auditReason))
+    }
+    let observation: OperationObservation | undefined
+    try {
+      observation = this.#observer?.startDiscordRequest(operation)
+    } catch {}
 
-    for (let attempt = 0; attempt <= this.#maxRetries; attempt += 1) {
-      const timeoutSignal = AbortSignal.timeout(this.#requestTimeoutMs)
-      const signal = parameters.signal
-        ? AbortSignal.any([parameters.signal, timeoutSignal])
-        : timeoutSignal
-      const headers = new Headers({
-        Accept: "application/json",
-        Authorization: `Bot ${this.#token}`,
-        "User-Agent": DISCORD_USER_AGENT,
-      })
-      let body: string | undefined
-      if (parameters.body !== undefined) {
-        body = JSON.stringify(parameters.body)
-        headers.set("Content-Type", "application/json")
-      }
-      if (parameters.auditReason !== undefined) {
-        headers.set("X-Audit-Log-Reason", encodeDiscordAuditReason(parameters.auditReason))
-      }
-
-      let response: Response
-      try {
-        const requestInit: RequestInit = {
-          headers,
-          method,
-          redirect: "error",
-          signal,
+    const execute = async (): Promise<T> => {
+      for (let attempt = 0; attempt <= this.#maxRetries; attempt += 1) {
+        const timeoutSignal = AbortSignal.timeout(this.#requestTimeoutMs)
+        const signal = parameters.signal
+          ? AbortSignal.any([parameters.signal, timeoutSignal])
+          : timeoutSignal
+        let response: Response
+        try {
+          const requestInit: RequestInit = {
+            headers,
+            method,
+            redirect: "error",
+            signal,
+          }
+          if (body !== undefined) requestInit.body = body
+          response = await this.#fetch(url, requestInit)
+        } catch (error) {
+          const category = timeoutSignal.aborted && !parameters.signal?.aborted
+            ? "timeout"
+            : parameters.signal?.aborted
+              ? "cancelled"
+              : "network-error"
+          const message = redactText(errorMessage(error), [this.#token])
+          throw new DiscordTransportError(
+            `Discord API ${method} ${route} failed: ${message}`,
+            category,
+            { cause: error },
+          )
         }
-        if (body !== undefined) requestInit.body = body
-        response = await this.#fetch(url, requestInit)
-      } catch (error) {
-        const message = redactText(errorMessage(error), [this.#token])
-        throw new Error(`Discord API ${method} ${route} failed: ${message}`, { cause: error })
+
+        const responseText = await response.text()
+        const parsedBody = parseJson(responseText)
+        const discordError = errorBody(parsedBody)
+        const retryAfterMs = response.status === 429
+          ? retryAfterMilliseconds(discordError, response.headers)
+          : undefined
+
+        if (
+          response.status === 429
+          && attempt < this.#maxRetries
+          && retryAfterMs !== undefined
+          && retryAfterMs <= this.#maxAutomaticRetryWaitMs
+        ) {
+          try {
+            observation?.retry()
+          } catch {}
+          await this.#sleep(retryAfterMs, parameters.signal)
+          continue
+        }
+
+        if (!response.ok) {
+          const detail = discordError?.message || response.statusText || "request failed"
+          throw new DiscordApiError({
+            ...(discordError?.code !== undefined ? { code: discordError.code } : {}),
+            message: redactText(
+              `Discord API ${method} ${route} returned ${response.status}: ${detail}`,
+              [this.#token],
+            ),
+            method,
+            ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+            route,
+            status: response.status,
+          })
+        }
+
+        return parsedBody as T
       }
-
-      const responseText = await response.text()
-      const parsedBody = parseJson(responseText)
-      const discordError = errorBody(parsedBody)
-      const retryAfterMs = response.status === 429
-        ? retryAfterMilliseconds(discordError, response.headers)
-        : undefined
-
-      if (
-        response.status === 429
-        && attempt < this.#maxRetries
-        && retryAfterMs !== undefined
-        && retryAfterMs <= this.#maxAutomaticRetryWaitMs
-      ) {
-        await this.#sleep(retryAfterMs, parameters.signal)
-        continue
-      }
-
-      if (!response.ok) {
-        const detail = discordError?.message || response.statusText || "request failed"
-        throw new DiscordApiError({
-          ...(discordError?.code !== undefined ? { code: discordError.code } : {}),
-          message: redactText(
-            `Discord API ${method} ${route} returned ${response.status}: ${detail}`,
-            [this.#token],
-          ),
-          method,
-          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-          route,
-          status: response.status,
-        })
-      }
-
-      return parsedBody as T
+      throw new DiscordTransportError(
+        `Discord API ${method} ${route} exhausted retries`,
+        "network-error",
+      )
     }
 
-    throw new Error(`Discord API ${method} ${route} exhausted retries`)
+    try {
+      const result = observation ? await observation.run(execute) : await execute()
+      finishObservation(observation, { outcome: "ok" })
+      return result
+    } catch (error) {
+      finishObservation(observation, {
+        errorCategory: requestErrorCategory(error),
+        outcome: "error",
+        ...(error instanceof DiscordApiError ? { statusCode: error.status } : {}),
+      })
+      throw error
+    }
   }
 
   getCurrentApplication(options: RequestOptions = {}): Promise<DiscordApplication> {
-    return this.#request("/oauth2/applications/@me", options)
+    return this.#request("get_current_application", "/oauth2/applications/@me", options)
   }
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {
-    return this.#request("/users/@me", options)
+    return this.#request("get_current_user", "/users/@me", options)
   }
 
   getUser(userId: string, options: RequestOptions = {}): Promise<DiscordUser> {
-    return this.#request(`/users/${userId}`, options)
+    return this.#request("get_user", `/users/${userId}`, options)
   }
 
   listCurrentUserGuilds(options: GuildPageOptions = {}): Promise<DiscordGuild[]> {
@@ -529,15 +610,15 @@ export class DiscordClient {
       limit: options.limit,
       with_counts: false,
     })}`
-    return this.#request(route, options)
+    return this.#request("list_current_user_guilds", route, options)
   }
 
   getGuildChannels(guildId: string, options: RequestOptions = {}): Promise<DiscordChannel[]> {
-    return this.#request(`/guilds/${guildId}/channels`, options)
+    return this.#request("get_guild_channels", `/guilds/${guildId}/channels`, options)
   }
 
   getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {
-    return this.#request(`/guilds/${guildId}`, options)
+    return this.#request("get_guild", `/guilds/${guildId}`, options)
   }
 
   getGuildMember(
@@ -545,11 +626,11 @@ export class DiscordClient {
     userId: string,
     options: RequestOptions = {},
   ): Promise<DiscordGuildMember> {
-    return this.#request(`/guilds/${guildId}/members/${userId}`, options)
+    return this.#request("get_guild_member", `/guilds/${guildId}/members/${userId}`, options)
   }
 
   getGuildRoles(guildId: string, options: RequestOptions = {}): Promise<DiscordRole[]> {
-    return this.#request(`/guilds/${guildId}/roles`, options)
+    return this.#request("get_guild_roles", `/guilds/${guildId}/roles`, options)
   }
 
   getGuildBan(
@@ -557,7 +638,7 @@ export class DiscordClient {
     userId: string,
     options: RequestOptions = {},
   ): Promise<DiscordBan> {
-    return this.#request(`/guilds/${guildId}/bans/${userId}`, options)
+    return this.#request("get_guild_ban", `/guilds/${guildId}/bans/${userId}`, options)
   }
 
   modifyGuildMemberTimeout(
@@ -573,13 +654,12 @@ export class DiscordClient {
         "Discord member timeout expiration",
       )
     }
-    return this.#request(`/guilds/${guildId}/members/${userId}`, {
+    return this.#request("modify_guild_member_timeout", `/guilds/${guildId}/members/${userId}`, {
       ...options,
       auditReason,
       body: {
         communication_disabled_until: input.communicationDisabledUntil,
       },
-      method: "PATCH",
     })
   }
 
@@ -589,10 +669,9 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
-    await this.#request<void>(`/guilds/${guildId}/members/${userId}`, {
+    await this.#request<void>("remove_guild_member", `/guilds/${guildId}/members/${userId}`, {
       ...options,
       auditReason,
-      method: "DELETE",
     })
   }
 
@@ -609,11 +688,10 @@ export class DiscordClient {
       DISCORD_LIMITS.banDeleteMessageSeconds,
       "Discord ban message-history deletion seconds",
     )
-    await this.#request<void>(`/guilds/${guildId}/bans/${userId}`, {
+    await this.#request<void>("create_guild_ban", `/guilds/${guildId}/bans/${userId}`, {
       ...options,
       auditReason,
       body: { delete_message_seconds: deleteMessageSeconds },
-      method: "PUT",
     })
   }
 
@@ -623,15 +701,14 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
-    await this.#request<void>(`/guilds/${guildId}/bans/${userId}`, {
+    await this.#request<void>("remove_guild_ban", `/guilds/${guildId}/bans/${userId}`, {
       ...options,
       auditReason,
-      method: "DELETE",
     })
   }
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {
-    return this.#request(`/channels/${channelId}`, options)
+    return this.#request("get_channel", `/channels/${channelId}`, options)
   }
 
   listMessages(channelId: string, options: MessagePageOptions = {}): Promise<DiscordMessage[]> {
@@ -651,7 +728,7 @@ export class DiscordClient {
       before: options.before,
       limit: options.limit,
     })}`
-    return this.#request(route, options)
+    return this.#request("list_messages", route, options)
   }
 
   getMessage(
@@ -659,7 +736,7 @@ export class DiscordClient {
     messageId: string,
     options: RequestOptions = {},
   ): Promise<DiscordMessage> {
-    return this.#request(`/channels/${channelId}/messages/${messageId}`, options)
+    return this.#request("get_message", `/channels/${channelId}/messages/${messageId}`, options)
   }
 
   createMessage(
@@ -683,7 +760,7 @@ export class DiscordClient {
           type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
         }
       : undefined
-    return this.#request(`/channels/${channelId}/messages`, {
+    return this.#request("create_message", `/channels/${channelId}/messages`, {
       ...options,
       body: {
         allowed_mentions: input.allowedMentions,
@@ -692,7 +769,6 @@ export class DiscordClient {
         ...(messageReference ? { message_reference: messageReference } : {}),
         nonce: input.nonce,
       },
-      method: "POST",
     })
   }
 
@@ -704,13 +780,12 @@ export class DiscordClient {
   ): Promise<DiscordMessage> {
     assertMessageContent(input.content)
     assertAllowedMentions(input.allowedMentions)
-    return this.#request(`/channels/${channelId}/messages/${messageId}`, {
+    return this.#request("edit_message", `/channels/${channelId}/messages/${messageId}`, {
       ...options,
       body: {
         allowed_mentions: input.allowedMentions,
         content: input.content,
       },
-      method: "PATCH",
     })
   }
 
@@ -732,8 +807,9 @@ export class DiscordClient {
       throw new RangeError("Discord reaction emoji contains invalid Unicode", { cause: error })
     }
     await this.#request<void>(
+      "add_own_reaction",
       `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`,
-      { ...options, method: "PUT" },
+      options,
     )
   }
 
@@ -884,14 +960,14 @@ export class DiscordClient {
       sort_by: options.sortBy,
       sort_order: options.sortOrder,
     })}`
-    return this.#request(route, options)
+    return this.#request("search_guild_messages", route, options)
   }
 
   listActiveGuildThreads(
     guildId: string,
     options: RequestOptions = {},
   ): Promise<DiscordThreadList> {
-    return this.#request(`/guilds/${guildId}/threads/active`, options)
+    return this.#request("list_active_guild_threads", `/guilds/${guildId}/threads/active`, options)
   }
 
   listPublicArchivedThreads(
@@ -906,6 +982,7 @@ export class DiscordClient {
     )
     assertIsoTimestamp(options.before, "Discord public archived thread cursor")
     return this.#request(
+      "list_public_archived_threads",
       `/channels/${channelId}/threads/archived/public${queryString({
         before: options.before,
         limit: options.limit,
@@ -926,6 +1003,7 @@ export class DiscordClient {
     )
     assertIsoTimestamp(options.before, "Discord private archived thread cursor")
     return this.#request(
+      "list_private_archived_threads",
       `/channels/${channelId}/threads/archived/private${queryString({
         before: options.before,
         limit: options.limit,
@@ -946,6 +1024,7 @@ export class DiscordClient {
     )
     assertSearchSnowflake(options.before, "Discord joined-private archived thread cursor")
     return this.#request(
+      "list_joined_private_archived_threads",
       `/channels/${channelId}/users/@me/threads/archived/private${queryString({
         before: options.before,
         limit: options.limit,
@@ -960,10 +1039,9 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
-    await this.#request<void>(`/channels/${channelId}/messages/${messageId}`, {
+    await this.#request<void>("delete_message", `/channels/${channelId}/messages/${messageId}`, {
       ...options,
       auditReason,
-      method: "DELETE",
     })
   }
 
@@ -973,11 +1051,10 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
-    await this.#request<void>(`/channels/${channelId}/messages/bulk-delete`, {
+    await this.#request<void>("bulk_delete_messages", `/channels/${channelId}/messages/bulk-delete`, {
       ...options,
       auditReason,
       body: { messages: messageIds },
-      method: "POST",
     })
   }
 }

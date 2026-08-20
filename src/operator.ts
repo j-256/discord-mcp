@@ -38,6 +38,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   interactionPolicy: "interaction-policy",
   messageContentIntent: "message-content-intent",
   nodeVersion: "node-version",
+  observability: "observability",
   token: "token",
 })
 
@@ -160,6 +161,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
+  }
+  if (
+    config.observability.exportEnabled
+    && !config.observability.export?.endpointConfigured
+  ) {
+    warnings.push("OTLP export uses the default loopback collector because no endpoint is explicitly configured")
   }
   return warnings
 }
@@ -320,6 +327,15 @@ export async function diagnoseConnector(
         "pass",
         "Discord Gateway events are disabled",
       ))
+    const exporter = config.observability.export
+    const exporterSummary = config.observability.exportEnabled
+      ? `OTLP/HTTP protobuf export is enabled with ${exporter?.endpointConfigured ? "explicit collector endpoints" : "the default loopback collector"} and ${exporter?.headersConfigured ? "configured authentication headers" : "no authentication headers"}`
+      : "OTLP export is disabled; process-local aggregates remain available"
+    checks.push(check(
+      DOCTOR_CHECK_IDS.observability,
+      "pass",
+      `${exporterSummary}; structured stderr logs are ${config.observability.jsonLogsEnabled ? "enabled" : "disabled"}`,
+    ))
   }
 
   let identity: IdentitySummary | null = null
@@ -411,6 +427,26 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
     ENVIRONMENT_NAMES.allowGateway,
     ENVIRONMENT_NAMES.gatewayEventBufferSize,
+    ENVIRONMENT_NAMES.allowObservabilityExport,
+    ENVIRONMENT_NAMES.observabilityLogs,
+    ENVIRONMENT_NAMES.otelEndpoint,
+    ENVIRONMENT_NAMES.otelTraceEndpoint,
+    ENVIRONMENT_NAMES.otelMetricsEndpoint,
+    ENVIRONMENT_NAMES.otelHeaders,
+    ENVIRONMENT_NAMES.otelTraceHeaders,
+    ENVIRONMENT_NAMES.otelMetricsHeaders,
+    ENVIRONMENT_NAMES.otelProtocol,
+    ENVIRONMENT_NAMES.otelTraceProtocol,
+    ENVIRONMENT_NAMES.otelMetricsProtocol,
+    ENVIRONMENT_NAMES.otelCompression,
+    ENVIRONMENT_NAMES.otelTraceCompression,
+    ENVIRONMENT_NAMES.otelMetricsCompression,
+    ENVIRONMENT_NAMES.otelTimeout,
+    ENVIRONMENT_NAMES.otelTraceTimeout,
+    ENVIRONMENT_NAMES.otelMetricsTimeout,
+    ENVIRONMENT_NAMES.otelServiceName,
+    ENVIRONMENT_NAMES.otelTracesSampler,
+    ENVIRONMENT_NAMES.otelTracesSamplerArg,
     ENVIRONMENT_NAMES.auditFile,
   ]
   const environmentLines = environmentVariables.map((name, index) => (

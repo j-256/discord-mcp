@@ -3,6 +3,7 @@ export const MCP_RESOURCE_NAMES = Object.freeze({
   guilds: "scoped_guilds",
   gatewayEvents: "gateway_events",
   gatewayStatus: "gateway_status",
+  observability: "connector_observability",
   policy: "connector_policy",
   safety: "connector_safety",
 })
@@ -12,6 +13,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
   guilds: "discord://guilds",
   gatewayEvents: "discord://gateway/events",
   gatewayStatus: "discord://gateway/status",
+  observability: "discord://connector/observability",
   policy: "discord://connector/policy",
   safety: "discord://connector/safety",
 })

@@ -9,6 +9,10 @@ import {
   INTERACTION_DEFAULTS,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
+import {
+  loadObservabilityConfig,
+  type ObservabilityConfig,
+} from "./observability-config.js"
 
 export interface ConnectorConfig {
   adminGuildIds: ReadonlySet<string>
@@ -26,6 +30,7 @@ export interface ConnectorConfig {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   mentionUserIds: ReadonlySet<string>
+  observability: ObservabilityConfig
   protectedUserIds: ReadonlySet<string>
   token: string
 }
@@ -223,6 +228,7 @@ export function loadConnectorConfig(
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
     ),
     mentionUserIds,
+    observability: loadObservabilityConfig(environment, [rawToken || "", token]),
     protectedUserIds,
     token,
   }

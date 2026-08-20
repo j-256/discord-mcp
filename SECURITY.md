@@ -26,6 +26,14 @@ Gateway dispatches must be reduced immediately to fixed event kinds, Discord ide
 
 Gateway cursors are opaque and process-bound. Report malformed, foreign, expired, ahead-of-buffer, and connection-gap cursors as explicit continuity resets. Never expose a Discord sequence number as a cursor or imply uninterrupted delivery after overflow or a reconnect that cannot preserve Resume continuity.
 
+## Observability
+
+Keep OTLP export disabled unless an operator has selected a trusted collector. Enabling export must remain a separate exact feature gate. Remote collectors require HTTPS; plaintext HTTP is permitted only for loopback. Collector URLs must remain credential-free and must not contain query strings or fragments. Treat OTLP header variables as secrets and percent-encode values according to the OpenTelemetry format. Reject unsupported certificate-file variables before constructing an exporter so upstream fallback configuration cannot read ambient files.
+
+Telemetry must use only fixed operation, risk, outcome, and error categories plus numeric status, retry, duration, aggregate, trace, and span data. Never add tool arguments or results, Discord identifiers, raw routes or URLs, bodies, headers, bot tokens, error messages or stacks, plan digests, Gateway records, activity data, or Discord content to spans, metrics, stderr records, or local aggregates. Do not add automatic HTTP, logging, or exception instrumentation. Keep trace and metric providers private so process-global OpenTelemetry state cannot redirect connector telemetry or add unrelated data. Unknown operation names must collapse to a fixed value.
+
+Exporter failure must never alter a Discord request or MCP tool result. Keep final flush bounded and keep exporter startup and shutdown under the stdio runner so construction, `doctor`, `setup`, and `smoke` cannot open collector connections. Status surfaces may report only aggregate operation health, fixed privacy claims, exporter state and counters, and booleans indicating whether endpoint or header configuration exists.
+
 ## Deletion
 
 Do not add a deletion shortcut that bypasses exact IDs, local policy, keyed planning, fresh reads, signed interactive confirmation, write-aware client approval, or pending activity journaling. If a new client cannot support MCP elicitation, keep deletion unavailable in that client.

@@ -3,9 +3,46 @@ import test from "node:test"
 
 import { DiscordClient } from "../src/discord-client.js"
 import { DiscordApiError } from "../src/errors.js"
+import type {
+  OperationCompletion,
+  OperationalErrorCategory,
+} from "../src/observability.js"
 
 const TOKEN = "test-discord-token-value"
 const API_BASE_URL = "https://discord.test/api/v10"
+
+interface RecordedObservation {
+  completions: OperationCompletion[]
+  operation: string
+  retries: number
+  runs: number
+}
+
+function recordingObserver(records: RecordedObservation[]) {
+  return {
+    startDiscordRequest(operation: string) {
+      const record: RecordedObservation = {
+        completions: [],
+        operation,
+        retries: 0,
+        runs: 0,
+      }
+      records.push(record)
+      return {
+        end(completion: OperationCompletion) {
+          record.completions.push(completion)
+        },
+        retry() {
+          record.retries += 1
+        },
+        async run<T>(callback: () => Promise<T>): Promise<T> {
+          record.runs += 1
+          return callback()
+        },
+      }
+    },
+  }
+}
 
 function jsonResponse(
   body: unknown,
@@ -280,6 +317,95 @@ test("Discord client retries short rate limits using Discord retry timing", asyn
   assert.equal(user.id, "1")
   assert.equal(calls, 2)
   assert.deepEqual(waits, [12])
+})
+
+test("Discord client observes only fixed REST operations, outcomes, status, and retries", async () => {
+  const records: RecordedObservation[] = []
+  let calls = 0
+  const privateChannelId = "299999999999999999"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      if (calls === 1) {
+        return jsonResponse({ message: "private rate-limit detail", retry_after: 0 }, 429)
+      }
+      if (calls === 3) {
+        return jsonResponse({ message: "private forbidden detail" }, 403)
+      }
+      return jsonResponse([])
+    },
+    observer: recordingObserver(records),
+    sleep: async () => undefined,
+    token: TOKEN,
+  })
+
+  await client.listMessages(privateChannelId)
+  await assert.rejects(() => client.getChannel(privateChannelId), DiscordApiError)
+
+  assert.deepEqual(records, [
+    {
+      completions: [{ outcome: "ok" }],
+      operation: "list_messages",
+      retries: 1,
+      runs: 1,
+    },
+    {
+      completions: [{
+        errorCategory: "discord-client-error" satisfies OperationalErrorCategory,
+        outcome: "error",
+        statusCode: 403,
+      }],
+      operation: "get_channel",
+      retries: 0,
+      runs: 1,
+    },
+  ])
+  const observed = JSON.stringify(records)
+  assert.equal(observed.includes(privateChannelId), false)
+  assert.equal(observed.includes("private"), false)
+  assert.equal(observed.includes(TOKEN), false)
+})
+
+test("Discord client classifies transport timeout and caller cancellation without details", async () => {
+  const categories: OperationalErrorCategory[] = []
+  const observer = {
+    startDiscordRequest() {
+      return {
+        end(completion: OperationCompletion) {
+          if (completion.errorCategory) categories.push(completion.errorCategory)
+        },
+        retry() {},
+        run<T>(callback: () => Promise<T>) {
+          return callback()
+        },
+      }
+    },
+  }
+  const timeoutClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+    }),
+    observer,
+    requestTimeoutMs: 1,
+    token: TOKEN,
+  })
+  await assert.rejects(() => timeoutClient.getCurrentUser())
+
+  const cancellation = new AbortController()
+  cancellation.abort()
+  const cancelledClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      throw init?.signal?.reason
+    },
+    observer,
+    token: TOKEN,
+  })
+  await assert.rejects(() => cancelledClient.getCurrentUser({ signal: cancellation.signal }))
+
+  assert.deepEqual(categories, ["timeout", "cancelled"])
 })
 
 test("Discord client surfaces long rate limits without sleeping", async () => {

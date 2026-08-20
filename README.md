@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes an optional privacy-safe real-time Gateway feed, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -18,6 +18,9 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
 - The Gateway requests only the nonprivileged `GUILDS`, `GUILD_MESSAGES`, `GUILD_MESSAGE_REACTIONS`, and `GUILD_MESSAGE_POLLS` intents, uses no Discord client cache, and immediately reduces dispatches to scoped identifiers and fixed event kinds
 - Gateway events remain in a bounded process-local buffer; content, profile data, emoji, URLs, raw payloads, session IDs, sequence numbers, and resume URLs are never returned or persisted
+- Process-local observability stores only bounded aggregate counts and durations under fixed operation names and never persists telemetry
+- Optional OTLP export and JSON stderr records contain no tool arguments, results, Discord identifiers, routes, URLs, bodies, headers, error messages, stacks, plan digests, or activity data
+- OTLP export is disabled by default, requires its own exact feature gate, and permits plaintext HTTP only to a loopback collector
 - Message interactions are disabled unless an explicit environment toggle and exact interaction-channel allowlist are both present
 - Interaction scope never inherits from a thread parent, mentions notify nobody by default, and roles, `@everyone`, and `@here` cannot be enabled
 - Every actual send, edit, or reaction write requires a pending content-free activity record and passes process-local anti-spam guards
@@ -99,7 +102,7 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, Gateway policy, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord or open a Gateway connection. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, or opening a Gateway connection.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, Gateway policy, observability policy, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, opening a Gateway connection, or starting telemetry export.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
@@ -117,6 +120,16 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
 | `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
+| `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
+| `DISCORD_MCP_OBSERVABILITY_LOGS` | No | Emit privacy-safe one-line operational JSON to stderr; defaults to `false` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Credential-free base collector URL; defaults to `http://localhost:4318` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | No | Exact per-signal endpoints overriding the base; HTTPS is required except for loopback |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, `OTEL_EXPORTER_OTLP_METRICS_HEADERS` | No | Percent-encoded `key=value` collector headers; per-signal values override shared names |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` | No | Must resolve to `http/protobuf` |
+| `OTEL_EXPORTER_OTLP_COMPRESSION`, `OTEL_EXPORTER_OTLP_TRACES_COMPRESSION`, `OTEL_EXPORTER_OTLP_METRICS_COMPRESSION` | No | `none` or `gzip`; per-signal values override the shared value |
+| `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`, `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` | No | Export timeout from 1 to 60000 milliseconds; defaults to 10000 |
+| `OTEL_SERVICE_NAME` | No | Safe exported service name; defaults to `discord-mcp` |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | No | Bounded sampler and optional ratio from 0 through 1 |
 | `DISCORD_MCP_ALLOW_ADMINISTRATION` | For member moderation | Must be exactly `true` to enable reviewed member administration |
 | `DISCORD_MCP_ADMIN_GUILD_IDS` | For member moderation | Non-empty exact administration-guild allowlist and a subset of the read guild allowlist when one exists |
 | `DISCORD_MCP_PROTECTED_USER_IDS` | No | Exact user IDs that member administration must never target; defaults empty and is bounded to 100 configured IDs |
@@ -146,6 +159,26 @@ env_vars = [
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   "DISCORD_MCP_ALLOW_GATEWAY",
   "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
+  "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
+  "DISCORD_MCP_OBSERVABILITY_LOGS",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_HEADERS",
+  "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+  "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+  "OTEL_EXPORTER_OTLP_PROTOCOL",
+  "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+  "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+  "OTEL_EXPORTER_OTLP_COMPRESSION",
+  "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION",
+  "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION",
+  "OTEL_EXPORTER_OTLP_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
+  "OTEL_SERVICE_NAME",
+  "OTEL_TRACES_SAMPLER",
+  "OTEL_TRACES_SAMPLER_ARG",
   "DISCORD_MCP_ALLOW_ADMINISTRATION",
   "DISCORD_MCP_ADMIN_GUILD_IDS",
   "DISCORD_MCP_PROTECTED_USER_IDS",
@@ -180,6 +213,7 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 | Tool | Access | Purpose |
 | --- | --- | --- |
 | `get_connector_status` | Discord read | Verify application and bot identity and report effective policy |
+| `get_observability_status` | Local read | Report bounded operation aggregates, exporter health, and explicit telemetry privacy guarantees |
 | `get_gateway_status` | Local read | Report optional Gateway health, intent privacy, reconnect and continuity-gap counters, and bounded-buffer state |
 | `get_gateway_events` | Local read | Page through retained content-free events after an optional process-bound cursor |
 | `list_guilds` | Discord read | List scoped bot guild memberships |
@@ -208,6 +242,7 @@ MCP resource discovery lists only stable metadata. Listing resources or template
 | `discord://connector/safety` | Static | Explain trust boundaries and reviewed workflows without identity or Discord data |
 | `discord://connector/policy` | Local | Report effective scope and write policy without credentials or Discord access |
 | `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
+| `discord://connector/observability` | Local | Return process-local operation aggregates, exporter health, and telemetry privacy guarantees |
 | `discord://gateway/status` | Local | Report Gateway state, privacy guarantees, and content-free counters |
 | `discord://gateway/events` | Gateway buffer | Return the most recent retained in-scope event kinds and identifiers |
 | `discord://guilds` | Discord read | Return one bounded page of normalized in-scope guild metadata |
@@ -235,6 +270,18 @@ The feed handles guild, channel, thread, role, message, bulk-deletion, reaction,
 Opaque cursors belong to one running process and never reuse Discord's sequence. If a cursor belongs to another process, predates retained history, crosses a connection gap, is malformed, or points ahead of the local feed, `get_gateway_events` returns retained events with `resetRequired`, an exact reset reason, and a new cursor. A successful Resume preserves cursor continuity; fallback Identify, terminal failure, and stopping an established session rotate the cursor generation. Buffer overflow and connection gaps have separate content-free counters instead of pretending uninterrupted delivery.
 
 Both Gateway resources are listed and readable even while the feature is disabled. When enabled, the server advertises resource subscription support. Legacy clients may subscribe to either exact URI through `resources/subscribe`; modern clients may include the URI in `subscriptions/listen`. Keyed leading-and-trailing coalescing limits notification traffic while preserving every retained event in the readable buffer. A notification contains only the resource URI and tells the client to read the bounded snapshot.
+
+## Privacy-safe observability
+
+Bounded aggregate observability is always available through `get_observability_status` and `discord://connector/observability`. It counts completed MCP tool and Discord REST operations, errors, retries, active calls, outcome classes, and fixed duration buckets. The snapshot is process-local, never persisted, and includes explicit machine-readable privacy claims. Unknown operation names collapse to `unknown` rather than creating unbounded or attacker-controlled labels.
+
+Set `DISCORD_MCP_OBSERVABILITY_LOGS=true` to write compact JSON records for completed operations, exporter transitions, and export results to stderr. Records use only fixed tool or REST operation names, outcome and error categories, numeric HTTP status and retry data, durations, and timestamps. Standard connector diagnostics remain separate human-readable stderr lines.
+
+Collector export remains inert unless `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT=true`. The stdio runner then emits manually created OTLP/HTTP protobuf traces and metrics. MCP tool spans parent their Discord REST spans. The implementation does not install automatic HTTP, logging, or exception instrumentation and creates no span events or links. Tool arguments and results, Discord identifiers, raw routes and URLs, request or response bodies, headers, bot tokens, error text and stacks, plan digests, Gateway records, and activity records never enter spans, metrics, logs, or local aggregates.
+
+The connector supports the standard OTLP endpoint, header, protocol, compression, timeout, service-name, and trace-sampler variables listed above, with explicitly configured per-signal settings taking precedence. Remote collectors require HTTPS. Plaintext HTTP is accepted only for `localhost`, `127.0.0.0/8`, or `[::1]`; URLs with credentials, query strings, or fragments are rejected. Header names and percent-decoded values are bounded, newline-free, and rejected if they contain the Discord token. Service names reject snowflake-like numeric identifiers. Runtime status reports only whether endpoints or headers were configured, never their values.
+
+Exporter failures are observational: they update fixed health counters but never fail a Discord or MCP operation. The connector uses private trace and metric providers so a preloaded global OpenTelemetry SDK cannot redirect its telemetry or contribute unrelated spans and metrics. Shutdown performs a bounded final trace and metric flush. Constructing the adapter directly, and running `doctor`, `setup`, or `smoke`, never opens a collector connection even when export configuration is present; only the stdio runner owns exporter startup and shutdown.
 
 ## Prompts
 
@@ -394,7 +441,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Channel and role administration through the reviewed-plan core, slash commands, richer observability, and additional client-native progressive discovery can be added without changing the Gateway, interaction, deletion, member-moderation, resource, prompt, or distribution safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Channel and role administration through the reviewed-plan core, slash commands, and additional client-native progressive discovery can be added without changing the Gateway, observability, interaction, deletion, member-moderation, resource, prompt, or distribution safety paths. Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

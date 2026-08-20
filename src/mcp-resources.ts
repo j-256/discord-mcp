@@ -172,6 +172,8 @@ export function registerDiscordResources(
           "",
           "The optional Gateway feed requires pinned identity and exact local scope, requests no privileged intents, stores no Discord content, and reports cursor discontinuities instead of claiming false continuity.",
           "",
+          "Operational status is process-local by default. Optional OTLP export requires a separate feature gate and carries only fixed operation categories, aggregates, durations, and exporter health without Discord identifiers, content, routes, arguments, results, or error details.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",

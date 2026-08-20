@@ -1,0 +1,57 @@
+export const MCP_TOOL_RISK_CLASSES = Object.freeze({
+  add_reaction: "interaction-write",
+  delete_messages: "destructive-write",
+  edit_own_message: "interaction-write",
+  execute_member_moderation: "destructive-write",
+  explain_channel_access: "discord-read",
+  get_connector_status: "discord-read",
+  get_gateway_events: "local-read",
+  get_gateway_status: "local-read",
+  get_message: "discord-read",
+  get_observability_status: "local-read",
+  list_active_threads: "discord-read",
+  list_activity: "local-read",
+  list_archived_threads: "discord-read",
+  list_channels: "discord-read",
+  list_guilds: "discord-read",
+  plan_member_moderation: "discord-read",
+  plan_message_deletion: "discord-read",
+  read_messages: "discord-read",
+  search_messages: "discord-read",
+  send_message: "interaction-write",
+})
+
+export type McpToolName = keyof typeof MCP_TOOL_RISK_CLASSES
+export type McpToolRiskClass = typeof MCP_TOOL_RISK_CLASSES[McpToolName]
+
+export const DISCORD_REST_OPERATIONS = Object.freeze({
+  add_own_reaction: "PUT",
+  bulk_delete_messages: "POST",
+  create_guild_ban: "PUT",
+  create_message: "POST",
+  delete_message: "DELETE",
+  edit_message: "PATCH",
+  get_channel: "GET",
+  get_current_application: "GET",
+  get_current_user: "GET",
+  get_guild: "GET",
+  get_guild_ban: "GET",
+  get_guild_channels: "GET",
+  get_guild_member: "GET",
+  get_guild_roles: "GET",
+  get_message: "GET",
+  get_user: "GET",
+  list_active_guild_threads: "GET",
+  list_current_user_guilds: "GET",
+  list_joined_private_archived_threads: "GET",
+  list_messages: "GET",
+  list_private_archived_threads: "GET",
+  list_public_archived_threads: "GET",
+  modify_guild_member_timeout: "PATCH",
+  remove_guild_ban: "DELETE",
+  remove_guild_member: "DELETE",
+  search_guild_messages: "GET",
+})
+
+export type DiscordRestOperation = keyof typeof DISCORD_REST_OPERATIONS
+export type DiscordRestMethod = typeof DISCORD_REST_OPERATIONS[DiscordRestOperation]

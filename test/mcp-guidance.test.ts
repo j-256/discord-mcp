@@ -331,6 +331,7 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
       { name: MCP_RESOURCE_NAMES.gatewayStatus, uri: MCP_RESOURCE_URIS.gatewayStatus },
       { name: MCP_RESOURCE_NAMES.guilds, uri: MCP_RESOURCE_URIS.guilds },
+      { name: MCP_RESOURCE_NAMES.observability, uri: MCP_RESOURCE_URIS.observability },
       { name: MCP_RESOURCE_NAMES.policy, uri: MCP_RESOURCE_URIS.policy },
       { name: MCP_RESOURCE_NAMES.safety, uri: MCP_RESOURCE_URIS.safety },
     ].sort((a, b) => a.name.localeCompare(b.name)),
@@ -399,6 +400,22 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.doesNotMatch(activity.text, /\/private\/connector/)
   assert.match(activity.text, /\[redacted\]/)
   assert.equal(calls.activity, 1)
+
+  const observability = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.observability,
+  )
+  const observabilityData = observability.value.data as Record<string, unknown>
+  assert.deepEqual(observabilityData.privacy, {
+    argumentsStored: false,
+    contentStored: false,
+    discordIdentifiersStored: false,
+    errorDetailsStored: false,
+    persistent: false,
+    rawRoutesStored: false,
+  })
+  assert.equal(JSON.stringify(observabilityData).includes(TOKEN), false)
+  assert.equal(JSON.stringify(observabilityData).includes("OTEL_EXPORTER"), false)
   assert.equal(totalCalls(calls), 1)
 })
 

@@ -67,6 +67,11 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.interactionMinWriteIntervalMs, 750)
   assert.equal(config.expectedApplicationId, "300000000000000001")
   assert.equal(config.gatewayEventBufferSize, 100)
+  assert.deepEqual(config.observability, {
+    export: undefined,
+    exportEnabled: false,
+    jsonLogsEnabled: false,
+  })
   assert.equal(config.auditFile, "/test/state/discord-mcp/activity.jsonl")
 })
 

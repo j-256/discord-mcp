@@ -23,6 +23,14 @@ const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
 const EXPECTED_DEPENDENCIES = {
   "@modelcontextprotocol/client": "2.0.0",
   "@modelcontextprotocol/server": "2.0.0",
+  "@opentelemetry/api": "1.9.1",
+  "@opentelemetry/context-async-hooks": "2.10.0",
+  "@opentelemetry/exporter-metrics-otlp-proto": "0.221.0",
+  "@opentelemetry/exporter-trace-otlp-proto": "0.221.0",
+  "@opentelemetry/otlp-exporter-base": "0.221.0",
+  "@opentelemetry/resources": "2.10.0",
+  "@opentelemetry/sdk-metrics": "2.10.0",
+  "@opentelemetry/sdk-trace": "2.10.0",
   zod: "4.4.3",
 }
 const EXPECTED_DEV_DEPENDENCIES = {
@@ -48,6 +56,7 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "DISCORD_MCP_ALLOW_DELETIONS",
   "DISCORD_MCP_ALLOW_GATEWAY",
   "DISCORD_MCP_ALLOW_INTERACTIONS",
+  "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   "DISCORD_MCP_APPLICATION_ID",
   "DISCORD_MCP_AUDIT_FILE",
   "DISCORD_MCP_DELETE_CHANNEL_IDS",
@@ -56,8 +65,34 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
   "DISCORD_MCP_MENTION_USER_IDS",
+  "DISCORD_MCP_OBSERVABILITY_LOGS",
   "DISCORD_MCP_PROTECTED_USER_IDS",
+  "OTEL_EXPORTER_OTLP_COMPRESSION",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_HEADERS",
+  "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION",
+  "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+  "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+  "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_PROTOCOL",
+  "OTEL_EXPORTER_OTLP_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION",
+  "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+  "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+  "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+  "OTEL_SERVICE_NAME",
+  "OTEL_TRACES_SAMPLER",
+  "OTEL_TRACES_SAMPLER_ARG",
 ].sort()
+
+const SECRET_ENVIRONMENT_NAMES = new Set([
+  "DISCORD_BOT_TOKEN",
+  "OTEL_EXPORTER_OTLP_HEADERS",
+  "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+  "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+])
 
 const EXPECTED_ACTION_PINS = new Map([
   ["actions/attest", "1e69f48acb82d1966a394da916b4c1698aa569d6"],
@@ -230,7 +265,11 @@ async function checkRegistryManifest(packageJson) {
     invariant(typeof entry.description === "string" && entry.description.length > 0, `${entry.name} lacks a registry description`)
     if (entry.name === "DISCORD_BOT_TOKEN") continue
     invariant(entry.isRequired === undefined, `${entry.name} must remain optional`)
-    invariant(entry.isSecret === undefined, `${entry.name} must not be marked secret`)
+    if (SECRET_ENVIRONMENT_NAMES.has(entry.name)) {
+      invariant(entry.isSecret === true, `${entry.name} must be marked secret`)
+    } else {
+      invariant(entry.isSecret === undefined, `${entry.name} must not be marked secret`)
+    }
   }
   assertEqual(byName.get("DISCORD_BOT_TOKEN"), {
     description: "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
@@ -244,6 +283,8 @@ async function checkRegistryManifest(packageJson) {
     "DISCORD_MCP_ALLOW_DELETIONS",
     "DISCORD_MCP_ALLOW_GATEWAY",
     "DISCORD_MCP_ALLOW_INTERACTIONS",
+    "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
+    "DISCORD_MCP_OBSERVABILITY_LOGS",
   ]) {
     const entry = byName.get(name)
     invariant(entry?.default === "false", `${name} must default to false`)
@@ -259,9 +300,76 @@ async function checkRegistryManifest(packageJson) {
     "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
     "DISCORD_MCP_MENTION_USER_IDS",
     "DISCORD_MCP_PROTECTED_USER_IDS",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_SERVICE_NAME",
   ]) {
     invariant(byName.get(name)?.format === "string", `${name} must use string registry input`)
   }
+  for (const name of [
+    "OTEL_EXPORTER_OTLP_COMPRESSION",
+    "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION",
+    "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION",
+  ]) {
+    const entry = byName.get(name)
+    assertEqual(entry?.choices, ["none", "gzip"], `${name} must expose bounded compression choices`)
+    invariant(
+      entry?.default === (name === "OTEL_EXPORTER_OTLP_COMPRESSION" ? "none" : undefined),
+      `${name} has an invalid compression default`,
+    )
+  }
+  for (const name of [
+    "OTEL_EXPORTER_OTLP_TIMEOUT",
+    "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
+    "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+  ]) {
+    assertEqual(
+      { default: byName.get(name)?.default, format: byName.get(name)?.format },
+      {
+        default: name === "OTEL_EXPORTER_OTLP_TIMEOUT" ? "10000" : undefined,
+        format: "number",
+      },
+      `${name} metadata is invalid`,
+    )
+  }
+  assertEqual(
+    byName.get("OTEL_EXPORTER_OTLP_PROTOCOL")?.default,
+    "http/protobuf",
+    "shared OTLP protocol default is invalid",
+  )
+  for (const name of [
+    "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+  ]) {
+    invariant(byName.get(name)?.default === undefined, `${name} must remain an explicit override`)
+  }
+  assertEqual(
+    byName.get("OTEL_TRACES_SAMPLER")?.choices,
+    [
+      "always_off",
+      "always_on",
+      "parentbased_always_off",
+      "parentbased_always_on",
+      "parentbased_traceidratio",
+      "traceidratio",
+    ],
+    "registry trace sampler choices are invalid",
+  )
+  assertEqual(
+    {
+      default: byName.get("OTEL_TRACES_SAMPLER_ARG")?.default,
+      format: byName.get("OTEL_TRACES_SAMPLER_ARG")?.format,
+    },
+    { default: "1", format: "number" },
+    "registry trace sampler argument metadata is invalid",
+  )
   assertEqual(
     {
       default: byName.get("DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE")?.default,
