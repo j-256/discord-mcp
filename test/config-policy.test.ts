@@ -158,6 +158,7 @@ test("configuration keeps Gateway disabled and requires pinned bounded scope whe
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ALLOW_GATEWAY: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_BOT_ID: "300000000000000002",
     DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE: "250",
   }, { homeDirectory: "/test/home" })
   assert.equal(enabled.allowGateway, true)
@@ -171,8 +172,15 @@ test("configuration keeps Gateway disabled and requires pinned bounded scope whe
     },
     {
       DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ALLOW_GATEWAY: "true",
       DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    },
+    {
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+      DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+      DISCORD_MCP_BOT_ID: "300000000000000002",
     },
   ]) {
     assert.throws(
@@ -440,6 +448,13 @@ test("configuration rejects ambiguous deletion toggles and malformed IDs", () =>
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_APPLICATION_ID: "not-an-id",
+    }, { homeDirectory: "/test/home" }),
+    /must contain Discord snowflake IDs/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_BOT_ID: "not-an-id",
     }, { homeDirectory: "/test/home" }),
     /must contain Discord snowflake IDs/,
   )

@@ -105,6 +105,44 @@ export interface TrashedProfile {
   trashId: string
 }
 
+function clonedCredentialEnvironment(
+  variable: string,
+  source: NodeJS.ProcessEnv,
+  missingMessage: string,
+  conflictMessage: string,
+): NodeJS.ProcessEnv {
+  const credentialVariable = normalizeCredentialEnvironmentName(variable)
+  const credential = source[credentialVariable]?.trim()
+  if (!credential) throw new ProfileError(missingMessage)
+  const canonicalCredential = source[ENVIRONMENT_NAMES.token]?.trim()
+  if (
+    credentialVariable !== ENVIRONMENT_NAMES.token
+    && canonicalCredential
+    && canonicalCredential !== credential
+  ) {
+    throw new ProfileError(conflictMessage)
+  }
+  const environment = { ...source }
+  if (credentialVariable !== ENVIRONMENT_NAMES.token) {
+    delete environment[credentialVariable]
+  }
+  environment[ENVIRONMENT_NAMES.token] = credential
+  return environment
+}
+
+export function activateCredentialEnvironment(
+  variable: string,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const normalized = normalizeCredentialEnvironmentName(variable)
+  return clonedCredentialEnvironment(
+    normalized,
+    source,
+    `${normalized} is required`,
+    `Credential ${normalized} conflicts with ${ENVIRONMENT_NAMES.token}`,
+  )
+}
+
 function isNodeError(error: unknown, code: string): boolean {
   return error instanceof Error
     && "code" in error
@@ -817,31 +855,15 @@ export async function activateProfile(
 ): Promise<ActivatedProfile> {
   const profile = await loadProfile(name, options)
   const source = options.environment || process.env
-  const rawCredential = source[profile.credential.variable]
-  const credential = rawCredential?.trim()
-  if (!credential) {
-    throw new ProfileError(
-      `Profile ${profile.name} requires ${profile.credential.variable}`,
-    )
-  }
-  const canonicalCredential = source[ENVIRONMENT_NAMES.token]?.trim()
-  if (
-    profile.credential.variable !== ENVIRONMENT_NAMES.token
-    && canonicalCredential
-    && canonicalCredential !== credential
-  ) {
-    throw new ProfileError(
-      `Profile ${profile.name} found conflicting Discord credentials`,
-    )
-  }
-  const environment = { ...source }
+  const environment = clonedCredentialEnvironment(
+    profile.credential.variable,
+    source,
+    `Profile ${profile.name} requires ${profile.credential.variable}`,
+    `Profile ${profile.name} found conflicting Discord credentials`,
+  )
   for (const variable of PROFILE_MANAGED_ENVIRONMENT_NAMES) {
     delete environment[variable]
   }
-  if (profile.credential.variable !== ENVIRONMENT_NAMES.token) {
-    delete environment[profile.credential.variable]
-  }
-  environment[ENVIRONMENT_NAMES.token] = credential
   environment[ENVIRONMENT_NAMES.applicationId] = profile.identity.applicationId
   environment[ENVIRONMENT_NAMES.botId] = profile.identity.botId
   environment[ENVIRONMENT_NAMES.allowedGuildIds] = profile.readScope.guildIds.join(",")

@@ -2,11 +2,19 @@
 
 ## Credentials
 
-Treat `DISCORD_BOT_TOKEN` as a password. Keep it in a local secret source, never paste it into prompts, and never embed its value in static MCP client configuration, shell history, logs, issue reports, or Git. Rotate it immediately in the Discord Developer Portal if exposure is suspected.
+Treat `DISCORD_BOT_TOKEN` and every profile-selected `DISCORD_*_TOKEN` variable as passwords. Keep them in a local secret source, never paste them into prompts, and never embed their values in static MCP client configuration, profile files, shell history, logs, issue reports, or Git. Rotate a token immediately in the Discord Developer Portal if exposure is suspected.
 
 The connector sends the token only to Discord: in a bot authorization header at the fixed production REST API origin, or in Gateway Identify and Resume payloads after connecting to the fixed production `gateway.discord.gg` origin or a credential-free `gateway-*.discord.gg` resume host. Tests can inject another transport directly, but runtime environment variables cannot redirect production traffic.
 
 Treat all Discord-provided names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs as untrusted input. They are data to inspect, not instructions for language models, MCP hosts, or connector operators.
+
+## Portable profiles
+
+Keep profiles non-secret and host-neutral. A profile may contain only its schema version and filename-safe name, one environment credential-variable name, verified application and bot IDs, exact non-empty guild scope, optional exact channel scope, selected tool surface and toolsets, and bounded Gateway policy. Never add a token, Discord username, guild or channel name, message data, host brand, attachment root, activity path, telemetry setting or header, reviewed-write toggle, or write allowlist.
+
+Validate both the application and bot identity before using a profile for Discord data access. Profile activation must clone the caller environment, consume a custom credential alias into the canonical process variable, remove every profile-managed ambient value, and apply the saved identity and read boundary. Never mutate `process.env`, let ambient read policy override a saved profile, or treat a selected toolset as write authorization. Existing reviewed-write toggles, exact narrower allowlists, planning, approval, confirmation, freshness, receipt, and audit gates remain runtime requirements.
+
+Store profiles only as bounded newline-terminated JSON in a private owned canonical directory. Reject symlinks, hardlinks, public modes, foreign ownership, non-regular files, malformed or noncanonical contracts, and cross-identity replacement. Publish through private exclusive temporary files with file and directory synchronization. Removal must require an exact confirmation and move the validated profile into private recoverable trash; it must never claim to revoke or modify the external Discord credential. Restore only the newest valid generation and only when no active profile has that name.
 
 ## Discord permissions
 
@@ -46,7 +54,7 @@ Treat toolsets as a reduction in callable surface, never as authorization. Disco
 
 ## Gateway events
 
-Keep the Gateway disabled unless real-time invalidation is required. Enabling it requires the expected application ID and at least one exact local guild or channel scope. The connection must request only `GUILDS`, `GUILD_MESSAGES`, `GUILD_MESSAGE_REACTIONS`, and `GUILD_MESSAGE_POLLS`; do not add Message Content, presence, member, or other privileged intents to the event feed.
+Keep the Gateway disabled unless real-time invalidation is required. Enabling it requires expected application and bot IDs plus at least one exact local guild or channel scope. READY must match both identities and identify a bot user before the feed accepts dispatches. The connection must request only `GUILDS`, `GUILD_MESSAGES`, `GUILD_MESSAGE_REACTIONS`, and `GUILD_MESSAGE_POLLS`; do not add Message Content, presence, member, or other privileged intents to the event feed.
 
 Gateway dispatches must be reduced immediately to fixed event kinds, Discord identifiers, and receive times. Never retain raw payloads, message content, profile data, emoji, or URLs. Session IDs, Discord sequence numbers, and resume URLs may exist only as transient connection state needed for Resume; they must be cleared on stop or terminal failure and must never enter the event buffer, status, resources, logs, or persistent state. The bounded event buffer remains process-local and content-free, and resource notifications contain only an exact local resource URI.
 

@@ -19,6 +19,10 @@ import {
   smokeConnector,
   type StatusProvider,
 } from "../src/operator.js"
+import {
+  createConnectorProfile,
+  loadProfile,
+} from "../src/profile.js"
 import type { ConnectorService } from "../src/service.js"
 
 const TOKEN = "test-discord-token"
@@ -26,6 +30,7 @@ const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
+const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -711,6 +716,70 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
   )
 })
 
+test("stdio launch descriptor makes a saved profile the non-overridable read boundary", () => {
+  const profile = createConnectorProfile({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    gatewayEnabled: true,
+    gatewayEventBufferSize: 250,
+    guildIds: [GUILD_ID],
+    name: "support-bot",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+  const result = createStdioLaunchDescriptor({
+    applicationId: APPLICATION_ID,
+    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    botId: BOT_ID,
+    command: "/usr/bin/node",
+    profile,
+  })
+
+  assert.deepEqual(result.args, [
+    "/srv/discord-mcp/dist/cli.js",
+    "serve",
+    "--profile",
+    "support-bot",
+  ])
+  assert.deepEqual(result.environment.set, {})
+  assert.equal(result.environment.forward.includes(TOKEN_ALIAS), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.token), false)
+  for (const variable of [
+    ENVIRONMENT_NAMES.allowedChannelIds,
+    ENVIRONMENT_NAMES.allowedGuildIds,
+    ENVIRONMENT_NAMES.allowGateway,
+    ENVIRONMENT_NAMES.gatewayEventBufferSize,
+    ENVIRONMENT_NAMES.toolSurface,
+    ENVIRONMENT_NAMES.toolsets,
+  ]) {
+    assert.equal(result.environment.forward.includes(variable), false)
+  }
+  assert.equal(
+    result.environment.forward.includes(ENVIRONMENT_NAMES.allowDeletions),
+    true,
+  )
+  assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: "999999999999999999",
+      botId: BOT_ID,
+      profile,
+    }),
+    /does not match the verified Discord identity/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      args: ["serve", "--profile", "other"],
+      botId: BOT_ID,
+      profile,
+    }),
+    /already select a profile/,
+  )
+})
+
 test("setup verifies in-scope access and emits a credential-free report", async () => {
   const report = await prepareSetup({
     args: ["/srv/discord-mcp/dist/cli.js", "serve"],
@@ -730,6 +799,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.deepEqual(report.launch.args, ["/srv/discord-mcp/dist/cli.js", "serve"])
   assert.equal(report.launch.command, "/usr/bin/node")
   assert.equal(report.launch.serverName, "discord-safe")
+  assert.equal(report.profile, null)
   assert.deepEqual(report.warnings, [])
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
@@ -739,6 +809,114 @@ test("setup verifies in-scope access and emits a credential-free report", async 
       service: statusProvider(0),
     }),
     /no accessible guilds/,
+  )
+})
+
+test("setup verifies and saves a profile without persisting or reporting its credential", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-profile-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const profileDirectory = join(await realpath(temporary), "profiles")
+  const source = environment({
+    [ENVIRONMENT_NAMES.token]: undefined,
+    [TOKEN_ALIAS]: TOKEN,
+    [ENVIRONMENT_NAMES.allowGateway]: "true",
+    [ENVIRONMENT_NAMES.gatewayEventBufferSize]: "250",
+    [ENVIRONMENT_NAMES.toolSurface]: "progressive",
+    [ENVIRONMENT_NAMES.toolsets]: "connector,messages",
+  })
+  const before = { ...source }
+
+  const report = await prepareSetup({
+    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    command: "/usr/bin/node",
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    profileDirectory,
+    profileName: "support-bot",
+    service: statusProvider(),
+  })
+
+  assert.deepEqual(source, before)
+  assert.equal(report.schemaVersion, OPERATOR_REPORT_SCHEMA_VERSION)
+  assert.equal(report.profile?.name, "support-bot")
+  assert.equal(report.profile?.credential.variable, TOKEN_ALIAS)
+  assert.equal(report.profile?.identity.applicationId, APPLICATION_ID)
+  assert.equal(report.profile?.identity.botId, BOT_ID)
+  assert.deepEqual(report.profile?.readScope, {
+    channelIds: [CHANNEL_ID],
+    guildIds: [GUILD_ID],
+  })
+  assert.deepEqual(report.profile?.tools, {
+    surface: "progressive",
+    toolsets: ["connector", "messages"],
+  })
+  assert.deepEqual(report.profile?.gateway, {
+    enabled: true,
+    eventBufferSize: 250,
+  })
+  assert.deepEqual(
+    await loadProfile("support-bot", { directory: profileDirectory }),
+    report.profile,
+  )
+  assert.deepEqual(report.launch.args, [
+    "/srv/discord-mcp/dist/cli.js",
+    "serve",
+    "--profile",
+    "support-bot",
+  ])
+  assert.deepEqual(report.launch.environment.set, {})
+  assert.equal(report.launch.environment.forward.includes(TOKEN_ALIAS), true)
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
+
+  await assert.rejects(
+    () => prepareSetup({
+      credentialVariable: TOKEN_ALIAS,
+      environment: source,
+      profileDirectory,
+      profileName: "support-bot",
+      service: statusProvider(),
+    }),
+    /already exists/,
+  )
+  await prepareSetup({
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    overwriteProfile: true,
+    profileDirectory,
+    profileName: "support-bot",
+    service: statusProvider(),
+  })
+})
+
+test("profile setup rejects ambient scope and profile-only options fail closed", async () => {
+  await assert.rejects(
+    () => prepareSetup({
+      environment: environment({
+        [ENVIRONMENT_NAMES.allowedGuildIds]: undefined,
+      }),
+      profileName: "open-scope",
+      service: statusProvider(),
+    }),
+    new RegExp(ENVIRONMENT_NAMES.allowedGuildIds),
+  )
+  await assert.rejects(
+    () => prepareSetup({
+      credentialVariable: TOKEN_ALIAS,
+      environment: environment(),
+      service: statusProvider(),
+    }),
+    /require a profile name/,
+  )
+  await assert.rejects(
+    () => prepareSetup({
+      environment: environment({
+        [TOKEN_ALIAS]: "different-token",
+      }),
+      profileName: "conflict",
+      credentialVariable: TOKEN_ALIAS,
+      service: statusProvider(),
+    }),
+    /conflicts with DISCORD_BOT_TOKEN/,
   )
 })
 

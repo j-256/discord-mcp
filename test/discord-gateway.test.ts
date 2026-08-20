@@ -14,6 +14,7 @@ import {
 import { GatewayEventStore } from "../src/gateway-events.js"
 
 const APPLICATION_ID = "100000000000000001"
+const BOT_ID = "100000000000000002"
 const GUILD_ID = "200000000000000001"
 const CHANNEL_ID = "300000000000000001"
 const MESSAGE_ID = "400000000000000001"
@@ -112,6 +113,7 @@ function fixture(options: { random?: number } = {}) {
       allowedChannelIds: new Set([CHANNEL_ID]),
       allowedGuildIds: new Set([GUILD_ID]),
       allowGateway: true,
+      expectedBotId: BOT_ID,
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
@@ -147,6 +149,7 @@ function ready(socket: FakeSocket, overrides: Record<string, unknown> = {}): voi
       application: { id: APPLICATION_ID },
       resume_gateway_url: "wss://gateway-us-east1-b.discord.gg",
       session_id: "private-session-id",
+      user: { bot: true, id: BOT_ID },
       ...overrides,
     },
     op: 0,
@@ -160,9 +163,24 @@ test("Gateway construction independently enforces scope and enabled-state invari
     () => new DiscordGateway({
       applicationId: APPLICATION_ID,
       config: {
+        allowedChannelIds: new Set([CHANNEL_ID]),
+        allowedGuildIds: new Set([GUILD_ID]),
+        allowGateway: true,
+        expectedBotId: undefined,
+        gatewayEventBufferSize: 10,
+        token: TOKEN,
+      },
+    }),
+    /bot ID must be a Discord snowflake/,
+  )
+  assert.throws(
+    () => new DiscordGateway({
+      applicationId: APPLICATION_ID,
+      config: {
         allowedChannelIds: new Set(),
         allowedGuildIds: new Set(),
         allowGateway: true,
+        expectedBotId: BOT_ID,
         gatewayEventBufferSize: 10,
         token: TOKEN,
       },
@@ -182,6 +200,7 @@ test("Gateway construction independently enforces scope and enabled-state invari
         allowedChannelIds: new Set([CHANNEL_ID]),
         allowedGuildIds: new Set(),
         allowGateway: true,
+        expectedBotId: BOT_ID,
         gatewayEventBufferSize: 10,
         token: TOKEN,
       },
@@ -416,7 +435,10 @@ test("Gateway invalid sessions re-identify only after Discord's delay and local 
 
 test("Gateway rejects wrong READY identities and untrusted resume origins", async () => {
   for (const [overrides, category] of [
-    [{ application: { id: "100000000000000002" } }, "invalid-ready-identity"],
+    [{ application: { id: "100000000000000099" } }, "invalid-ready-identity"],
+    [{ user: { bot: true, id: "100000000000000099" } }, "invalid-ready-identity"],
+    [{ user: { bot: false, id: BOT_ID } }, "invalid-ready-identity"],
+    [{ user: { bot: true, id: "not-a-snowflake" } }, "invalid-ready-identity"],
     [{ resume_gateway_url: "wss://gateway.discord.gg.evil.example" }, "invalid-resume-origin"],
   ] as const) {
     const { gateway, logs, scheduler, sockets } = fixture()

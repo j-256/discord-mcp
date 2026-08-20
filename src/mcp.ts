@@ -3551,8 +3551,11 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
   let runtime = options.gatewayRuntime
   if (!runtime && config.allowGateway) {
     const applicationId = config.expectedApplicationId
-    if (!applicationId) {
-      throw new ConfigurationError("Enabled Gateway configuration requires an application ID")
+    const botId = config.expectedBotId
+    if (!applicationId || !botId) {
+      throw new ConfigurationError(
+        "Enabled Gateway configuration requires application and bot IDs",
+      )
     }
     runtime = new DiscordGateway({
       applicationId,

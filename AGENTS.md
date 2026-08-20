@@ -8,11 +8,13 @@ This repository implements a local stdio MCP server for Discord guild access. Ke
 
 Never print, persist, return, or commit a Discord bot token. Production code must use the fixed Discord API origin; only tests may inject another transport or origin.
 
+Portable profiles may persist only a non-secret credential-variable name, verified application and bot IDs, exact read scope, selected tool policy, and Gateway policy. Keep write authority and every local path or telemetry setting outside profiles, reject unsafe profile files, and never let ambient read policy override an activated profile.
+
 Message deletion must remain exact-ID based and require every existing gate: the environment toggle, deletion-channel allowlist, destructive MCP annotation, MCP host write approval, a fresh matching keyed plan digest, signed MCP request state, interactive confirmation, a final fresh-plan check, and a pending content-free audit record. Do not weaken or bypass one gate because another exists.
 
 Member administration must remain exact-ID based and require every existing gate: the environment toggle, administration-guild allowlist, protected-user denylist, verified bot and target identities, complete permission and strict role-hierarchy evidence, destructive MCP annotation, MCP host write approval, a fresh matching keyed plan digest, signed MCP request state, interactive confirmation, a final fresh-plan check, and a pending content-free audit record. Do not add an immediate moderation path.
 
-Never persist message content, attachment URLs, embeds, components, Discord audit-log reasons, profile names, role names, or avatars. Activity records may contain Discord identifiers, timestamps, numeric action parameters, plan digests, strategies, sanitized errors, and outcomes.
+Never persist message content, attachment URLs, embeds, components, Discord audit-log reasons, Discord usernames or profile names, role names, or avatars. Activity records may contain Discord identifiers, timestamps, numeric action parameters, plan digests, strategies, sanitized errors, and outcomes.
 
 ## Development
 

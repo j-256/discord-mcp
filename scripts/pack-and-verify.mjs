@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises"
@@ -160,9 +161,21 @@ import * as connector from "@j-256/discord-mcp"
 
 const DISCOVERY_TOOL_NAME = "discover_discord_tools"
 const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
+const PROFILE_NAME = "installed-profile"
+const PROFILE_TOKEN_VARIABLE = "DISCORD_INSTALLED_BOT_TOKEN"
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
+await connector.saveProfile(connector.createConnectorProfile({
+  applicationId: "100000000000000001",
+  botId: "200000000000000001",
+  channelIds: ["400000000000000001"],
+  credentialVariable: PROFILE_TOKEN_VARIABLE,
+  guildIds: ["300000000000000001"],
+  name: PROFILE_NAME,
+  toolsets: ["connector", "messages"],
+  toolSurface: "progressive",
+}))
 const catalogTransport = new StdioClientTransport({
   command: process.execPath,
   args: [entrypoint, "catalog"],
@@ -305,12 +318,81 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     cwd: consumer,
     env: environment,
   })
+  const profileEnvironment = baseVerificationEnvironment(environment.HOME)
+  const listResult = await run(bin, ["profile", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: profileEnvironment,
+  })
+  const listedProfiles = JSON.parse(listResult.stdout)
+  assert.deepEqual(listedProfiles.profiles.map(({ name }) => name), ["installed-profile"])
+  assert.equal(listedProfiles.profiles[0].credentialVariable, "DISCORD_INSTALLED_BOT_TOKEN")
+  const showResult = await run(bin, ["profile", "show", "installed-profile", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: profileEnvironment,
+  })
+  const shownProfile = JSON.parse(showResult.stdout)
+  assert.equal(shownProfile.profile.identity.applicationId, "100000000000000001")
+  assert.equal(shownProfile.profile.identity.botId, "200000000000000001")
+  const removeResult = await run(bin, [
+    "profile",
+    "remove",
+    "installed-profile",
+    "--confirm",
+    "installed-profile",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: profileEnvironment,
+  })
+  const removal = JSON.parse(removeResult.stdout)
+  assert.equal(removal.action, "remove")
+  assert.equal(removal.credentialUnaffected, true)
+  assert.equal(removal.recoverable, true)
+  const emptyListResult = await run(bin, ["profile", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: profileEnvironment,
+  })
+  assert.deepEqual(JSON.parse(emptyListResult.stdout).profiles, [])
+  const restoreResult = await run(bin, [
+    "profile",
+    "restore",
+    "installed-profile",
+    "--confirm",
+    "installed-profile",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: profileEnvironment,
+  })
+  const restoration = JSON.parse(restoreResult.stdout)
+  assert.equal(restoration.action, "restore")
+  assert.equal(restoration.credentialUnaffected, true)
+  const profileDoctorResult = await run(bin, [
+    "doctor",
+    "--profile",
+    "installed-profile",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: {
+      ...profileEnvironment,
+      DISCORD_INSTALLED_BOT_TOKEN: DUMMY_TOKEN,
+    },
+  })
+  invariant(JSON.parse(profileDoctorResult.stdout).status !== "error", "installed profile activation failed")
 }
 
 const outputDirectory = parseOutputDirectory(process.argv.slice(2))
 const packageJson = await readJson(join(REPOSITORY_ROOT, "package.json"))
 invariant(packageJson.name === PACKAGE_NAME, "package identity changed before pack verification")
-const workDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-pack-"))
+const temporaryWorkDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-pack-"))
+const workDirectory = await realpath(temporaryWorkDirectory)
 try {
   await run(process.execPath, ["scripts/check-release-metadata.mjs"])
   const firstDirectory = join(workDirectory, "first")

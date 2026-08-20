@@ -298,9 +298,9 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowGateway],
     ENVIRONMENT_NAMES.allowGateway,
   )
-  if (allowGateway && !expectedApplicationId) {
+  if (allowGateway && (!expectedApplicationId || !expectedBotId)) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGateway} requires ${ENVIRONMENT_NAMES.applicationId}`,
+      `${ENVIRONMENT_NAMES.allowGateway} requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
     )
   }
   if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {

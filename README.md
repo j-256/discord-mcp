@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, channels, roles, threads, forums, effective permissions, privacy-minimized guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed forum posts, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, channels, roles, threads, forums, effective permissions, privacy-minimized guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, portable non-secret multi-bot profiles, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed forum posts, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -18,8 +18,11 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
 - Toolsets separate guild audit logs, permission diagnostics, attachments, forum posts, channel creation, role creation, deletion, and moderation from ordinary reads and interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - Optional guild and channel allowlists can narrow read access
+- Portable profiles bind one verified application and bot identity to exact non-empty guild scope, optional channel scope, selected tools, Gateway policy, and a caller-owned credential variable without storing the credential
+- Profile activation replaces ambient read boundaries in a cloned environment while leaving reviewed-write toggles and their narrower allowlists explicit at runtime
+- Profile files are private, bounded, canonical, single-link records written atomically; removal moves one exact profile to recoverable private trash instead of deleting it
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
-- Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
+- Real-time Gateway access is disabled by default and additionally requires expected application and bot IDs plus an exact guild or channel read allowlist
 - The Gateway requests only the nonprivileged `GUILDS`, `GUILD_MESSAGES`, `GUILD_MESSAGE_REACTIONS`, and `GUILD_MESSAGE_POLLS` intents, uses no Discord client cache, and immediately reduces dispatches to scoped identifiers and fixed event kinds
 - Gateway events remain in a bounded process-local buffer; content, profile data, emoji, URLs, raw payloads, session IDs, sequence numbers, and resume URLs are never returned or persisted
 - Process-local observability stores only bounded aggregate counts and durations under fixed operation names and never persists telemetry
@@ -73,6 +76,7 @@ Treat attachment messages, forum posts, channel creation, role creation, message
 - Node.js 22 or newer
 - A Discord application with a bot user
 - The bot token available as `DISCORD_BOT_TOKEN`
+- A distinct uppercase `DISCORD_*_TOKEN` environment variable may be selected when creating a named profile
 - `View Channels` and `Read Message History` in every channel the connector should read
 - The Message Content privileged intent enabled for full message bodies and native search; the optional content-free Gateway feed does not request it
 - `Send Messages` only in channels where message sends or edits will be enabled
@@ -133,18 +137,26 @@ node dist/cli.js doctor
 node dist/cli.js doctor --online
 node dist/cli.js catalog --check
 node dist/cli.js setup
+node dist/cli.js setup --profile support-bot --token-env DISCORD_SUPPORT_BOT_TOKEN
+node dist/cli.js profile list
+node dist/cli.js doctor --profile support-bot --online
+node dist/cli.js smoke --profile support-bot
 node dist/cli.js smoke
 ```
 
 `catalog` starts a separate credential-free stdio server that reuses the production registrations while disabling all tool execution. It reads no ambient token or policy, constructs no Discord client, opens no Gateway or telemetry exporter, and creates no activity record. Static safety guidance and validated prompts remain inspectable; every listed, invalid, disabled, discovery, or unknown tool call returns the same fixed `CATALOG_ONLY` result. Add `--check` to verify the exact tool, prompt, resource, and resource-template identities, every tool schema and risk annotation, static safety resource, and execution guard in process without contacting Discord. Add `--json` with `--check` for a versioned machine-readable report.
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, attachment policy, forum-post policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not read attachment files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, reading attachment files, opening a Gateway connection, or starting telemetry export.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application and bot identity pins, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, attachment policy, forum-post policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not read attachment files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, reading attachment files, opening a Gateway connection, or starting telemetry export. Add `--profile NAME` to diagnose the saved identity and read boundary using its selected credential variable.
 
-`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. When invoked through the built CLI, the descriptor points at that exact Node.js executable and CLI entrypoint. It includes the verified public application ID, names every environment variable that a host may forward, and never includes the bot token value.
+`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. When invoked through the built CLI, the descriptor points at that exact Node.js executable and CLI entrypoint. Without a profile, it pins the verified public application and bot IDs and names every environment variable that a host may forward. It never includes a bot token value.
 
-`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read messages, open a Gateway connection, start telemetry export, or write to Discord.
+Add `--profile NAME` to save a strict non-secret profile after verification. Profile setup requires an exact non-empty `DISCORD_MCP_ALLOWED_GUILD_IDS`; channel scope may remain empty to inherit the exact guild boundary. `--token-env DISCORD_NAME_TOKEN` selects a caller-owned credential variable, and `--force` replaces only a profile whose saved application and bot identities still match. Both options require `--profile`. Saved profiles intentionally omit tokens, Discord names and content, host brands, local paths, telemetry configuration, every reviewed-write toggle, and every write allowlist.
 
-Add `--json` to `setup`, `doctor`, or `smoke`, or use it with `catalog --check`, for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
+`profile list` and `profile show NAME` inspect saved contracts without reading a credential, contacting Discord, opening the Gateway, or starting telemetry. `profile remove NAME --confirm NAME` moves one validated profile into private recoverable trash and leaves its external credential active. `profile restore NAME --confirm NAME` restores the newest valid generation only when the active name is absent. Add `--json` to any profile lifecycle command for a versioned path-free report.
+
+`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read messages, open a Gateway connection, start telemetry export, or write to Discord. Add `--profile NAME` to smoke the saved contract.
+
+Add `--json` to `setup`, `doctor`, `smoke`, or a profile lifecycle command, or use it with `catalog --check`, for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
 
 ## Configuration
 
@@ -152,11 +164,12 @@ Add `--json` to `setup`, `doctor`, or `smoke`, or use it with `catalog --check`,
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | Yes | Discord bot authentication |
 | `DISCORD_MCP_APPLICATION_ID` | Recommended | Reject a token belonging to a different application |
+| `DISCORD_MCP_BOT_ID` | Recommended | Reject a token belonging to a different bot user |
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
 | `DISCORD_MCP_TOOL_SURFACE` | No | `full` advertises every selected canonical tool; `progressive` initially advertises only exact-tool discovery; defaults to `full` |
 | `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `attachments`, `audit-logs`, `channel-creation`, `connector`, `deletion`, `forum-posts`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `permissions`, `role-creation`, `roles`, and `threads`; defaults to `all` |
-| `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
+| `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires application and bot IDs plus at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
 | `DISCORD_MCP_OBSERVABILITY_LOGS` | No | Emit privacy-safe one-line operational JSON to stderr; defaults to `false` |
@@ -192,7 +205,9 @@ Add `--json` to `setup`, `doctor`, or `smoke`, or use it with `catalog --check`,
 
 An unset read allowlist means all guild channels Discord allows the bot to view. The bot's Discord role remains authoritative.
 
-Run `node dist/cli.js setup --json` and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, command, arguments, environment-variable names to forward, the verified public application ID to set, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Keep `DISCORD_BOT_TOKEN` in the host process environment or secret store and forward it by name; never copy its value into a static configuration file.
+Run `node dist/cli.js setup --json` and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, command, arguments, environment-variable names to forward, both verified public identity IDs to set, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Keep `DISCORD_BOT_TOKEN` in the host process environment or secret store and forward it by name; never copy its value into a static configuration file.
+
+A profile-aware descriptor runs `serve --profile NAME`, forwards only the selected credential variable plus runtime settings outside the saved boundary, and sets no identity or read-policy environment values. Activation maps the credential into the canonical process variable, applies both saved identity pins, exact read scope, tool policy, and Gateway policy, and removes the alias from the cloned service environment. Runtime write gates and their narrower allowlists remain ordinary forwarded environment variables, and the existing configuration loader requires them to fit inside the saved read scope.
 
 When using the published package, configure the stdio command as `npx` with arguments `--yes`, `@j-256/discord-mcp@0.1.0`, and `serve`. Pinning the package version prevents an unreviewed update from replacing the executable. Host configuration formats differ, so the launch descriptor is intentionally typed data rather than a client-specific configuration fragment.
 
@@ -272,9 +287,9 @@ Resource payloads and failures pass through the same recursive token-redaction b
 
 ## Real-time Gateway events
 
-Set `DISCORD_MCP_ALLOW_GATEWAY=true` only after `DISCORD_MCP_APPLICATION_ID` and at least one exact guild or channel read allowlist are configured. The stdio server then opens one native WebSocket connection to Discord. Constructing the MCP adapter, running `doctor`, running `setup`, and running `smoke` never open that connection. Initial connections use Discord's fixed Gateway origin; resume URLs received from Discord are accepted only for credential-free `wss` hosts in Discord's Gateway host family.
+Set `DISCORD_MCP_ALLOW_GATEWAY=true` only after `DISCORD_MCP_APPLICATION_ID`, `DISCORD_MCP_BOT_ID`, and at least one exact guild or channel read allowlist are configured. The stdio server then opens one native WebSocket connection to Discord. Constructing the MCP adapter, running `doctor`, running `setup`, and running `smoke` never open that connection. Initial connections use Discord's fixed Gateway origin; resume URLs received from Discord are accepted only for credential-free `wss` hosts in Discord's Gateway host family.
 
-The connection implements bounded connection and authentication deadlines, jittered heartbeats, acknowledgement timeouts, session resume, invalid-session delay, capped reconnect backoff, fatal close handling, idempotent shutdown on stdio termination, and a conservative process-local Identify budget. READY must identify the configured application before the feed accepts dispatches. Replayed dispatches received during a valid Resume are normalized instead of dropped. `get_gateway_status` distinguishes `disabled`, `connecting`, `authenticating`, `ready`, `reconnecting`, `failed`, and `stopped`, and reports only fixed error categories. It never returns the token, raw errors, WebSocket address, session ID, or Discord Gateway sequence.
+The connection implements bounded connection and authentication deadlines, jittered heartbeats, acknowledgement timeouts, session resume, invalid-session delay, capped reconnect backoff, fatal close handling, idempotent shutdown on stdio termination, and a conservative process-local Identify budget. READY must identify the configured application and exact bot user before the feed accepts dispatches. Replayed dispatches received during a valid Resume are normalized instead of dropped. `get_gateway_status` distinguishes `disabled`, `connecting`, `authenticating`, `ready`, `reconnecting`, `failed`, and `stopped`, and reports only fixed error categories. It never returns the token, raw errors, WebSocket address, session ID, or Discord Gateway sequence.
 
 The feed handles guild, channel, thread, role, message, bulk-deletion, reaction, and poll-vote lifecycle changes. Startup guild and thread synchronization records only a bounded ephemeral channel-to-parent identifier map so an allowlisted parent can grant read scope to child threads. Direct messages, out-of-scope guilds, unknown out-of-scope channels, malformed dispatches, and raw Discord strings are discarded. Public records contain a local receipt time, a fixed event kind, an opaque cursor, and only the relevant guild, channel, parent, role, or message IDs.
 

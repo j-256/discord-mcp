@@ -45,6 +45,7 @@ export interface DiscordGatewayOptions {
     | "allowedChannelIds"
     | "allowedGuildIds"
     | "allowGateway"
+    | "expectedBotId"
     | "gatewayEventBufferSize"
     | "token"
   >
@@ -194,6 +195,7 @@ function parsePayload(data: unknown): GatewayPayload | undefined {
 export class DiscordGateway implements GatewayRuntime {
   readonly #applicationId: string
   #awaitingHeartbeatAck = false
+  readonly #botId: string
   readonly #clock: () => number
   readonly #eventStore: GatewayEventStore
   #heartbeatIntervalMs: number | undefined
@@ -221,6 +223,10 @@ export class DiscordGateway implements GatewayRuntime {
     if (!DISCORD_SNOWFLAKE_PATTERN.test(options.applicationId)) {
       throw new RangeError("Gateway application ID must be a Discord snowflake")
     }
+    const botId = options.config.expectedBotId
+    if (!botId || !DISCORD_SNOWFLAKE_PATTERN.test(botId)) {
+      throw new RangeError("Gateway bot ID must be a Discord snowflake")
+    }
     if (!options.config.token.trim()) throw new RangeError("Gateway token must not be empty")
     if (
       options.config.allowGateway
@@ -230,6 +236,7 @@ export class DiscordGateway implements GatewayRuntime {
       throw new RangeError("Enabled Discord Gateway requires an exact guild or channel scope")
     }
     this.#applicationId = options.applicationId
+    this.#botId = botId
     this.#clock = options.clock || Date.now
     this.#eventStore = options.eventStore || new GatewayEventStore({
       allowedChannelIds: options.config.allowedChannelIds,
@@ -559,8 +566,16 @@ export class DiscordGateway implements GatewayRuntime {
     const record = recordValue(data)
     const application = recordValue(record?.application)
     const applicationId = safeString(application?.id, 20)
+    const user = recordValue(record?.user)
+    const botId = safeString(user?.id, 20)
     const sessionId = safeString(record?.session_id, 256)
-    if (applicationId !== this.#applicationId) {
+    if (
+      applicationId !== this.#applicationId
+      || !botId
+      || !DISCORD_SNOWFLAKE_PATTERN.test(botId)
+      || user?.bot !== true
+      || botId !== this.#botId
+    ) {
       this.#fail("invalid-ready-identity")
       return
     }

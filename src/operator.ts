@@ -30,9 +30,19 @@ import {
   selectedCanonicalMcpToolNames,
   selectedMcpToolsets,
 } from "./mcp-tool-catalog.js"
+import {
+  activateCredentialEnvironment,
+  createConnectorProfile,
+  normalizeCredentialEnvironmentName,
+  normalizeProfileName,
+  parseConnectorProfile,
+  PROFILE_MANAGED_ENVIRONMENT_NAMES,
+  saveProfile,
+  type ConnectorProfile,
+} from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 2
+export const OPERATOR_REPORT_SCHEMA_VERSION = 3
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -93,6 +103,7 @@ export interface SetupReport {
   guildsAccessibleOnFirstPage: number
   guildsInScopeOnFirstPage: number
   launch: StdioLaunchDescriptor
+  profile: ConnectorProfile | null
   schemaVersion: number
   serverName: string
   status: "ok"
@@ -150,7 +161,11 @@ export interface DoctorOptions {
 export interface SetupOptions {
   args?: readonly string[]
   command?: string
+  credentialVariable?: string
   environment?: NodeJS.ProcessEnv
+  overwriteProfile?: boolean
+  profileDirectory?: string
+  profileName?: string
   serverName?: string
   service?: StatusProvider
 }
@@ -557,6 +572,7 @@ export function createStdioLaunchDescriptor(options: {
   args?: readonly string[]
   botId: string
   command?: string
+  profile?: ConnectorProfile
   serverName?: string
 }): StdioLaunchDescriptor {
   const applicationId = options.applicationId.trim()
@@ -566,6 +582,20 @@ export function createStdioLaunchDescriptor(options: {
   const botId = options.botId.trim()
   if (!DISCORD_SNOWFLAKE_PATTERN.test(botId)) {
     throw new ConfigurationError("Verified Discord bot ID must be a snowflake")
+  }
+  const profile = options.profile === undefined
+    ? undefined
+    : parseConnectorProfile(options.profile)
+  if (
+    profile
+    && (
+      profile.identity.applicationId !== applicationId
+      || profile.identity.botId !== botId
+    )
+  ) {
+    throw new ConfigurationError(
+      "Portable launch profile does not match the verified Discord identity",
+    )
   }
   const serverName = options.serverName === undefined
     ? DEFAULT_MCP_SERVER_NAME
@@ -581,7 +611,13 @@ export function createStdioLaunchDescriptor(options: {
   if (args.some((argument) => typeof argument !== "string" || !argument.trim())) {
     throw new ConfigurationError("MCP server arguments must be non-empty strings")
   }
-  const environmentVariables = [
+  if (profile) {
+    if (args.includes("--profile")) {
+      throw new ConfigurationError("MCP server arguments already select a profile")
+    }
+    args.push("--profile", profile.name)
+  }
+  let environmentVariables: string[] = [
     ENVIRONMENT_NAMES.token,
     ENVIRONMENT_NAMES.allowedGuildIds,
     ENVIRONMENT_NAMES.allowedChannelIds,
@@ -631,15 +667,27 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.toolsets,
     ENVIRONMENT_NAMES.auditFile,
   ]
+  if (profile) {
+    const managed = new Set<string>(PROFILE_MANAGED_ENVIRONMENT_NAMES)
+    environmentVariables = [
+      profile.credential.variable,
+      ...environmentVariables.filter((name) => (
+        name !== ENVIRONMENT_NAMES.token
+        && !managed.has(name)
+      )),
+    ]
+  }
   return {
     args,
     command,
     environment: {
       forward: environmentVariables,
-      set: {
-        [ENVIRONMENT_NAMES.applicationId]: applicationId,
-        [ENVIRONMENT_NAMES.botId]: botId,
-      },
+      set: profile
+        ? {}
+        : {
+          [ENVIRONMENT_NAMES.applicationId]: applicationId,
+          [ENVIRONMENT_NAMES.botId]: botId,
+        },
     },
     requirements: {
       elicitation: "required-for-reviewed-writes",
@@ -659,23 +707,72 @@ export async function prepareSetup(
   options: SetupOptions = {},
 ): Promise<SetupReport> {
   const environment = options.environment || process.env
-  const config = loadConnectorConfig(environment)
+  if (
+    !options.profileName
+    && (
+      options.credentialVariable !== undefined
+      || options.overwriteProfile
+      || options.profileDirectory !== undefined
+    )
+  ) {
+    throw new ConfigurationError(
+      "Credential aliases, profile replacement, and profile storage require a profile name",
+    )
+  }
+  const profileName = options.profileName === undefined
+    ? undefined
+    : normalizeProfileName(options.profileName)
+  const credentialVariable = normalizeCredentialEnvironmentName(
+    options.credentialVariable ?? ENVIRONMENT_NAMES.token,
+  )
+  const runtimeEnvironment = profileName
+    ? activateCredentialEnvironment(credentialVariable, environment)
+    : environment
+  const config = loadConnectorConfig(runtimeEnvironment)
+  if (profileName && config.allowedGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `Profile setup requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+    )
+  }
   const service = options.service || new ConnectorService({ config })
   const status = await service.getStatus()
   if (status.guildPage.inScope < 1) {
     throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
   }
+  const profile = profileName
+    ? createConnectorProfile({
+      applicationId: status.application.id,
+      botId: status.bot.id,
+      channelIds: [...config.allowedChannelIds],
+      credentialVariable,
+      gatewayEnabled: config.allowGateway,
+      gatewayEventBufferSize: config.gatewayEventBufferSize,
+      guildIds: [...config.allowedGuildIds],
+      name: profileName,
+      toolsets: selectedMcpToolsets(config.mcpToolsets),
+      toolSurface: config.mcpToolSurface,
+    })
+    : null
   const launch = createStdioLaunchDescriptor({
     applicationId: status.application.id,
     botId: status.bot.id,
     ...(options.args ? { args: options.args } : {}),
     ...(options.command ? { command: options.command } : {}),
+    ...(profile ? { profile } : {}),
     ...(options.serverName !== undefined ? { serverName: options.serverName } : {}),
   })
+  if (profile) {
+    await saveProfile(profile, {
+      environment,
+      overwrite: options.overwriteProfile ?? false,
+      ...(options.profileDirectory ? { directory: options.profileDirectory } : {}),
+    })
+  }
   return {
     applicationId: status.application.id,
     botId: status.bot.id,
     launch,
+    profile,
     guildsAccessibleOnFirstPage: status.guildPage.accessible,
     guildsInScopeOnFirstPage: status.guildPage.inScope,
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
