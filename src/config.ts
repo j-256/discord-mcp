@@ -49,6 +49,7 @@ export interface ConnectorConfig {
   channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
+  expectedBotId: string | undefined
   forumPostChannelIds: ReadonlySet<string>
   gatewayEventBufferSize: number
   interactionChannelIds: ReadonlySet<string>
@@ -289,6 +290,10 @@ export function loadConnectorConfig(
   const expectedApplicationId = applicationIdValue?.trim()
     ? parseId(applicationIdValue, ENVIRONMENT_NAMES.applicationId)
     : undefined
+  const botIdValue = environment[ENVIRONMENT_NAMES.botId]
+  const expectedBotId = botIdValue?.trim()
+    ? parseId(botIdValue, ENVIRONMENT_NAMES.botId)
+    : undefined
   const allowGateway = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGateway],
     ENVIRONMENT_NAMES.allowGateway,
@@ -357,6 +362,7 @@ export function loadConnectorConfig(
     channelCreationGuildIds,
     deleteChannelIds,
     expectedApplicationId,
+    expectedBotId,
     forumPostChannelIds,
     gatewayEventBufferSize: parseInteger(
       environment[ENVIRONMENT_NAMES.gatewayEventBufferSize],

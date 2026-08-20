@@ -82,10 +82,10 @@ function application(id = APPLICATION_ID): DiscordApplication {
   }
 }
 
-function bot(): DiscordUser {
+function bot(id = BOT_ID): DiscordUser {
   return {
     bot: true,
-    id: BOT_ID,
+    id,
     username: "connector-bot",
   }
 }
@@ -360,6 +360,7 @@ function serviceFixture(overrides: {
   const config = loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     ...overrides.environment,
   }, { homeDirectory: "/test/home" })
   return {
@@ -398,6 +399,26 @@ test("service rejects a token for the wrong Discord application before data acce
     (error: unknown) => (
       error instanceof ConfigurationError
       && /expected 100000000000000001/.test(error.message)
+    ),
+  )
+  assert.equal(calls.guilds, 0)
+})
+
+test("service rejects a token for the wrong pinned bot before data access", async () => {
+  const { calls, service } = serviceFixture({
+    client: {
+      async getCurrentUser() {
+        calls.user += 1
+        return bot("999999999999999999")
+      },
+    },
+  })
+
+  await assert.rejects(
+    () => service.getStatus(),
+    (error: unknown) => (
+      error instanceof ConfigurationError
+      && /expected 200000000000000001/.test(error.message)
     ),
   )
   assert.equal(calls.guilds, 0)

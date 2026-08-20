@@ -18,6 +18,10 @@ export class OperationStoreError extends Error {
   override name = "OperationStoreError"
 }
 
+export class ProfileError extends Error {
+  override name = "ProfileError"
+}
+
 export class AttachmentMessagePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

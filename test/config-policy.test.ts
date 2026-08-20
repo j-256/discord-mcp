@@ -52,6 +52,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
     DISCORD_MCP_ALLOW_INTERACTIONS: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_BOT_ID: "300000000000000002",
     DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_INTERACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
     DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
@@ -83,6 +84,7 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.interactionMaxWritesPerMinute, 12)
   assert.equal(config.interactionMinWriteIntervalMs, 750)
   assert.equal(config.expectedApplicationId, "300000000000000001")
+  assert.equal(config.expectedBotId, "300000000000000002")
   assert.equal(config.gatewayEventBufferSize, 100)
   assert.equal(config.mcpToolSurface, "full")
   assert.deepEqual([...config.mcpToolsets], MCP_TOOLSET_NAMES)

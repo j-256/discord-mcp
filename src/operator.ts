@@ -39,6 +39,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
   applicationIdentity: "application-identity",
   attachmentPolicy: "attachment-policy",
+  botIdentity: "bot-identity",
   channelCreationPolicy: "channel-creation-policy",
   channelScope: "channel-scope",
   configuration: "configuration",
@@ -303,6 +304,17 @@ export async function diagnoseConnector(
         "warn",
         `${ENVIRONMENT_NAMES.applicationId} is not set, so token identity is not pinned locally`,
       ))
+    checks.push(config.expectedBotId
+      ? check(
+        DOCTOR_CHECK_IDS.botIdentity,
+        "pass",
+        `Expected Discord bot is pinned to ${config.expectedBotId}`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.botIdentity,
+        "warn",
+        `${ENVIRONMENT_NAMES.botId} is not set, so bot identity is not pinned locally`,
+      ))
     checks.push(config.allowedGuildIds.size > 0
       ? check(
         DOCTOR_CHECK_IDS.guildScope,
@@ -543,12 +555,17 @@ export async function diagnoseConnector(
 export function createStdioLaunchDescriptor(options: {
   applicationId: string
   args?: readonly string[]
+  botId: string
   command?: string
   serverName?: string
 }): StdioLaunchDescriptor {
   const applicationId = options.applicationId.trim()
   if (!DISCORD_SNOWFLAKE_PATTERN.test(applicationId)) {
     throw new ConfigurationError("Verified Discord application ID must be a snowflake")
+  }
+  const botId = options.botId.trim()
+  if (!DISCORD_SNOWFLAKE_PATTERN.test(botId)) {
+    throw new ConfigurationError("Verified Discord bot ID must be a snowflake")
   }
   const serverName = options.serverName === undefined
     ? DEFAULT_MCP_SERVER_NAME
@@ -621,6 +638,7 @@ export function createStdioLaunchDescriptor(options: {
       forward: environmentVariables,
       set: {
         [ENVIRONMENT_NAMES.applicationId]: applicationId,
+        [ENVIRONMENT_NAMES.botId]: botId,
       },
     },
     requirements: {
@@ -649,6 +667,7 @@ export async function prepareSetup(
   }
   const launch = createStdioLaunchDescriptor({
     applicationId: status.application.id,
+    botId: status.bot.id,
     ...(options.args ? { args: options.args } : {}),
     ...(options.command ? { command: options.command } : {}),
     ...(options.serverName !== undefined ? { serverName: options.serverName } : {}),

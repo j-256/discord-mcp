@@ -404,6 +404,12 @@ export class ConnectorService {
         if (!bot.bot) {
           throw new ConfigurationError("Discord credential did not identify a bot user")
         }
+        const expectedBotId = this.#config.expectedBotId
+        if (expectedBotId && bot.id !== expectedBotId) {
+          throw new ConfigurationError(
+            `Discord token belongs to bot ${bot.id}, expected ${expectedBotId}`,
+          )
+        }
         if (application.bot?.id && application.bot.id !== bot.id) {
           throw new ConfigurationError("Discord application and bot user identities do not match")
         }

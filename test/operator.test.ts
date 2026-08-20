@@ -33,6 +33,7 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     ...overrides,
   }
 }
@@ -632,6 +633,7 @@ test("doctor fails online verification when local scope contains no accessible g
 test("stdio launch descriptor is portable, complete, and credential-free", () => {
   const result = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
+    botId: BOT_ID,
     command: "/opt/Discord MCP/bin/discord-mcp",
     serverName: "team-discord",
   })
@@ -643,6 +645,7 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
       forward: result.environment.forward,
       set: {
         DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+        DISCORD_MCP_BOT_ID: BOT_ID,
       },
     },
     requirements: {
@@ -661,24 +664,39 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
   assert.deepEqual(
     [...result.environment.forward].sort(),
     Object.values(ENVIRONMENT_NAMES)
-      .filter((name) => name !== ENVIRONMENT_NAMES.applicationId)
+      .filter((name) => (
+        name !== ENVIRONMENT_NAMES.applicationId
+        && name !== ENVIRONMENT_NAMES.botId
+      ))
       .sort(),
   )
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
   assert.throws(
     () => createStdioLaunchDescriptor({
       applicationId: APPLICATION_ID,
+      botId: BOT_ID,
       serverName: "bad.name",
     }),
     /MCP server name/,
   )
   assert.throws(
-    () => createStdioLaunchDescriptor({ applicationId: "not-a-snowflake" }),
+    () => createStdioLaunchDescriptor({
+      applicationId: "not-a-snowflake",
+      botId: BOT_ID,
+    }),
     /snowflake/,
   )
   assert.throws(
     () => createStdioLaunchDescriptor({
       applicationId: APPLICATION_ID,
+      botId: "not-a-snowflake",
+    }),
+    /bot ID must be a snowflake/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
       command: " ",
     }),
     /command must not be empty/,
@@ -687,6 +705,7 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
     () => createStdioLaunchDescriptor({
       applicationId: APPLICATION_ID,
       args: ["serve", ""],
+      botId: BOT_ID,
     }),
     /arguments must be non-empty strings/,
   )

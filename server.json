@@ -43,6 +43,11 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_BOT_ID",
+          "description": "Expected Discord bot user ID; startup rejects a token for another bot",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ALLOWED_GUILD_IDS",
           "description": "Comma- or whitespace-separated read guild allowlist",
           "format": "string"
