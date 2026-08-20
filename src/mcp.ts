@@ -30,6 +30,7 @@ import {
 import { loadConnectorConfig } from "./config.js"
 import {
   ADMINISTRATION_LIMITS,
+  AUDIT_LOG_LIMITS,
   CHANNEL_CREATION_KINDS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
@@ -181,6 +182,37 @@ const guildInputSchema = z.strictObject({
 const roleInputSchema = z.strictObject({
   guildId: snowflakeSchema,
   roleId: snowflakeSchema,
+})
+const guildAuditListInputSchema = z.strictObject({
+  actionType: z.number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional()
+    .describe("Optional exact numeric Discord audit action type"),
+  actorUserId: snowflakeSchema
+    .optional()
+    .describe("Optional exact executor user ID filter"),
+  beforeEntryId: snowflakeSchema
+    .optional()
+    .describe("Optional exact audit entry cursor for the next older page"),
+  guildId: snowflakeSchema.describe("Exact permitted Discord guild ID"),
+  includeReasons: z.boolean()
+    .default(false)
+    .describe("Explicitly include audit reasons; change and option values remain omitted"),
+  limit: z.number()
+    .int()
+    .min(1)
+    .max(AUDIT_LOG_LIMITS.entryPage)
+    .default(AUDIT_LOG_LIMITS.entryPageDefault)
+    .describe("Maximum privacy-minimized entries to return"),
+})
+const guildAuditEntryInputSchema = z.strictObject({
+  entryId: snowflakeSchema.describe("Exact Discord audit entry ID"),
+  guildId: snowflakeSchema.describe("Exact permitted Discord guild ID"),
+  includeReason: z.boolean()
+    .default(false)
+    .describe("Explicitly include the audit reason; change and option values remain omitted"),
 })
 const uniqueSnowflakeListSchema = z.array(snowflakeSchema)
   .min(1)
@@ -1088,6 +1120,7 @@ export interface DiscordToolService {
   explainChannelAccess: ConnectorService["explainChannelAccess"]
   explainPrincipalPermissions: ConnectorService["explainPrincipalPermissions"]
   getMessage: ConnectorService["getMessage"]
+  getGuildAuditEntry: ConnectorService["getGuildAuditEntry"]
   getRole: ConnectorService["getRole"]
   getStatus: ConnectorService["getStatus"]
   listActivity: ConnectorService["listActivity"]
@@ -1095,6 +1128,7 @@ export interface DiscordToolService {
   listArchivedThreads: ConnectorService["listArchivedThreads"]
   listChannels: ConnectorService["listChannels"]
   listGuilds: ConnectorService["listGuilds"]
+  listGuildAuditEntries: ConnectorService["listGuildAuditEntries"]
   listRoles: ConnectorService["listRoles"]
   planMessageDeletion: ConnectorService["planMessageDeletion"]
   planAttachmentMessage: ConnectorService["planAttachmentMessage"]
@@ -1818,6 +1852,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         "Resource discovery is content-free; live resources are bounded, and message resources require exact channel and message IDs.",
         "The optional Gateway feed requests no privileged intents, retains only scoped identifiers and fixed event kinds, and reports cursor discontinuities explicitly.",
         "Observability is process-local unless separately enabled for privacy-safe OTLP export, and status surfaces expose only fixed operation aggregates and exporter health.",
+        "Guild audit-log reads omit embedded Discord objects plus all change and option values, redact non-snowflake targets, persist nothing, and include reasons only by explicit opt-in.",
         "Prompts render validated read-only or plan-only workflows and never perform service calls themselves.",
         "Native search requires a substantive filter and may report that Discord is still indexing.",
         "Forum posts are public threads and retain applied tag IDs.",
@@ -2007,6 +2042,60 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord role ${input.roleId} belongs to in-scope guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_guild_audit_entries", server.registerTool(
+    "list_guild_audit_entries",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "List a bounded newest-to-oldest page of privacy-minimized Discord guild audit entries with exact actor, action, and before-entry filters. Embedded objects, change and option values, and non-snowflake targets are omitted; reasons require explicit opt-in.",
+      inputSchema: guildAuditListInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List privacy-safe Discord guild audit entries",
+    },
+    safeToolHandler("list_guild_audit_entries", async (
+      input: z.infer<typeof guildAuditListInputSchema>,
+      context,
+    ) => {
+      const result = await service.listGuildAuditEntries(input.guildId, {
+        ...(input.actionType !== undefined ? { actionType: input.actionType } : {}),
+        ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+        ...(input.beforeEntryId ? { beforeEntryId: input.beforeEntryId } : {}),
+        includeReasons: input.includeReasons,
+        limit: input.limit,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord returned ${result.entries.length} privacy-minimized guild audit entries`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("get_guild_audit_entry", server.registerTool(
+    "get_guild_audit_entry",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Look up one exact Discord guild audit entry by ID without scanning newer history. The result omits embedded objects plus change and option values, redacts non-snowflake targets, and includes its reason only by explicit opt-in.",
+      inputSchema: guildAuditEntryInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Get one privacy-safe Discord guild audit entry",
+    },
+    safeToolHandler("get_guild_audit_entry", async (
+      input: z.infer<typeof guildAuditEntryInputSchema>,
+      context,
+    ) => {
+      const result = await service.getGuildAuditEntry(input.guildId, input.entryId, {
+        includeReason: input.includeReason,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        result.found
+          ? `Discord returned privacy-minimized guild audit entry ${input.entryId}`
+          : `Discord guild audit entry ${input.entryId} was not found in retained history`,
       )
     }, secrets, observability),
   ))

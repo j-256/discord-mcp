@@ -6,6 +6,7 @@ import test from "node:test"
 
 import { MCP_TOOLSET_NAMES } from "../src/constants.js"
 import type { DiscordToolService } from "../src/mcp.js"
+import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import {
   diagnoseConnector,
   DOCTOR_CHECK_IDS,
@@ -110,6 +111,7 @@ function toolService(): DiscordToolService {
     executeRoleCreation: unexpected,
     explainChannelAccess: unexpected,
     explainPrincipalPermissions: unexpected,
+    getGuildAuditEntry: unexpected,
     getMessage: unexpected,
     getRole: unexpected,
     async getStatus() {
@@ -120,6 +122,7 @@ function toolService(): DiscordToolService {
     listArchivedThreads: unexpected,
     listChannels: unexpected,
     listGuilds: unexpected,
+    listGuildAuditEntries: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
     planAttachmentMessage: unexpected,
@@ -660,7 +663,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 31)
+  assert.equal(report.toolCount, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [

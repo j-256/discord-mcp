@@ -2,6 +2,10 @@ export class ConfigurationError extends Error {
   override name = "ConfigurationError"
 }
 
+export class DiscordAuditEvidenceError extends ConfigurationError {
+  override name = "DiscordAuditEvidenceError"
+}
+
 export class PolicyError extends Error {
   override name = "PolicyError"
 }

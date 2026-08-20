@@ -1,4 +1,5 @@
 export * from "./activity-log.js"
+export * from "./audit-log-service.js"
 export * from "./administration-service.js"
 export * from "./attachment-file.js"
 export * from "./attachment-message-service.js"

@@ -97,6 +97,78 @@ test("Discord client encodes bounded message pagination without undefined cursor
   assert.equal(requestUrl, `${API_BASE_URL}/channels/200/messages?before=300&limit=25`)
 })
 
+test("Discord client encodes bounded guild audit-log filters and cursors", async () => {
+  let requestUrl = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      requestUrl = String(input)
+      return jsonResponse({ audit_log_entries: [] })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.getGuildAuditLog("100", {
+    actionType: 22,
+    actorUserId: "200",
+    before: "300",
+    limit: 51,
+  })
+
+  const url = new URL(requestUrl)
+  assert.equal(url.pathname, "/api/v10/guilds/100/audit-logs")
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    action_type: "22",
+    before: "300",
+    limit: "51",
+    user_id: "200",
+  })
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "get_guild_audit_log",
+    retries: 0,
+    runs: 1,
+  }])
+  assert.equal(JSON.stringify(records).includes("100"), false)
+})
+
+test("Discord client rejects invalid guild audit-log inputs before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ audit_log_entries: [] })
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(() => client.getGuildAuditLog("invalid"), /guild ID/)
+  assert.throws(
+    () => client.getGuildAuditLog("18446744073709551616"),
+    /guild ID/,
+  )
+  assert.throws(
+    () => client.getGuildAuditLog("100", { actorUserId: "invalid" }),
+    /actor user ID/,
+  )
+  assert.throws(
+    () => client.getGuildAuditLog("100", { after: "200", before: "300" }),
+    /mutually exclusive/,
+  )
+  assert.throws(
+    () => client.getGuildAuditLog("100", { limit: 101 }),
+    /between 1 and 100/,
+  )
+  assert.throws(
+    () => client.getGuildAuditLog("100", { actionType: 0 }),
+    /positive safe integer/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client enforces pagination bounds outside the MCP adapter", () => {
   const client = new DiscordClient({
     apiBaseUrl: API_BASE_URL,

@@ -13,6 +13,33 @@ export interface DiscordBan {
   user: DiscordUser
 }
 
+export interface DiscordGuildAuditLogChange {
+  key: string
+  new_value?: unknown
+  old_value?: unknown
+}
+
+export interface DiscordGuildAuditLogEntry {
+  action_type: number
+  changes?: DiscordGuildAuditLogChange[] | null
+  id: string
+  options?: Record<string, unknown> | null
+  reason?: string | null
+  target_id: string | null
+  user_id: string | null
+}
+
+export interface DiscordGuildAuditLog {
+  application_commands?: unknown[]
+  audit_log_entries: DiscordGuildAuditLogEntry[]
+  auto_moderation_rules?: unknown[]
+  guild_scheduled_events?: unknown[]
+  integrations?: unknown[]
+  threads?: unknown[]
+  users?: DiscordUser[]
+  webhooks?: unknown[]
+}
+
 export interface DiscordAttachment {
   content_type?: string | null
   description?: string | null

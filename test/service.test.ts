@@ -40,6 +40,7 @@ const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
+const OTHER_GUILD_ID = "300000000000000002"
 const CHANNEL_ID = "400000000000000001"
 const OTHER_CHANNEL_ID = "400000000000000002"
 const THREAD_ID = "400000000000000003"
@@ -183,6 +184,7 @@ function serviceFixture(overrides: {
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
 } = {}) {
   const calls = {
+    activityAppends: 0,
     addReaction: 0,
     application: 0,
     createAttachment: 0,
@@ -191,6 +193,7 @@ function serviceFixture(overrides: {
     createRole: 0,
     editMessage: 0,
     getRole: 0,
+    guildAuditLog: 0,
     guilds: 0,
     listMessages: 0,
     removeMember: 0,
@@ -254,6 +257,10 @@ function serviceFixture(overrides: {
     },
     async getGuild() {
       return { ...guild(), owner_id: "700000000000000001" }
+    },
+    async getGuildAuditLog() {
+      calls.guildAuditLog += 1
+      return { audit_log_entries: [] }
     },
     async getGuildBan(_guildId, userId) {
       return { user: { id: userId, username: "target" } }
@@ -330,7 +337,9 @@ function serviceFixture(overrides: {
   }
   Object.assign(client, overrides.client)
   const activityStore: ActivityStore = {
-    async append() {},
+    async append() {
+      calls.activityAppends += 1
+    },
     async list() {
       return {
         entries: [],
@@ -722,6 +731,47 @@ test("service returns bounded role inventory and one exact role", async () => {
     mismatched.getRole(GUILD_ID, CREATED_ROLE_ID),
     /incomplete or invalid role evidence/,
   )
+})
+
+test("service verifies identity and guild scope before privacy-safe audit-log reads", async () => {
+  const entryId = "800000000000000001"
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildAuditLog(guildId, options) {
+        assert.equal(guildId, GUILD_ID)
+        calls.guildAuditLog += 1
+        if (options?.after) {
+          return {
+            audit_log_entries: [{
+              action_type: 22,
+              id: entryId,
+              target_id: "private-invite-code",
+              user_id: BOT_ID,
+            }],
+          }
+        }
+        return { audit_log_entries: [] }
+      },
+    },
+    environment: { DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID },
+  })
+
+  const listed = await service.listGuildAuditEntries(GUILD_ID, { limit: 1 })
+  const exact = await service.getGuildAuditEntry(GUILD_ID, entryId)
+
+  assert.equal(listed.guildId, GUILD_ID)
+  assert.equal(exact.found, true)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.guildAuditLog, 2)
+  assert.equal(calls.activityAppends, 0)
+  assert.equal(JSON.stringify(exact).includes("private-invite-code"), false)
+
+  await assert.rejects(
+    () => service.listGuildAuditEntries(OTHER_GUILD_ID),
+    PolicyError,
+  )
+  assert.equal(calls.guildAuditLog, 2)
 })
 
 test("service verifies identity before reviewed additive role creation", async () => {

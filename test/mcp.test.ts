@@ -12,6 +12,7 @@ import {
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
 import {
+  AUDIT_LOG_LIMITS,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
@@ -46,6 +47,7 @@ import {
 } from "../src/mcp.js"
 import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
 import { MCP_RESOURCE_URIS } from "../src/mcp-guidance.js"
+import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityConfig } from "../src/observability-config.js"
 import { OperationalTelemetry } from "../src/observability.js"
@@ -67,6 +69,7 @@ const CHANNEL_ID = "200000000000000001"
 const PARENT_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
 const ROLE_ID = "350000000000000001"
+const AUDIT_ENTRY_ID = "360000000000000001"
 const USER_ID = "400000000000000001"
 const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
@@ -709,6 +712,38 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async getGuildAuditEntry(guildId, entryId, options) {
+      return {
+        entry: {
+          actionName: "MEMBER_BAN_ADD",
+          actionType: 22,
+          actorUserId: USER_ID,
+          changeCount: 1,
+          changeKeys: ["reason"],
+          createdAt: "2026-08-20T00:00:00.000Z",
+          hasReason: true,
+          id: entryId,
+          optionKeys: [],
+          redactedChangeKeyCount: 0,
+          redactedOptionKeyCount: 0,
+          targetId: USER_ID,
+          targetIdentifierRedacted: false,
+          ...(options?.includeReason ? { reason: AUDIT_REASON } : {}),
+        },
+        found: true,
+        guildId,
+        privacy: {
+          changeValues: "omitted",
+          embeddedObjects: "omitted",
+          nonSnowflakeTargets: "redacted",
+          optionValues: "omitted",
+          persistence: "none",
+          reasons: options?.includeReason ? "included" : "omitted",
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async getRole(guildId) {
       calls.getRole += 1
       return {
@@ -796,6 +831,45 @@ function serviceFixture(overrides: {
           before: null,
           requestedLimit: 200,
           returned: 0,
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async listGuildAuditEntries(guildId, options) {
+      const includeReasons = options?.includeReasons ?? false
+      return {
+        entries: [{
+          actionName: "MEMBER_BAN_ADD",
+          actionType: 22,
+          actorUserId: USER_ID,
+          changeCount: 1,
+          changeKeys: ["reason"],
+          createdAt: "2026-08-20T00:00:00.000Z",
+          hasReason: true,
+          id: AUDIT_ENTRY_ID,
+          optionKeys: [],
+          redactedChangeKeyCount: 0,
+          redactedOptionKeyCount: 0,
+          targetId: USER_ID,
+          targetIdentifierRedacted: false,
+          ...(includeReasons ? { reason: AUDIT_REASON } : {}),
+        }],
+        guildId,
+        page: {
+          beforeEntryId: options?.beforeEntryId ?? null,
+          hasMore: false,
+          nextBeforeEntryId: null,
+          requestedLimit: options?.limit ?? 25,
+          returned: 1,
+        },
+        privacy: {
+          changeValues: "omitted",
+          embeddedObjects: "omitted",
+          nonSnowflakeTargets: "redacted",
+          optionValues: "omitted",
+          persistence: "none",
+          reasons: includeReasons ? "included" : "omitted",
         },
         schemaVersion: 1,
         status: "ok",
@@ -1003,6 +1077,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_channels",
       "list_roles",
       "get_role",
+      "list_guild_audit_entries",
+      "get_guild_audit_entry",
       "list_active_threads",
       "list_archived_threads",
       "explain_channel_access",
@@ -1147,6 +1223,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   for (const name of [
     "explain_principal_permissions",
     "audit_channel_role_access",
+    "list_guild_audit_entries",
+    "get_guild_audit_entry",
   ]) {
     assert.deepEqual(listedTool(result.tools, name).annotations, {
       destructiveHint: false,
@@ -1608,6 +1686,65 @@ test("MCP role reads expose complete inventory and exact lookup with snowflake v
   assert.equal(invalid.isError, true)
   assert.equal(calls.listRoles, 1)
   assert.equal(calls.getRole, 1)
+})
+
+test("MCP guild audit-log tools enforce bounded privacy tiers and exact IDs", async (context) => {
+  const { client } = await connectedFixture(context)
+  const tools = (await client.listTools()).tools
+  const listTool = listedTool(tools, "list_guild_audit_entries")
+
+  assert.equal(
+    (listTool.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .limit?.maximum,
+    AUDIT_LOG_LIMITS.entryPage,
+  )
+  const listed = await client.callTool({
+    arguments: {
+      actionType: 22,
+      actorUserId: USER_ID,
+      guildId: GUILD_ID,
+      limit: 1,
+    },
+    name: "list_guild_audit_entries",
+  })
+  const exact = await client.callTool({
+    arguments: {
+      entryId: AUDIT_ENTRY_ID,
+      guildId: GUILD_ID,
+      includeReason: true,
+    },
+    name: "get_guild_audit_entry",
+  })
+  const invalid = await client.callTool({
+    arguments: { actionType: 0, guildId: GUILD_ID },
+    name: "list_guild_audit_entries",
+  })
+
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal(JSON.stringify(listed).includes(AUDIT_REASON), false)
+  assert.equal(structuredContent(exact).found, true)
+  assert.equal(JSON.stringify(exact).includes(AUDIT_REASON), true)
+  assert.equal(invalid.isError, true)
+})
+
+test("progressive audit-log discovery reveals only the requested exact read", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: {
+      DISCORD_MCP_TOOLSETS: "audit-logs",
+      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "get_guild_audit_entry" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, ["get_guild_audit_entry"])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["get_guild_audit_entry", "discover_discord_tools"],
+  )
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {
@@ -3137,7 +3274,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 31)
+  assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, 7)
   assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 5)

@@ -176,6 +176,8 @@ export function registerDiscordResources(
           "",
           "Principal permission diagnostics are read-only and scope every exact guild, channel, member, role, and hierarchy target before evaluation. They use exact member and private-thread membership lookups rather than member enumeration, fail closed on malformed evidence, and return unknown instead of optimistic answers when evidence is incomplete. Channel-role audits expose standalone role baselines and never infer member-specific overwrites, timeouts, or private-thread membership.",
           "",
+          "Guild audit-log reads are separately selectable, exact-guild scoped, bounded, and read-only. They validate remote ordering, cursors, filters, and identifiers; omit embedded Discord objects plus change and option values; redact non-snowflake targets; include reasons only by explicit opt-in; and persist nothing.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Attachment messages require separate exact channel and canonical local-directory scopes. Planning performs a bounded stable read of one owned regular file and binds its bytes, path, exact message fields, reply, notifications, and complete permissions into a keyed plan. Execution requires fresh byte-matching plans, signed approval, a unique one-shot operation key, the shared anti-spam guard, pending content-free records, one non-retried multipart request, and exact message readback. It never accepts URLs or base64, persists file or message content, returns an attachment URL, retries, or rolls back.",

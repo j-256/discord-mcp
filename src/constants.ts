@@ -7,6 +7,7 @@ export const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json
 export const DISCORD_WEB_BASE_URL = "https://discord.com"
 export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION})`
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
+export const DISCORD_SNOWFLAKE_MAX = 18_446_744_073_709_551_615n
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 export const CONTENT_FREE_ERROR_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/
 export const CONTENT_FREE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
@@ -23,6 +24,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 export const MCP_TOOLSET_NAMES = [
   "activity",
   "attachments",
+  "audit-logs",
   "channel-creation",
   "connector",
   "deletion",
@@ -133,6 +135,16 @@ export const PERMISSION_LIMITS = Object.freeze({
   auditActions: 5,
   auditRolePage: 100,
   auditRolePageDefault: 50,
+})
+
+export const AUDIT_LOG_LIMITS = Object.freeze({
+  changes: 100,
+  entryPage: 50,
+  entryPageDefault: 25,
+  options: 50,
+  reasonCharacters: 512,
+  reflectedKeyCharacters: 100,
+  responseEntries: 100,
 })
 
 export const CONNECTOR_LIMITS = Object.freeze({

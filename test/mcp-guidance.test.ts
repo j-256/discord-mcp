@@ -218,6 +218,7 @@ function guidanceService(options: {
       }
     },
     explainPrincipalPermissions: unexpected,
+    getGuildAuditEntry: unexpected,
     async getMessage(channelId, messageId) {
       calls.messages += 1
       calls.lastChannelId = channelId
@@ -299,6 +300,7 @@ function guidanceService(options: {
         status: "ok",
       }
     },
+    listGuildAuditEntries: unexpected,
     async listRoles(guildId) {
       calls.roles += 1
       calls.lastGuildId = guildId
@@ -463,6 +465,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
   assert.match(safety.text, /ADMINISTRATOR is forbidden/)
+  assert.match(safety.text, /Guild audit-log reads are separately selectable/)
+  assert.match(safety.text, /include reasons only by explicit opt-in/)
   assert.match(safety.text, /one-shot operation key/)
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)

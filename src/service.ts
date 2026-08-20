@@ -3,6 +3,11 @@ import type {
   ActivityStore,
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
+import {
+  GuildAuditLogService,
+  type GetGuildAuditEntryOptions,
+  type ListGuildAuditEntriesOptions,
+} from "./audit-log-service.js"
 import type {
   AttachmentMessagePlan,
   AttachmentMessageRequest,
@@ -109,6 +114,7 @@ export interface DiscordServiceClient {
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
+  getGuildAuditLog: DiscordClient["getGuildAuditLog"]
   getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
@@ -281,6 +287,7 @@ export class ConnectorService {
   readonly #deletionService: DeletionService
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
+  readonly #guildAuditLogService: GuildAuditLogService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
@@ -339,6 +346,9 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.interactionOptions,
       limiter: interactionLimiter,
+    })
+    this.#guildAuditLogService = new GuildAuditLogService({
+      client: this.#client,
     })
     this.#permissionService = new PermissionService({
       client: this.#client,
@@ -487,6 +497,25 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async listGuildAuditEntries(
+    guildId: string,
+    options: ListGuildAuditEntriesOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    this.#policy.assertGuildAllowed(guildId)
+    return this.#guildAuditLogService.list(guildId, options)
+  }
+
+  async getGuildAuditEntry(
+    guildId: string,
+    entryId: string,
+    options: GetGuildAuditEntryOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    this.#policy.assertGuildAllowed(guildId)
+    return this.#guildAuditLogService.get(guildId, entryId, options)
   }
 
   async readMessages(channelId: string, options: MessagePageOptions = {}) {

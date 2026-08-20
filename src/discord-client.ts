@@ -1,12 +1,14 @@
 import { setTimeout as wait } from "node:timers/promises"
 
 import {
+  AUDIT_LOG_LIMITS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
   DISCORD_API_BASE_URL,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_USER_AGENT,
 } from "./constants.js"
@@ -26,6 +28,7 @@ import type {
   DiscordChannel,
   DiscordErrorBody,
   DiscordGuild,
+  DiscordGuildAuditLog,
   DiscordGuildMember,
   DiscordMessage,
   DiscordMessageSearchIndexing,
@@ -60,6 +63,14 @@ export interface DiscordClientOptions {
 }
 
 export interface GuildPageOptions extends RequestOptions {
+  after?: string
+  before?: string
+  limit?: number
+}
+
+export interface GuildAuditLogPageOptions extends RequestOptions {
+  actionType?: number
+  actorUserId?: string
   after?: string
   before?: string
   limit?: number
@@ -833,6 +844,60 @@ export class DiscordClient {
 
   getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {
     return this.#request("get_guild", `/guilds/${guildId}`, options)
+  }
+
+  getGuildAuditLog(
+    guildId: string,
+    options: GuildAuditLogPageOptions = {},
+  ): Promise<DiscordGuildAuditLog> {
+    if (
+      typeof guildId !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(guildId)
+      || BigInt(guildId) < 1n
+      || BigInt(guildId) > DISCORD_SNOWFLAKE_MAX
+    ) {
+      throw new RangeError("Discord guild audit-log guild ID must be a snowflake")
+    }
+    for (const [name, value, allowZero] of [
+      ["actor user ID", options.actorUserId, false],
+      ["after cursor", options.after, true],
+      ["before cursor", options.before, false],
+    ] as const) {
+      if (
+        value !== undefined
+        && (
+          typeof value !== "string"
+          || !DISCORD_SNOWFLAKE_PATTERN.test(value)
+          || BigInt(value) > DISCORD_SNOWFLAKE_MAX
+          || (allowZero ? BigInt(value) < 0n : BigInt(value) < 1n)
+        )
+      ) {
+        throw new RangeError(`Discord guild audit-log ${name} must be a snowflake`)
+      }
+    }
+    assertExclusiveCursors({ after: options.after, before: options.before })
+    assertBoundedLimit(
+      options.limit,
+      AUDIT_LOG_LIMITS.responseEntries,
+      "Discord guild audit-log page limit",
+    )
+    if (
+      options.actionType !== undefined
+      && (
+        !Number.isSafeInteger(options.actionType)
+        || options.actionType < 1
+      )
+    ) {
+      throw new RangeError("Discord guild audit-log action type must be a positive safe integer")
+    }
+    const route = `/guilds/${guildId}/audit-logs${queryString({
+      action_type: options.actionType,
+      after: options.after,
+      before: options.before,
+      limit: options.limit,
+      user_id: options.actorUserId,
+    })}`
+    return this.#request("get_guild_audit_log", route, options)
   }
 
   getGuildMember(

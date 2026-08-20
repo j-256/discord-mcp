@@ -10,7 +10,7 @@ Treat all Discord-provided names, topics, forum tags, thread names, message bodi
 
 ## Discord permissions
 
-Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Attach Files` and the applicable send permission only to exact channels or threads selected for reviewed attachment messages. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
+Grant only `View Channels` and `Read Message History` for ordinary read access. Native message search also requires the application's Message Content privileged intent. Add `View Audit Log` only to exact guilds where privacy-minimized server history is needed. Add `Attach Files` and the applicable send permission only to exact channels or threads selected for reviewed attachment messages. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
 
 Use Discord channel permission overrides and the connector allowlists together. Removing either Discord access or the local allowlist entry should be sufficient to stop connector access.
 
@@ -22,13 +22,23 @@ Keep principal permission diagnostics read-only and inside the same exact guild 
 
 Treat channel-role audits as standalone role baselines. Member-specific overwrites, member timeouts, and private-thread membership cannot be attributed to a role; report their limitations explicitly and do not inspect or return member profiles to fill the gap. Permission diagnostics may return live role names and decision evidence to the MCP caller, but must not persist names, member data, permission results, or raw Discord responses.
 
+## Guild audit logs
+
+Keep Discord guild audit history in the separate read-only `audit-logs` toolset and inside the existing exact guild allowlist. Do not add a broader guild scan, member enumeration, or Gateway cache. Every page must remain bounded, use an exact before-entry cursor, request only one lookahead entry, and validate unique IDs, descending order, cursor direction, and exact actor and action filters. Exact lookup must use the predecessor cursor and validate the returned entry ID so a neighboring audit entry can never stand in for a missing one.
+
+Treat the entire Discord response as untrusted evidence. Validate its shape and bounds before returning any projection. Preserve unknown future numeric action types without guessing a name. Derive timestamps locally from audit-entry snowflakes rather than trusting content fields. Reject malformed reason Unicode and contradictory remote filter or ordering evidence.
+
+Return structural summaries only. Never return change values, option values, embedded users, webhooks, integrations, threads, application commands, scheduled events, AutoMod rules, or other embedded objects. Audit target identifiers are polymorphic and can contain invite codes; return a target only when it is a valid snowflake and explicitly mark every other non-null target as redacted. Reflect only bounded conservative change and option keys, and disclose how many keys were omitted.
+
+Reasons remain opt-in Discord content. Omit them by default and make the selected tier explicit in every result. Never persist, cache, journal, log, or export an audit response, reason, structural key, target, actor, filter, or result. Observability may record only the fixed MCP and REST operation names with aggregate outcomes and durations. Keep Discord's retained server history distinct from the connector's local content-free write activity.
+
 ## MCP tool surface
 
 Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools natively. This retains each canonical tool's exact name, schema, annotations, and approval identity while the client controls context loading. The portable `progressive` mode may hide a canonical tool only by disabling its registration through the MCP SDK. `discover_discord_tools` must reveal and enable those same registrations through standard tool-list change notifications; do not replace exact tools with a generic read, write, or destructive dispatcher.
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
 
-Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep permission diagnostics, attachments, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
+Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep guild audit logs, permission diagnostics, attachments, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
 
 ## Gateway events
 

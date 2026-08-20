@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, effective permissions, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, effective permissions, privacy-minimized guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -15,7 +15,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
-- Toolsets separate permission diagnostics, attachments, channel creation, role creation, deletion, and moderation from ordinary reads and interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
+- Toolsets separate guild audit logs, permission diagnostics, attachments, channel creation, role creation, deletion, and moderation from ordinary reads and interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
@@ -43,6 +43,8 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Role reads normalize current solid colors, hierarchy, managed-role provenance, known permission names, and unknown future permission bits from a complete bounded inventory or one exact role endpoint
 - Principal permission diagnostics fetch exact member or role identities and a complete bounded role inventory without listing guild members, then evaluate named permissions, channel actions, timeouts, thread access, and strict role hierarchy without writing or persisting profile data
 - Channel-role audits evaluate every role against a bounded action set, page compact rows with exact role cursors, report full-inventory totals, and distinguish standalone role baselines from member-specific overwrites
+- Guild audit-log reads use exact guild scope, bounded lookahead pagination, exact actor and action filters, strict response-order validation, and an exact-entry lookup that cannot substitute a neighboring entry
+- Guild audit summaries omit Discord's embedded objects plus all change and option values, redact polymorphic non-snowflake targets, include reasons only by explicit opt-in, and are never cached, logged, journaled, or persisted
 - Role creation is additive-only, accepts exact named permissions, forbids `ADMINISTRATOR`, and never edits, moves, assigns, deletes, rolls back, or creates role icons, emoji, or gradients
 - A keyed plan binds the complete role inventory, exact request without the raw operation key, operation-key hash, bot identity, effective permissions, hierarchy, capacity, and logical-name collision candidates
 - MCP host write approval, signed MCP elicitation, a final fresh plan match, a durable one-shot content-free receipt, pending activity journaling, a single non-retried POST, and exact post-write readback all surround role creation
@@ -73,6 +75,7 @@ Treat attachment messages, channel creation, role creation, message deletion, an
 - `Manage Messages` only in channels where deletion will eventually be enabled
 - `Manage Channels` and `View Channels` only in exact guilds and parent categories where additive channel creation will be enabled
 - `Manage Roles` only in exact guilds where additive role creation will be enabled, with the bot's own highest role above the newly created role
+- `View Audit Log` only in guilds where privacy-minimized server audit history is needed
 - `Kick Members`, `Ban Members`, or `Moderate Members` only in exact guilds where the corresponding member administration action will be enabled
 
 Do not grant the bot `Administrator`. Restrict its Discord role at the category or channel level wherever possible.
@@ -142,7 +145,7 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
 | `DISCORD_MCP_TOOL_SURFACE` | No | `full` advertises every selected canonical tool; `progressive` initially advertises only exact-tool discovery; defaults to `full` |
-| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `attachments`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `permissions`, `role-creation`, `roles`, and `threads`; defaults to `all` |
+| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `attachments`, `audit-logs`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `permissions`, `role-creation`, `roles`, and `threads`; defaults to `all` |
 | `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
@@ -255,7 +258,7 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 
 The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the attachments, channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
 
-`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `permissions`, `attachments`, `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
+`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `audit-logs`, `permissions`, `attachments`, `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
 
 | Tool | Access | Purpose |
 | --- | --- | --- |
@@ -268,6 +271,8 @@ The default `full` surface is recommended for MCP hosts with native deferred-too
 | `list_channels` | Discord read | List scoped channels, thread metadata, and forum configuration without message content |
 | `list_roles` | Discord read | List the complete bounded role inventory with current colors, hierarchy, managed provenance, and arbitrary-width permission evidence |
 | `get_role` | Discord read | Fetch and normalize one exact role through Discord's exact guild-role endpoint |
+| `list_guild_audit_entries` | Discord read | Page privacy-minimized guild audit history with exact actor, action, and before-entry filters plus proven lookahead cursors |
+| `get_guild_audit_entry` | Discord read | Fetch one exact retained guild audit entry without scanning or substituting a neighboring entry |
 | `list_active_threads` | Discord read | List a bounded set of active threads and forum posts, optionally beneath one parent |
 | `list_archived_threads` | Discord read | Page through public, private, or joined-private archived threads with typed cursors |
 | `explain_channel_access` | Discord read | Explain the current bot's effective permissions and evidence confidence |
@@ -390,6 +395,14 @@ The service derives channel scope from the exact channel response, fetches membe
 `audit_channel_role_access` evaluates every role in the complete guild inventory for up to five selected channel actions, then returns a bounded deterministic page keyed by an exact role ID. Full-inventory allow, deny, and unknown totals remain available even when rows are paged. Each row is a standalone role baseline: member-specific overwrites and timeouts do not belong to a role, so their count is disclosed and they are excluded. Private-thread membership is likewise unknown for a role unless `MANAGE_THREADS` supplies moderator access.
 
 Both tools are read-only snapshots. They return Discord identifiers, role names, permission bitfields, decision traces, and warnings to the caller, but the connector does not persist those results or member profile data. A later Discord request can still fail if state changes between diagnosis and use.
+
+## Privacy-safe guild audit logs
+
+The `audit-logs` toolset is read-only and requires Discord's `View Audit Log` permission in each permitted guild. Discord retains audit entries for 45 days. `list_guild_audit_entries` returns at most 50 entries newest first, accepts exact actor and numeric action filters, and requests one private lookahead entry so `hasMore` and `nextBeforeEntryId` are evidence-backed rather than guessed. `get_guild_audit_entry` uses Discord's ascending `after` semantics with the exact predecessor snowflake, then requires an exact identifier match. A missing entry returns `found: false`; a neighboring entry is never returned as the requested one. See Discord's [audit log reference](https://docs.discord.com/developers/resources/audit-log).
+
+Every entry exposes its ID, a timestamp derived locally from that snowflake, numeric action type, a known stable action name or `null` for a future value, nullable actor ID, safe bounded change and option keys, counts, and reason presence. Change values and option values are always omitted. Discord's response also embeds users, webhooks, integrations, threads, application commands, scheduled events, and AutoMod rules; the connector ignores all of them. Because `target_id` can hold an invite code or another non-snowflake identifier, only valid snowflake targets are returned and all other non-null targets are marked as redacted.
+
+Reasons are Discord content and are absent unless `includeReasons` or `includeReason` is explicitly true. The result identifies the active privacy tier. Audit responses are not cached, written to the local activity log, stored in operation receipts, used as telemetry labels, or otherwise persisted. Strict bounds, unique IDs, documented sort order, cursor direction, and requested actor and action filters are validated before any result is returned. This Discord server history remains separate from `list_activity`, which reports only this connector's own content-free local write records.
 
 ## Reviewed additive channel creation
 
