@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, effective permissions, privacy-minimized guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed forum posts, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, channels, roles, threads, forums, effective permissions, privacy-minimized guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed forum posts, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -140,7 +140,7 @@ node dist/cli.js smoke
 
 `doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, attachment policy, forum-post policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not read attachment files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, reading attachment files, opening a Gateway connection, or starting telemetry export.
 
-`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
+`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. When invoked through the built CLI, the descriptor points at that exact Node.js executable and CLI entrypoint. It includes the verified public application ID, names every environment variable that a host may forward, and never includes the bot token value.
 
 `smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read messages, open a Gateway connection, start telemetry export, or write to Discord.
 
@@ -192,85 +192,15 @@ Add `--json` to `setup`, `doctor`, or `smoke`, or use it with `catalog --check`,
 
 An unset read allowlist means all guild channels Discord allows the bot to view. The bot's Discord role remains authoritative.
 
-Configure the MCP host with a local stdio server:
+Run `node dist/cli.js setup --json` and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, command, arguments, environment-variable names to forward, the verified public application ID to set, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Keep `DISCORD_BOT_TOKEN` in the host process environment or secret store and forward it by name; never copy its value into a static configuration file.
 
-```toml
-[mcp_servers.discord]
-command = "node"
-args = ["/absolute/path/to/discord-mcp/dist/cli.js", "serve"]
-required = true
-startup_timeout_sec = 30
-tool_timeout_sec = 180
-env_vars = [
-  "DISCORD_BOT_TOKEN",
-  "DISCORD_MCP_ALLOWED_GUILD_IDS",
-  "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
-  "DISCORD_MCP_ALLOW_ATTACHMENTS",
-  "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
-  "DISCORD_MCP_ATTACHMENT_ROOTS",
-  "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
-  "DISCORD_MCP_TOOL_SURFACE",
-  "DISCORD_MCP_TOOLSETS",
-  "DISCORD_MCP_ALLOW_GATEWAY",
-  "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
-  "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
-  "DISCORD_MCP_OBSERVABILITY_LOGS",
-  "OTEL_EXPORTER_OTLP_ENDPOINT",
-  "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-  "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-  "OTEL_EXPORTER_OTLP_HEADERS",
-  "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
-  "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
-  "OTEL_EXPORTER_OTLP_PROTOCOL",
-  "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
-  "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
-  "OTEL_EXPORTER_OTLP_COMPRESSION",
-  "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION",
-  "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION",
-  "OTEL_EXPORTER_OTLP_TIMEOUT",
-  "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
-  "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
-  "OTEL_SERVICE_NAME",
-  "OTEL_TRACES_SAMPLER",
-  "OTEL_TRACES_SAMPLER_ARG",
-  "DISCORD_MCP_ALLOW_ADMINISTRATION",
-  "DISCORD_MCP_ADMIN_GUILD_IDS",
-  "DISCORD_MCP_PROTECTED_USER_IDS",
-  "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
-  "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
-  "DISCORD_MCP_ALLOW_FORUM_POSTS",
-  "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
-  "DISCORD_MCP_ALLOW_ROLE_CREATION",
-  "DISCORD_MCP_ROLE_CREATION_GUILD_IDS",
-  "DISCORD_MCP_ALLOW_INTERACTIONS",
-  "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
-  "DISCORD_MCP_MENTION_USER_IDS",
-  "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
-  "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
-  "DISCORD_MCP_ALLOW_DELETIONS",
-  "DISCORD_MCP_DELETE_CHANNEL_IDS",
-  "DISCORD_MCP_AUDIT_FILE",
-]
-default_tools_approval_mode = "writes"
+When using the published package, configure the stdio command as `npx` with arguments `--yes`, `@j-256/discord-mcp@0.1.0`, and `serve`. Pinning the package version prevents an unreviewed update from replacing the executable. Host configuration formats differ, so the launch descriptor is intentionally typed data rather than a client-specific configuration fragment.
 
-[mcp_servers.discord.env]
-DISCORD_MCP_APPLICATION_ID = "your-application-id"
-```
-
-For the published package, replace the local `command` and `args` fields with an exact npm version:
-
-```toml
-command = "npx"
-args = ["--yes", "@j-256/discord-mcp@0.1.0", "serve"]
-```
-
-Restart the local MCP host after changing MCP configuration. Use `/mcp` in the MCP host to inspect the connected server.
-
-The [official MCP host configuration reference](https://modelcontextprotocol.io/docs) documents the stdio command, argument, environment-forwarding, approval, required-server, and timeout fields emitted by `setup`.
+Restart or reload the MCP host after changing its configuration, inspect the negotiated server, and confirm that required-server behavior, write approval, elicitation, and timeouts match the descriptor before enabling reviewed write policies. A host without MCP elicitation can use read-only and plan-only capabilities but must not execute reviewed writes.
 
 ## Tools
 
-The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the attachments, forum-posts, channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
+The default `full` surface is recommended for clients with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the attachments, forum-posts, channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
 
 `DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `audit-logs`, `permissions`, `attachments`, `forum-posts`, `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
 
@@ -513,7 +443,7 @@ The raw key, local path, filename, description, file size and digest, message co
 
 ## Safe message interactions
 
-Message interactions are a separate exact-ID policy boundary from reads and deletion. Set `DISCORD_MCP_ALLOW_INTERACTIONS=true` and list every writable channel or thread by its own ID in `DISCORD_MCP_INTERACTION_CHANNEL_IDS`. An allowlisted parent grants read access to its threads but never grants interaction access to them. The MCP host treats all three tools as writes, so the recommended `default_tools_approval_mode = "writes"` keeps client approval in front of each call.
+Message interactions are a separate exact-ID policy boundary from reads and deletion. Set `DISCORD_MCP_ALLOW_INTERACTIONS=true` and list every writable channel or thread by its own ID in `DISCORD_MCP_INTERACTION_CHANNEL_IDS`. An allowlisted parent grants read access to its threads but never grants interaction access to them. MCP hosts should treat all three tools as writes and require approval before each call.
 
 `send_message` accepts plain text only and requires an idempotency key between 16 and 128 safe ASCII characters. Generate one key for one intended message, such as a UUID, and reuse that exact key with unchanged arguments for every retry. The connector derives a channel-bound 25-character nonce without sending, logging, or returning the raw key. Matching concurrent and recent in-process calls share one result. Discord also enforces nonce uniqueness for the past few minutes, which covers a connector restart inside that window. Reusing a key with different arguments is rejected, including when Discord returns an earlier nonce match whose content differs.
 

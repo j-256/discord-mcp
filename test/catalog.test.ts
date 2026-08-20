@@ -111,7 +111,7 @@ test("credential-free catalog exposes every exact production contract with compl
 
     assert.match(client.getInstructions() || "", /credential-free catalog/)
     assert.match(client.getInstructions() || "", /every tools\/call request returns the fixed CATALOG_ONLY result/)
-    assert.doesNotMatch(client.getInstructions() || "", /host/i)
+    assert.match(client.getInstructions() || "", /operational serve command/)
   })
 })
 

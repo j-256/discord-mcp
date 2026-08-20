@@ -105,14 +105,17 @@ function policy(): ScopePolicy {
 function fixture(initialMessages: DiscordMessage[]) {
   const messages = new Map(initialMessages.map((entry) => [entry.id, entry]))
   const calls = {
+    auditReasons: [] as string[],
     bulk: [] as string[][],
     individual: [] as string[],
   }
   const client: DeletionServiceOptions["client"] = {
-    async bulkDeleteMessages(_channelId, messageIds) {
+    async bulkDeleteMessages(_channelId, messageIds, reason) {
+      calls.auditReasons.push(reason)
       calls.bulk.push([...messageIds])
     },
-    async deleteMessage(_channelId, messageId) {
+    async deleteMessage(_channelId, messageId, reason) {
+      calls.auditReasons.push(reason)
       calls.individual.push(messageId)
     },
     async getChannel(): Promise<DiscordChannel> {
@@ -229,6 +232,10 @@ test("deletion execution journals before writing and uses age-safe strategies", 
   assert.equal(result.status, "completed")
   assert.deepEqual(calls.bulk, [[MESSAGE_ONE, MESSAGE_TWO]])
   assert.deepEqual(calls.individual, [MESSAGE_THREE])
+  assert.deepEqual(calls.auditReasons, [
+    `Reviewed deletion plan ${plan.digest.slice(0, 32)}`,
+    `Reviewed deletion plan ${plan.digest.slice(0, 32)}`,
+  ])
   assert.deepEqual(
     activityStore.entries.map((entry) => entry.status),
     ["pending", "completed"],

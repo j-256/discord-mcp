@@ -41,7 +41,7 @@ function doctorReport(status: DoctorReport["status"] = "ok"): DoctorReport {
     }],
     identity: null,
     online: false,
-    schemaVersion: 1,
+    schemaVersion: 2,
     status,
   }
 }
@@ -50,11 +50,28 @@ function setupReport(): SetupReport {
   return {
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
-    client: "host",
-    hostConfig: `secret = "${TOKEN}"`,
     guildsAccessibleOnFirstPage: 1,
     guildsInScopeOnFirstPage: 1,
-    schemaVersion: 1,
+    launch: {
+      args: ["serve"],
+      command: "discord-mcp",
+      environment: {
+        forward: ["DISCORD_BOT_TOKEN"],
+        set: { DISCORD_MCP_APPLICATION_ID: APPLICATION_ID },
+      },
+      requirements: {
+        elicitation: "required-for-reviewed-writes",
+        requiredServer: true,
+        toolApproval: "writes",
+      },
+      serverName: "discord",
+      timeouts: {
+        startupSeconds: 30,
+        toolSeconds: 180,
+      },
+      transport: "stdio",
+    },
+    schemaVersion: 2,
     serverName: "discord",
     status: "ok",
     toolsets: ["connector", "messages"],
@@ -74,7 +91,7 @@ function smokeReport(): SmokeReport {
     readOnlyTools: ["get_connector_status"],
     resourceTemplateUris: ["discord://channels/{channelId}/access"],
     resourceUris: ["discord://connector/safety"],
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: "ok",
     toolCount: 12,
     toolsets: ["connector", "messages"],
@@ -140,14 +157,11 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   })
   assert.deepEqual(parseCliArguments([
     "setup",
-    "--client",
-    "host",
     "--name",
     "team-discord",
     "--command",
     "/usr/local/bin/discord-mcp",
   ]), {
-    client: "host",
     command: "setup",
     json: false,
     launcherCommand: "/usr/local/bin/discord-mcp",
@@ -159,7 +173,10 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   })
   assert.throws(() => parseCliArguments(["unknown"]), /Unknown command/)
   assert.throws(() => parseCliArguments(["doctor", "--online", "--online"]), /only once/)
-  assert.throws(() => parseCliArguments(["setup", "--client", "other"]), /Only the host/)
+  assert.throws(
+    () => parseCliArguments(["setup", "--client", "legacy"]),
+    /Unknown option --client/,
+  )
   assert.throws(() => parseCliArguments(["setup", "--name"]), /requires a value/)
   assert.throws(() => parseCliArguments(["smoke", "--other"]), /Unknown option/)
   assert.throws(() => parseCliArguments(["catalog", "--json"]), /requires --check/)
@@ -262,7 +279,10 @@ test("CLI redacts setup output and forwards setup options", async () => {
     dependencies: dependencies({
       async prepareSetup(options) {
         received = options
-        return setupReport()
+        return {
+          ...setupReport(),
+          warnings: [`Rejected ${TOKEN}`],
+        }
       },
     }),
     environment: { DISCORD_BOT_TOKEN: `  ${TOKEN}  ` },
@@ -282,6 +302,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
 
 test("CLI setup pins the running Node.js executable and built entrypoint by default", async () => {
   let received: unknown
+  const stdout = outputStream()
   const exitCode = await runCli({
     args: ["setup"],
     dependencies: dependencies({
@@ -293,7 +314,7 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
     entrypointPath: "/srv/discord-mcp/dist/cli.js",
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     executablePath: "/usr/bin/node",
-    stdout: outputStream().stream,
+    stdout: stdout.stream,
   })
 
   assert.equal(exitCode, 0)
@@ -302,6 +323,9 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
     command: "/usr/bin/node",
     environment: { DISCORD_BOT_TOKEN: TOKEN },
   })
+  assert.match(stdout.value(), /Portable stdio launch descriptor/)
+  assert.match(stdout.value(), /required-server, write-approval, elicitation, and timeout settings/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
 test("CLI renders smoke, help, and version output", async () => {

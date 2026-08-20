@@ -32,7 +32,7 @@ import {
 } from "./mcp-tool-catalog.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 1
+export const OPERATOR_REPORT_SCHEMA_VERSION = 2
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -89,16 +89,35 @@ export interface DoctorReport {
 export interface SetupReport {
   applicationId: string
   botId: string
-  client: "host"
-  hostConfig: string
   guildsAccessibleOnFirstPage: number
   guildsInScopeOnFirstPage: number
+  launch: StdioLaunchDescriptor
   schemaVersion: number
   serverName: string
   status: "ok"
   toolsets: McpToolsetName[]
   toolSurface: McpToolSurface
   warnings: string[]
+}
+
+export interface StdioLaunchDescriptor {
+  args: string[]
+  command: string
+  environment: {
+    forward: string[]
+    set: Record<string, string>
+  }
+  requirements: {
+    elicitation: "required-for-reviewed-writes"
+    requiredServer: true
+    toolApproval: "writes"
+  }
+  serverName: string
+  timeouts: {
+    startupSeconds: number
+    toolSeconds: number
+  }
+  transport: "stdio"
 }
 
 export interface SmokeReport extends IdentitySummary {
@@ -521,27 +540,30 @@ export async function diagnoseConnector(
   }
 }
 
-function tomlString(value: string): string {
-  return JSON.stringify(value)
-}
-
-export function renderHostConfiguration(options: {
+export function createStdioLaunchDescriptor(options: {
   applicationId: string
   args?: readonly string[]
   command?: string
   serverName?: string
-}): string {
+}): StdioLaunchDescriptor {
   const applicationId = options.applicationId.trim()
   if (!DISCORD_SNOWFLAKE_PATTERN.test(applicationId)) {
     throw new ConfigurationError("Verified Discord application ID must be a snowflake")
   }
-  const serverName = options.serverName?.trim() || DEFAULT_MCP_SERVER_NAME
+  const serverName = options.serverName === undefined
+    ? DEFAULT_MCP_SERVER_NAME
+    : options.serverName.trim()
   if (!MCP_SERVER_NAME_PATTERN.test(serverName)) {
     throw new ConfigurationError("MCP server name may contain only letters, numbers, underscores, and hyphens")
   }
-  const command = options.command?.trim() || DEFAULT_CLI_COMMAND
+  const command = options.command === undefined
+    ? DEFAULT_CLI_COMMAND
+    : options.command.trim()
   if (!command) throw new ConfigurationError("MCP server command must not be empty")
-  const args = options.args || ["serve"]
+  const args = [...(options.args || ["serve"])]
+  if (args.some((argument) => typeof argument !== "string" || !argument.trim())) {
+    throw new ConfigurationError("MCP server arguments must be non-empty strings")
+  }
   const environmentVariables = [
     ENVIRONMENT_NAMES.token,
     ENVIRONMENT_NAMES.allowedGuildIds,
@@ -592,24 +614,27 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.toolsets,
     ENVIRONMENT_NAMES.auditFile,
   ]
-  const environmentLines = environmentVariables.map((name, index) => (
-    `  ${tomlString(name)}${index < environmentVariables.length - 1 ? "," : ""}`
-  ))
-  return [
-    `[mcp_servers.${serverName}]`,
-    `command = ${tomlString(command)}`,
-    `args = [${args.map(tomlString).join(", ")}]`,
-    "required = true",
-    `startup_timeout_sec = ${STARTUP_TIMEOUT_SECONDS}`,
-    `tool_timeout_sec = ${TOOL_TIMEOUT_SECONDS}`,
-    "default_tools_approval_mode = \"writes\"",
-    "env_vars = [",
-    ...environmentLines,
-    "]",
-    "",
-    `[mcp_servers.${serverName}.env]`,
-    `${ENVIRONMENT_NAMES.applicationId} = ${tomlString(applicationId)}`,
-  ].join("\n")
+  return {
+    args,
+    command,
+    environment: {
+      forward: environmentVariables,
+      set: {
+        [ENVIRONMENT_NAMES.applicationId]: applicationId,
+      },
+    },
+    requirements: {
+      elicitation: "required-for-reviewed-writes",
+      requiredServer: true,
+      toolApproval: "writes",
+    },
+    serverName,
+    timeouts: {
+      startupSeconds: STARTUP_TIMEOUT_SECONDS,
+      toolSeconds: TOOL_TIMEOUT_SECONDS,
+    },
+    transport: "stdio",
+  }
 }
 
 export async function prepareSetup(
@@ -622,21 +647,20 @@ export async function prepareSetup(
   if (status.guildPage.inScope < 1) {
     throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
   }
-  const serverName = options.serverName?.trim() || DEFAULT_MCP_SERVER_NAME
+  const launch = createStdioLaunchDescriptor({
+    applicationId: status.application.id,
+    ...(options.args ? { args: options.args } : {}),
+    ...(options.command ? { command: options.command } : {}),
+    ...(options.serverName !== undefined ? { serverName: options.serverName } : {}),
+  })
   return {
     applicationId: status.application.id,
     botId: status.bot.id,
-    client: "host",
-    hostConfig: renderHostConfiguration({
-      applicationId: status.application.id,
-      ...(options.args ? { args: options.args } : {}),
-      ...(options.command ? { command: options.command } : {}),
-      serverName,
-    }),
+    launch,
     guildsAccessibleOnFirstPage: status.guildPage.accessible,
     guildsInScopeOnFirstPage: status.guildPage.inScope,
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
-    serverName,
+    serverName: launch.serverName,
     status: "ok",
     toolsets: selectedMcpToolsets(config.mcpToolsets),
     toolSurface: config.mcpToolSurface,

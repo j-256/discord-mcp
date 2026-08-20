@@ -152,7 +152,7 @@ async function checkPackageAndLock() {
   assertEqual(packageJson.dependencies, EXPECTED_DEPENDENCIES, "production dependency set changed")
   assertEqual(packageJson.devDependencies, EXPECTED_DEV_DEPENDENCIES, "development dependency set changed")
   assertEqual([...packageJson.keywords].sort(), [
-    "host",
+    "ai-agent",
     "discord",
     "least-privilege",
     "mcp",

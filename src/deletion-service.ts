@@ -297,7 +297,7 @@ export class DeletionService {
 
     const deletedMessageIds: string[] = []
     let failedMessageId: string | null = null
-    const auditReason = `MCP host approved deletion plan ${plan.digest.slice(0, 32)}`
+    const auditReason = `Reviewed deletion plan ${plan.digest.slice(0, 32)}`
     try {
       for (const operation of plan.operations) {
         if (operation.kind === "bulk") {

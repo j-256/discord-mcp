@@ -43,7 +43,6 @@ export type ParsedCliArguments =
   | { command: "help"; topic: CliCommand | undefined }
   | { command: "serve" }
   | {
-    client: "host"
     command: "setup"
     json: boolean
     launcherCommand: string | undefined
@@ -108,7 +107,6 @@ function parseBooleanOptions(
 }
 
 function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments, { command: "setup" }> {
-  let client = "host"
   let json = false
   let launcherCommand: string | undefined
   let serverName: string | undefined
@@ -126,7 +124,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       json = true
       continue
     }
-    if (!["--client", "--command", "--name"].includes(argument)) {
+    if (!["--command", "--name"].includes(argument)) {
       throw new ConfigurationError(`Unknown option ${argument}`)
     }
     const value = args[index + 1]
@@ -134,15 +132,10 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       throw new ConfigurationError(`Option ${argument} requires a value`)
     }
     index += 1
-    if (argument === "--client") client = value
     if (argument === "--command") launcherCommand = value
     if (argument === "--name") serverName = value
   }
-  if (client !== "host") {
-    throw new ConfigurationError("Only the host setup client is supported")
-  }
   return {
-    client,
     command: "setup",
     json,
     launcherCommand,
@@ -210,7 +203,7 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp doctor [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access."
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup [--client host] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot and print a credential-free MCP host MCP configuration fragment."
+    return "Usage: discord-mcp setup [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
     return "Usage: discord-mcp smoke [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool."
@@ -269,11 +262,12 @@ function renderSetup(report: SetupReport): string {
   for (const warning of report.warnings) lines.push(`WARNING: ${warning}`)
   lines.push(
     "",
-    "Add this fragment to MCP host config.toml:",
+    "Portable stdio launch descriptor:",
     "",
-    report.hostConfig,
+    JSON.stringify(report.launch, null, 2),
     "",
-    `${ENVIRONMENT_NAMES.token} is forwarded by name and its value is not included`,
+    `${ENVIRONMENT_NAMES.token} is named for secret forwarding and its value is not included`,
+    "Translate the requirements into the MCP host's required-server, write-approval, elicitation, and timeout settings.",
   )
   return lines.join("\n")
 }

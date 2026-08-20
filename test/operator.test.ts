@@ -4,14 +4,18 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { MCP_TOOLSET_NAMES } from "../src/constants.js"
+import {
+  ENVIRONMENT_NAMES,
+  MCP_TOOLSET_NAMES,
+} from "../src/constants.js"
 import type { DiscordToolService } from "../src/mcp.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import {
   diagnoseConnector,
   DOCTOR_CHECK_IDS,
+  createStdioLaunchDescriptor,
+  OPERATOR_REPORT_SCHEMA_VERSION,
   prepareSetup,
-  renderHostConfiguration,
   smokeConnector,
   type StatusProvider,
 } from "../src/operator.js"
@@ -625,54 +629,66 @@ test("doctor fails online verification when local scope contains no accessible g
   )
 })
 
-test("MCP host configuration uses verified identity and environment forwarding without secrets", () => {
-  const result = renderHostConfiguration({
+test("stdio launch descriptor is portable, complete, and credential-free", () => {
+  const result = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
     command: "/opt/Discord MCP/bin/discord-mcp",
     serverName: "team-discord",
   })
 
-  assert.match(result, /\[mcp_servers\.team-discord\]/)
-  assert.match(result, /command = "\/opt\/Discord MCP\/bin\/discord-mcp"/)
-  assert.match(result, /args = \["serve"\]/)
-  assert.match(result, /default_tools_approval_mode = "writes"/)
-  assert.match(result, /required = true/)
-  assert.match(result, /DISCORD_BOT_TOKEN/)
-  assert.match(result, /DISCORD_MCP_ALLOW_ADMINISTRATION/)
-  assert.match(result, /DISCORD_MCP_ADMIN_GUILD_IDS/)
-  assert.match(result, /DISCORD_MCP_PROTECTED_USER_IDS/)
-  assert.match(result, /DISCORD_MCP_ALLOW_ATTACHMENTS/)
-  assert.match(result, /DISCORD_MCP_ATTACHMENT_CHANNEL_IDS/)
-  assert.match(result, /DISCORD_MCP_ATTACHMENT_MAX_BYTES/)
-  assert.match(result, /DISCORD_MCP_ATTACHMENT_ROOTS/)
-  assert.match(result, /DISCORD_MCP_ALLOW_CHANNEL_CREATION/)
-  assert.match(result, /DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS/)
-  assert.match(result, /DISCORD_MCP_ALLOW_ROLE_CREATION/)
-  assert.match(result, /DISCORD_MCP_ROLE_CREATION_GUILD_IDS/)
-  assert.match(result, /DISCORD_MCP_ALLOW_FORUM_POSTS/)
-  assert.match(result, /DISCORD_MCP_FORUM_POST_CHANNEL_IDS/)
-  assert.match(result, /DISCORD_MCP_ALLOW_GATEWAY/)
-  assert.match(result, /DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE/)
-  assert.match(result, /DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT/)
-  assert.match(result, /DISCORD_MCP_OBSERVABILITY_LOGS/)
-  assert.match(result, /OTEL_EXPORTER_OTLP_HEADERS/)
-  assert.match(result, /OTEL_EXPORTER_OTLP_TRACES_ENDPOINT/)
-  assert.match(result, /OTEL_EXPORTER_OTLP_METRICS_ENDPOINT/)
-  assert.match(result, /OTEL_TRACES_SAMPLER/)
-  assert.match(result, /DISCORD_MCP_TOOL_SURFACE/)
-  assert.match(result, /DISCORD_MCP_TOOLSETS/)
-  assert.match(result, new RegExp(APPLICATION_ID))
-  assert.doesNotMatch(result, new RegExp(TOKEN))
+  assert.deepEqual(result, {
+    args: ["serve"],
+    command: "/opt/Discord MCP/bin/discord-mcp",
+    environment: {
+      forward: result.environment.forward,
+      set: {
+        DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+      },
+    },
+    requirements: {
+      elicitation: "required-for-reviewed-writes",
+      requiredServer: true,
+      toolApproval: "writes",
+    },
+    serverName: "team-discord",
+    timeouts: {
+      startupSeconds: 30,
+      toolSeconds: 180,
+    },
+    transport: "stdio",
+  })
+  assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
+  assert.deepEqual(
+    [...result.environment.forward].sort(),
+    Object.values(ENVIRONMENT_NAMES)
+      .filter((name) => name !== ENVIRONMENT_NAMES.applicationId)
+      .sort(),
+  )
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
   assert.throws(
-    () => renderHostConfiguration({
+    () => createStdioLaunchDescriptor({
       applicationId: APPLICATION_ID,
       serverName: "bad.name",
     }),
     /MCP server name/,
   )
   assert.throws(
-    () => renderHostConfiguration({ applicationId: "not-a-snowflake" }),
+    () => createStdioLaunchDescriptor({ applicationId: "not-a-snowflake" }),
     /snowflake/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      command: " ",
+    }),
+    /command must not be empty/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      args: ["serve", ""],
+    }),
+    /arguments must be non-empty strings/,
   )
 })
 
@@ -686,12 +702,15 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   })
 
   assert.equal(report.status, "ok")
+  assert.equal(report.schemaVersion, OPERATOR_REPORT_SCHEMA_VERSION)
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.serverName, "discord-safe")
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
-  assert.match(report.hostConfig, /args = \["\/srv\/discord-mcp\/dist\/cli\.js", "serve"\]/)
+  assert.deepEqual(report.launch.args, ["/srv/discord-mcp/dist/cli.js", "serve"])
+  assert.equal(report.launch.command, "/usr/bin/node")
+  assert.equal(report.launch.serverName, "discord-safe")
   assert.deepEqual(report.warnings, [])
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
