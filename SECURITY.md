@@ -18,13 +18,17 @@ An allowlisted channel grants local read scope to child threads, including forum
 
 Search results are bounded and omit attachment URLs, raw embeds, raw components, reactions, and Discord member payloads. They are returned to the MCP caller but are not persisted by the connector.
 
+Keep principal permission diagnostics read-only and inside the same exact guild and derived channel scope as other reads. Fetch a requested member only through the exact guild-member endpoint and private-thread membership only through the exact thread-member endpoint; never replace either with member enumeration or a privileged Gateway member cache. Validate the complete bounded role inventory, exact response identities, overwrite uniqueness, arbitrary-width bitfields, timeout timestamps, thread parent, and hierarchy target before claiming a complete decision. Missing or contradictory evidence must produce an unknown decision or fail closed, never an optimistic allowance.
+
+Treat channel-role audits as standalone role baselines. Member-specific overwrites, member timeouts, and private-thread membership cannot be attributed to a role; report their limitations explicitly and do not inspect or return member profiles to fill the gap. Permission diagnostics may return live role names and decision evidence to the MCP caller, but must not persist names, member data, permission results, or raw Discord responses.
+
 ## MCP tool surface
 
 Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools natively. This retains each canonical tool's exact name, schema, annotations, and approval identity while the client controls context loading. The portable `progressive` mode may hide a canonical tool only by disabling its registration through the MCP SDK. `discover_discord_tools` must reveal and enable those same registrations through standard tool-list change notifications; do not replace exact tools with a generic read, write, or destructive dispatcher.
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
 
-Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep attachments, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
+Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep permission diagnostics, attachments, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
 
 ## Gateway events
 

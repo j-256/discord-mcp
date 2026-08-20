@@ -36,6 +36,7 @@ export interface DiscordChannel {
   guild_id?: string
   id: string
   last_message_id?: string | null
+  member?: DiscordThreadMember
   member_count?: number
   message_count?: number
   name?: string | null
@@ -176,6 +177,14 @@ export interface DiscordThreadList {
   has_more?: boolean
   members?: unknown[]
   threads: DiscordChannel[]
+}
+
+export interface DiscordThreadMember {
+  flags: number
+  id?: string
+  join_timestamp: string
+  member?: DiscordGuildMember
+  user_id?: string
 }
 
 export interface DiscordUser {

@@ -151,6 +151,7 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
       return {
@@ -216,6 +217,7 @@ function guidanceService(options: {
         status: "ok",
       }
     },
+    explainPrincipalPermissions: unexpected,
     async getMessage(channelId, messageId) {
       calls.messages += 1
       calls.lastChannelId = channelId

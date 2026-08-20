@@ -63,7 +63,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, channel-creation, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, role-creation, roles, threads, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, channel-creation, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, permissions, role-creation, roles, threads, or all",
           "default": "all",
           "format": "string"
         },

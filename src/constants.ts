@@ -32,6 +32,7 @@ export const MCP_TOOLSET_NAMES = [
   "messages",
   "moderation",
   "observability",
+  "permissions",
   "role-creation",
   "roles",
   "threads",
@@ -126,6 +127,12 @@ export const DISCORD_LIMITS = Object.freeze({
   searchOffset: 9_975,
   searchSlop: 100,
   snowflakeCharacters: 20,
+})
+
+export const PERMISSION_LIMITS = Object.freeze({
+  auditActions: 5,
+  auditRolePage: 100,
+  auditRolePageDefault: 50,
 })
 
 export const CONNECTOR_LIMITS = Object.freeze({

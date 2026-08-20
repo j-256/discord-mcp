@@ -61,6 +61,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["emoji", "react", "reaction"],
     toolset: "interactions",
   },
+  audit_channel_role_access: {
+    keywords: ["access", "audit", "channel", "matrix", "permissions", "role"],
+    toolset: "permissions",
+  },
   delete_messages: {
     keywords: ["bulk", "delete", "exact ids", "remove"],
     toolset: "deletion",
@@ -93,6 +97,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   explain_channel_access: {
     keywords: ["access", "permissions", "read", "view"],
     toolset: "guilds",
+  },
+  explain_principal_permissions: {
+    keywords: ["action", "effective", "hierarchy", "member", "permissions", "role"],
+    toolset: "permissions",
   },
   get_connector_status: {
     keywords: ["application", "bot", "identity", "scope", "status"],

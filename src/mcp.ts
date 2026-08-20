@@ -44,6 +44,7 @@ import {
   IDEMPOTENCY_KEY_PATTERN,
   MCP_DISCOVERY_TOOL_NAME,
   MEMBER_MODERATION_ACTIONS,
+  PERMISSION_LIMITS,
   SCHEMA_VERSION,
 } from "./constants.js"
 import { normalizeMessageIds } from "./deletion-service.js"
@@ -95,6 +96,9 @@ import { stableString } from "./normalize.js"
 import type { McpToolName } from "./observability-catalog.js"
 import { OPERATION_KEY_HASH_PATTERN } from "./operation-store.js"
 import {
+  PRINCIPAL_PERMISSION_SUBJECT_KINDS,
+} from "./permission-service.js"
+import {
   classifyOperationalError,
   OperationalTelemetry,
   type OperationObservation,
@@ -108,7 +112,11 @@ import {
 } from "./role-administration-service.js"
 import { ConnectorService } from "./service.js"
 import {
+  DEFAULT_DISCORD_CHANNEL_PERMISSION_ACTIONS,
+  DISCORD_CHANNEL_PERMISSION_ACTIONS,
+  DISCORD_PERMISSION_ACTIONS,
   DISCORD_PERMISSION_NAMES,
+  type DiscordPermissionAction,
   type DiscordPermissionName,
 } from "./permissions.js"
 
@@ -611,6 +619,143 @@ const roleNameSchema = z.string()
 const discordPermissionNameSchema = z.enum(
   DISCORD_PERMISSION_NAMES as [DiscordPermissionName, ...DiscordPermissionName[]],
 )
+const permissionActionSchema = z.enum(DISCORD_PERMISSION_ACTIONS)
+const channelPermissionActionSchema = z.enum(DISCORD_CHANNEL_PERMISSION_ACTIONS)
+const roleTargetPermissionActions: ReadonlySet<DiscordPermissionAction> = new Set([
+  "assign-role",
+  "remove-role",
+])
+const memberTargetPermissionActions: ReadonlySet<DiscordPermissionAction> = new Set([
+  "ban-member",
+  "kick-member",
+  "timeout-member",
+])
+const channelPermissionActions: ReadonlySet<DiscordPermissionAction> = new Set(
+  DISCORD_CHANNEL_PERMISSION_ACTIONS,
+)
+const requestedPermissionNamesSchema = z.array(discordPermissionNameSchema)
+  .min(1)
+  .max(DISCORD_PERMISSION_NAMES.length)
+  .refine(
+    (values) => new Set(values).size === values.length,
+    { message: "requestedPermissions must be unique" },
+  )
+const explainPrincipalPermissionsInputSchema = z.strictObject({
+  action: permissionActionSchema.optional(),
+  channelId: snowflakeSchema.optional(),
+  guildId: snowflakeSchema,
+  requestedPermissions: requestedPermissionNamesSchema.optional(),
+  subjectId: snowflakeSchema.optional(),
+  subjectKind: z.enum(PRINCIPAL_PERMISSION_SUBJECT_KINDS),
+  targetRoleId: snowflakeSchema.optional(),
+  targetUserId: snowflakeSchema.optional(),
+}).superRefine((input, context) => {
+  if (input.subjectKind === "connector" && input.subjectId !== undefined) {
+    context.addIssue({
+      code: "custom",
+      message: "connector subjects do not accept subjectId",
+      path: ["subjectId"],
+    })
+  }
+  if (input.subjectKind !== "connector" && input.subjectId === undefined) {
+    context.addIssue({
+      code: "custom",
+      message: `${input.subjectKind} subjects require subjectId`,
+      path: ["subjectId"],
+    })
+  }
+  if (!input.action && !input.requestedPermissions) {
+    context.addIssue({
+      code: "custom",
+      message: "Provide an action or requestedPermissions",
+    })
+  }
+  if (input.action && channelPermissionActions.has(input.action) && !input.channelId) {
+    context.addIssue({
+      code: "custom",
+      message: `${input.action} requires channelId`,
+      path: ["channelId"],
+    })
+  }
+  if (
+    input.action
+    && (
+      roleTargetPermissionActions.has(input.action)
+      || memberTargetPermissionActions.has(input.action)
+    )
+    && input.channelId
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: `${input.action} does not accept channelId`,
+      path: ["channelId"],
+    })
+  }
+  if (input.action && roleTargetPermissionActions.has(input.action)) {
+    if (!input.targetRoleId) {
+      context.addIssue({
+        code: "custom",
+        message: `${input.action} requires targetRoleId`,
+        path: ["targetRoleId"],
+      })
+    }
+    if (input.targetUserId) {
+      context.addIssue({
+        code: "custom",
+        message: `${input.action} does not accept targetUserId`,
+        path: ["targetUserId"],
+      })
+    }
+  } else if (input.action && memberTargetPermissionActions.has(input.action)) {
+    if (!input.targetUserId) {
+      context.addIssue({
+        code: "custom",
+        message: `${input.action} requires targetUserId`,
+        path: ["targetUserId"],
+      })
+    }
+    if (input.targetRoleId) {
+      context.addIssue({
+        code: "custom",
+        message: `${input.action} does not accept targetRoleId`,
+        path: ["targetRoleId"],
+      })
+    }
+  } else if (input.targetRoleId || input.targetUserId) {
+    context.addIssue({
+      code: "custom",
+      message: "Targets are valid only for hierarchy actions",
+    })
+  }
+  if (
+    input.action
+    && (
+      roleTargetPermissionActions.has(input.action)
+      || memberTargetPermissionActions.has(input.action)
+    )
+    && input.subjectKind === "role"
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Hierarchy actions require a connector or member subject",
+      path: ["subjectKind"],
+    })
+  }
+})
+const auditChannelRoleAccessInputSchema = z.strictObject({
+  actions: z.array(channelPermissionActionSchema)
+    .min(1)
+    .max(PERMISSION_LIMITS.auditActions)
+    .refine(
+      (values) => new Set(values).size === values.length,
+      { message: "actions must be unique" },
+    )
+    .default([...DEFAULT_DISCORD_CHANNEL_PERMISSION_ACTIONS]),
+  afterRoleId: snowflakeSchema.optional(),
+  channelId: snowflakeSchema,
+  limit: z.number().int().min(1).max(PERMISSION_LIMITS.auditRolePage)
+    .default(PERMISSION_LIMITS.auditRolePageDefault),
+})
 const rolePermissionNamesSchema = z.array(discordPermissionNameSchema)
   .max(DISCORD_PERMISSION_NAMES.length)
   .refine(
@@ -932,6 +1077,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  auditChannelRoleAccess: ConnectorService["auditChannelRoleAccess"]
   deleteMessages: ConnectorService["deleteMessages"]
   describePolicy: ConnectorService["describePolicy"]
   editOwnMessage: ConnectorService["editOwnMessage"]
@@ -940,6 +1086,7 @@ export interface DiscordToolService {
   executeChannelCreation: ConnectorService["executeChannelCreation"]
   executeRoleCreation: ConnectorService["executeRoleCreation"]
   explainChannelAccess: ConnectorService["explainChannelAccess"]
+  explainPrincipalPermissions: ConnectorService["explainPrincipalPermissions"]
   getMessage: ConnectorService["getMessage"]
   getRole: ConnectorService["getRole"]
   getStatus: ConnectorService["getStatus"]
@@ -1929,6 +2076,72 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord message-history access for bot ${result.botId} in channel ${channelId} is ${readable}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("explain_principal_permissions", server.registerTool(
+    "explain_principal_permissions",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Explain effective Discord permissions for the connector bot, one exact member, or one exact role in a permitted guild. Supports named permission checks, channel actions, and hierarchy actions with exact targets. Applies owner and Administrator bypasses, channel overwrite order, implicit dependencies, timeout restrictions, role hierarchy, thread inheritance, and exact private-thread membership. Partial Discord evidence produces an unknown decision instead of an optimistic answer.",
+      inputSchema: explainPrincipalPermissionsInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Explain Discord principal permissions",
+    },
+    safeToolHandler("explain_principal_permissions", async (
+      input: z.infer<typeof explainPrincipalPermissionsInputSchema>,
+      context,
+    ) => {
+      const request = {
+        ...(input.action ? { action: input.action } : {}),
+        ...(input.channelId ? { channelId: input.channelId } : {}),
+        guildId: input.guildId,
+        ...(input.requestedPermissions
+          ? { requestedPermissions: input.requestedPermissions }
+          : {}),
+        ...(input.subjectId ? { subjectId: input.subjectId } : {}),
+        subjectKind: input.subjectKind,
+        ...(input.targetRoleId ? { targetRoleId: input.targetRoleId } : {}),
+        ...(input.targetUserId ? { targetUserId: input.targetUserId } : {}),
+      }
+      const result = await service.explainPrincipalPermissions(request, {
+        signal: context.mcpReq.signal,
+      })
+      const decision = result.permissions.allowed === null
+        ? "unknown"
+        : result.permissions.allowed ? "allowed" : "denied"
+      return toolResult(
+        result,
+        `Discord permission decision for ${result.permissions.subjectKind} ${result.permissions.subjectId} in guild ${result.guildId} is ${decision}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("audit_channel_role_access", server.registerTool(
+    "audit_channel_role_access",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Audit a bounded page of every guild role's effective access to one permitted Discord channel or thread. Returns compact per-action decisions plus full-inventory totals, deterministic exact-role pagination, member-overwrite warnings, and partial confidence when Discord evidence is incomplete. Private-thread role membership remains unknown unless Manage Threads grants moderator access.",
+      inputSchema: auditChannelRoleAccessInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Audit Discord channel role access",
+    },
+    safeToolHandler("audit_channel_role_access", async (
+      input: z.infer<typeof auditChannelRoleAccessInputSchema>,
+      context,
+    ) => {
+      const result = await service.auditChannelRoleAccess({
+        actions: input.actions,
+        ...(input.afterRoleId ? { afterRoleId: input.afterRoleId } : {}),
+        channelId: input.channelId,
+        limit: input.limit,
+      }, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord evaluated ${result.page.totalRoles} roles for ${result.requestedActions.length} actions in channel ${input.channelId} and returned ${result.roles.length}`,
       )
     }, secrets, observability),
   ))

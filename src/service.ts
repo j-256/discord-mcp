@@ -61,6 +61,12 @@ import {
   normalizeSearchMessage,
 } from "./normalize.js"
 import { evaluateBotChannelPermissions } from "./permissions.js"
+import type {
+  AuditChannelRoleAccessRequest,
+  ExplainPrincipalPermissionsRequest,
+  PermissionServiceOptions,
+} from "./permission-service.js"
+import { PermissionService } from "./permission-service.js"
 import { ScopePolicy } from "./policy.js"
 import type {
   RoleAdministrationServiceOptions,
@@ -109,6 +115,7 @@ export interface DiscordServiceClient {
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoles: DiscordClient["getGuildRoles"]
   getMessage: DiscordClient["getMessage"]
+  getThreadMember: DiscordClient["getThreadMember"]
   getUser: DiscordClient["getUser"]
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
@@ -159,6 +166,7 @@ export interface ConnectorServiceOptions {
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
   >
   operationStore?: OperationStore
+  permissionOptions?: Pick<PermissionServiceOptions, "clock">
   policy?: ScopePolicy
   roleAdministrationOptions?: Pick<
     RoleAdministrationServiceOptions,
@@ -273,6 +281,7 @@ export class ConnectorService {
   readonly #deletionService: DeletionService
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
+  readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
 
@@ -330,6 +339,11 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.interactionOptions,
       limiter: interactionLimiter,
+    })
+    this.#permissionService = new PermissionService({
+      client: this.#client,
+      policy: this.#policy,
+      ...options.permissionOptions,
     })
     this.#roleAdministrationService = new RoleAdministrationService({
       activityStore: this.#activityStore,
@@ -792,6 +806,22 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async explainPrincipalPermissions(
+    request: ExplainPrincipalPermissionsRequest,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#permissionService.explain(identity.bot.id, request, options)
+  }
+
+  async auditChannelRoleAccess(
+    request: AuditChannelRoleAccessRequest,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#permissionService.auditChannelRoles(request, options)
   }
 
   async planMessageDeletion(

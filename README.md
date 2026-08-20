@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, permissions, and indexed message history through a dedicated bot. It includes exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, effective permissions, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -15,7 +15,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
-- Toolsets separate attachments, channel creation, role creation, deletion, and moderation from reads and ordinary interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
+- Toolsets separate permission diagnostics, attachments, channel creation, role creation, deletion, and moderation from ordinary reads and interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
@@ -41,6 +41,8 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Visible channel inventory is explicitly treated as visibility-bounded, and a reserved operation key cannot be reused after a failed or uncertain attempt
 - Role creation is disabled unless a separate toggle and non-empty exact guild allowlist are both configured
 - Role reads normalize current solid colors, hierarchy, managed-role provenance, known permission names, and unknown future permission bits from a complete bounded inventory or one exact role endpoint
+- Principal permission diagnostics fetch exact member or role identities and a complete bounded role inventory without listing guild members, then evaluate named permissions, channel actions, timeouts, thread access, and strict role hierarchy without writing or persisting profile data
+- Channel-role audits evaluate every role against a bounded action set, page compact rows with exact role cursors, report full-inventory totals, and distinguish standalone role baselines from member-specific overwrites
 - Role creation is additive-only, accepts exact named permissions, forbids `ADMINISTRATOR`, and never edits, moves, assigns, deletes, rolls back, or creates role icons, emoji, or gradients
 - A keyed plan binds the complete role inventory, exact request without the raw operation key, operation-key hash, bot identity, effective permissions, hierarchy, capacity, and logical-name collision candidates
 - MCP host write approval, signed MCP elicitation, a final fresh plan match, a durable one-shot content-free receipt, pending activity journaling, a single non-retried POST, and exact post-write readback all surround role creation
@@ -140,7 +142,7 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
 | `DISCORD_MCP_TOOL_SURFACE` | No | `full` advertises every selected canonical tool; `progressive` initially advertises only exact-tool discovery; defaults to `full` |
-| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `attachments`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `role-creation`, `roles`, and `threads`; defaults to `all` |
+| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `attachments`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `permissions`, `role-creation`, `roles`, and `threads`; defaults to `all` |
 | `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
@@ -253,7 +255,7 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 
 The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the attachments, channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
 
-`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `attachments`, `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
+`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `permissions`, `attachments`, `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
 
 | Tool | Access | Purpose |
 | --- | --- | --- |
@@ -269,6 +271,8 @@ The default `full` surface is recommended for MCP hosts with native deferred-too
 | `list_active_threads` | Discord read | List a bounded set of active threads and forum posts, optionally beneath one parent |
 | `list_archived_threads` | Discord read | Page through public, private, or joined-private archived threads with typed cursors |
 | `explain_channel_access` | Discord read | Explain the current bot's effective permissions and evidence confidence |
+| `explain_principal_permissions` | Discord read | Explain named permissions or one supported action for the connector, one exact member, or one exact role, including channel rules, timeout, private-thread membership, and hierarchy evidence |
+| `audit_channel_role_access` | Discord read | Page compact standalone role baselines for bounded channel actions with deterministic exact-role cursors and full-inventory totals |
 | `read_messages` | Discord read | Read a bounded page of normalized messages |
 | `search_messages` | Discord read | Search indexed guild history with bounded official Discord filters and compact results |
 | `get_message` | Discord read | Read one exact message |
@@ -378,6 +382,14 @@ An allowlisted parent grants local read scope to its child threads. This inherit
 `explain_channel_access` evaluates only the authenticated connector bot. It unions the guild `@everyone` role with the bot's roles, applies channel overwrites in Discord's documented everyone, combined-role, and member order, and treats permission bitfields as arbitrary-width integers. `ADMINISTRATOR` bypasses channel overwrites, unknown future bits are preserved and reported, and incomplete role or overwrite evidence yields `partial` confidence instead of a false access claim.
 
 Threads use their parent's overwrites. A successful lookup of a private thread is also reported as evidence that Discord exposed that thread to the bot. The explanation identifies required and missing read permissions, but it remains a diagnostic snapshot rather than a guarantee that a later Discord request will succeed. See Discord's [permissions reference](https://docs.discord.com/developers/topics/permissions).
+
+`explain_principal_permissions` extends that model to the connector bot, one exact member, or one exact role in a permitted guild. It accepts either named permissions, one supported action, or both. Channel actions cover viewing, reading, sending, attaching files, adding reactions, deleting messages, and managing a channel or thread. Hierarchy actions cover assigning or removing one exact role and kicking, banning, or timing out one exact member. Hierarchy requests remain at guild scope and require an exact target plus a connector or member subject.
+
+The service derives channel scope from the exact channel response, fetches members only through Discord's exact guild-member endpoint, and validates a complete bounded role inventory. It never invokes the guild-member listing endpoint. Decisions account for guild ownership, `ADMINISTRATOR`, Discord's overwrite order, channel and voice prerequisites, thread-specific send and management permissions, active member timeouts, strict role position, managed roles, protected guild owners, self-targeting, and administrator timeout immunity. Private-thread checks use the exact thread-member endpoint for member subjects; a `404` is explicit non-membership, while unavailable role membership stays `unknown`. Missing or contradictory evidence returns `partial` confidence and an `allowed: null` decision.
+
+`audit_channel_role_access` evaluates every role in the complete guild inventory for up to five selected channel actions, then returns a bounded deterministic page keyed by an exact role ID. Full-inventory allow, deny, and unknown totals remain available even when rows are paged. Each row is a standalone role baseline: member-specific overwrites and timeouts do not belong to a role, so their count is disclosed and they are excluded. Private-thread membership is likewise unknown for a role unless `MANAGE_THREADS` supplies moderator access.
+
+Both tools are read-only snapshots. They return Discord identifiers, role names, permission bitfields, decision traces, and warnings to the caller, but the connector does not persist those results or member profile data. A later Discord request can still fail if state changes between diagnosis and use.
 
 ## Reviewed additive channel creation
 

@@ -278,6 +278,14 @@ function serviceFixture(overrides: {
     async getMessage() {
       return message()
     },
+    async getThreadMember(threadId, userId) {
+      return {
+        flags: 0,
+        id: threadId,
+        join_timestamp: "2026-08-14T00:00:00.000Z",
+        user_id: userId,
+      }
+    },
     async getUser(userId) {
       return { id: userId, username: "target" }
     },
@@ -1239,4 +1247,41 @@ test("service explains current bot access using thread-parent overwrites", async
   assert.equal(result.permissions.privateThreadAccess, "lookup-succeeded")
   assert.equal(result.permissions.canReadMessages, true)
   assert.deepEqual(result.permissions.missingReadPermissions, [])
+})
+
+test("service verifies identity once before principal explanation and role audit", async () => {
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember(_guildId, userId) {
+        return { roles: [], user: { id: userId, username: "connector-bot" } }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.SEND_MESSAGES,
+          "@everyone",
+        )]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    },
+  })
+
+  const explanation = await service.explainPrincipalPermissions({
+    action: "send-message",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    subjectKind: "connector",
+  })
+  const audit = await service.auditChannelRoleAccess({
+    actions: ["view-channel"],
+    channelId: CHANNEL_ID,
+  })
+
+  assert.equal(explanation.permissions.allowed, true)
+  assert.equal(audit.summary["view-channel"]?.allowed, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
 })

@@ -441,6 +441,7 @@ function serviceFixture(overrides: {
   const calls = {
     active: 0,
     addReaction: 0,
+    auditRoles: 0,
     archived: 0,
     administrationExecute: 0,
     administrationPlan: 0,
@@ -454,6 +455,7 @@ function serviceFixture(overrides: {
     getRole: 0,
     listRoles: 0,
     plan: 0,
+    principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
     search: 0,
@@ -471,6 +473,46 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: "completed",
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
+      }
+    },
+    async auditChannelRoleAccess(input) {
+      calls.auditRoles += 1
+      const actions = [...(input.actions || [
+        "view-channel" as const,
+        "read-messages" as const,
+        "send-message" as const,
+      ])]
+      return {
+        channel: normalizeChannel(rawChannel({ id: input.channelId })),
+        confidence: "complete",
+        guildId: GUILD_ID,
+        memberOverwriteCount: 0,
+        page: {
+          hasMore: false,
+          nextCursor: null,
+          requestedLimit: input.limit ?? 50,
+          returned: 1,
+          totalRoles: 1,
+        },
+        permissionSourceChannelId: input.channelId,
+        requestedActions: actions,
+        roles: [{
+          administrator: false,
+          decisions: Object.fromEntries(actions.map((action) => [action, true])),
+          id: GUILD_ID,
+          managed: false,
+          name: "@everyone",
+          position: 0,
+        }],
+        schemaVersion: 1,
+        status: "ok",
+        summary: Object.fromEntries(actions.map((action) => [action, {
+          allowed: 1,
+          denied: 0,
+          unknown: 0,
+        }])),
+        unknownPermissionBits: "0",
+        warnings: [],
       }
     },
     async deleteMessages(channelId, messageIds, planDigest) {
@@ -590,6 +632,59 @@ function serviceFixture(overrides: {
         }),
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async explainPrincipalPermissions(input) {
+      calls.principalExplain += 1
+      const subjectId = input.subjectKind === "connector"
+        ? "600000000000000001"
+        : input.subjectId as string
+      return {
+        channel: input.channelId
+          ? normalizeChannel(rawChannel({ id: input.channelId }))
+          : null,
+        guildId: input.guildId,
+        permissions: {
+          action: input.action ?? null,
+          administrator: false,
+          allowed: true,
+          appliedRoleIds: [GUILD_ID],
+          basePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+          confidence: "complete",
+          decisionTrace: [],
+          effectivePermissionNames: ["VIEW_CHANNEL"],
+          effectivePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+          guildOwner: false,
+          hierarchy: {
+            actorHighestRoleIds: [],
+            actorHighestRolePosition: null,
+            allowed: null,
+            reason: "No hierarchy action was requested",
+            status: "not-applicable",
+            targetHighestRoleIds: [],
+            targetHighestRolePosition: null,
+          },
+          ignoredMemberOverwriteCount: 0,
+          implicitDenies: [],
+          ineffectivePermissions: [],
+          memberOverwriteCount: 0,
+          missingPermissions: [],
+          permissionSourceChannelId: input.channelId ?? null,
+          privateThreadAccess: "not-applicable",
+          requestedPermissions: [...(input.requestedPermissions || [])],
+          subjectId,
+          subjectKind: input.subjectKind,
+          subjectTimedOut: false,
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        schemaVersion: 1,
+        status: "ok",
+        target: input.targetRoleId
+          ? { id: input.targetRoleId, kind: "role" }
+          : input.targetUserId
+            ? { id: input.targetUserId, kind: "member" }
+            : null,
       }
     },
     async editOwnMessage(input) {
@@ -911,6 +1006,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_active_threads",
       "list_archived_threads",
       "explain_channel_access",
+      "explain_principal_permissions",
+      "audit_channel_role_access",
       "read_messages",
       "search_messages",
       "get_message",
@@ -1047,6 +1144,17 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   }
   const activity = result.tools.find((tool) => tool.name === "list_activity")
   assert.equal(activity?.annotations?.openWorldHint, false)
+  for (const name of [
+    "explain_principal_permissions",
+    "audit_channel_role_access",
+  ]) {
+    assert.deepEqual(listedTool(result.tools, name).annotations, {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    })
+  }
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
 })
 
@@ -1369,6 +1477,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
   assert.deepEqual(calls, {
     active: 1,
     addReaction: 0,
+    auditRoles: 0,
     administrationExecute: 0,
     administrationPlan: 0,
     archived: 1,
@@ -1382,11 +1491,100 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     getRole: 0,
     listRoles: 0,
     plan: 0,
+    principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
     search: 0,
     send: 0,
   })
+})
+
+test("MCP principal permission tools enforce exact subjects, targets, and bounded role audits", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const explained = await client.callTool({
+    arguments: {
+      action: "send-message",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      subjectKind: "connector",
+    },
+    name: "explain_principal_permissions",
+  })
+  const audited = await client.callTool({
+    arguments: {
+      actions: ["view-channel", "send-message"],
+      channelId: CHANNEL_ID,
+      limit: 1,
+    },
+    name: "audit_channel_role_access",
+  })
+  const invalidSubject = await client.callTool({
+    arguments: {
+      action: "view-channel",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      subjectId: USER_ID,
+      subjectKind: "connector",
+    },
+    name: "explain_principal_permissions",
+  })
+  const invalidTarget = await client.callTool({
+    arguments: {
+      action: "kick-member",
+      guildId: GUILD_ID,
+      subjectKind: "connector",
+    },
+    name: "explain_principal_permissions",
+  })
+  const invalidHierarchyChannel = await client.callTool({
+    arguments: {
+      action: "kick-member",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      subjectKind: "connector",
+      targetUserId: USER_ID,
+    },
+    name: "explain_principal_permissions",
+  })
+  const duplicateActions = await client.callTool({
+    arguments: {
+      actions: ["view-channel", "view-channel"],
+      channelId: CHANNEL_ID,
+    },
+    name: "audit_channel_role_access",
+  })
+
+  assert.equal(structuredContent(explained).status, "ok")
+  assert.equal(structuredContent(audited).status, "ok")
+  assert.equal(invalidSubject.isError, true)
+  assert.equal(invalidTarget.isError, true)
+  assert.equal(invalidHierarchyChannel.isError, true)
+  assert.equal(duplicateActions.isError, true)
+  assert.equal(calls.principalExplain, 1)
+  assert.equal(calls.auditRoles, 1)
+})
+
+test("progressive permission discovery reveals only the requested exact tool", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: {
+      DISCORD_MCP_TOOLSETS: "permissions",
+      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "explain_principal_permissions" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "explain_principal_permissions",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["explain_principal_permissions", "discover_discord_tools"],
+  )
 })
 
 test("MCP role reads expose complete inventory and exact lookup with snowflake validation", async (context) => {
@@ -2939,7 +3137,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 29)
+  assert.equal(tools.tools.length, 31)
   assert.equal(prompts.prompts.length, 7)
   assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 5)

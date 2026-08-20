@@ -240,7 +240,7 @@ test("Discord client returns Discord search indexing progress without retrying",
   assert.equal(calls, 1)
 })
 
-test("Discord client targets role, member, active-thread, and archived-thread routes", async () => {
+test("Discord client targets role, member, thread-member, and thread-list routes", async () => {
   const requests: string[] = []
   const client = new DiscordClient({
     apiBaseUrl: API_BASE_URL,
@@ -248,6 +248,9 @@ test("Discord client targets role, member, active-thread, and archived-thread ro
       const url = String(input)
       requests.push(url)
       if (url.endsWith("/roles")) return jsonResponse([])
+      if (url.includes("/thread-members/")) {
+        return jsonResponse({ flags: 0, join_timestamp: "2026-08-14T00:00:00.000Z" })
+      }
       if (url.includes("/members/")) return jsonResponse({ roles: [] })
       return jsonResponse({ has_more: false, threads: [] })
     },
@@ -256,6 +259,7 @@ test("Discord client targets role, member, active-thread, and archived-thread ro
 
   await client.getGuildRoles("100")
   await client.getGuildMember("100", "101")
+  await client.getThreadMember("200", "101")
   await client.listActiveGuildThreads("100")
   await client.listPublicArchivedThreads("200", {
     before: "2026-08-14T00:00:00.000Z",
@@ -267,6 +271,7 @@ test("Discord client targets role, member, active-thread, and archived-thread ro
   assert.deepEqual(requests, [
     `${API_BASE_URL}/guilds/100/roles`,
     `${API_BASE_URL}/guilds/100/members/101`,
+    `${API_BASE_URL}/channels/200/thread-members/101?with_member=false`,
     `${API_BASE_URL}/guilds/100/threads/active`,
     `${API_BASE_URL}/channels/200/threads/archived/public?before=2026-08-14T00%3A00%3A00.000Z&limit=25`,
     `${API_BASE_URL}/channels/200/threads/archived/private?limit=20`,
@@ -287,6 +292,10 @@ test("Discord client targets role, member, active-thread, and archived-thread ro
   assert.throws(
     () => client.listJoinedPrivateArchivedThreads("200", { before: "not-a-snowflake" }),
     /Discord snowflake/,
+  )
+  assert.throws(
+    () => client.getThreadMember("not-a-snowflake", "101"),
+    /exact thread-member lookup requires snowflake IDs/,
   )
 })
 

@@ -32,6 +32,7 @@ import type {
   DiscordMessageSearchResponse,
   DiscordRole,
   DiscordThreadList,
+  DiscordThreadMember,
   DiscordUser,
   MessageCursor,
   RequestOptions,
@@ -972,6 +973,24 @@ export class DiscordClient {
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {
     return this.#request("get_channel", `/channels/${channelId}`, options)
+  }
+
+  getThreadMember(
+    threadId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordThreadMember> {
+    if (
+      !DISCORD_SNOWFLAKE_PATTERN.test(threadId)
+      || !DISCORD_SNOWFLAKE_PATTERN.test(userId)
+    ) {
+      throw new RangeError("Discord exact thread-member lookup requires snowflake IDs")
+    }
+    return this.#request(
+      "get_thread_member",
+      `/channels/${threadId}/thread-members/${userId}?with_member=false`,
+      options,
+    )
   }
 
   listMessages(channelId: string, options: MessagePageOptions = {}): Promise<DiscordMessage[]> {

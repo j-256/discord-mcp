@@ -98,6 +98,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
       return status().policy
@@ -108,6 +109,7 @@ function toolService(): DiscordToolService {
     executeMemberModeration: unexpected,
     executeRoleCreation: unexpected,
     explainChannelAccess: unexpected,
+    explainPrincipalPermissions: unexpected,
     getMessage: unexpected,
     getRole: unexpected,
     async getStatus() {
@@ -658,7 +660,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 29)
+  assert.equal(report.toolCount, 31)
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
