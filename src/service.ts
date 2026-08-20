@@ -59,6 +59,13 @@ import type {
 } from "./forum-post-service.js"
 import { ForumPostService } from "./forum-post-service.js"
 import type {
+  GuildScaffoldPlan,
+  GuildScaffoldRequest,
+  GuildScaffoldResult,
+  GuildScaffoldServiceOptions,
+} from "./guild-scaffold-service.js"
+import { GuildScaffoldService } from "./guild-scaffold-service.js"
+import type {
   AddReactionRequest,
   EditOwnMessageRequest,
   InteractionServiceOptions,
@@ -177,6 +184,10 @@ export interface ConnectorServiceOptions {
   deletionOptions?: Pick<DeletionServiceOptions, "clock" | "planKey" | "randomId">
   forumPostOptions?: Pick<
     ForumPostServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildScaffoldOptions?: Pick<
+    GuildScaffoldServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   interactionOptions?: Pick<
@@ -301,6 +312,7 @@ export class ConnectorService {
   readonly #interactionService: InteractionService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
+  readonly #guildScaffoldService: GuildScaffoldService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
@@ -382,6 +394,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.roleAdministrationOptions,
+    })
+    this.#guildScaffoldService = new GuildScaffoldService({
+      channelService: this.#channelAdministrationService,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      roleService: this.#roleAdministrationService,
+      ...options.guildScaffoldOptions,
     })
   }
 
@@ -913,6 +933,19 @@ export class ConnectorService {
     return this.#roleAdministrationService.plan(identity.bot.id, request, options)
   }
 
+  async planGuildScaffold(
+    request: GuildScaffoldRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildScaffoldPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildScaffoldService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planForumPost(
     request: ForumPostRequest,
     options: RequestOptions = {},
@@ -950,6 +983,21 @@ export class ConnectorService {
   ): Promise<RoleCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#roleAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeGuildScaffold(
+    request: GuildScaffoldRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildScaffoldResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildScaffoldService.execute(
+      identity.application.id,
       identity.bot.id,
       request,
       planDigest,

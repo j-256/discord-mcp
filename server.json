@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.j-256/discord-mcp",
   "title": "Discord MCP",
-  "description": "Least-privilege Discord access with bounded reads and reviewed writes, including safe forum posts",
+  "description": "Least-privilege Discord access with bounded reads, reviewed writes, and resumable guild scaffolds",
   "repository": {
     "url": "https://github.com/j-256/discord-mcp",
     "source": "github",
@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guilds, interactions, messages, moderation, observability, permissions, role-creation, roles, threads, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-scaffolds, guilds, interactions, messages, moderation, observability, permissions, role-creation, roles, threads, or all",
           "default": "all",
           "format": "string"
         },
@@ -294,6 +294,20 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
+          "description": "Enable reviewed resumable additive guild scaffolds when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
+          "description": "Exact guild IDs eligible for reviewed resumable additive scaffolds",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_ROLE_CREATION",
           "description": "Enable reviewed additive role creation when an exact guild allowlist is also set",
           "default": "false",
@@ -354,7 +368,7 @@
         },
         {
           "name": "DISCORD_MCP_AUDIT_FILE",
-          "description": "Content-free local activity JSONL path with adjacent private attachment-, channel-, forum-post-, and role-creation operation receipts",
+          "description": "Content-free local activity JSONL path with adjacent private attachment-, channel-, forum-post-, guild-scaffold-, and role-creation operation receipts",
           "format": "string"
         }
       ]

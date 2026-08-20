@@ -25,6 +25,8 @@ export interface PolicyDescription {
   forumPostsEnabled: boolean
   gatewayEnabled: boolean
   gatewayEventBufferSize: number
+  guildScaffoldGuildIds: string[]
+  guildScaffoldsEnabled: boolean
   interactionChannelIds: string[]
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -49,6 +51,7 @@ export class ScopePolicy {
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowGateway: boolean
+  readonly #allowGuildScaffolds: boolean
   readonly #allowForumPosts: boolean
   readonly #allowRoleCreation: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
@@ -60,6 +63,7 @@ export class ScopePolicy {
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
   readonly #gatewayEventBufferSize: number
+  readonly #guildScaffoldGuildIds: ReadonlySet<string>
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
@@ -85,6 +89,7 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowAttachments"
     | "allowGateway"
+    | "allowGuildScaffolds"
     | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
@@ -93,6 +98,7 @@ export class ScopePolicy {
     | "attachmentMaxBytes"
     | "attachmentRoots"
     | "gatewayEventBufferSize"
+    | "guildScaffoldGuildIds"
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -107,6 +113,7 @@ export class ScopePolicy {
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowGateway = config.allowGateway ?? false
+    this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#deleteChannelIds = config.deleteChannelIds
@@ -119,6 +126,7 @@ export class ScopePolicy {
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
+    this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
@@ -146,6 +154,9 @@ export class ScopePolicy {
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       gatewayEnabled: this.#allowGateway,
       gatewayEventBufferSize: this.#gatewayEventBufferSize,
+      guildScaffoldGuildIds: [...this.#guildScaffoldGuildIds].sort(),
+      guildScaffoldsEnabled: this.#allowGuildScaffolds
+        && this.#guildScaffoldGuildIds.size > 0,
       forumPostChannelIds: [...this.#forumPostChannelIds].sort(),
       forumPostsEnabled: this.#allowForumPosts && this.#forumPostChannelIds.size > 0,
       interactionChannelIds: [...this.#interactionChannelIds].sort(),
@@ -224,6 +235,19 @@ export class ScopePolicy {
     }
     if (!this.#roleCreationGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the role creation scope`)
+    }
+  }
+
+  assertGuildScaffoldAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowGuildScaffolds) {
+      throw new PolicyError("Discord guild scaffolds are disabled by connector configuration")
+    }
+    if (this.#guildScaffoldGuildIds.size === 0) {
+      throw new PolicyError("Discord guild scaffolds require an explicit guild allowlist")
+    }
+    if (!this.#guildScaffoldGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the guild scaffold scope`)
     }
   }
 

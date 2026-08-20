@@ -122,6 +122,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
+    guildScaffoldGuildIds: [],
+    guildScaffoldsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -264,6 +266,8 @@ test("configuration and policy require an exact administration guild and protect
     forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
+    guildScaffoldGuildIds: [],
+    guildScaffoldsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -353,6 +357,39 @@ test("configuration and policy isolate exact role creation authority", () => {
   )
   assert.equal(enabled.describe().roleCreationEnabled, true)
   assert.deepEqual(enabled.describe().roleCreationGuildIds, [GUILD_ID])
+})
+
+test("configuration and policy isolate exact guild scaffold authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: "999999999999999999",
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildScaffoldAllowed(GUILD_ID),
+    /guild scaffolds are disabled/,
+  )
+
+  const enabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+    DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  enabled.assertGuildScaffoldAllowed(GUILD_ID)
+  assert.throws(
+    () => enabled.assertGuildScaffoldAllowed("999999999999999999"),
+    /outside the guild scaffold scope/,
+  )
+  assert.equal(enabled.describe().guildScaffoldsEnabled, true)
+  assert.deepEqual(enabled.describe().guildScaffoldGuildIds, [GUILD_ID])
 })
 
 test("configuration and policy isolate forum posts to exact readable channels", () => {
@@ -515,6 +552,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
+    guildScaffoldGuildIds: [],
+    guildScaffoldsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,

@@ -122,6 +122,38 @@ export class ForumPostEvidenceError extends Error {
   override name = "ForumPostEvidenceError"
 }
 
+export class GuildScaffoldPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild snapshot does not match the reviewed scaffold plan")
+    this.name = "GuildScaffoldPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildScaffoldOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(message: string, receipt: unknown) {
+    super(message)
+    this.name = "GuildScaffoldOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildScaffoldExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildScaffoldExecutionError"
+    this.result = result
+  }
+}
+
 export class RoleCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

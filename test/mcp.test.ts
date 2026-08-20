@@ -25,6 +25,10 @@ import type {
   ForumPostPlan,
   ForumPostRequest,
 } from "../src/forum-post-service.js"
+import type {
+  GuildScaffoldPlan,
+  GuildScaffoldRequest,
+} from "../src/guild-scaffold-service.js"
 import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
   type NormalizedDiscordRole,
@@ -40,6 +44,8 @@ import {
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
+  GuildScaffoldExecutionError,
+  GuildScaffoldOperationConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
   RoleCreationExecutionError,
@@ -74,6 +80,8 @@ const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
 const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const GUILD_ID = "100000000000000001"
+const APPLICATION_ID = "110000000000000001"
+const BOT_ID = "120000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const PARENT_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
@@ -85,6 +93,7 @@ const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
+const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -468,6 +477,95 @@ function rolePlan(
   }
 }
 
+function guildScaffoldPlan(
+  request: GuildScaffoldRequest,
+  digest = DIGEST,
+): GuildScaffoldPlan {
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    counts: {
+      alreadyCurrent: 0,
+      completed: 0,
+      ready: 2,
+      total: 2,
+      waitingForParent: 0,
+    },
+    createdAt: "2026-08-14T00:00:00.000Z",
+    digest,
+    executionFrontier: {
+      stepIndexes: [0, 1],
+    },
+    guild: {
+      id: request.guildId,
+      name: "Guild",
+      ownerId: USER_ID,
+    },
+    operation: {
+      operationKeyHash: OPERATION_KEY_HASH,
+      requestDigest: DIGEST,
+      status: "unreserved",
+      stepLimit: request.stepLimit ?? 10,
+    },
+    permission: {
+      botAdministrator: false,
+      botEffectivePermissionNames: ["MANAGE_CHANNELS", "MANAGE_ROLES", "VIEW_CHANNEL"],
+      botEffectivePermissions: (
+        DISCORD_PERMISSIONS.MANAGE_CHANNELS
+        | DISCORD_PERMISSIONS.MANAGE_ROLES
+        | DISCORD_PERMISSIONS.VIEW_CHANNEL
+      ).toString(),
+      botHighestRoleIds: ["350000000000000002"],
+      botHighestRolePosition: 2,
+      guildManageChannels: true,
+      guildManageRoles: true,
+      guildViewChannel: true,
+    },
+    schemaVersion: 1,
+    status: "planned",
+    steps: [{
+      existingResourceId: null,
+      index: 0,
+      key: "reviewer-role",
+      kind: "role",
+      operationKeyHash: OPERATION_KEY_HASH,
+      parent: null,
+      state: "ready",
+      target: {
+        hoist: false,
+        mentionable: false,
+        name: "reviewer",
+        permissionBits: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+        permissions: ["VIEW_CHANNEL"],
+        primaryColor: 0,
+      },
+    }, {
+      existingResourceId: null,
+      index: 1,
+      key: "review-category",
+      kind: "category",
+      operationKeyHash: OPERATION_KEY_HASH,
+      parent: null,
+      state: "ready",
+      target: {
+        defaultAutoArchiveDuration: null,
+        name: "Review",
+        nsfw: null,
+        rateLimitPerUser: null,
+        topic: null,
+      },
+    }],
+    visibleInventory: {
+      channels: 5,
+      channelLimit: 500,
+      roles: 3,
+      roleLimit: 250,
+    },
+    warnings: ["A newly created category requires a fresh child plan"],
+  }
+}
+
 function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
@@ -486,6 +584,8 @@ function fixturePolicy(): PolicyDescription {
     forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
+    guildScaffoldGuildIds: [],
+    guildScaffoldsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -511,6 +611,8 @@ function serviceFixture(overrides: {
   channelCreationPlanDigest?: string
   forumPostError?: Error
   forumPostPlanDigest?: string
+  guildScaffoldError?: Error
+  guildScaffoldPlanDigest?: string
   interactionError?: Error
   messageContent?: string
   planDigest?: string
@@ -533,6 +635,8 @@ function serviceFixture(overrides: {
     edit: 0,
     forumPostExecute: 0,
     forumPostPlan: 0,
+    guildScaffoldExecute: 0,
+    guildScaffoldPlan: 0,
     explain: 0,
     getRole: 0,
     listRoles: 0,
@@ -671,6 +775,30 @@ function serviceFixture(overrides: {
         threadId: MESSAGE_ID,
         url: `https://discord.com/channels/${GUILD_ID}/${MESSAGE_ID}/${MESSAGE_ID}`,
         verification: "match",
+      }
+    },
+    async executeGuildScaffold(request, planDigest) {
+      if (overrides.guildScaffoldError) throw overrides.guildScaffoldError
+      calls.guildScaffoldExecute += 1
+      const planned = guildScaffoldPlan(request, planDigest)
+      return {
+        applicationId: planned.applicationId,
+        botId: planned.botId,
+        executedSteps: planned.steps.map((step) => ({
+          activityId: `activity-scaffold-${step.index}`,
+          index: step.index,
+          key: step.key,
+          kind: step.kind,
+          resourceId: step.kind === "role" ? ROLE_ID : CHANNEL_ID,
+          status: "completed" as const,
+        })),
+        guildId: request.guildId,
+        operationKeyHash: planned.operation.operationKeyHash,
+        planDigest,
+        remaining: { ready: 0, waitingForParent: 0 },
+        requestDigest: planned.operation.requestDigest,
+        schemaVersion: 1,
+        status: "completed" as const,
       }
     },
     async executeMemberModeration(request, planDigest) {
@@ -1015,6 +1143,13 @@ function serviceFixture(overrides: {
         overrides.forumPostPlanDigest || DIGEST,
       )
     },
+    async planGuildScaffold(request) {
+      calls.guildScaffoldPlan += 1
+      return guildScaffoldPlan(
+        request,
+        overrides.guildScaffoldPlanDigest || DIGEST,
+      )
+    },
     async planMemberModeration() {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
@@ -1203,6 +1338,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_forum_post",
       "plan_attachment_message",
       "execute_attachment_message",
+      "plan_guild_scaffold",
+      "execute_guild_scaffold",
       "plan_role_creation",
       "execute_role_creation",
       "plan_member_moderation",
@@ -1283,6 +1420,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.deepEqual(roleCreation?.annotations, {
     destructiveHint: false,
     idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const guildScaffoldPlanTool = result.tools.find((tool) => (
+    tool.name === "plan_guild_scaffold"
+  ))
+  assert.deepEqual(guildScaffoldPlanTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const guildScaffoldTool = result.tools.find((tool) => (
+    tool.name === "execute_guild_scaffold"
+  ))
+  assert.deepEqual(guildScaffoldTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
     openWorldHint: true,
     readOnlyHint: false,
   })
@@ -1581,6 +1736,30 @@ test("progressive discovery enables the complete reviewed attachment-message wor
   )
 })
 
+test("progressive discovery enables the complete reviewed guild-scaffold workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_scaffold" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_scaffold",
+    "plan_guild_scaffold",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_scaffold",
+      "execute_guild_scaffold",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed role-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -1717,6 +1896,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     explain: 1,
     forumPostExecute: 0,
     forumPostPlan: 0,
+    guildScaffoldExecute: 0,
+    guildScaffoldPlan: 0,
     getRole: 0,
     listRoles: 0,
     plan: 0,
@@ -2961,6 +3142,264 @@ test("MCP forum posts expose uncertain and one-shot conflict outcomes safely", a
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(FORUM_POST_OPERATION_KEY),
+  )
+})
+
+test("MCP guild scaffolds validate bounded additive resource graphs", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Review",
+      }],
+      guildId: GUILD_ID,
+      operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+      roles: [{
+        key: "reviewer-role",
+        name: "reviewer",
+        permissions: ["VIEW_CHANNEL"],
+      }],
+      stepLimit: 2,
+    },
+    name: "plan_guild_scaffold",
+  })
+  const tooSmall = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Review",
+      }],
+      guildId: GUILD_ID,
+      operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+      roles: [],
+    },
+    name: "plan_guild_scaffold",
+  })
+  const unsafeRole = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Review",
+      }],
+      guildId: GUILD_ID,
+      operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+      roles: [{
+        key: "reviewer-role",
+        name: "reviewer",
+        permissions: ["ADMINISTRATOR"],
+      }],
+    },
+    name: "plan_guild_scaffold",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(tooSmall.isError, true)
+  assert.equal(unsafeRole.isError, true)
+  assert.equal(calls.guildScaffoldPlan, 1)
+})
+
+test("MCP guild scaffolds bind signed approval to the exact reviewed frontier", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Review",
+      }],
+      guildId: GUILD_ID,
+      operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+      planDigest: DIGEST,
+      roles: [{
+        key: "reviewer-role",
+        name: "reviewer",
+        permissions: ["VIEW_CHANNEL"],
+      }],
+      stepLimit: 2,
+    },
+    name: "execute_guild_scaffold",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.guildScaffoldPlan, 1)
+  assert.equal(calls.guildScaffoldExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, /reviewer-role/)
+  assert.match(confirmationMessage, /review-category/)
+  assert.match(confirmationMessage, /Exact target/)
+  assert.match(confirmationMessage, /Execution frontier step indexes: \[0,1\]/)
+  assert.match(confirmationMessage, /In this execution frontier: true/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /forces a pause/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_SCAFFOLD_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_SCAFFOLD_OPERATION_KEY),
+  )
+})
+
+test("MCP guild scaffolds stop before execution on refusal or a changed plan", async (context) => {
+  const arguments_ = {
+    auditReason: AUDIT_REASON,
+    channels: [{ key: "review-category", kind: "category", name: "Review" }],
+    guildId: GUILD_ID,
+    operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+    planDigest: DIGEST,
+    roles: [{
+      key: "reviewer-role",
+      name: "reviewer",
+      permissions: ["VIEW_CHANNEL"],
+    }],
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: arguments_,
+    name: "execute_guild_scaffold",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.guildScaffoldExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildScaffoldPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: arguments_,
+    name: "execute_guild_scaffold",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changed.calls.guildScaffoldExecute, 0)
+  assert.equal(confirmations, 0)
+})
+
+test("MCP guild scaffolds expose resumable, uncertain, and content-free conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const arguments_ = {
+    auditReason: AUDIT_REASON,
+    channels: [{ key: "review-category", kind: "category", name: "Review" }],
+    guildId: GUILD_ID,
+    operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+    planDigest: DIGEST,
+    roles: [{
+      key: "reviewer-role",
+      name: "reviewer",
+      permissions: ["VIEW_CHANNEL"],
+    }],
+  }
+  const paused = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildScaffoldError: new GuildScaffoldExecutionError(
+        "A scaffold step stopped before write reservation",
+        { status: "paused-step-prewrite" },
+      ),
+    },
+  })
+  const pausedResult = await paused.client.callTool({
+    arguments: arguments_,
+    name: "execute_guild_scaffold",
+  })
+  assert.equal(structuredContent(pausedResult).status, "paused-step-prewrite")
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildScaffoldError: new GuildScaffoldExecutionError(
+        "A scaffold write outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: arguments_,
+    name: "execute_guild_scaffold",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "scaffold-operation",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    resourceId: null,
+    status: "pending" as const,
+    timestamp: "2026-08-20T00:00:00.000Z",
+    verification: null,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildScaffoldError: new GuildScaffoldOperationConflictError(
+        "The scaffold operation is already reserved",
+        receipt,
+      ),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_guild_scaffold",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(GUILD_SCAFFOLD_OPERATION_KEY),
+  )
+
+  const unsafeConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildScaffoldError: new GuildScaffoldOperationConflictError(
+        "The scaffold receipt is unsafe",
+        { ...receipt, operationKey: GUILD_SCAFFOLD_OPERATION_KEY },
+      ),
+    },
+  })
+  const unsafeResult = await unsafeConflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_guild_scaffold",
+  })
+  assert.deepEqual(
+    (structuredContent(unsafeResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(
+    JSON.stringify(unsafeResult),
+    new RegExp(GUILD_SCAFFOLD_OPERATION_KEY),
   )
 })
 

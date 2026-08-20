@@ -18,6 +18,7 @@ import {
   ChannelCreationPlanChangedError,
   DiscordApiError,
 } from "../src/errors.js"
+import type { GuildScaffoldAuthority } from "../src/guild-scaffold-authority.js"
 import type {
   OperationReceipt,
   OperationReservation,
@@ -324,6 +325,19 @@ test("channel creation normalization is exact, type-specific, and content bounde
     () => normalizeChannelCreationRequest(request({ defaultAutoArchiveDuration: 30 })),
     /not supported/,
   )
+})
+
+test("channel creation rejects forged guild scaffold authority", async () => {
+  const target = fixture()
+  await assert.rejects(
+    target.service.planForGuildScaffold(
+      {} as GuildScaffoldAuthority,
+      BOT_ID,
+      request(),
+    ),
+    /scaffold authority is invalid/,
+  )
+  assert.deepEqual(target.events, [])
 })
 
 test("channel creation plans bind live evidence and return an exact current no-op", async () => {

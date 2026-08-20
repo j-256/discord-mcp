@@ -40,6 +40,7 @@ export interface ConnectorConfig {
   allowDeletions: boolean
   allowForumPosts: boolean
   allowGateway: boolean
+  allowGuildScaffolds: boolean
   allowInteractions: boolean
   allowRoleCreation: boolean
   auditFile: string
@@ -52,6 +53,7 @@ export interface ConnectorConfig {
   expectedBotId: string | undefined
   forumPostChannelIds: ReadonlySet<string>
   gatewayEventBufferSize: number
+  guildScaffoldGuildIds: ReadonlySet<string>
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -258,10 +260,15 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.roleCreationGuildIds],
     ENVIRONMENT_NAMES.roleCreationGuildIds,
   )
+  const guildScaffoldGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.guildScaffoldGuildIds],
+    ENVIRONMENT_NAMES.guildScaffoldGuildIds,
+  )
 
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
+    [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
@@ -330,6 +337,10 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.allowDeletions,
     ),
     allowGateway,
+    allowGuildScaffolds: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowGuildScaffolds],
+      ENVIRONMENT_NAMES.allowGuildScaffolds,
+    ),
     allowForumPosts: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowForumPosts],
       ENVIRONMENT_NAMES.allowForumPosts,
@@ -371,6 +382,7 @@ export function loadConnectorConfig(
       1,
       CONNECTOR_LIMITS.gatewayEventBufferSize,
     ),
+    guildScaffoldGuildIds,
     interactionChannelIds,
     interactionMaxWritesPerMinute: parseInteger(
       environment[ENVIRONMENT_NAMES.interactionMaxWritesPerMinute],

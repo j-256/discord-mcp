@@ -11,6 +11,7 @@ import {
   RoleCreationOperationConflictError,
   RoleCreationPlanChangedError,
 } from "../src/errors.js"
+import type { GuildScaffoldAuthority } from "../src/guild-scaffold-authority.js"
 import type {
   OperationReceipt,
   OperationReservation,
@@ -310,6 +311,19 @@ test("role creation normalization uses named permissions and blocks administrato
     () => normalizeRoleCreationRequest(request({ primaryColor: 0x1_00_00_00 })),
     /between 0 and/,
   )
+})
+
+test("role creation rejects forged guild scaffold authority", async () => {
+  const target = fixture()
+  await assert.rejects(
+    target.service.planForGuildScaffold(
+      {} as GuildScaffoldAuthority,
+      BOT_ID,
+      request(),
+    ),
+    /scaffold authority is invalid/,
+  )
+  assert.deepEqual(target.events, [])
 })
 
 test("role inventory is bounded, current, and exposes permission evidence", () => {

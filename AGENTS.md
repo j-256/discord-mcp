@@ -14,7 +14,9 @@ Message deletion must remain exact-ID based and require every existing gate: the
 
 Member administration must remain exact-ID based and require every existing gate: the environment toggle, administration-guild allowlist, protected-user denylist, verified bot and target identities, complete permission and strict role-hierarchy evidence, destructive MCP annotation, MCP host write approval, a fresh matching keyed plan digest, signed MCP request state, interactive confirmation, a final fresh-plan check, and a pending content-free audit record. Do not add an immediate moderation path.
 
-Never persist message content, attachment URLs, embeds, components, Discord audit-log reasons, Discord usernames or profile names, role names, or avatars. Activity records may contain Discord identifiers, timestamps, numeric action parameters, plan digests, strategies, sanitized errors, and outcomes.
+Guild scaffolds must remain additive-only, exact-guild scoped, and limited to bounded roles, categories, text channels, and forum channels. Preserve verified application and bot binding, complete role and visibility-bounded channel evidence, exact symbolic parent graphs, permission and capacity checks, fresh reviewed frontiers, signed confirmation, durable content-free request and per-step checkpoints, non-retried writes, exact readbacks, and restart-safe fail-closed resumption. A newly created category must force a fresh plan before child creation. Never add edits, moves, assignments, permission overwrites, deletion, rollback, or best-effort continuation to the scaffold workflow.
+
+Never persist message content, attachment URLs, embeds, components, Discord audit-log reasons, Discord usernames or profile names, role names, channel names or topics, scaffold symbols, or avatars. Activity records and operation receipts may contain Discord identifiers, timestamps, numeric action parameters, domain-separated hashes, plan digests, strategies, sanitized errors, and outcomes.
 
 ## Development
 

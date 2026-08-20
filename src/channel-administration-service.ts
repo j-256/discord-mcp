@@ -27,6 +27,10 @@ import {
   errorMessage,
 } from "./errors.js"
 import {
+  assertGuildScaffoldAuthority,
+  type GuildScaffoldAuthority,
+} from "./guild-scaffold-authority.js"
+import {
   type OperationReceipt,
   type OperationStore,
   operationKeyHash,
@@ -64,6 +68,7 @@ const CHANNEL_TYPE_BY_KIND: Readonly<Record<ChannelCreationKind, number>> = Obje
   text: DISCORD_CHANNEL_TYPES.text,
 })
 type ChannelCreationTargetOutcome = "settled" | "uncertain"
+type ChannelCreationAuthority = "direct" | "guild-scaffold"
 const CHANNEL_CREATION_TARGET_LOCKS = new Map<
   string,
   Promise<ChannelCreationTargetOutcome>
@@ -330,7 +335,7 @@ export function normalizeChannelCreationRequest(
   }
 }
 
-function logicalNameKey(value: string): string {
+export function logicalChannelNameKey(value: string): string {
   return value
     .normalize("NFKC")
     .toLocaleLowerCase("en-US")
@@ -342,7 +347,7 @@ function targetLockKey(request: NormalizedChannelCreationRequest): string {
   return [
     request.guildId,
     request.parentId ?? "",
-    logicalNameKey(request.name),
+    logicalChannelNameKey(request.name),
   ].join("\0")
 }
 
@@ -398,10 +403,15 @@ function exactMember(
   return member
 }
 
-function assertChannels(
+export function assertGuildChannelInventory(
   channels: readonly DiscordChannel[],
   guildId: string,
 ): void {
+  if (channels.length > DISCORD_LIMITS.guildChannels) {
+    throw new ChannelCreationStateError(
+      "Discord returned a guild channel inventory above the documented limit",
+    )
+  }
   const ids = new Set<string>()
   for (const channel of channels) {
     if (
@@ -488,7 +498,7 @@ function observedChannel(channel: DiscordChannel): ObservedCreatedChannel {
   }
 }
 
-function matchesRequest(
+export function channelMatchesRequest(
   channel: DiscordChannel,
   request: NormalizedChannelCreationRequest,
 ): boolean {
@@ -726,9 +736,14 @@ export class ChannelAdministrationService {
   async #state(
     botId: string,
     request: NormalizedChannelCreationRequest,
+    authority: ChannelCreationAuthority,
     options: RequestOptions,
   ): Promise<ChannelCreationState> {
-    this.#policy.assertChannelCreationAllowed(request.guildId)
+    if (authority === "guild-scaffold") {
+      this.#policy.assertGuildScaffoldAllowed(request.guildId)
+    } else {
+      this.#policy.assertChannelCreationAllowed(request.guildId)
+    }
     const existingReceipt = await this.#operationStore.get(
       "channel-creation",
       request.operationKeyHash,
@@ -755,7 +770,7 @@ export class ChannelAdministrationService {
       )
     }
     exactMember(botMember, botId)
-    assertChannels(channels, request.guildId)
+    assertGuildChannelInventory(channels, request.guildId)
 
     let botPermissions: GuildMemberPermissionResult
     try {
@@ -804,12 +819,12 @@ export class ChannelAdministrationService {
         .sort()
     }
 
-    const requestedNameKey = logicalNameKey(request.name)
+    const requestedNameKey = logicalChannelNameKey(request.name)
     const candidates = channels.filter((channel) => (
       Object.values(CHANNEL_TYPE_BY_KIND).includes(channel.type)
       && (channel.parent_id ?? null) === request.parentId
       && typeof channel.name === "string"
-      && logicalNameKey(channel.name) === requestedNameKey
+      && logicalChannelNameKey(channel.name) === requestedNameKey
     ))
     if (candidates.length > 1) {
       throw new ChannelCreationStateError(
@@ -817,7 +832,7 @@ export class ChannelAdministrationService {
       )
     }
     const candidate = candidates[0]
-    if (candidate && !matchesRequest(candidate, request)) {
+    if (candidate && !channelMatchesRequest(candidate, request)) {
       throw new ChannelCreationStateError(
         "Discord channel creation conflicts with an existing channel at the reviewed logical location",
       )
@@ -855,9 +870,10 @@ export class ChannelAdministrationService {
   async #planNormalized(
     botId: string,
     request: NormalizedChannelCreationRequest,
+    authority: ChannelCreationAuthority,
     options: RequestOptions,
   ): Promise<ChannelCreationPlan> {
-    const state = await this.#state(botId, request, options)
+    const state = await this.#state(botId, request, authority, options)
     const action = state.exactChannel ? "none" : "create"
     const digest = reviewedPlanDigest(this.#planKey, {
       action,
@@ -960,6 +976,22 @@ export class ChannelAdministrationService {
     return this.#planNormalized(
       botId,
       normalizeChannelCreationRequest(request),
+      "direct",
+      options,
+    )
+  }
+
+  async planForGuildScaffold(
+    authority: GuildScaffoldAuthority,
+    botId: string,
+    request: ChannelCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelCreationPlan> {
+    assertGuildScaffoldAuthority(authority)
+    return this.#planNormalized(
+      botId,
+      normalizeChannelCreationRequest(request),
+      "guild-scaffold",
       options,
     )
   }
@@ -976,9 +1008,49 @@ export class ChannelAdministrationService {
     }
     return withTargetLock(
       targetLockKey(normalized),
-      () => this.#executeNormalized(botId, normalized, expectedDigest, options),
+      () => this.#executeNormalized(
+        botId,
+        normalized,
+        expectedDigest,
+        "direct",
+        options,
+      ),
       () => new ChannelCreationExecutionError(
         "Discord channel creation was blocked because a concurrent creation at the same logical target ended with an uncertain outcome",
+        {
+          guildId: normalized.guildId,
+          operationKeyHash: normalized.operationKeyHash,
+          planDigest: expectedDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+        },
+      ),
+    )
+  }
+
+  async executeForGuildScaffold(
+    authority: GuildScaffoldAuthority,
+    botId: string,
+    request: ChannelCreationRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelCreationResult> {
+    assertGuildScaffoldAuthority(authority)
+    const normalized = normalizeChannelCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord channel creation plan digest is invalid")
+    }
+    return withTargetLock(
+      targetLockKey(normalized),
+      () => this.#executeNormalized(
+        botId,
+        normalized,
+        expectedDigest,
+        "guild-scaffold",
+        options,
+      ),
+      () => new ChannelCreationExecutionError(
+        "Discord scaffold channel creation was blocked because a concurrent creation at the same logical target ended with an uncertain outcome",
         {
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
@@ -994,11 +1066,12 @@ export class ChannelAdministrationService {
     botId: string,
     normalized: NormalizedChannelCreationRequest,
     expectedDigest: string,
+    authority: ChannelCreationAuthority,
     options: RequestOptions,
   ): Promise<ChannelCreationResult> {
     let plan: ChannelCreationPlan
     try {
-      plan = await this.#planNormalized(botId, normalized, options)
+      plan = await this.#planNormalized(botId, normalized, authority, options)
     } catch (error) {
       if (
         error instanceof ChannelCreationStateError

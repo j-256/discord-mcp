@@ -79,6 +79,8 @@ function status(
       forumPostsEnabled: false,
       gatewayEnabled: false,
       gatewayEventBufferSize: 100,
+      guildScaffoldGuildIds: [],
+      guildScaffoldsEnabled: false,
       interactionChannelIds: [],
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 500,
@@ -120,6 +122,7 @@ function toolService(): DiscordToolService {
     executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
     executeForumPost: unexpected,
+    executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
     executeRoleCreation: unexpected,
     explainChannelAccess: unexpected,
@@ -141,6 +144,7 @@ function toolService(): DiscordToolService {
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
     planForumPost: unexpected,
+    planGuildScaffold: unexpected,
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
     readMessages: unexpected,
@@ -484,6 +488,49 @@ test("doctor and setup explain reviewed role-creation scope without Discord writ
   )
   assert.match(setup.warnings.join("\n"), /role-creation guild allowlist/)
   assert.match(omitted.warnings.join("\n"), /role-creation toolset/)
+})
+
+test("doctor and setup explain resumable guild-scaffold scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const scaffold = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildScaffoldPolicy,
+  )
+  assert.equal(scaffold?.status, "pass")
+  assert.match(scaffold?.summary || "", /1 guilds with durable bounded resumption/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.guildScaffoldPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /guild-scaffold allowlist/)
+  assert.match(omitted.warnings.join("\n"), /guild-scaffolds toolset/)
 })
 
 test("doctor reports the privacy-safe Gateway policy without opening a connection", async () => {
@@ -936,6 +983,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_attachment_message",
     "review_channel_creation",
     "review_forum_post",
+    "review_guild_scaffold",
     "review_member_moderation",
     "review_message_deletion",
     "review_role_creation",

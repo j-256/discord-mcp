@@ -23,6 +23,10 @@ import {
   errorMessage,
 } from "./errors.js"
 import {
+  assertGuildScaffoldAuthority,
+  type GuildScaffoldAuthority,
+} from "./guild-scaffold-authority.js"
+import {
   type OperationReceipt,
   type OperationStore,
   operationKeyHash,
@@ -94,6 +98,7 @@ const HIGH_RISK_PERMISSION_SET = new Set<DiscordPermissionName>(
 )
 
 type RoleCreationTargetOutcome = "settled" | "uncertain"
+type RoleCreationAuthority = "direct" | "guild-scaffold"
 
 export type RoleManagementType =
   | "bot"
@@ -299,7 +304,7 @@ export function normalizeRoleCreationRequest(
     )
   }
   assertValidUnicode(request.name, "Discord role name")
-  if (logicalNameKey(request.name) === logicalNameKey("@everyone")) {
+  if (logicalRoleNameKey(request.name) === logicalRoleNameKey("@everyone")) {
     throw new RangeError("Discord role creation cannot target the reserved @everyone role")
   }
   if (typeof request.auditReason !== "string") {
@@ -343,7 +348,7 @@ export function normalizeRoleCreationRequest(
   }
 }
 
-function logicalNameKey(value: string): string {
+export function logicalRoleNameKey(value: string): string {
   return value
     .normalize("NFKC")
     .toLocaleLowerCase("en-US")
@@ -534,7 +539,7 @@ export function normalizeDiscordRoleInventory(
 }
 
 function targetLockKey(request: NormalizedRoleCreationRequest): string {
-  return `${request.guildId}\0${logicalNameKey(request.name)}`
+  return `${request.guildId}\0${logicalRoleNameKey(request.name)}`
 }
 
 function uncertainExecution(error: unknown): boolean {
@@ -589,7 +594,7 @@ function exactMember(
   return member
 }
 
-function roleMatchesRequest(
+export function roleMatchesRequest(
   role: NormalizedDiscordRole,
   request: NormalizedRoleCreationRequest,
 ): boolean {
@@ -775,9 +780,14 @@ export class RoleAdministrationService {
   async #state(
     botId: string,
     request: NormalizedRoleCreationRequest,
+    authority: RoleCreationAuthority,
     options: RequestOptions,
   ): Promise<RoleCreationState> {
-    this.#policy.assertRoleCreationAllowed(request.guildId)
+    if (authority === "guild-scaffold") {
+      this.#policy.assertGuildScaffoldAllowed(request.guildId)
+    } else {
+      this.#policy.assertRoleCreationAllowed(request.guildId)
+    }
     const existingReceipt = await this.#operationStore.get(
       "role-creation",
       request.operationKeyHash,
@@ -833,8 +843,8 @@ export class RoleAdministrationService {
     }
     assertCompletePermissions(botPermissions, request)
 
-    const requestedNameKey = logicalNameKey(request.name)
-    const candidates = roles.filter((role) => logicalNameKey(role.name) === requestedNameKey)
+    const requestedNameKey = logicalRoleNameKey(request.name)
+    const candidates = roles.filter((role) => logicalRoleNameKey(role.name) === requestedNameKey)
     if (candidates.length > 1) {
       throw new RoleCreationStateError(
         "Discord role creation target is ambiguous at the reviewed logical name",
@@ -872,9 +882,10 @@ export class RoleAdministrationService {
   async #planNormalized(
     botId: string,
     request: NormalizedRoleCreationRequest,
+    authority: RoleCreationAuthority,
     options: RequestOptions,
   ): Promise<RoleCreationPlan> {
-    const state = await this.#state(botId, request, options)
+    const state = await this.#state(botId, request, authority, options)
     const action = state.exactRole ? "none" : "create"
     const reviewedRequest = {
       auditReason: request.auditReason,
@@ -977,6 +988,22 @@ export class RoleAdministrationService {
     return this.#planNormalized(
       botId,
       normalizeRoleCreationRequest(request),
+      "direct",
+      options,
+    )
+  }
+
+  async planForGuildScaffold(
+    authority: GuildScaffoldAuthority,
+    botId: string,
+    request: RoleCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleCreationPlan> {
+    assertGuildScaffoldAuthority(authority)
+    return this.#planNormalized(
+      botId,
+      normalizeRoleCreationRequest(request),
+      "guild-scaffold",
       options,
     )
   }
@@ -993,9 +1020,49 @@ export class RoleAdministrationService {
     }
     return withTargetLock(
       targetLockKey(normalized),
-      () => this.#executeNormalized(botId, normalized, expectedDigest, options),
+      () => this.#executeNormalized(
+        botId,
+        normalized,
+        expectedDigest,
+        "direct",
+        options,
+      ),
       () => new RoleCreationExecutionError(
         "Discord role creation was blocked because a concurrent creation at the same logical target ended with an uncertain outcome",
+        {
+          guildId: normalized.guildId,
+          operationKeyHash: normalized.operationKeyHash,
+          planDigest: expectedDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+        },
+      ),
+    )
+  }
+
+  async executeForGuildScaffold(
+    authority: GuildScaffoldAuthority,
+    botId: string,
+    request: RoleCreationRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<RoleCreationResult> {
+    assertGuildScaffoldAuthority(authority)
+    const normalized = normalizeRoleCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord role creation plan digest is invalid")
+    }
+    return withTargetLock(
+      targetLockKey(normalized),
+      () => this.#executeNormalized(
+        botId,
+        normalized,
+        expectedDigest,
+        "guild-scaffold",
+        options,
+      ),
+      () => new RoleCreationExecutionError(
+        "Discord scaffold role creation was blocked because a concurrent creation at the same logical target ended with an uncertain outcome",
         {
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
@@ -1011,11 +1078,12 @@ export class RoleAdministrationService {
     botId: string,
     normalized: NormalizedRoleCreationRequest,
     expectedDigest: string,
+    authority: RoleCreationAuthority,
     options: RequestOptions,
   ): Promise<RoleCreationResult> {
     let plan: RoleCreationPlan
     try {
-      plan = await this.#planNormalized(botId, normalized, options)
+      plan = await this.#planNormalized(botId, normalized, authority, options)
     } catch (error) {
       if (
         error instanceof RoleCreationStateError

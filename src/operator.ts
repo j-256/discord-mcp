@@ -58,6 +58,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildAccess: "guild-access",
   guildScope: "guild-scope",
   gatewayPolicy: "gateway-policy",
+  guildScaffoldPolicy: "guild-scaffold-policy",
   interactionPolicy: "interaction-policy",
   messageContentIntent: "message-content-intent",
   nodeVersion: "node-version",
@@ -227,6 +228,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowRoleCreation && config.roleCreationGuildIds.size === 0) {
     warnings.push("The role-creation toggle is enabled but role creation remains blocked because no role-creation guild allowlist is configured")
   }
+  if (config.allowGuildScaffolds && config.guildScaffoldGuildIds.size === 0) {
+    warnings.push("The guild-scaffold toggle is enabled but scaffold execution remains blocked because no guild-scaffold allowlist is configured")
+  }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
@@ -237,6 +241,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
     [config.allowGateway, "gateway", "Gateway events"],
+    [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
     [config.allowInteractions, "interactions", "Message interactions"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
   ] as const) {
@@ -474,6 +479,25 @@ export async function diagnoseConnector(
         `Additive role creation is constrained to ${config.roleCreationGuildIds.size} guilds with reviewed one-shot execution`,
       ))
     }
+    if (!config.allowGuildScaffolds) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildScaffoldPolicy,
+        "pass",
+        "Reviewed additive guild scaffolds are disabled",
+      ))
+    } else if (config.guildScaffoldGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildScaffoldPolicy,
+        "warn",
+        "Guild-scaffold toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildScaffoldPolicy,
+        "pass",
+        `Reviewed additive guild scaffolds are constrained to ${config.guildScaffoldGuildIds.size} guilds with durable bounded resumption`,
+      ))
+    }
     if (!config.allowInteractions) {
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
@@ -632,6 +656,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.channelCreationGuildIds,
     ENVIRONMENT_NAMES.allowRoleCreation,
     ENVIRONMENT_NAMES.roleCreationGuildIds,
+    ENVIRONMENT_NAMES.allowGuildScaffolds,
+    ENVIRONMENT_NAMES.guildScaffoldGuildIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowForumPosts,

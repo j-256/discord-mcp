@@ -40,6 +40,7 @@ type McpToolWorkflow =
   | "attachment-message"
   | "channel-creation"
   | "forum-post"
+  | "guild-scaffold"
   | "member-moderation"
   | "message-deletion"
   | "role-creation"
@@ -89,6 +90,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "execute", "forum", "post", "thread"],
     toolset: "forum-posts",
     workflow: "forum-post",
+  },
+  execute_guild_scaffold: {
+    keywords: ["blueprint", "category", "channel", "create", "guild", "role", "scaffold"],
+    toolset: "guild-scaffolds",
+    workflow: "guild-scaffold",
   },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
@@ -183,6 +189,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "forum", "plan", "post", "review", "thread"],
     toolset: "forum-posts",
     workflow: "forum-post",
+  },
+  plan_guild_scaffold: {
+    keywords: ["blueprint", "category", "channel", "guild", "plan", "review", "role", "scaffold"],
+    toolset: "guild-scaffolds",
+    workflow: "guild-scaffold",
   },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],

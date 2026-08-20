@@ -9,6 +9,7 @@ export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION}
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
 export const DISCORD_SNOWFLAKE_MAX = 18_446_744_073_709_551_615n
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
+export const GUILD_SCAFFOLD_SYMBOL_PATTERN = /^[a-z][a-z0-9_-]*$/
 export const CONTENT_FREE_ERROR_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/
 export const CONTENT_FREE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
@@ -30,6 +31,7 @@ export const MCP_TOOLSET_NAMES = [
   "deletion",
   "forum-posts",
   "gateway",
+  "guild-scaffolds",
   "guilds",
   "interactions",
   "messages",
@@ -53,6 +55,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
   allowForumPosts: "DISCORD_MCP_ALLOW_FORUM_POSTS",
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
+  allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowRoleCreation: "DISCORD_MCP_ALLOW_ROLE_CREATION",
@@ -66,6 +69,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
   forumPostChannelIds: "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
   gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
+  guildScaffoldGuildIds: "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
   interactionChannelIds: "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
@@ -183,6 +187,11 @@ export const CONNECTOR_LIMITS = Object.freeze({
   observabilityServiceNameCharacters: 64,
   observabilityTimeoutMs: 60_000,
   operationReceiptBytes: 16_384,
+  scaffoldChannels: 20,
+  scaffoldRoles: 10,
+  scaffoldStepLimit: 10,
+  scaffoldSteps: 25,
+  scaffoldSymbolCharacters: 32,
   profileBytes: 16_384,
   protectedUserAllowlist: 100,
   searchFilterIds: 25,

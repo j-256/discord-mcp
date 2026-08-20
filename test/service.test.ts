@@ -181,6 +181,7 @@ function serviceFixture(overrides: {
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
+  guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   operationStore?: OperationStore
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
@@ -381,6 +382,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.forumPostOptions
         ? { forumPostOptions: overrides.forumPostOptions }
+        : {}),
+      ...(overrides.guildScaffoldOptions
+        ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
         : {}),
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
@@ -711,6 +715,61 @@ test("service verifies identity before reviewed additive channel creation", asyn
   assert.equal(calls.createChannel, 1)
   assert.equal(operationStore.receipt?.status, "completed")
   assert.doesNotMatch(JSON.stringify(operationStore.receipt), /channel-create-attempt/)
+})
+
+test("service verifies identity before an exact guild-scaffold no-op", async () => {
+  const operationStore = new MemoryOperationStore()
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildChannels() {
+        return [channel({
+          id: CREATED_CHANNEL_ID,
+          name: "Support",
+          parent_id: null,
+          permission_overwrites: [],
+          type: 4,
+        })]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-scaffold",
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed exact existing scaffold",
+    channels: [{ key: "support-category", kind: "category" as const, name: "Support" }],
+    guildId: GUILD_ID,
+    operationKey: "guild-scaffold-attempt-0001",
+    roles: [{ key: "support-role", name: "Support" }],
+  }
+
+  const plan = await service.planGuildScaffold(request)
+  const result = await service.executeGuildScaffold(request, plan.digest)
+
+  assert.equal(plan.status, "already-current")
+  assert.equal(result.status, "already-current")
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.createChannel, 0)
+  assert.equal(calls.createRole, 0)
+  assert.equal(operationStore.receipt, undefined)
 })
 
 test("service pins identity through reviewed forum creation without persisting intent", async () => {
