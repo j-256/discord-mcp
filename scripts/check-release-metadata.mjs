@@ -67,6 +67,8 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "DISCORD_MCP_MENTION_USER_IDS",
   "DISCORD_MCP_OBSERVABILITY_LOGS",
   "DISCORD_MCP_PROTECTED_USER_IDS",
+  "DISCORD_MCP_TOOLSETS",
+  "DISCORD_MCP_TOOL_SURFACE",
   "OTEL_EXPORTER_OTLP_COMPRESSION",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
   "OTEL_EXPORTER_OTLP_HEADERS",
@@ -300,6 +302,7 @@ async function checkRegistryManifest(packageJson) {
     "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
     "DISCORD_MCP_MENTION_USER_IDS",
     "DISCORD_MCP_PROTECTED_USER_IDS",
+    "DISCORD_MCP_TOOLSETS",
     "OTEL_EXPORTER_OTLP_ENDPOINT",
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
     "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
@@ -369,6 +372,22 @@ async function checkRegistryManifest(packageJson) {
     },
     { default: "1", format: "number" },
     "registry trace sampler argument metadata is invalid",
+  )
+  assertEqual(
+    {
+      choices: byName.get("DISCORD_MCP_TOOL_SURFACE")?.choices,
+      default: byName.get("DISCORD_MCP_TOOL_SURFACE")?.default,
+    },
+    { choices: ["full", "progressive"], default: "full" },
+    "registry MCP tool surface metadata is invalid",
+  )
+  assertEqual(
+    {
+      default: byName.get("DISCORD_MCP_TOOLSETS")?.default,
+      format: byName.get("DISCORD_MCP_TOOLSETS")?.format,
+    },
+    { default: "all", format: "string" },
+    "registry MCP toolset metadata is invalid",
   )
   assertEqual(
     {

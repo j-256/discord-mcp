@@ -7,6 +7,7 @@ import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
   MEMBER_MODERATION_ACTIONS,
+  type McpToolsetName,
 } from "./constants.js"
 import { encodeDiscordAuditReason } from "./discord-client.js"
 import { MCP_PROMPT_NAMES } from "./mcp-guidance-catalog.js"
@@ -186,8 +187,9 @@ function userPrompt(
 export function registerDiscordPrompts(
   server: McpServer,
   secrets: readonly (string | undefined)[],
+  toolsets: ReadonlySet<McpToolsetName>,
 ): void {
-  server.registerPrompt(
+  if (toolsets.has("messages")) server.registerPrompt(
     MCP_PROMPT_NAMES.summarizeChannel,
     {
       argsSchema: summarizeChannelPromptSchema,
@@ -215,7 +217,7 @@ export function registerDiscordPrompts(
     ),
   )
 
-  server.registerPrompt(
+  if (toolsets.has("messages")) server.registerPrompt(
     MCP_PROMPT_NAMES.searchGuildMessages,
     {
       argsSchema: searchGuildMessagesPromptSchema,
@@ -244,7 +246,7 @@ export function registerDiscordPrompts(
     ),
   )
 
-  server.registerPrompt(
+  if (toolsets.has("deletion")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMessageDeletion,
     {
       argsSchema: reviewMessageDeletionPromptSchema,
@@ -270,7 +272,7 @@ export function registerDiscordPrompts(
     ),
   )
 
-  server.registerPrompt(
+  if (toolsets.has("moderation")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMemberModeration,
     {
       argsSchema: reviewMemberModerationPromptSchema,

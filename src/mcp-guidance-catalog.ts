@@ -1,3 +1,5 @@
+import type { McpToolsetName } from "./constants.js"
+
 export const MCP_RESOURCE_NAMES = Object.freeze({
   activity: "connector_activity",
   guilds: "scoped_guilds",
@@ -36,3 +38,21 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   searchGuildMessages: "search_guild_messages",
   summarizeChannel: "summarize_channel",
 })
+
+export type McpPromptName = typeof MCP_PROMPT_NAMES[
+  keyof typeof MCP_PROMPT_NAMES
+]
+
+export const MCP_PROMPT_TOOLSETS = Object.freeze({
+  [MCP_PROMPT_NAMES.reviewMemberModeration]: "moderation",
+  [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",
+  [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",
+  [MCP_PROMPT_NAMES.summarizeChannel]: "messages",
+} satisfies Record<McpPromptName, McpToolsetName>)
+
+export function selectedMcpPromptNames(
+  toolsets: ReadonlySet<McpToolsetName>,
+): McpPromptName[] {
+  return (Object.values(MCP_PROMPT_NAMES) as McpPromptName[])
+    .filter((name) => toolsets.has(MCP_PROMPT_TOOLSETS[name]))
+}

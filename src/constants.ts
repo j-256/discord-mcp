@@ -9,6 +9,30 @@ export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION}
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 
+export const MCP_DISCOVERY_TOOL_NAME = "discover_discord_tools"
+
+export const MCP_TOOL_SURFACES = [
+  "full",
+  "progressive",
+] as const
+
+export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
+
+export const MCP_TOOLSET_NAMES = [
+  "activity",
+  "connector",
+  "deletion",
+  "gateway",
+  "guilds",
+  "interactions",
+  "messages",
+  "moderation",
+  "observability",
+  "threads",
+] as const
+
+export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
+
 export const ENVIRONMENT_NAMES = Object.freeze({
   adminGuildIds: "DISCORD_MCP_ADMIN_GUILD_IDS",
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
@@ -47,6 +71,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   otelTracesSamplerArg: "OTEL_TRACES_SAMPLER_ARG",
   protectedUserIds: "DISCORD_MCP_PROTECTED_USER_IDS",
   token: "DISCORD_BOT_TOKEN",
+  toolSurface: "DISCORD_MCP_TOOL_SURFACE",
+  toolsets: "DISCORD_MCP_TOOLSETS",
 })
 
 export const DISCORD_LIMITS = Object.freeze({
@@ -96,6 +122,9 @@ export const CONNECTOR_LIMITS = Object.freeze({
   interactionNotificationUsers: 10,
   mentionUserAllowlist: 100,
   messagePageDefault: 50,
+  toolDiscoveryMatches: 8,
+  toolDiscoveryQueryCharacters: 200,
+  toolDiscoverySummaryCharacters: 200,
   observabilityHeaders: 32,
   observabilityHeaderValueCharacters: 4_096,
   observabilityOtlpEndpointCharacters: 2_048,

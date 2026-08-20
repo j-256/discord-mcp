@@ -1,5 +1,10 @@
 import type { ConnectorConfig } from "./config.js"
-import { GATEWAY_DEFAULTS } from "./constants.js"
+import {
+  GATEWAY_DEFAULTS,
+  MCP_TOOLSET_NAMES,
+  type McpToolsetName,
+  type McpToolSurface,
+} from "./constants.js"
 import { PolicyError } from "./errors.js"
 import type { DiscordChannel, DiscordGuild } from "./types.js"
 
@@ -17,6 +22,8 @@ export interface PolicyDescription {
   interactionMinWriteIntervalMs: number
   interactionsEnabled: boolean
   mentionUserCount: number
+  mcpToolsets: McpToolsetName[]
+  mcpToolSurface: McpToolSurface
   protectedUserCount: number
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
@@ -36,6 +43,8 @@ export class ScopePolicy {
   readonly #interactionMinWriteIntervalMs: number
   readonly #gatewayEventBufferSize: number
   readonly #mentionUserIds: ReadonlySet<string>
+  readonly #mcpToolsets: ReadonlySet<McpToolsetName>
+  readonly #mcpToolSurface: McpToolSurface
   readonly #protectedUserIds: ReadonlySet<string>
 
   constructor(config: Pick<
@@ -52,7 +61,13 @@ export class ScopePolicy {
     | "interactionMinWriteIntervalMs"
     | "mentionUserIds"
     | "protectedUserIds"
-  > & Partial<Pick<ConnectorConfig, "allowGateway" | "gatewayEventBufferSize">>) {
+  > & Partial<Pick<
+    ConnectorConfig,
+    | "allowGateway"
+    | "gatewayEventBufferSize"
+    | "mcpToolsets"
+    | "mcpToolSurface"
+  >>) {
     this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
@@ -67,6 +82,8 @@ export class ScopePolicy {
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
     this.#mentionUserIds = config.mentionUserIds
+    this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
+    this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#protectedUserIds = config.protectedUserIds
   }
 
@@ -85,6 +102,8 @@ export class ScopePolicy {
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
       interactionsEnabled: this.#allowInteractions && this.#interactionChannelIds.size > 0,
       mentionUserCount: this.#mentionUserIds.size,
+      mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
+      mcpToolSurface: this.#mcpToolSurface,
       protectedUserCount: this.#protectedUserIds.size,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",

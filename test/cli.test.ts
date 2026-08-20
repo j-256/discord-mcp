@@ -56,6 +56,8 @@ function setupReport(): SetupReport {
     schemaVersion: 1,
     serverName: "discord",
     status: "ok",
+    toolsets: ["connector", "messages"],
+    toolSurface: "full",
     warnings: [],
   }
 }
@@ -74,6 +76,8 @@ function smokeReport(): SmokeReport {
     schemaVersion: 1,
     status: "ok",
     toolCount: 12,
+    toolsets: ["connector", "messages"],
+    toolSurface: "full",
   }
 }
 

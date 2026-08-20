@@ -6,6 +6,7 @@ import {
   InMemoryTransport,
 } from "@modelcontextprotocol/client"
 
+import { MCP_TOOLSET_NAMES } from "../src/constants.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_NAMES,
@@ -134,6 +135,8 @@ function guidanceService(options: {
         interactionMinWriteIntervalMs: 500,
         interactionsEnabled: false,
         mentionUserCount: 0,
+        mcpToolsets: [...MCP_TOOLSET_NAMES],
+        mcpToolSurface: "full",
         protectedUserCount: 0,
         readChannelScope: "allowlist",
         readGuildScope: "allowlist",

@@ -1,6 +1,7 @@
 export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   add_reaction: "interaction-write",
   delete_messages: "destructive-write",
+  discover_discord_tools: "local-read",
   edit_own_message: "interaction-write",
   execute_member_moderation: "destructive-write",
   explain_channel_access: "discord-read",

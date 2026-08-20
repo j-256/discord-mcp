@@ -6,21 +6,30 @@ import {
 import type { ConnectorConfig } from "./config.js"
 import { loadConnectorConfig } from "./config.js"
 import {
+  CONNECTOR_LIMITS,
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
   DISCORD_SNOWFLAKE_PATTERN,
   ENVIRONMENT_NAMES,
+  MCP_DISCOVERY_TOOL_NAME,
+  MCP_TOOLSET_NAMES,
+  type McpToolsetName,
+  type McpToolSurface,
 } from "./constants.js"
 import { ConfigurationError, errorMessage, redactText } from "./errors.js"
 import {
-  MCP_PROMPT_NAMES,
   MCP_RESOURCE_TEMPLATE_URIS,
   MCP_RESOURCE_URIS,
+  selectedMcpPromptNames,
 } from "./mcp-guidance.js"
 import {
   createDiscordMcpServer,
   type DiscordToolService,
 } from "./mcp.js"
+import {
+  selectedCanonicalMcpToolNames,
+  selectedMcpToolsets,
+} from "./mcp-tool-catalog.js"
 import { ConnectorService } from "./service.js"
 
 export const OPERATOR_REPORT_SCHEMA_VERSION = 1
@@ -40,6 +49,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   nodeVersion: "node-version",
   observability: "observability",
   token: "token",
+  toolSurface: "tool-surface",
 })
 
 const DEFAULT_CLI_COMMAND = "discord-mcp"
@@ -82,6 +92,8 @@ export interface SetupReport {
   schemaVersion: number
   serverName: string
   status: "ok"
+  toolsets: McpToolsetName[]
+  toolSurface: McpToolSurface
   warnings: string[]
 }
 
@@ -94,6 +106,8 @@ export interface SmokeReport extends IdentitySummary {
   schemaVersion: number
   status: "ok"
   toolCount: number
+  toolsets: McpToolsetName[]
+  toolSurface: McpToolSurface
 }
 
 type ConnectorStatus = Awaited<ReturnType<ConnectorService["getStatus"]>>
@@ -161,6 +175,16 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
+  }
+  for (const [enabled, toolset, capability] of [
+    [config.allowAdministration, "moderation", "Member administration"],
+    [config.allowDeletions, "deletion", "Message deletion"],
+    [config.allowGateway, "gateway", "Gateway events"],
+    [config.allowInteractions, "interactions", "Message interactions"],
+  ] as const) {
+    if (enabled && !config.mcpToolsets.has(toolset)) {
+      warnings.push(`${capability} is enabled by policy but omitted from the MCP ${toolset} toolset`)
+    }
   }
   if (
     config.observability.exportEnabled
@@ -259,6 +283,11 @@ export async function diagnoseConnector(
         "warn",
         "Local channel allowlist is open; Discord permissions are the channel boundary",
       ))
+    checks.push(check(
+      DOCTOR_CHECK_IDS.toolSurface,
+      "pass",
+      `MCP tool surface is ${config.mcpToolSurface} with ${config.mcpToolsets.size} of ${MCP_TOOLSET_NAMES.length} risk-separated toolsets and ${selectedCanonicalMcpToolNames(config.mcpToolsets).length} canonical tools`,
+    ))
     if (!config.allowAdministration) {
       checks.push(check(
         DOCTOR_CHECK_IDS.administrationPolicy,
@@ -447,6 +476,8 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.otelServiceName,
     ENVIRONMENT_NAMES.otelTracesSampler,
     ENVIRONMENT_NAMES.otelTracesSamplerArg,
+    ENVIRONMENT_NAMES.toolSurface,
+    ENVIRONMENT_NAMES.toolsets,
     ENVIRONMENT_NAMES.auditFile,
   ]
   const environmentLines = environmentVariables.map((name, index) => (
@@ -495,6 +526,8 @@ export async function prepareSetup(
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName,
     status: "ok",
+    toolsets: selectedMcpToolsets(config.mcpToolsets),
+    toolSurface: config.mcpToolSurface,
     warnings: [
       ...policyWarnings(config),
       ...(status.application.messageContentIntent === "enabled"
@@ -538,9 +571,13 @@ export async function smokeConnector(
   options: SmokeOptions = {},
 ): Promise<SmokeReport> {
   const environment = options.environment || process.env
+  const config = loadConnectorConfig(environment)
+  const service = options.service || new ConnectorService({ config })
+  const selectedToolNames = selectedCanonicalMcpToolNames(config.mcpToolsets)
+  const expectedToolNames = [...selectedToolNames, MCP_DISCOVERY_TOOL_NAME]
   const server = createDiscordMcpServer({
     environment,
-    ...(options.service ? { service: options.service } : {}),
+    service,
   })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const client = new Client(
@@ -551,8 +588,45 @@ export async function smokeConnector(
   try {
     await server.connect(serverTransport)
     await client.connect(clientTransport)
-    const [listed, listedPrompts, listedResources, listedTemplates] = await Promise.all([
-      client.listTools(),
+    let listed = await client.listTools()
+    if (config.mcpToolSurface === "progressive") {
+      assertExactCatalog(
+        listed.tools.map(({ name }) => name),
+        [MCP_DISCOVERY_TOOL_NAME],
+        "initial progressive tool",
+      )
+    }
+    const discoveryProbe = await client.callTool({
+      arguments: {},
+      name: MCP_DISCOVERY_TOOL_NAME,
+    })
+    const discoveryProbeContent = objectValue(discoveryProbe.structuredContent)
+    if (discoveryProbe.isError || discoveryProbeContent?.status !== "ok") {
+      throw new Error("MCP tool discovery smoke call failed")
+    }
+    if (config.mcpToolSurface === "progressive") {
+      for (const toolset of selectedMcpToolsets(config.mcpToolsets)) {
+        const discovered = await client.callTool({
+          arguments: {
+            detail: "full",
+            limit: CONNECTOR_LIMITS.toolDiscoveryMatches,
+            toolset,
+          },
+          name: MCP_DISCOVERY_TOOL_NAME,
+        })
+        const discoveredContent = objectValue(discovered.structuredContent)
+        if (discovered.isError || discoveredContent?.status !== "ok") {
+          throw new Error(`MCP ${toolset} toolset discovery smoke call failed`)
+        }
+      }
+      listed = await client.listTools()
+    }
+    assertExactCatalog(
+      listed.tools.map(({ name }) => name),
+      expectedToolNames,
+      "tool",
+    )
+    const [listedPrompts, listedResources, listedTemplates] = await Promise.all([
       client.listPrompts(),
       client.listResources(),
       client.listResourceTemplates(),
@@ -561,7 +635,11 @@ export async function smokeConnector(
     const resourceUris = listedResources.resources.map((resource) => resource.uri)
     const resourceTemplateUris = listedTemplates.resourceTemplates
       .map((template) => template.uriTemplate)
-    assertExactCatalog(promptNames, Object.values(MCP_PROMPT_NAMES), "prompt")
+    assertExactCatalog(
+      promptNames,
+      selectedMcpPromptNames(config.mcpToolsets),
+      "prompt",
+    )
     assertExactCatalog(resourceUris, Object.values(MCP_RESOURCE_URIS), "resource")
     assertExactCatalog(
       resourceTemplateUris,
@@ -576,7 +654,11 @@ export async function smokeConnector(
     ))) {
       throw new Error("MCP smoke check found a tool without complete risk annotations")
     }
-    for (const name of ["delete_messages", "execute_member_moderation"]) {
+    for (const name of [
+      "delete_messages",
+      "execute_member_moderation",
+    ] as const) {
+      if (!selectedToolNames.includes(name)) continue
       const tool = listed.tools.find((entry) => entry.name === name)
       if (
         !tool
@@ -594,6 +676,7 @@ export async function smokeConnector(
       ["edit_own_message", true],
     ] as const
     for (const [name, destructiveHint] of interactionAnnotations) {
+      if (!selectedToolNames.includes(name)) continue
       const tool = listed.tools.find((entry) => entry.name === name)
       if (
         !tool
@@ -605,13 +688,21 @@ export async function smokeConnector(
         throw new Error(`MCP smoke check found invalid ${name} annotations`)
       }
     }
-    const result = await client.callTool({
-      arguments: {},
-      name: "get_connector_status",
-    })
-    const structured = objectValue(result.structuredContent)
-    if (result.isError || structured?.status !== "ok") {
-      throw new Error("MCP get_connector_status smoke call failed")
+    let structured: Record<string, unknown> | undefined
+    if (config.mcpToolsets.has("connector")) {
+      const result = await client.callTool({
+        arguments: {},
+        name: "get_connector_status",
+      })
+      structured = objectValue(result.structuredContent)
+      if (result.isError || structured?.status !== "ok") {
+        throw new Error("MCP get_connector_status smoke call failed")
+      }
+    } else {
+      structured = objectValue(await service.getStatus())
+      if (structured?.status !== "ok") {
+        throw new Error("Discord connector identity smoke call failed")
+      }
     }
     const applicationId = stringProperty(structured.application, "id")
     const botId = stringProperty(structured.bot, "id")
@@ -647,6 +738,8 @@ export async function smokeConnector(
       schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
       status: "ok",
       toolCount: listed.tools.length,
+      toolsets: selectedMcpToolsets(config.mcpToolsets),
+      toolSurface: config.mcpToolSurface,
     }
   } finally {
     await client.close().catch(() => undefined)

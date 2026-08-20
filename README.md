@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -13,6 +13,9 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Discord names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
 - Resource discovery is content-free; live resource templates require exact IDs and never enumerate messages
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and destructive prompts stop after read-only planning
+- Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
+- Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
+- Toolsets separate deletion and moderation from reads and ordinary interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
@@ -102,11 +105,11 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, Gateway policy, observability policy, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, opening a Gateway connection, or starting telemetry export.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, deletion policy, and administration policy. Offline checks do not contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, opening a Gateway connection, or starting telemetry export.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
-`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the tool, resource, resource-template, and prompt catalogs, checks every write tool's risk annotations, and calls only `get_connector_status`. Catalog discovery is local and content-free. The command does not list Discord channels, read messages, or write to Discord.
+`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read messages, open a Gateway connection, start telemetry export, or write to Discord.
 
 Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
 
@@ -118,6 +121,8 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_APPLICATION_ID` | Recommended | Reject a token belonging to a different application |
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
+| `DISCORD_MCP_TOOL_SURFACE` | No | `full` advertises every selected canonical tool; `progressive` initially advertises only exact-tool discovery; defaults to `full` |
+| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, and `threads`; defaults to `all` |
 | `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
@@ -157,6 +162,8 @@ env_vars = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+  "DISCORD_MCP_TOOL_SURFACE",
+  "DISCORD_MCP_TOOLSETS",
   "DISCORD_MCP_ALLOW_GATEWAY",
   "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
@@ -210,8 +217,13 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 
 ## Tools
 
+The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either reviewed deletion tool enables both `plan_message_deletion` and `delete_messages`, and the same closure applies to member moderation, so a client never receives half of a reviewed workflow.
+
+`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, or journaling. The `deletion` and `moderation` sets are deliberately separate from `messages`, `guilds`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
+
 | Tool | Access | Purpose |
 | --- | --- | --- |
+| `discover_discord_tools` | Local read | Search only the configured exact-tool catalog by capability, toolset, or risk and reveal canonical contracts in progressive mode without contacting Discord |
 | `get_connector_status` | Discord read | Verify application and bot identity and report effective policy |
 | `get_observability_status` | Local read | Report bounded operation aggregates, exporter health, and explicit telemetry privacy guarantees |
 | `get_gateway_status` | Local read | Report optional Gateway health, intent privacy, reconnect and continuity-gap counters, and bounded-buffer state |
@@ -285,7 +297,7 @@ Exporter failures are observational: they update fixed health counters but never
 
 ## Prompts
 
-MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned.
+MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned. Message prompts are listed only with the `messages` toolset, and each reviewed prompt is listed only with its matching `deletion` or `moderation` toolset.
 
 | Prompt | Workflow boundary |
 | --- | --- |

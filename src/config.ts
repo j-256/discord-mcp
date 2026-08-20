@@ -7,8 +7,14 @@ import {
   ENVIRONMENT_NAMES,
   GATEWAY_DEFAULTS,
   INTERACTION_DEFAULTS,
+  type McpToolsetName,
+  type McpToolSurface,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
+import {
+  parseMcpToolsets,
+  parseMcpToolSurface,
+} from "./mcp-tool-catalog.js"
 import {
   loadObservabilityConfig,
   type ObservabilityConfig,
@@ -30,6 +36,8 @@ export interface ConnectorConfig {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   mentionUserIds: ReadonlySet<string>
+  mcpToolsets: ReadonlySet<McpToolsetName>
+  mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
   protectedUserIds: ReadonlySet<string>
   token: string
@@ -228,6 +236,14 @@ export function loadConnectorConfig(
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
     ),
     mentionUserIds,
+    mcpToolsets: parseMcpToolsets(
+      environment[ENVIRONMENT_NAMES.toolsets],
+      ENVIRONMENT_NAMES.toolsets,
+    ),
+    mcpToolSurface: parseMcpToolSurface(
+      environment[ENVIRONMENT_NAMES.toolSurface],
+      ENVIRONMENT_NAMES.toolSurface,
+    ),
     observability: loadObservabilityConfig(environment, [rawToken || "", token]),
     protectedUserIds,
     token,

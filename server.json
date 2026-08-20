@@ -53,6 +53,21 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_TOOL_SURFACE",
+          "description": "Advertise every selected canonical tool or reveal exact tools progressively through MCP list-change notifications",
+          "default": "full",
+          "choices": [
+            "full",
+            "progressive"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_TOOLSETS",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, threads, or all",
+          "default": "all",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_GATEWAY",
           "description": "Enable a scoped, content-free Gateway event feed with only nonprivileged intents",
           "default": "false",

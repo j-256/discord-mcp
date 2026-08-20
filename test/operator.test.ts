@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { MCP_TOOLSET_NAMES } from "../src/constants.js"
 import type { DiscordToolService } from "../src/mcp.js"
 import {
   diagnoseConnector,
@@ -61,6 +62,8 @@ function status(
       interactionMinWriteIntervalMs: 500,
       interactionsEnabled: false,
       mentionUserCount: 0,
+      mcpToolsets: [...MCP_TOOLSET_NAMES],
+      mcpToolSurface: "full",
       protectedUserCount: 0,
       readChannelScope: "allowlist",
       readGuildScope: "allowlist",
@@ -166,6 +169,34 @@ test("doctor distinguishes valid scoped configuration from safe warnings", async
     open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.status,
     "warn",
   )
+})
+
+test("doctor and setup explain progressive risk-separated MCP toolsets", async () => {
+  const configuredEnvironment = environment({
+    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_TOOLSETS: "connector,messages",
+    DISCORD_MCP_TOOL_SURFACE: "progressive",
+  })
+  const doctor = await diagnoseConnector({
+    environment: configuredEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: configuredEnvironment,
+    service: statusProvider(),
+  })
+
+  const toolSurface = doctor.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.toolSurface,
+  )
+  assert.equal(toolSurface?.status, "pass")
+  assert.match(toolSurface?.summary || "", /progressive/)
+  assert.match(toolSurface?.summary || "", /2 of 10/)
+  assert.match(toolSurface?.summary || "", /4 canonical tools/)
+  assert.equal(setup.toolSurface, "progressive")
+  assert.deepEqual(setup.toolsets, ["connector", "messages"])
+  assert.match(setup.warnings.join("\n"), /interactions toolset/)
 })
 
 test("doctor and setup explain effective interaction policy without Discord writes", async () => {
@@ -407,6 +438,8 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /OTEL_EXPORTER_OTLP_TRACES_ENDPOINT/)
   assert.match(result, /OTEL_EXPORTER_OTLP_METRICS_ENDPOINT/)
   assert.match(result, /OTEL_TRACES_SAMPLER/)
+  assert.match(result, /DISCORD_MCP_TOOL_SURFACE/)
+  assert.match(result, /DISCORD_MCP_TOOLSETS/)
   assert.match(result, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(result, new RegExp(TOKEN))
   assert.throws(
@@ -435,6 +468,8 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.serverName, "discord-safe")
+  assert.equal(report.toolSurface, "full")
+  assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.match(report.hostConfig, /args = \["\/srv\/discord-mcp\/dist\/cli\.js", "serve"\]/)
   assert.deepEqual(report.warnings, [])
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
@@ -457,7 +492,9 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 20)
+  assert.equal(report.toolCount, 21)
+  assert.equal(report.toolSurface, "full")
+  assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
     "review_member_moderation",
     "review_message_deletion",
@@ -485,6 +522,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
+  assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(
@@ -494,4 +532,31 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     }),
     /no accessible guilds/,
   )
+})
+
+test("MCP smoke expands a progressive subset without broadening configured toolsets", async () => {
+  const report = await smokeConnector({
+    environment: environment({
+      DISCORD_MCP_TOOLSETS: "messages,activity",
+      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    }),
+    service: toolService(),
+  })
+
+  assert.equal(report.status, "ok")
+  assert.equal(report.toolSurface, "progressive")
+  assert.deepEqual(report.toolsets, ["activity", "messages"])
+  assert.equal(report.toolCount, 5)
+  assert.deepEqual(report.destructiveTools, [])
+  assert.deepEqual(report.promptNames, [
+    "search_guild_messages",
+    "summarize_channel",
+  ])
+  assert.deepEqual(report.readOnlyTools, [
+    "discover_discord_tools",
+    "get_message",
+    "list_activity",
+    "read_messages",
+    "search_messages",
+  ])
 })

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { loadConnectorConfig } from "../src/config.js"
+import { MCP_TOOLSET_NAMES } from "../src/constants.js"
 import { ConfigurationError, PolicyError } from "../src/errors.js"
 import { ScopePolicy } from "../src/policy.js"
 import type { DiscordChannel } from "../src/types.js"
@@ -67,12 +68,60 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.interactionMinWriteIntervalMs, 750)
   assert.equal(config.expectedApplicationId, "300000000000000001")
   assert.equal(config.gatewayEventBufferSize, 100)
+  assert.equal(config.mcpToolSurface, "full")
+  assert.deepEqual([...config.mcpToolsets], MCP_TOOLSET_NAMES)
   assert.deepEqual(config.observability, {
     export: undefined,
     exportEnabled: false,
     jsonLogsEnabled: false,
   })
   assert.equal(config.auditFile, "/test/state/discord-mcp/activity.jsonl")
+})
+
+test("configuration strictly parses the MCP tool surface and risk-separated toolsets", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_TOOLSETS: " Messages,connector,messages ",
+    DISCORD_MCP_TOOL_SURFACE: " PROGRESSIVE ",
+  }, { homeDirectory: "/test/home" })
+
+  assert.equal(config.mcpToolSurface, "progressive")
+  assert.deepEqual([...config.mcpToolsets].sort(), ["connector", "messages"])
+  assert.deepEqual(new ScopePolicy(config).describe(), {
+    administrationEnabled: false,
+    administrationGuildIds: [],
+    allowedChannelIds: [],
+    allowedGuildIds: [],
+    deleteChannelIds: [],
+    deletionsEnabled: false,
+    gatewayEnabled: false,
+    gatewayEventBufferSize: 100,
+    interactionChannelIds: [],
+    interactionMaxWritesPerMinute: 10,
+    interactionMinWriteIntervalMs: 500,
+    interactionsEnabled: false,
+    mentionUserCount: 0,
+    mcpToolsets: ["connector", "messages"],
+    mcpToolSurface: "progressive",
+    protectedUserCount: 0,
+    readChannelScope: "all-visible",
+    readGuildScope: "all-visible",
+  })
+
+  for (const environment of [
+    { DISCORD_MCP_TOOL_SURFACE: "hidden" },
+    { DISCORD_MCP_TOOLSETS: "messages,all" },
+    { DISCORD_MCP_TOOLSETS: "messages,unknown" },
+    { DISCORD_MCP_TOOLSETS: ",,," },
+  ]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        ...environment,
+      }, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  }
 })
 
 test("configuration keeps Gateway disabled and requires pinned bounded scope when enabled", () => {
@@ -176,6 +225,8 @@ test("configuration and policy require an exact administration guild and protect
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     mentionUserCount: 0,
+    mcpToolsets: [...MCP_TOOLSET_NAMES],
+    mcpToolSurface: "full",
     protectedUserCount: 1,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
@@ -294,6 +345,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     mentionUserCount: 0,
+    mcpToolsets: [...MCP_TOOLSET_NAMES],
+    mcpToolSurface: "full",
     protectedUserCount: 0,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",

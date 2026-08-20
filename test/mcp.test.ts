@@ -6,9 +6,15 @@ import test, { type TestContext } from "node:test"
 import {
   Client,
   InMemoryTransport,
+  type ClientOptions,
+  type Tool,
 } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
+import {
+  MCP_DISCOVERY_TOOL_NAME,
+  MCP_TOOLSET_NAMES,
+} from "../src/constants.js"
 import {
   AdministrationExecutionError,
   DiscordApiError,
@@ -35,6 +41,7 @@ import type { DiscordChannel, DiscordMessage } from "../src/types.js"
 
 const TOKEN = "test-discord-token"
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
+const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
@@ -167,6 +174,8 @@ function fixturePolicy(): PolicyDescription {
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     mentionUserCount: 0,
+    mcpToolsets: [...MCP_TOOLSET_NAMES],
+    mcpToolSurface: "full",
     protectedUserCount: 0,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
@@ -438,13 +447,18 @@ async function connectedFixture(
       action: "accept" | "cancel" | "decline"
       content?: { approve: boolean }
     }>
+    environment?: NodeJS.ProcessEnv
+    listChanged?: ClientOptions["listChanged"]
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
     gateway?: GatewayEventSource
   } = {},
 ) {
   const serviceData = serviceFixture(options.serviceOverrides)
   const server = createDiscordMcpServer({
-    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    environment: {
+      DISCORD_BOT_TOKEN: TOKEN,
+      ...options.environment,
+    },
     ...(options.gateway ? { gateway: options.gateway } : {}),
     requestStateKey: new Uint8Array(32).fill(9),
     service: serviceData.service,
@@ -453,7 +467,10 @@ async function connectedFixture(
   await server.connect(serverTransport)
   const client = new Client(
     { name: "discord-mcp-test", version: "1.0.0" },
-    { capabilities: { elicitation: {} } },
+    {
+      capabilities: { elicitation: {} },
+      ...(options.listChanged ? { listChanged: options.listChanged } : {}),
+    },
   )
   if (options.elicitationHandler) {
     client.setRequestHandler(
@@ -479,6 +496,17 @@ async function connectedFixture(
 function structuredContent(result: { structuredContent?: unknown }): Record<string, unknown> {
   assert.ok(result.structuredContent)
   return result.structuredContent as Record<string, unknown>
+}
+
+function listedTool(tools: readonly Tool[], name: string): Tool {
+  const tool = tools.find((entry) => entry.name === name)
+  assert.ok(tool, `Expected MCP tool ${name}`)
+  return tool
+}
+
+async function settleNotifications(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  await new Promise<void>((resolve) => setImmediate(resolve))
 }
 
 test("MCP server advertises bounded tools with accurate write annotations", async (context) => {
@@ -509,6 +537,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
+      "discover_discord_tools",
     ],
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
@@ -530,6 +559,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const discovery = result.tools.find((tool) => (
+    tool.name === "discover_discord_tools"
+  ))
+  assert.deepEqual(discovery?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
     readOnlyHint: true,
   })
   const send = result.tools.find((tool) => tool.name === "send_message")
@@ -565,6 +603,177 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const activity = result.tools.find((tool) => tool.name === "list_activity")
   assert.equal(activity?.annotations?.openWorldHint, false)
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("MCP tool discovery returns bounded exact contracts without contacting Discord", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const advertised = await client.listTools()
+
+  const exact = structuredContent(await client.callTool({
+    arguments: { query: "delete_messages" },
+    name: "discover_discord_tools",
+  }))
+  const exactMatches = exact.matches as Array<Record<string, unknown>>
+  assert.equal(exact.status, "ok")
+  assert.equal(exact.surface, "full")
+  assert.equal(exact.refreshToolsList, false)
+  assert.deepEqual(exact.newlyEnabledToolNames, [])
+  assert.equal(exactMatches.length, 1)
+  assert.equal(exactMatches[0]?.name, "delete_messages")
+  assert.equal(exactMatches[0]?.risk, "destructive")
+  assert.deepEqual(
+    exactMatches[0]?.annotations,
+    listedTool(advertised.tools, "delete_messages").annotations,
+  )
+  assert.deepEqual(
+    exactMatches[0]?.inputSchema,
+    listedTool(advertised.tools, "delete_messages").inputSchema,
+  )
+
+  const bounded = structuredContent(await client.callTool({
+    arguments: { detail: "full", limit: 1, risk: "destructive" },
+    name: "discover_discord_tools",
+  }))
+  const boundedMatches = bounded.matches as Array<Record<string, unknown>>
+  assert.equal(boundedMatches.length, 1)
+  assert.equal(boundedMatches[0]?.risk, "destructive")
+  assert.ok(Number(bounded.totalMatches) > boundedMatches.length)
+  assert.ok(boundedMatches[0]?.inputSchema)
+
+  const secretQuery = structuredContent(await client.callTool({
+    arguments: { query: TOKEN },
+    name: "discover_discord_tools",
+  }))
+  assert.equal((secretQuery.matches as unknown[]).length, 0)
+  assert.doesNotMatch(JSON.stringify(secretQuery), new RegExp(TOKEN))
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
+test("progressive discovery enables exact reviewed workflows and emits list changes", async (context) => {
+  const full = await connectedFixture(context)
+  const fullTools = (await full.client.listTools()).tools
+  let changedTools: Tool[] | null = null
+  let notificationCount = 0
+  let resolveFirstNotification: (() => void) | undefined
+  let rejectFirstNotification: ((error: Error) => void) | undefined
+  const firstNotification = new Promise<void>((resolve, reject) => {
+    resolveFirstNotification = resolve
+    rejectFirstNotification = reject
+  })
+  const progressive = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    listChanged: {
+      tools: {
+        debounceMs: 0,
+        onChanged(error, tools) {
+          notificationCount += 1
+          if (error) {
+            rejectFirstNotification?.(error)
+            return
+          }
+          changedTools = tools
+          resolveFirstNotification?.()
+        },
+      },
+    },
+  })
+
+  assert.deepEqual(
+    (await progressive.client.listTools()).tools.map(({ name }) => name),
+    ["discover_discord_tools"],
+  )
+  await assert.rejects(
+    () => progressive.client.callTool({
+      arguments: {
+        channelId: CHANNEL_ID,
+        messageIds: [MESSAGE_ID],
+        planDigest: DIGEST,
+      },
+      name: "delete_messages",
+    }),
+    /disabled|not found|not registered|unknown/i,
+  )
+
+  const discovery = structuredContent(await progressive.client.callTool({
+    arguments: { query: "delete_messages" },
+    name: "discover_discord_tools",
+  }))
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "delete_messages",
+    "plan_message_deletion",
+  ])
+  assert.equal(discovery.refreshToolsList, true)
+  await firstNotification
+  await settleNotifications()
+  assert.ok(notificationCount >= 1)
+  assert.ok(changedTools)
+  assert.deepEqual((changedTools as Tool[]).map(({ name }) => name), [
+    "plan_message_deletion",
+    "delete_messages",
+    MCP_DISCOVERY_TOOL_NAME,
+  ])
+
+  const refreshed = (await progressive.client.listTools()).tools
+  assert.deepEqual(
+    refreshed.map(({ name }) => name),
+    [
+      "plan_message_deletion",
+      "delete_messages",
+      "discover_discord_tools",
+    ],
+  )
+  for (const name of ["plan_message_deletion", "delete_messages"]) {
+    assert.deepEqual(
+      listedTool(refreshed, name),
+      listedTool(fullTools, name),
+    )
+  }
+
+  const notificationsAfterFirstDiscovery = notificationCount
+  const repeated = structuredContent(await progressive.client.callTool({
+    arguments: { query: "delete_messages" },
+    name: "discover_discord_tools",
+  }))
+  await settleNotifications()
+  assert.deepEqual(repeated.newlyEnabledToolNames, [])
+  assert.equal(repeated.refreshToolsList, false)
+  assert.equal(notificationCount, notificationsAfterFirstDiscovery)
+})
+
+test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOLSETS: "messages,connector" },
+  })
+
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "get_connector_status",
+      "read_messages",
+      "search_messages",
+      "get_message",
+      "discover_discord_tools",
+    ],
+  )
+  assert.deepEqual(
+    (await client.listPrompts()).prompts.map(({ name }) => name),
+    ["summarize_channel", "search_guild_messages"],
+  )
+  const unavailable = structuredContent(await client.callTool({
+    arguments: { query: "moderation" },
+    name: "discover_discord_tools",
+  }))
+  assert.equal(unavailable.totalMatches, 0)
+  assert.deepEqual(unavailable.matches, [])
+  assert.deepEqual(
+    (unavailable.toolsets as Array<Record<string, unknown>>)
+      .map(({ name }) => name),
+    ["connector", "messages"],
+  )
+  await assert.rejects(
+    () => client.callTool({ arguments: {}, name: "list_guilds" }),
+    /not found|not registered|unknown/i,
+  )
 })
 
 test("MCP message search requires a substantive filter and forwards bounded input", async (context) => {
@@ -1244,6 +1453,100 @@ test("MCP tool results redact the Discord token if Discord returns it as data", 
   assert.match(JSON.stringify(result), /\[redacted\]/)
 })
 
+test("MCP stdio progressive discovery negotiates modern tool-list changes", async (context) => {
+  const transport = new StdioClientTransport({
+    args: ["--import", "tsx", "src/cli.ts", "serve"],
+    command: process.execPath,
+    cwd: process.cwd(),
+    env: {
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_TOOLSETS: "deletion",
+      DISCORD_MCP_TOOL_SURFACE: "progressive",
+      PATH: process.env.PATH || "",
+    },
+    stderr: "pipe",
+  })
+  let diagnostics = ""
+  transport.stderr?.on("data", (chunk) => {
+    diagnostics += String(chunk)
+  })
+  let changedTools: Tool[] | null = null
+  let resolveNotification: (() => void) | undefined
+  let rejectNotification: ((error: Error) => void) | undefined
+  const notification = new Promise<void>((resolve, reject) => {
+    resolveNotification = resolve
+    rejectNotification = reject
+  })
+  const client = new Client(
+    { name: "discord-mcp-stdio-progressive-test", version: "1.0.0" },
+    {
+      capabilities: { elicitation: {} },
+      listChanged: {
+        tools: {
+          debounceMs: 0,
+          onChanged(error, tools) {
+            if (error) {
+              rejectNotification?.(error)
+              return
+            }
+            changedTools = tools
+            resolveNotification?.()
+          },
+        },
+      },
+      versionNegotiation: { mode: { pin: "2026-07-28" } },
+    },
+  )
+  context.after(async () => {
+    try {
+      await client.close()
+    } catch {}
+  })
+
+  await client.connect(transport)
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [MCP_DISCOVERY_TOOL_NAME],
+  )
+  const discovered = structuredContent(await client.callTool({
+    arguments: { query: "plan_message_deletion" },
+    name: MCP_DISCOVERY_TOOL_NAME,
+  }))
+  assert.deepEqual(discovered.newlyEnabledToolNames, [
+    "delete_messages",
+    "plan_message_deletion",
+  ])
+
+  let notificationTimer: NodeJS.Timeout | undefined
+  await Promise.race([
+    notification,
+    new Promise<never>((_resolve, reject) => {
+      notificationTimer = setTimeout(
+        () => reject(new Error("Timed out waiting for MCP tool-list change")),
+        LIST_CHANGED_TIMEOUT_MS,
+      )
+    }),
+  ]).finally(() => {
+    if (notificationTimer) clearTimeout(notificationTimer)
+  })
+  assert.ok(changedTools)
+  assert.deepEqual((changedTools as Tool[]).map(({ name }) => name), [
+    "plan_message_deletion",
+    "delete_messages",
+    MCP_DISCOVERY_TOOL_NAME,
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_message_deletion",
+      "delete_messages",
+      MCP_DISCOVERY_TOOL_NAME,
+    ],
+  )
+  assert.match(diagnostics, /stdio server ready/)
+  assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
+})
+
 test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", async (context) => {
   const transport = new StdioClientTransport({
     args: ["--import", "tsx", "src/cli.ts", "serve"],
@@ -1281,7 +1584,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 20)
+  assert.equal(tools.tools.length, 21)
   assert.equal(prompts.prompts.length, 4)
   assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 3)

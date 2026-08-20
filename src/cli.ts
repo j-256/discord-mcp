@@ -220,6 +220,8 @@ function renderSetup(report: SetupReport): string {
     `Discord MCP setup verified application ${report.applicationId} and bot ${report.botId}`,
     `Accessible guilds on first page: ${report.guildsAccessibleOnFirstPage}`,
     `In-scope guilds on first page: ${report.guildsInScopeOnFirstPage}`,
+    `Tool surface: ${report.toolSurface}`,
+    `Toolsets: ${report.toolsets.join(", ")}`,
   ]
   for (const warning of report.warnings) lines.push(`WARNING: ${warning}`)
   lines.push(
@@ -238,6 +240,8 @@ function renderSmoke(report: SmokeReport): string {
     "Discord MCP smoke: ok",
     `Application: ${report.applicationId}`,
     `Bot: ${report.botId}`,
+    `Tool surface: ${report.toolSurface}`,
+    `Toolsets: ${report.toolsets.join(", ")}`,
     `Tools: ${report.toolCount}`,
     `Read-only tools: ${report.readOnlyTools.join(", ")}`,
     `Destructive tools: ${report.destructiveTools.join(", ")}`,

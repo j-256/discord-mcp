@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server"
 
+import type { McpToolsetName } from "./constants.js"
 import { registerDiscordPrompts } from "./mcp-prompts.js"
 import { registerDiscordResources } from "./mcp-resources.js"
 import type { PolicyDescription } from "./policy.js"
@@ -20,6 +21,7 @@ export interface DiscordGuidanceOptions {
   policy: PolicyDescription
   secrets: readonly (string | undefined)[]
   service: DiscordGuidanceService
+  toolsets: ReadonlySet<McpToolsetName>
 }
 
 export function registerDiscordGuidance(
@@ -27,5 +29,5 @@ export function registerDiscordGuidance(
   options: DiscordGuidanceOptions,
 ): void {
   registerDiscordResources(server, options)
-  registerDiscordPrompts(server, options.secrets)
+  registerDiscordPrompts(server, options.secrets, options.toolsets)
 }

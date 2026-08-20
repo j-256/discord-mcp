@@ -152,6 +152,8 @@ import { Client } from "@modelcontextprotocol/client"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import * as connector from "@j-256/discord-mcp"
 
+const DISCOVERY_TOOL_NAME = "discover_discord_tools"
+const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
@@ -161,21 +163,37 @@ const transport = new StdioClientTransport({
   env: {
     ...getDefaultEnvironment(),
     DISCORD_BOT_TOKEN: "${DUMMY_TOKEN}",
+    DISCORD_MCP_TOOLSETS: "deletion",
+    DISCORD_MCP_TOOL_SURFACE: "progressive",
   },
 })
 const client = new Client({ name: "installed-package-verifier", version: "1.0.0" }, { capabilities: {} })
 try {
   await client.connect(transport)
-  const [tools, resources, templates, prompts] = await Promise.all([
+  const [initialTools, resources, templates, prompts] = await Promise.all([
     client.listTools(),
     client.listResources(),
     client.listResourceTemplates(),
     client.listPrompts(),
   ])
-  assert.ok(tools.tools.length > 0)
+  assert.deepEqual(initialTools.tools.map(({ name }) => name), [DISCOVERY_TOOL_NAME])
   assert.ok(resources.resources.length > 0)
   assert.ok(templates.resourceTemplates.length > 0)
   assert.ok(prompts.prompts.length > 0)
+  const discovery = await client.callTool({
+    arguments: { query: REVIEWED_DELETION_TOOLS[0] },
+    name: DISCOVERY_TOOL_NAME,
+  })
+  assert.equal(discovery.isError, undefined)
+  assert.deepEqual(
+    discovery.structuredContent.newlyEnabledToolNames,
+    [...REVIEWED_DELETION_TOOLS].sort(),
+  )
+  const refreshedTools = await client.listTools()
+  assert.deepEqual(
+    refreshedTools.tools.map(({ name }) => name),
+    [...REVIEWED_DELETION_TOOLS, DISCOVERY_TOOL_NAME],
+  )
   const safety = await client.readResource({ uri: "${STATIC_RESOURCE_URI}" })
   assert.equal(safety.contents.length, 1)
   assert.match(safety.contents[0].text, /review-first workflows/)
