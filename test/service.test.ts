@@ -9,7 +9,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import type { ActivityStore } from "../src/activity-log.js"
+import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
 import {
   ConfigurationError,
@@ -48,6 +48,7 @@ const SECOND_THREAD_ID = "400000000000000004"
 const MESSAGE_ID = "500000000000000001"
 const CREATED_CHANNEL_ID = "400000000000000005"
 const CREATED_ROLE_ID = "700000000000000001"
+const FORUM_TAG_ID = "800000000000000001"
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -179,16 +180,19 @@ function serviceFixture(overrides: {
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
+  forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   operationStore?: OperationStore
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
 } = {}) {
   const calls = {
     activityAppends: 0,
+    activityEntries: [] as ActivityEntry[],
     addReaction: 0,
     application: 0,
     createAttachment: 0,
     createChannel: 0,
+    createForumPost: 0,
     createMessage: 0,
     createRole: 0,
     editMessage: 0,
@@ -205,6 +209,10 @@ function serviceFixture(overrides: {
     },
     async bulkDeleteMessages() {},
     async createGuildBan() {},
+    async createForumPost() {
+      calls.createForumPost += 1
+      throw new Error("Unexpected forum-post creation")
+    },
     async createAttachmentMessage(_channelId, input) {
       calls.createAttachment += 1
       return message({
@@ -337,8 +345,9 @@ function serviceFixture(overrides: {
   }
   Object.assign(client, overrides.client)
   const activityStore: ActivityStore = {
-    async append() {
+    async append(entry) {
       calls.activityAppends += 1
+      calls.activityEntries.push(entry)
     },
     async list() {
       return {
@@ -368,6 +377,9 @@ function serviceFixture(overrides: {
       ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
       ...(overrides.interactionOptions
         ? { interactionOptions: overrides.interactionOptions }
+        : {}),
+      ...(overrides.forumPostOptions
+        ? { forumPostOptions: overrides.forumPostOptions }
         : {}),
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
@@ -678,6 +690,138 @@ test("service verifies identity before reviewed additive channel creation", asyn
   assert.equal(calls.createChannel, 1)
   assert.equal(operationStore.receipt?.status, "completed")
   assert.doesNotMatch(JSON.stringify(operationStore.receipt), /channel-create-attempt/)
+})
+
+test("service pins identity through reviewed forum creation without persisting intent", async () => {
+  const operationStore = new MemoryOperationStore()
+  const title = "Private reviewed launch title"
+  const content = "Private reviewed launch content"
+  const auditReason = "Private reviewed forum reason"
+  const operationKey = "forum-post-service-attempt-0001"
+  const forum = channel({
+    available_tags: [{
+      emoji_id: null,
+      emoji_name: null,
+      id: FORUM_TAG_ID,
+      moderated: false,
+      name: "Private tag name",
+    }],
+    default_auto_archive_duration: 1_440,
+    default_thread_rate_limit_per_user: 0,
+    flags: 0,
+    name: "Private forum name",
+    permission_overwrites: [],
+    type: 15,
+  })
+  const createdThread = thread(THREAD_ID, CHANNEL_ID, {
+    applied_tags: [FORUM_TAG_ID],
+    name: title,
+    owner_id: BOT_ID,
+    rate_limit_per_user: 30,
+  })
+  const starter = message({
+    attachments: [],
+    author: bot(),
+    channel_id: THREAD_ID,
+    components: [],
+    content,
+    guild_id: GUILD_ID,
+    id: THREAD_ID,
+    type: 0,
+  })
+  const { calls, service } = serviceFixture({
+    client: {
+      async createForumPost(channelId, input, reason) {
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(reason, auditReason)
+        assert.deepEqual(input, {
+          allowedMentions: { parse: [], replied_user: false },
+          appliedTagIds: [FORUM_TAG_ID],
+          autoArchiveDuration: 1_440,
+          content,
+          name: title,
+          rateLimitPerUser: 30,
+        })
+        calls.createForumPost += 1
+        return { ...createdThread, message: starter }
+      },
+      async getChannel(channelId) {
+        if (channelId === CHANNEL_ID) return forum
+        assert.equal(channelId, THREAD_ID)
+        return createdThread
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES,
+          "@everyone",
+        )]
+      },
+      async getMessage(channelId, messageId) {
+        assert.equal(channelId, THREAD_ID)
+        assert.equal(messageId, THREAD_ID)
+        return starter
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
+      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    },
+    forumPostOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(13),
+      randomId: () => "activity-forum-post",
+    },
+    operationStore,
+  })
+  const request = {
+    appliedTagIds: [FORUM_TAG_ID],
+    auditReason,
+    autoArchiveDuration: 1_440,
+    channelId: CHANNEL_ID,
+    content,
+    name: title,
+    operationKey,
+    rateLimitPerUser: 30,
+  }
+
+  const plan = await service.planForumPost(request)
+  const result = await service.executeForumPost(request, plan.digest)
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.threadId, THREAD_ID)
+  assert.equal(result.messageId, THREAD_ID)
+  assert.equal(result.verification, "match")
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.createForumPost, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "forum-post")
+  assert.equal(operationStore.receipt?.resourceId, THREAD_ID)
+  assert.equal(operationStore.receipt?.status, "completed")
+  const persisted = JSON.stringify({
+    activity: calls.activityEntries,
+    receipt: operationStore.receipt,
+  })
+  for (const privateValue of [
+    title,
+    content,
+    auditReason,
+    operationKey,
+    FORUM_TAG_ID,
+    "Private tag name",
+    "Private forum name",
+  ]) {
+    assert.equal(persisted.includes(privateValue), false)
+  }
 })
 
 test("service returns bounded role inventory and one exact role", async () => {

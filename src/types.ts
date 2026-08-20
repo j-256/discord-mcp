@@ -59,6 +59,7 @@ export interface DiscordChannel {
   default_forum_layout?: number
   default_reaction_emoji?: DiscordDefaultReaction | null
   default_sort_order?: number | null
+  default_thread_rate_limit_per_user?: number | null
   flags?: number
   guild_id?: string
   id: string
@@ -84,6 +85,10 @@ export interface DiscordChannel {
   topic?: string | null
   total_message_sent?: number
   type: number
+}
+
+export interface DiscordCreatedForumPost extends DiscordChannel {
+  message: DiscordMessage
 }
 
 export interface DiscordDefaultReaction {

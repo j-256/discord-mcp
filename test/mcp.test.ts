@@ -21,6 +21,10 @@ import type {
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
+import type {
+  ForumPostPlan,
+  ForumPostRequest,
+} from "../src/forum-post-service.js"
 import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
   type NormalizedDiscordRole,
@@ -34,6 +38,8 @@ import {
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
   DiscordApiError,
+  ForumPostExecutionError,
+  ForumPostOperationConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
   RoleCreationExecutionError,
@@ -46,7 +52,10 @@ import {
   type DiscordToolService,
 } from "../src/mcp.js"
 import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
-import { MCP_RESOURCE_URIS } from "../src/mcp-guidance.js"
+import {
+  MCP_PROMPT_NAMES,
+  MCP_RESOURCE_URIS,
+} from "../src/mcp-guidance.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityConfig } from "../src/observability-config.js"
@@ -75,6 +84,7 @@ const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
+const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -316,6 +326,69 @@ function channelPlan(
   }
 }
 
+function forumPostPlan(
+  request: ForumPostRequest,
+  digest = DIGEST,
+): ForumPostPlan {
+  return {
+    createdAt: "2026-08-20T00:00:00.000Z",
+    digest,
+    guild: {
+      id: GUILD_ID,
+      name: "Guild",
+      ownerId: USER_ID,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    parent: {
+      availableTagCount: 1,
+      defaultAutoArchiveDuration: 1_440,
+      defaultThreadRateLimitPerUser: 0,
+      flags: 0,
+      guildId: GUILD_ID,
+      id: request.channelId,
+      name: "ideas",
+      requireTag: false,
+      type: 15,
+    },
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "SEND_MESSAGES",
+      ],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.SEND_MESSAGES
+      ).toString(),
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "SEND_MESSAGES",
+      ],
+    },
+    schemaVersion: 1,
+    selectedTags: (request.appliedTagIds || []).map((id) => ({
+      id,
+      moderated: false,
+      name: "reviewed",
+    })),
+    status: "planned",
+    target: {
+      appliedTagIds: [...(request.appliedTagIds || [])].sort(),
+      auditReason: request.auditReason,
+      autoArchiveDuration: request.autoArchiveDuration ?? null,
+      content: request.content,
+      name: request.name,
+      notificationUserIds: [...(request.notifyUserIds || [])].sort(),
+      rateLimitPerUser: request.rateLimitPerUser ?? null,
+    },
+    warnings: ["One-shot reviewed forum post"],
+  }
+}
+
 function normalizedCreatedRole(
   request: RoleCreationRequest,
 ): NormalizedDiscordRole {
@@ -409,6 +482,8 @@ function fixturePolicy(): PolicyDescription {
     channelCreationGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    forumPostChannelIds: [],
+    forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     interactionChannelIds: [],
@@ -434,6 +509,8 @@ function serviceFixture(overrides: {
   channelCreationAction?: "create" | "none"
   channelCreationError?: Error
   channelCreationPlanDigest?: string
+  forumPostError?: Error
+  forumPostPlanDigest?: string
   interactionError?: Error
   messageContent?: string
   planDigest?: string
@@ -454,6 +531,8 @@ function serviceFixture(overrides: {
     channelCreationPlan: 0,
     delete: 0,
     edit: 0,
+    forumPostExecute: 0,
+    forumPostPlan: 0,
     explain: 0,
     getRole: 0,
     listRoles: 0,
@@ -573,6 +652,25 @@ function serviceFixture(overrides: {
         planDigest,
         schemaVersion: 1,
         status: planned.action === "none" ? "already-current" : "completed",
+      }
+    },
+    async executeForumPost(request, planDigest) {
+      if (overrides.forumPostError) throw overrides.forumPostError
+      calls.forumPostExecute += 1
+      const planned = forumPostPlan(request, planDigest)
+      return {
+        activityId: "activity-forum-post",
+        driftFields: [],
+        guildId: GUILD_ID,
+        messageId: MESSAGE_ID,
+        operationKeyHash: planned.operationKeyHash,
+        parentChannelId: request.channelId,
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        threadId: MESSAGE_ID,
+        url: `https://discord.com/channels/${GUILD_ID}/${MESSAGE_ID}/${MESSAGE_ID}`,
+        verification: "match",
       }
     },
     async executeMemberModeration(request, planDigest) {
@@ -910,6 +1008,13 @@ function serviceFixture(overrides: {
         overrides.channelCreationAction,
       )
     },
+    async planForumPost(request) {
+      calls.forumPostPlan += 1
+      return forumPostPlan(
+        request,
+        overrides.forumPostPlanDigest || DIGEST,
+      )
+    },
     async planMemberModeration() {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
@@ -1094,6 +1199,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "delete_messages",
       "plan_channel_creation",
       "execute_channel_creation",
+      "plan_forum_post",
+      "execute_forum_post",
       "plan_attachment_message",
       "execute_attachment_message",
       "plan_role_creation",
@@ -1140,6 +1247,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.deepEqual(channelCreation?.annotations, {
     destructiveHint: false,
     idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const forumPostPlanTool = result.tools.find((tool) => (
+    tool.name === "plan_forum_post"
+  ))
+  assert.deepEqual(forumPostPlanTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const forumPost = result.tools.find((tool) => (
+    tool.name === "execute_forum_post"
+  ))
+  assert.deepEqual(forumPost?.annotations, {
+    destructiveHint: false,
+    idempotentHint: false,
     openWorldHint: true,
     readOnlyHint: false,
   })
@@ -1408,6 +1533,30 @@ test("progressive discovery enables the complete reviewed channel-creation workf
   )
 })
 
+test("progressive discovery enables the complete reviewed forum-post workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_forum_post" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_forum_post",
+    "plan_forum_post",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_forum_post",
+      "execute_forum_post",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed attachment-message workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -1566,6 +1715,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     delete: 0,
     edit: 0,
     explain: 1,
+    forumPostExecute: 0,
+    forumPostPlan: 0,
     getRole: 0,
     listRoles: 0,
     plan: 0,
@@ -2606,6 +2757,213 @@ test("MCP channel creation exposes uncertain and one-shot conflict outcomes", as
   )
 })
 
+test("MCP forum posts plan exact tags, settings, notifications, and content", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      appliedTagIds: [ROLE_ID],
+      auditReason: AUDIT_REASON,
+      autoArchiveDuration: 4_320,
+      channelId: CHANNEL_ID,
+      content: `Please review the bounded launch proposal <@${USER_ID}>`,
+      name: "Reviewed launch proposal",
+      notifyUserIds: [USER_ID],
+      operationKey: FORUM_POST_OPERATION_KEY,
+      rateLimitPerUser: 30,
+    },
+    name: "plan_forum_post",
+  })
+  const duplicateTags = await client.callTool({
+    arguments: {
+      appliedTagIds: [ROLE_ID, ROLE_ID],
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      content: `Please review the bounded launch proposal <@${USER_ID}>`,
+      name: "Reviewed launch proposal",
+      operationKey: FORUM_POST_OPERATION_KEY,
+    },
+    name: "plan_forum_post",
+  })
+  const invalidContent = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      content: "   ",
+      name: "Reviewed launch proposal",
+      operationKey: FORUM_POST_OPERATION_KEY,
+    },
+    name: "plan_forum_post",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.deepEqual(
+    (structuredContent(planned).target as Record<string, unknown>).appliedTagIds,
+    [ROLE_ID],
+  )
+  assert.equal(duplicateTags.isError, true)
+  assert.equal(invalidContent.isError, true)
+  assert.equal(calls.forumPostPlan, 1)
+})
+
+test("MCP forum posts bind signed approval to the exact reviewed request", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      appliedTagIds: [ROLE_ID],
+      auditReason: AUDIT_REASON,
+      autoArchiveDuration: 4_320,
+      channelId: CHANNEL_ID,
+      content: `Please review the bounded launch proposal <@${USER_ID}>`,
+      name: "Reviewed launch proposal",
+      notifyUserIds: [USER_ID],
+      operationKey: FORUM_POST_OPERATION_KEY,
+      planDigest: DIGEST,
+      rateLimitPerUser: 30,
+    },
+    name: "execute_forum_post",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.forumPostPlan, 1)
+  assert.equal(calls.forumPostExecute, 1)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, /Reviewed launch proposal/)
+  assert.match(confirmationMessage, /bounded launch proposal/)
+  assert.match(confirmationMessage, new RegExp(ROLE_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, /Required bot permissions/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /without automatic retry/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(FORUM_POST_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(FORUM_POST_OPERATION_KEY),
+  )
+})
+
+test("MCP forum posts stop before execution on refusal or a changed plan", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      content: "Please review the bounded launch proposal",
+      name: "Reviewed launch proposal",
+      operationKey: FORUM_POST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_forum_post",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.forumPostExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { forumPostPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      content: "Please review the bounded launch proposal",
+      name: "Reviewed launch proposal",
+      operationKey: FORUM_POST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_forum_post",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.forumPostExecute, 0)
+})
+
+test("MCP forum posts expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      forumPostError: new ForumPostExecutionError(
+        "Discord forum-post outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      content: "Please review the bounded launch proposal",
+      name: "Reviewed launch proposal",
+      operationKey: FORUM_POST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_forum_post",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-forum-post",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    threadId: MESSAGE_ID,
+    timestamp: "2026-08-20T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      forumPostError: new ForumPostOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      content: "Please review the bounded launch proposal",
+      name: "Reviewed launch proposal",
+      operationKey: FORUM_POST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_forum_post",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(FORUM_POST_OPERATION_KEY),
+  )
+})
+
 test("MCP role creation plans named permissions and rejects unsafe schemas", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -3275,7 +3633,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   ])
 
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
-  assert.equal(prompts.prompts.length, 7)
+  assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 5)
   for (const catalog of [tools, prompts, resources, templates]) {

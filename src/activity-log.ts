@@ -147,10 +147,34 @@ export interface AttachmentMessageActivity {
   verification: "match" | null
 }
 
+export type ForumPostActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ForumPostActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "forum-post-create"
+  messageId: string | null
+  operationKeyHash: string
+  parentChannelId: string
+  planDigest: string
+  schemaVersion: number
+  status: ForumPostActivityStatus
+  threadId: string | null
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ActivityEntry =
   | AttachmentMessageActivity
   | ChannelCreationActivity
   | DeletionActivity
+  | ForumPostActivity
   | InteractionActivity
   | MemberModerationActivity
   | RoleCreationActivity
@@ -505,8 +529,91 @@ function parseAttachmentMessageActivity(
   }
 }
 
+function parseForumPostActivity(value: unknown): ForumPostActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const terminalIdsValid = record.threadId === null
+    ? record.messageId === null
+    : (
+        typeof record.threadId === "string"
+        && DISCORD_SNOWFLAKE_PATTERN.test(record.threadId)
+        && record.messageId === record.threadId
+      )
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "forum-post-create"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.parentChannelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.parentChannelId)
+    || !terminalIdsValid
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.threadId !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.threadId === null
+      || record.verification !== "match"
+      || record.error !== null
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.threadId === null
+      || record.verification !== "drift"
+      || record.error !== null
+    ))
+    || (record.status === "failed" && (
+      record.threadId !== null
+      || record.error === null
+      || record.verification !== null
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "forum-post-create",
+    messageId: record.messageId as string | null,
+    operationKeyHash: record.operationKeyHash,
+    parentChannelId: record.parentChannelId,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ForumPostActivityStatus,
+    threadId: record.threadId as string | null,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAttachmentMessageActivity(value)
+    || parseForumPostActivity(value)
     || parseChannelCreationActivity(value)
     || parseRoleCreationActivity(value)
     || parseDeletionActivity(value)

@@ -74,6 +74,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.attachmentChannelIds], [])
   assert.deepEqual(config.attachmentRoots, [])
   assert.equal(config.allowDeletions, true)
+  assert.equal(config.allowForumPosts, false)
+  assert.deepEqual([...config.forumPostChannelIds], [])
   assert.equal(config.allowGateway, false)
   assert.equal(config.allowInteractions, true)
   assert.equal(config.allowRoleCreation, false)
@@ -114,6 +116,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     channelCreationGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    forumPostChannelIds: [],
+    forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     interactionChannelIds: [],
@@ -246,6 +250,8 @@ test("configuration and policy require an exact administration guild and protect
     channelCreationGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    forumPostChannelIds: [],
+    forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     interactionChannelIds: [],
@@ -337,6 +343,44 @@ test("configuration and policy isolate exact role creation authority", () => {
   )
   assert.equal(enabled.describe().roleCreationEnabled, true)
   assert.deepEqual(enabled.describe().roleCreationGuildIds, [GUILD_ID])
+})
+
+test("configuration and policy isolate forum posts to exact readable channels", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertForumPostAllowed(channel()),
+    /forum posts are disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
+    DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabledConfig.allowForumPosts, true)
+  assert.deepEqual([...enabledConfig.forumPostChannelIds], [CHANNEL_ID])
+  assert.equal(enabled.assertForumPostAllowed(channel()), GUILD_ID)
+  assert.throws(
+    () => enabled.assertForumPostAllowed(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the forum-post scope/,
+  )
+  assert.equal(enabled.describe().forumPostsEnabled, true)
+  assert.deepEqual(enabled.describe().forumPostChannelIds, [CHANNEL_ID])
 })
 
 test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
@@ -450,6 +494,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     channelCreationGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
+    forumPostChannelIds: [],
+    forumPostsEnabled: false,
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     interactionChannelIds: [],

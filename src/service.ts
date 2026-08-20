@@ -52,6 +52,13 @@ import type {
 import { DiscordClient } from "./discord-client.js"
 import { ConfigurationError } from "./errors.js"
 import type {
+  ForumPostPlan,
+  ForumPostRequest,
+  ForumPostResult,
+  ForumPostServiceOptions,
+} from "./forum-post-service.js"
+import { ForumPostService } from "./forum-post-service.js"
+import type {
   AddReactionRequest,
   EditOwnMessageRequest,
   InteractionServiceOptions,
@@ -106,6 +113,7 @@ export interface DiscordServiceClient {
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildChannel: DiscordClient["createGuildChannel"]
   createGuildRole: DiscordClient["createGuildRole"]
+  createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
   deleteMessage: DiscordClient["deleteMessage"]
@@ -167,6 +175,10 @@ export interface ConnectorServiceOptions {
   clientOptions?: Omit<DiscordClientOptions, "token">
   config: ConnectorConfig
   deletionOptions?: Pick<DeletionServiceOptions, "clock" | "planKey" | "randomId">
+  forumPostOptions?: Pick<
+    ForumPostServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   interactionOptions?: Pick<
     InteractionServiceOptions,
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
@@ -288,6 +300,7 @@ export class ConnectorService {
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
   readonly #guildAuditLogService: GuildAuditLogService
+  readonly #forumPostService: ForumPostService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
@@ -346,6 +359,14 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.interactionOptions,
       limiter: interactionLimiter,
+    })
+    this.#forumPostService = new ForumPostService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.forumPostOptions,
     })
     this.#guildAuditLogService = new GuildAuditLogService({
       client: this.#client,
@@ -886,6 +907,14 @@ export class ConnectorService {
     return this.#roleAdministrationService.plan(identity.bot.id, request, options)
   }
 
+  async planForumPost(
+    request: ForumPostRequest,
+    options: RequestOptions = {},
+  ): Promise<ForumPostPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#forumPostService.plan(identity.bot.id, request, options)
+  }
+
   async planAttachmentMessage(
     request: AttachmentMessageRequest,
     options: RequestOptions = {},
@@ -915,6 +944,20 @@ export class ConnectorService {
   ): Promise<RoleCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#roleAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeForumPost(
+    request: ForumPostRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ForumPostResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#forumPostService.execute(
       identity.bot.id,
       request,
       planDigest,

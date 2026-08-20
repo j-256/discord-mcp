@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { DiscordClient } from "../src/discord-client.js"
+import {
+  type CreateForumPostInput,
+  DiscordClient,
+} from "../src/discord-client.js"
 import { DiscordApiError } from "../src/errors.js"
 import type {
   OperationCompletion,
@@ -814,6 +817,172 @@ test("Discord client never retries a rate-limited channel creation", async () =>
   )
   assert.equal(requests, 1)
   assert.equal(sleeps, 0)
+})
+
+test("Discord client sends one narrow forum-post body with fixed telemetry", async () => {
+  let request: {
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  } | null = null
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      request = {
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      }
+      return jsonResponse({
+        guild_id: "100",
+        id: "300",
+        message: {
+          author: { bot: true, id: "400", username: "connector" },
+          channel_id: "300",
+          content: "Reviewed body",
+          guild_id: "100",
+          id: "300",
+          timestamp: "2026-08-20T00:00:00.000Z",
+          type: 0,
+        },
+        name: "Reviewed post",
+        owner_id: "400",
+        parent_id: "200",
+        type: 11,
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.createForumPost("200", {
+    allowedMentions: { replied_user: false, users: ["500"] },
+    appliedTagIds: ["600"],
+    autoArchiveDuration: 1_440,
+    content: "Reviewed body",
+    name: "Reviewed post",
+    rateLimitPerUser: 15,
+  }, "Support / case 42")
+
+  assert.deepEqual(request, {
+    body: {
+      applied_tags: ["600"],
+      auto_archive_duration: 1_440,
+      message: {
+        allowed_mentions: { replied_user: false, users: ["500"] },
+        content: "Reviewed body",
+      },
+      name: "Reviewed post",
+      rate_limit_per_user: 15,
+    },
+    method: "POST",
+    reason: "Support%20%2F%20case%2042",
+    url: `${API_BASE_URL}/channels/200/threads`,
+  })
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "create_forum_post",
+    retries: 0,
+    runs: 1,
+  }])
+  assert.equal(JSON.stringify(records).includes("200"), false)
+})
+
+test("Discord client never retries a rate-limited forum post", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createForumPost("200", {
+      allowedMentions: { parse: [], replied_user: false },
+      content: "Reviewed body",
+      name: "Reviewed post",
+    }, "Reviewed forum post"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && error.retryAfterMs === 1
+    ),
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client rejects invalid forum-post inputs before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const valid = {
+    allowedMentions: { parse: [], replied_user: false } as const,
+    content: "Reviewed body",
+    name: "Reviewed post",
+  }
+
+  assert.throws(() => client.createForumPost("invalid", valid, "reviewed"), /channel ID/)
+  assert.throws(
+    () => client.createForumPost("200", { ...valid, name: " reviewed" }, "reviewed"),
+    /forum-post name/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", { ...valid, content: "" }, "reviewed"),
+    /must not be blank/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", { ...valid, appliedTagIds: [] }, "reviewed"),
+    /tag IDs/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", { ...valid, autoArchiveDuration: 30 }, "reviewed"),
+    /auto-archive/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", { ...valid, rateLimitPerUser: 21_601 }, "reviewed"),
+    /slowmode/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", {
+      ...valid,
+      allowedMentions: {
+        parse: [],
+        replied_user: false,
+        roles: ["500"],
+      },
+    } as unknown as CreateForumPostInput, "reviewed"),
+    /parsing must be empty/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", {
+      ...valid,
+      allowedMentions: { parse: [], replied_user: "false" },
+    } as unknown as CreateForumPostInput, "reviewed"),
+    /must be a boolean/,
+  )
+  assert.throws(
+    () => client.createForumPost("200", null as unknown as CreateForumPostInput, "reviewed"),
+    /input must be an object/,
+  )
+  assert.throws(() => client.createForumPost("200", valid, ""), /must not be blank/)
+  assert.equal(requests, 0)
 })
 
 test("Discord client sends current role creation and exact lookup contracts", async () => {

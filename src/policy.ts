@@ -21,6 +21,8 @@ export interface PolicyDescription {
   channelCreationGuildIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
+  forumPostChannelIds: string[]
+  forumPostsEnabled: boolean
   gatewayEnabled: boolean
   gatewayEventBufferSize: number
   interactionChannelIds: string[]
@@ -47,6 +49,7 @@ export class ScopePolicy {
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowGateway: boolean
+  readonly #allowForumPosts: boolean
   readonly #allowRoleCreation: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #attachmentChannelIds: ReadonlySet<string>
@@ -57,6 +60,7 @@ export class ScopePolicy {
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
   readonly #gatewayEventBufferSize: number
+  readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
@@ -81,6 +85,7 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowAttachments"
     | "allowGateway"
+    | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
     | "channelCreationGuildIds"
@@ -88,6 +93,7 @@ export class ScopePolicy {
     | "attachmentMaxBytes"
     | "attachmentRoots"
     | "gatewayEventBufferSize"
+    | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
     | "roleCreationGuildIds"
@@ -101,6 +107,7 @@ export class ScopePolicy {
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowGateway = config.allowGateway ?? false
+    this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
@@ -112,6 +119,7 @@ export class ScopePolicy {
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
+    this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
@@ -138,6 +146,8 @@ export class ScopePolicy {
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       gatewayEnabled: this.#allowGateway,
       gatewayEventBufferSize: this.#gatewayEventBufferSize,
+      forumPostChannelIds: [...this.#forumPostChannelIds].sort(),
+      forumPostsEnabled: this.#allowForumPosts && this.#forumPostChannelIds.size > 0,
       interactionChannelIds: [...this.#interactionChannelIds].sort(),
       interactionMaxWritesPerMinute: this.#interactionMaxWritesPerMinute,
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
@@ -298,6 +308,20 @@ export class ScopePolicy {
     }
     if (!this.#interactionChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the interaction scope`)
+    }
+    return guildId
+  }
+
+  assertForumPostAllowed(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowForumPosts) {
+      throw new PolicyError("Discord forum posts are disabled by connector configuration")
+    }
+    if (this.#forumPostChannelIds.size === 0) {
+      throw new PolicyError("Discord forum posts require an explicit forum-channel allowlist")
+    }
+    if (!this.#forumPostChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the forum-post scope`)
     }
     return guildId
   }

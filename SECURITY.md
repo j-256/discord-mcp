@@ -10,11 +10,11 @@ Treat all Discord-provided names, topics, forum tags, thread names, message bodi
 
 ## Discord permissions
 
-Grant only `View Channels` and `Read Message History` for ordinary read access. Native message search also requires the application's Message Content privileged intent. Add `View Audit Log` only to exact guilds where privacy-minimized server history is needed. Add `Attach Files` and the applicable send permission only to exact channels or threads selected for reviewed attachment messages. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
+Grant only `View Channels` and `Read Message History` for ordinary read access. Native message search also requires the application's Message Content privileged intent. Add `View Audit Log` only to exact guilds where privacy-minimized server history is needed. Add `Attach Files` and the applicable send permission only to exact channels or threads selected for reviewed attachment messages. Add `Send Messages` only to exact forums selected for reviewed forum-post creation, and add `Manage Threads` only when the workflow must apply moderated tags. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
 
 Use Discord channel permission overrides and the connector allowlists together. Removing either Discord access or the local allowlist entry should be sufficient to stop connector access.
 
-An allowlisted channel grants local read scope to child threads, including forum posts, but does not grant deletion scope to those thread IDs. When a channel allowlist is configured, guild search is constrained to exact allowed channel IDs before contacting Discord.
+An allowlisted channel grants local read scope to child threads, including forum posts, but does not grant deletion scope to those thread IDs or forum-post creation scope to another channel. Forum-post creation always requires the parent forum's own exact ID in its separate allowlist. When a channel allowlist is configured, guild search is constrained to exact allowed channel IDs before contacting Discord.
 
 Search results are bounded and omit attachment URLs, raw embeds, raw components, reactions, and Discord member payloads. They are returned to the MCP caller but are not persisted by the connector.
 
@@ -38,7 +38,7 @@ Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools native
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
 
-Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep guild audit logs, permission diagnostics, attachments, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
+Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep guild audit logs, permission diagnostics, attachments, forum posts, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
 
 ## Gateway events
 
@@ -83,6 +83,24 @@ Operation receipt directories and files must remain owner-private. Reject symlin
 Guild channel listings are visibility-bounded. Require both guild-level and parent-category `MANAGE_CHANNELS` and `VIEW_CHANNEL`, label the evidence honestly, and fail closed on ambiguous logical-name matches, incomplete roles or overwrites, invalid response identities, and capacity reached in the visible inventory. Do not claim that the absence of a visible collision proves global absence.
 
 Never persist channel names, topics, audit-log reasons, permission overwrites, role names, or raw Discord responses. Channel-creation activity and operation records may contain exact guild, parent, and created-channel IDs, the channel kind, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity IDs, and sanitized error classifications.
+
+## Forum posts
+
+Do not add a forum-post shortcut that bypasses the environment toggle, exact forum-channel allowlist, pinned bot identity, exact stable forum type, complete guild-role and forum-overwrite evidence, exact available and selected tag IDs, required and moderated tag checks, notification policy, process-keyed planning, signed interactive confirmation, write-aware client approval, final fresh-plan match, shared interaction limiter, atomic one-shot operation-key reservation, pending activity journaling, single POST, or exact thread and starter-message readback. If a client cannot support MCP elicitation, keep forum-post execution unavailable in that client.
+
+Keep the surface to one public thread and one plain-text starter message in a stable `GUILD_FORUM` channel. Do not silently add media channels, files, embeds, components, stickers, fuzzy tag lookup, private or standalone threads, edits, locks, archive actions, pins, tag administration, deletion, retry, rollback, or reconciliation. Each excluded capability needs its own evidence, policy, confirmation, and recovery design.
+
+Require complete `VIEW_CHANNEL`, `READ_MESSAGE_HISTORY`, and `SEND_MESSAGES` evidence on the exact parent forum. Discord ignores `CREATE_PUBLIC_THREADS` for this operation. Require `MANAGE_THREADS` whenever any selected exact tag is moderated. Validate the forum's complete bounded overwrite and available-tag arrays, unique IDs, guild identity, `REQUIRE_TAG`, setting bounds, bot member identity, and complete guild-role inventory before returning a plan.
+
+Suppress every notification by default. Allow only exact user IDs already present as visible mentions in the starter content and separately configured in the notification allowlist. Never enable role, `@everyone`, or `@here` notification through this workflow.
+
+Exclude the raw operation key from plan material, signed request state, activity, receipts, results, and errors while binding its domain-separated hash into the plan. The title, starter content, tag IDs and names, notification user IDs, forum name, audit reason, roles, and overwrites may appear in the reviewed plan but must never enter persistent records. Forum-post activity and receipts may contain only exact guild, parent forum, created thread and starter-message IDs, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity ID, and sanitized error category.
+
+Discord supplies no nonce or idempotency token for a forum starter message. Keep the MCP execute tool non-idempotent, disable automatic REST retry, and make the key permanently spent once reserved. A transport failure, Discord 5xx response, malformed success, or failure after any valid thread ID is observed is uncertain and must be treated as potentially completed. Never delete a thread as compensation. Require operator inspection of the exact forum and Discord audit log before a new reviewed intent uses a new key.
+
+Serialize the same exact forum and normalized logical title across operation keys within one connector process. If the leading operation ends uncertain, block a queued same-target request before reservation. Do not imply cross-process serialization or title uniqueness; Discord permits duplicate titles.
+
+Validate the nested starter message in Discord's create response, then fetch the exact thread and starter message using the shared ID. Require the expected guild, parent, public-thread type, bot owner and author, regular message type, active unlocked state, no webhook, attachment, or component payload, and valid bounded settings. Return only fixed drift-field names when safe readback differs, never observed content.
 
 ## Role creation
 

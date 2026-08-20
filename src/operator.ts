@@ -43,6 +43,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   channelScope: "channel-scope",
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
+  forumPostPolicy: "forum-post-policy",
   guildAccess: "guild-access",
   guildScope: "guild-scope",
   gatewayPolicy: "gateway-policy",
@@ -173,6 +174,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowDeletions && config.deleteChannelIds.size === 0) {
     warnings.push("The deletion toggle is enabled but deletion remains blocked because no deletion-channel allowlist is configured")
   }
+  if (config.allowForumPosts && config.forumPostChannelIds.size === 0) {
+    warnings.push("The forum-post toggle is enabled but forum-post creation remains blocked because no forum-channel allowlist is configured")
+  }
   if (
     config.allowAttachments
     && (config.attachmentChannelIds.size === 0 || config.attachmentRoots.length === 0)
@@ -196,6 +200,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowAttachments, "attachments", "Attachment messages"],
     [config.allowChannelCreation, "channel-creation", "Channel creation"],
     [config.allowDeletions, "deletion", "Message deletion"],
+    [config.allowForumPosts, "forum-posts", "Forum-post creation"],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowInteractions, "interactions", "Message interactions"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
@@ -385,6 +390,25 @@ export async function diagnoseConnector(
         `Message deletion is constrained to ${config.deleteChannelIds.size} channels`,
       ))
     }
+    if (!config.allowForumPosts) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumPostPolicy,
+        "pass",
+        "Reviewed forum-post creation is disabled",
+      ))
+    } else if (config.forumPostChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumPostPolicy,
+        "warn",
+        "Forum-post toggle is enabled, but the required forum-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumPostPolicy,
+        "pass",
+        `Reviewed forum-post creation is constrained to ${config.forumPostChannelIds.size} exact channels with one-shot execution and exact readback`,
+      ))
+    }
     if (!config.allowRoleCreation) {
       checks.push(check(
         DOCTOR_CHECK_IDS.roleCreationPolicy,
@@ -535,6 +559,8 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
+    ENVIRONMENT_NAMES.allowForumPosts,
+    ENVIRONMENT_NAMES.forumPostChannelIds,
     ENVIRONMENT_NAMES.allowInteractions,
     ENVIRONMENT_NAMES.interactionChannelIds,
     ENVIRONMENT_NAMES.mentionUserIds,
@@ -796,6 +822,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error("MCP smoke check found invalid execute_attachment_message annotations")
+      }
+    }
+    if (selectedToolNames.includes("execute_forum_post")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_forum_post"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== false
+        || tool.annotations.idempotentHint !== false
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_forum_post annotations")
       }
     }
     const interactionAnnotations = [

@@ -26,6 +26,7 @@ import type {
   DiscordApplication,
   DiscordBan,
   DiscordChannel,
+  DiscordCreatedForumPost,
   DiscordErrorBody,
   DiscordGuild,
   DiscordGuildAuditLog,
@@ -153,6 +154,8 @@ const ISO_8601_TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2
 const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const CHANNEL_TOPIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const ROLE_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const ALLOWED_MENTION_PARSE_KEYS = ["parse", "replied_user"] as const
+const ALLOWED_MENTION_USER_KEYS = ["replied_user", "users"] as const
 
 export interface GuildMessageSearchOptions extends RequestOptions {
   attachmentExtensions?: readonly string[]
@@ -235,6 +238,15 @@ export interface CreateGuildRoleInput {
   name: string
   permissions: string
   primaryColor: number
+}
+
+export interface CreateForumPostInput {
+  allowedMentions: DiscordAllowedMentions
+  appliedTagIds?: readonly string[]
+  autoArchiveDuration?: number
+  content: string
+  name: string
+  rateLimitPerUser?: number
 }
 
 export interface EditMessageInput {
@@ -454,7 +466,9 @@ function assertExclusiveCursors(
 }
 
 function assertMessageContent(content: string): void {
-  if (!content.trim()) throw new RangeError("Discord message content must not be blank")
+  if (typeof content !== "string" || !content.trim()) {
+    throw new RangeError("Discord message content must not be blank")
+  }
   if (content.length > DISCORD_LIMITS.messageContentCharacters) {
     throw new RangeError(
       `Discord message content must not exceed ${DISCORD_LIMITS.messageContentCharacters} characters`,
@@ -558,6 +572,58 @@ function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
   }
 }
 
+function assertCreateForumPostInput(input: CreateForumPostInput): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord forum-post input must be an object")
+  }
+  if (
+    typeof input.name !== "string"
+    || input.name.length < 1
+    || input.name.length > DISCORD_LIMITS.channelNameCharacters
+    || input.name.trim() !== input.name
+    || CHANNEL_NAME_CONTROL_PATTERN.test(input.name)
+  ) {
+    throw new RangeError(
+      `Discord forum-post name must contain 1-${DISCORD_LIMITS.channelNameCharacters} characters without surrounding whitespace or controls`,
+    )
+  }
+  assertValidUnicode(input.name, "Discord forum-post name")
+  assertMessageContent(input.content)
+  if (CHANNEL_TOPIC_CONTROL_PATTERN.test(input.content)) {
+    throw new RangeError("Discord forum-post content contains unsupported control characters")
+  }
+  assertValidUnicode(input.content, "Discord forum-post content")
+  if (
+    input.autoArchiveDuration !== undefined
+    && !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[])
+      .includes(input.autoArchiveDuration)
+  ) {
+    throw new RangeError("Discord forum-post auto-archive duration is not supported")
+  }
+  assertIntegerRange(
+    input.rateLimitPerUser,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+    "Discord forum-post slowmode seconds",
+  )
+  if (input.appliedTagIds !== undefined) {
+    if (
+      !Array.isArray(input.appliedTagIds)
+      || input.appliedTagIds.length < 1
+      || input.appliedTagIds.length > DISCORD_LIMITS.forumAppliedTags
+      || new Set(input.appliedTagIds).size !== input.appliedTagIds.length
+      || input.appliedTagIds.some((value) => (
+        typeof value !== "string" || !DISCORD_SNOWFLAKE_PATTERN.test(value)
+      ))
+    ) {
+      throw new RangeError(
+        `Discord forum-post tag IDs must contain 1-${DISCORD_LIMITS.forumAppliedTags} unique snowflakes`,
+      )
+    }
+  }
+  assertAllowedMentions(input.allowedMentions)
+}
+
 function assertCreateGuildRoleInput(input: CreateGuildRoleInput): void {
   if (
     typeof input.name !== "string"
@@ -613,22 +679,46 @@ export function encodeDiscordAuditReason(auditReason: string): string {
 }
 
 function assertAllowedMentions(allowedMentions: DiscordAllowedMentions): void {
-  if ("parse" in allowedMentions) {
-    if (allowedMentions.parse.length !== 0) {
+  if (
+    !allowedMentions
+    || typeof allowedMentions !== "object"
+    || Array.isArray(allowedMentions)
+  ) {
+    throw new RangeError("Discord allowed mentions must be an exact object")
+  }
+  const value = allowedMentions as Record<string, unknown>
+  if (typeof value.replied_user !== "boolean") {
+    throw new RangeError("Discord replied-user mention setting must be a boolean")
+  }
+  const keys = Object.keys(value).sort()
+  if ("parse" in value) {
+    if (
+      keys.join("\0") !== ALLOWED_MENTION_PARSE_KEYS.join("\0")
+      || !Array.isArray(value.parse)
+      || value.parse.length !== 0
+    ) {
       throw new RangeError("Discord allowed mention parsing must be empty")
     }
     return
   }
+  if (
+    keys.join("\0") !== ALLOWED_MENTION_USER_KEYS.join("\0")
+    || !Array.isArray(value.users)
+    || value.users.some((userId) => typeof userId !== "string")
+  ) {
+    throw new RangeError("Discord allowed mentions must contain exact user IDs")
+  }
+  const users = value.users as string[]
   assertBoundedArray(
-    allowedMentions.users,
+    users,
     DISCORD_LIMITS.allowedMentionUsers,
     "Discord allowed mention user IDs",
   )
   assertSearchSnowflakes(
-    allowedMentions.users,
+    users,
     "Discord allowed mention user IDs",
   )
-  if (new Set(allowedMentions.users).size !== allowedMentions.users.length) {
+  if (new Set(users).size !== users.length) {
     throw new RangeError("Discord allowed mention user IDs must be unique")
   }
 }
@@ -838,6 +928,46 @@ export class DiscordClient {
           : {}),
         ...(input.topic !== undefined ? { topic: input.topic } : {}),
         type: input.type,
+      },
+    })
+  }
+
+  createForumPost(
+    channelId: string,
+    input: CreateForumPostInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordCreatedForumPost> {
+    if (
+      typeof channelId !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(channelId)
+    ) {
+      throw new RangeError("Discord forum-post channel ID must be a snowflake")
+    }
+    assertCreateForumPostInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord forum-post audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("create_forum_post", `/channels/${channelId}/threads`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      body: {
+        ...(input.appliedTagIds !== undefined
+          ? { applied_tags: input.appliedTagIds }
+          : {}),
+        ...(input.autoArchiveDuration !== undefined
+          ? { auto_archive_duration: input.autoArchiveDuration }
+          : {}),
+        message: {
+          allowed_mentions: input.allowedMentions,
+          content: input.content,
+        },
+        name: input.name,
+        ...(input.rateLimitPerUser !== undefined
+          ? { rate_limit_per_user: input.rateLimitPerUser }
+          : {}),
       },
     })
   }

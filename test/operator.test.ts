@@ -65,6 +65,8 @@ function status(
       channelCreationGuildIds: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
+      forumPostChannelIds: [],
+      forumPostsEnabled: false,
       gatewayEnabled: false,
       gatewayEventBufferSize: 100,
       interactionChannelIds: [],
@@ -107,6 +109,7 @@ function toolService(): DiscordToolService {
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeForumPost: unexpected,
     executeMemberModeration: unexpected,
     executeRoleCreation: unexpected,
     explainChannelAccess: unexpected,
@@ -127,6 +130,7 @@ function toolService(): DiscordToolService {
     planMessageDeletion: unexpected,
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
+    planForumPost: unexpected,
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
     readMessages: unexpected,
@@ -385,6 +389,50 @@ test("doctor and setup explain reviewed channel-creation scope without Discord w
   assert.match(omitted.warnings.join("\n"), /channel-creation toolset/)
 })
 
+test("doctor and setup explain reviewed forum-post scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
+      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
+      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const forumPost = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.forumPostPolicy,
+  )
+  assert.equal(forumPost?.status, "pass")
+  assert.match(forumPost?.summary || "", /1 exact channels/)
+  assert.match(forumPost?.summary || "", /exact readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.forumPostPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /forum-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /forum-posts toolset/)
+})
+
 test("doctor and setup explain reviewed role-creation scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
     environment: environment({
@@ -601,6 +649,8 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS/)
   assert.match(result, /DISCORD_MCP_ALLOW_ROLE_CREATION/)
   assert.match(result, /DISCORD_MCP_ROLE_CREATION_GUILD_IDS/)
+  assert.match(result, /DISCORD_MCP_ALLOW_FORUM_POSTS/)
+  assert.match(result, /DISCORD_MCP_FORUM_POST_CHANNEL_IDS/)
   assert.match(result, /DISCORD_MCP_ALLOW_GATEWAY/)
   assert.match(result, /DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE/)
   assert.match(result, /DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT/)
@@ -669,6 +719,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.promptNames, [
     "review_attachment_message",
     "review_channel_creation",
+    "review_forum_post",
     "review_member_moderation",
     "review_message_deletion",
     "review_role_creation",
@@ -700,11 +751,13 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
+  assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.destructiveTools.includes("execute_channel_creation"), false)
   assert.equal(report.destructiveTools.includes("execute_role_creation"), false)
   assert.equal(report.destructiveTools.includes("execute_attachment_message"), false)
+  assert.equal(report.destructiveTools.includes("execute_forum_post"), false)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(

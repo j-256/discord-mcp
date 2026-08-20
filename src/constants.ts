@@ -28,6 +28,7 @@ export const MCP_TOOLSET_NAMES = [
   "channel-creation",
   "connector",
   "deletion",
+  "forum-posts",
   "gateway",
   "guilds",
   "interactions",
@@ -50,6 +51,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowAttachments: "DISCORD_MCP_ALLOW_ATTACHMENTS",
   allowChannelCreation: "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
+  allowForumPosts: "DISCORD_MCP_ALLOW_FORUM_POSTS",
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
@@ -61,6 +63,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   auditFile: "DISCORD_MCP_AUDIT_FILE",
   channelCreationGuildIds: "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
+  forumPostChannelIds: "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
   gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   interactionChannelIds: "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
@@ -105,6 +108,7 @@ export const DISCORD_LIMITS = Object.freeze({
   bulkDeleteSafetyMarginMs: 60_000,
   banDeleteMessageSeconds: 7 * 24 * 60 * 60,
   channelMessages: 100,
+  channelPermissionOverwrites: 1_000,
   channelNameCharacters: 100,
   channelRateLimitSeconds: 21_600,
   channelTopicCharacters: 1_024,
@@ -112,6 +116,8 @@ export const DISCORD_LIMITS = Object.freeze({
   currentUserGuilds: 200,
   deletionMessages: 100,
   guildMessageSearch: 25,
+  forumAppliedTags: 5,
+  forumAvailableTags: 20,
   guildRoles: 250,
   guildChannels: 500,
   messageContentCharacters: 2_000,
@@ -271,6 +277,10 @@ export const DISCORD_CHANNEL_TYPES = Object.freeze({
   stageVoice: 13,
   text: 0,
   voice: 2,
+})
+
+export const DISCORD_CHANNEL_FLAGS = Object.freeze({
+  requireTag: 1 << 4,
 })
 
 export const DISCORD_MESSAGE_REFERENCE_TYPES = Object.freeze({

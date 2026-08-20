@@ -122,16 +122,18 @@ test("file operation store atomically selects one concurrent reservation", async
   )
 })
 
-test("file operation store isolates attachment, channel, and role operation-key domains", async (context) => {
+test("file operation store isolates attachment, channel, forum, and role operation-key domains", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const store = new FileOperationStore(join(root, "receipts"))
   const channel = receipt()
   const attachment = { ...receipt(), kind: "attachment-message" as const }
+  const forum = { ...receipt(), kind: "forum-post" as const }
   const role = { ...receipt(), kind: "role-creation" as const }
 
   assert.equal((await store.reserve(channel)).created, true)
   assert.equal((await store.reserve(attachment)).created, true)
+  assert.equal((await store.reserve(forum)).created, true)
   assert.equal((await store.reserve(role)).created, true)
   assert.deepEqual(
     await store.get("attachment-message", attachment.operationKeyHash),
@@ -140,6 +142,10 @@ test("file operation store isolates attachment, channel, and role operation-key 
   assert.deepEqual(
     await store.get("channel-creation", channel.operationKeyHash),
     channel,
+  )
+  assert.deepEqual(
+    await store.get("forum-post", forum.operationKeyHash),
+    forum,
   )
   assert.deepEqual(
     await store.get("role-creation", role.operationKeyHash),

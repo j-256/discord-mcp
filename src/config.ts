@@ -38,6 +38,7 @@ export interface ConnectorConfig {
   allowAttachments: boolean
   allowChannelCreation: boolean
   allowDeletions: boolean
+  allowForumPosts: boolean
   allowGateway: boolean
   allowInteractions: boolean
   allowRoleCreation: boolean
@@ -48,6 +49,7 @@ export interface ConnectorConfig {
   channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
+  forumPostChannelIds: ReadonlySet<string>
   gatewayEventBufferSize: number
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
@@ -237,6 +239,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.interactionChannelIds],
     ENVIRONMENT_NAMES.interactionChannelIds,
   )
+  const forumPostChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.forumPostChannelIds],
+    ENVIRONMENT_NAMES.forumPostChannelIds,
+  )
   const mentionUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.mentionUserIds],
     ENVIRONMENT_NAMES.mentionUserIds,
@@ -268,6 +274,7 @@ export function loadConnectorConfig(
   for (const [name, channelIds] of [
     [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
+    [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
@@ -318,6 +325,10 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.allowDeletions,
     ),
     allowGateway,
+    allowForumPosts: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowForumPosts],
+      ENVIRONMENT_NAMES.allowForumPosts,
+    ),
     allowInteractions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
@@ -346,6 +357,7 @@ export function loadConnectorConfig(
     channelCreationGuildIds,
     deleteChannelIds,
     expectedApplicationId,
+    forumPostChannelIds,
     gatewayEventBufferSize: parseInteger(
       environment[ENVIRONMENT_NAMES.gatewayEventBufferSize],
       ENVIRONMENT_NAMES.gatewayEventBufferSize,

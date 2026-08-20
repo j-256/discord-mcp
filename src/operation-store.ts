@@ -25,6 +25,7 @@ export const OPERATION_KEY_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
 export const OPERATION_KINDS = [
   "attachment-message",
   "channel-creation",
+  "forum-post",
   "role-creation",
 ] as const
 

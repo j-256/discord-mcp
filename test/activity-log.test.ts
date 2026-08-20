@@ -15,6 +15,7 @@ import {
   type AttachmentMessageActivity,
   type ChannelCreationActivity,
   type DeletionActivity,
+  type ForumPostActivity,
   type InteractionActivity,
   type MemberModerationActivity,
   type RoleCreationActivity,
@@ -135,6 +136,38 @@ function roleCreation(
     roleId: status.startsWith("completed") ? "350" : null,
     schemaVersion: 1,
     status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function forumPost(
+  id: string,
+  status: ForumPostActivity["status"],
+): ForumPostActivity {
+  const hasThread = [
+    "completed",
+    "completed-with-drift",
+    "uncertain",
+  ].includes(status)
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "forum-post-create",
+    messageId: hasThread ? "300" : null,
+    operationKeyHash: `sha256:${"1".repeat(64)}`,
+    parentChannelId: "200",
+    planDigest: `hmac-sha256:${"2".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    threadId: hasThread ? "300" : null,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -336,6 +369,46 @@ test("JSONL activity log strips all attachment and message content from attachme
   assert.doesNotMatch(
     JSON.stringify(result),
     /cdn\.discordapp|private message|private description|private digest|private\/report|private-name|private user|private-operation|sizeBytes/,
+  )
+})
+
+test("JSONL activity log strips forum-post intent and rejects mismatched starter IDs", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...forumPost("1", "pending"),
+    content: "must never reach disk",
+    name: "must-not-persist",
+  } as ForumPostActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...forumPost("2", "completed-with-drift"),
+      appliedTagIds: ["private-tag"],
+      auditReason: "private audit reason",
+      content: "private starter content",
+      name: "private forum title",
+      notifyUserIds: ["private user"],
+      operationKey: "private-operation-key",
+    })}\n${JSON.stringify({
+      ...forumPost("3", "completed"),
+      messageId: "301",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "forum-post-create")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private-tag|private audit|private starter|private forum|private user|private-operation/,
   )
 })
 
