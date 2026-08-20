@@ -13,6 +13,10 @@ export interface PolicyDescription {
   administrationGuildIds: string[]
   allowedChannelIds: string[]
   allowedGuildIds: string[]
+  attachmentChannelIds: string[]
+  attachmentMaxBytes: number
+  attachmentRootCount: number
+  attachmentsEnabled: boolean
   channelCreationEnabled: boolean
   channelCreationGuildIds: string[]
   deleteChannelIds: string[]
@@ -38,12 +42,16 @@ export class ScopePolicy {
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
+  readonly #allowAttachments: boolean
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowGateway: boolean
   readonly #allowRoleCreation: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
+  readonly #attachmentChannelIds: ReadonlySet<string>
+  readonly #attachmentMaxBytes: number
+  readonly #attachmentRoots: readonly string[]
   readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
@@ -71,10 +79,14 @@ export class ScopePolicy {
     | "protectedUserIds"
   > & Partial<Pick<
     ConnectorConfig,
+    | "allowAttachments"
     | "allowGateway"
     | "allowChannelCreation"
     | "allowRoleCreation"
     | "channelCreationGuildIds"
+    | "attachmentChannelIds"
+    | "attachmentMaxBytes"
+    | "attachmentRoots"
     | "gatewayEventBufferSize"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -84,12 +96,16 @@ export class ScopePolicy {
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
+    this.#allowAttachments = config.allowAttachments ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowGateway = config.allowGateway ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#deleteChannelIds = config.deleteChannelIds
+    this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
+    this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
+    this.#attachmentRoots = config.attachmentRoots ?? []
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
@@ -109,6 +125,12 @@ export class ScopePolicy {
       administrationGuildIds: [...this.#adminGuildIds].sort(),
       allowedChannelIds: [...this.#allowedChannelIds].sort(),
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
+      attachmentChannelIds: [...this.#attachmentChannelIds].sort(),
+      attachmentMaxBytes: this.#attachmentMaxBytes,
+      attachmentRootCount: this.#attachmentRoots.length,
+      attachmentsEnabled: this.#allowAttachments
+        && this.#attachmentChannelIds.size > 0
+        && this.#attachmentRoots.length > 0,
       channelCreationEnabled: this.#allowChannelCreation
         && this.#channelCreationGuildIds.size > 0,
       channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
@@ -246,6 +268,22 @@ export class ScopePolicy {
     }
     if (!this.#deleteChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the deletion scope`)
+    }
+    return guildId
+  }
+
+  assertChannelAttachmentAllowed(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowAttachments) {
+      throw new PolicyError("Discord attachment messages are disabled by connector configuration")
+    }
+    if (this.#attachmentChannelIds.size === 0) {
+      throw new PolicyError(
+        "Discord attachment messages require an explicit attachment-channel allowlist",
+      )
+    }
+    if (!this.#attachmentChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the attachment scope`)
     }
     return guildId
   }

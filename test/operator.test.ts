@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import { MCP_TOOLSET_NAMES } from "../src/constants.js"
@@ -53,6 +56,10 @@ function status(
       administrationGuildIds: [],
       allowedChannelIds: [CHANNEL_ID],
       allowedGuildIds: [GUILD_ID],
+      attachmentChannelIds: [],
+      attachmentMaxBytes: 0,
+      attachmentRootCount: 0,
+      attachmentsEnabled: false,
       channelCreationEnabled: false,
       channelCreationGuildIds: [],
       deleteChannelIds: [],
@@ -96,6 +103,7 @@ function toolService(): DiscordToolService {
       return status().policy
     },
     editOwnMessage: unexpected,
+    executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
     executeMemberModeration: unexpected,
     executeRoleCreation: unexpected,
@@ -112,6 +120,7 @@ function toolService(): DiscordToolService {
     listGuilds: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
+    planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
@@ -241,6 +250,56 @@ test("doctor and setup explain effective interaction policy without Discord writ
     "warn",
   )
   assert.match(setup.warnings.join("\n"), /interaction-channel allowlist/)
+})
+
+test("doctor and setup explain reviewed attachment scope without reading files or writing to Discord", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-attachment-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
+      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ATTACHMENT_MAX_BYTES: "4096",
+      DISCORD_MCP_ATTACHMENT_ROOTS: root,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
+      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ATTACHMENT_ROOTS: root,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const attachment = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.attachmentPolicy,
+  )
+  assert.equal(attachment?.status, "pass")
+  assert.match(attachment?.summary || "", /1 channels and 1 canonical roots/)
+  assert.match(attachment?.summary || "", /4096-byte ceiling/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.attachmentPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /attachment-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /attachments toolset/)
 })
 
 test("doctor and setup explain exact administration scope without Discord writes", async () => {
@@ -529,6 +588,10 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /DISCORD_MCP_ALLOW_ADMINISTRATION/)
   assert.match(result, /DISCORD_MCP_ADMIN_GUILD_IDS/)
   assert.match(result, /DISCORD_MCP_PROTECTED_USER_IDS/)
+  assert.match(result, /DISCORD_MCP_ALLOW_ATTACHMENTS/)
+  assert.match(result, /DISCORD_MCP_ATTACHMENT_CHANNEL_IDS/)
+  assert.match(result, /DISCORD_MCP_ATTACHMENT_MAX_BYTES/)
+  assert.match(result, /DISCORD_MCP_ATTACHMENT_ROOTS/)
   assert.match(result, /DISCORD_MCP_ALLOW_CHANNEL_CREATION/)
   assert.match(result, /DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS/)
   assert.match(result, /DISCORD_MCP_ALLOW_ROLE_CREATION/)
@@ -595,10 +658,11 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 27)
+  assert.equal(report.toolCount, 29)
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
+    "review_attachment_message",
     "review_channel_creation",
     "review_member_moderation",
     "review_message_deletion",
@@ -631,9 +695,11 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
+  assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.destructiveTools.includes("execute_channel_creation"), false)
   assert.equal(report.destructiveTools.includes("execute_role_creation"), false)
+  assert.equal(report.destructiveTools.includes("execute_attachment_message"), false)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(

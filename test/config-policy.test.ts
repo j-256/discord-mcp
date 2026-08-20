@@ -1,4 +1,13 @@
 import assert from "node:assert/strict"
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  symlink,
+} from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import { loadConnectorConfig } from "../src/config.js"
@@ -61,6 +70,9 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.mentionUserIds], [USER_ID])
   assert.deepEqual([...config.protectedUserIds], [USER_ID])
   assert.equal(config.allowAdministration, true)
+  assert.equal(config.allowAttachments, false)
+  assert.deepEqual([...config.attachmentChannelIds], [])
+  assert.deepEqual(config.attachmentRoots, [])
   assert.equal(config.allowDeletions, true)
   assert.equal(config.allowGateway, false)
   assert.equal(config.allowInteractions, true)
@@ -94,6 +106,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     administrationGuildIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
+    attachmentChannelIds: [],
+    attachmentMaxBytes: 10 * 1_024 * 1_024,
+    attachmentRootCount: 0,
+    attachmentsEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -222,6 +238,10 @@ test("configuration and policy require an exact administration guild and protect
     administrationGuildIds: [GUILD_ID],
     allowedChannelIds: [],
     allowedGuildIds: [],
+    attachmentChannelIds: [],
+    attachmentMaxBytes: 10 * 1_024 * 1_024,
+    attachmentRootCount: 0,
+    attachmentsEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -422,6 +442,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     administrationGuildIds: [],
     allowedChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
     allowedGuildIds: [GUILD_ID],
+    attachmentChannelIds: [],
+    attachmentMaxBytes: 10 * 1_024 * 1_024,
+    attachmentRootCount: 0,
+    attachmentsEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
@@ -441,6 +465,63 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
   })
+})
+
+test("configuration and policy isolate local attachments to exact channels and roots", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-attachment-"))
+  const root = await realpath(temporary)
+  try {
+    const linkedTarget = join(root, "linked-target")
+    const linkedRoot = join(root, "linked-root")
+    await mkdir(linkedTarget)
+    await symlink(linkedTarget, linkedRoot)
+    const config = loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
+      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ATTACHMENT_MAX_BYTES: "2048",
+      DISCORD_MCP_ATTACHMENT_ROOTS: JSON.stringify([root]),
+    }, { homeDirectory: "/test/home" })
+    const policy = new ScopePolicy(config)
+
+    assert.equal(config.allowAttachments, true)
+    assert.deepEqual([...config.attachmentChannelIds], [CHANNEL_ID])
+    assert.deepEqual(config.attachmentRoots, [root])
+    assert.equal(config.attachmentMaxBytes, 2_048)
+    assert.equal(policy.assertChannelAttachmentAllowed(channel()), GUILD_ID)
+    assert.throws(
+      () => policy.assertChannelAttachmentAllowed(channel({ id: OTHER_CHANNEL_ID })),
+      /outside the attachment scope/,
+    )
+    const description = policy.describe()
+    assert.equal(description.attachmentsEnabled, true)
+    assert.equal(description.attachmentRootCount, 1)
+    assert.equal(JSON.stringify(description).includes(root), false)
+
+    for (const environment of [
+      { DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: "999999999999999999" },
+      { DISCORD_MCP_ATTACHMENT_MAX_BYTES: String(10 * 1_024 * 1_024 + 1) },
+      { DISCORD_MCP_ATTACHMENT_ROOTS: "relative/path" },
+      { DISCORD_MCP_ATTACHMENT_ROOTS: "[not-json" },
+      { DISCORD_MCP_ATTACHMENT_ROOTS: JSON.stringify([root, root]) },
+      { DISCORD_MCP_ATTACHMENT_ROOTS: linkedRoot },
+      { DISCORD_MCP_ATTACHMENT_ROOTS: `${root}/` },
+      { DISCORD_MCP_ATTACHMENT_ROOTS: "/" },
+    ]) {
+      assert.throws(
+        () => loadConnectorConfig({
+          DISCORD_BOT_TOKEN: TOKEN,
+          DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+          ...environment,
+        }, { homeDirectory: "/test/home" }),
+        ConfigurationError,
+      )
+    }
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
 })
 
 test("scope policy requires exact interaction channels and exact notification users", () => {

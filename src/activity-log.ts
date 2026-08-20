@@ -125,7 +125,30 @@ export interface RoleCreationActivity {
   verification: "drift" | "match" | null
 }
 
+export type AttachmentMessageActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface AttachmentMessageActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "attachment-message-send"
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string
+  replyToMessageId: string | null
+  schemaVersion: number
+  status: AttachmentMessageActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type ActivityEntry =
+  | AttachmentMessageActivity
   | ChannelCreationActivity
   | DeletionActivity
   | InteractionActivity
@@ -410,6 +433,87 @@ function parseRoleCreationActivity(
   }
 }
 
+function parseAttachmentMessageActivity(
+  value: unknown,
+): AttachmentMessageActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "attachment-message-send"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !(record.messageId === null || (
+      typeof record.messageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.messageId)
+    ))
+    || !(record.replyToMessageId === null || (
+      typeof record.replyToMessageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.replyToMessageId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.messageId !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.messageId === null
+      || record.verification !== "match"
+    ))
+    || (record.status === "failed" && (
+      record.messageId !== null
+      || record.error === null
+      || record.verification !== null
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "attachment-message-send",
+    messageId: record.messageId,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    replyToMessageId: record.replyToMessageId,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as AttachmentMessageActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
+function parseActivityEntry(value: unknown): ActivityEntry | undefined {
+  return parseAttachmentMessageActivity(value)
+    || parseChannelCreationActivity(value)
+    || parseRoleCreationActivity(value)
+    || parseDeletionActivity(value)
+    || parseInteractionActivity(value)
+    || parseMemberModerationActivity(value)
+}
+
 export class JsonlActivityLog implements ActivityStore {
   readonly #file: string
 
@@ -418,11 +522,15 @@ export class JsonlActivityLog implements ActivityStore {
   }
 
   async append(entry: ActivityEntry): Promise<void> {
+    const normalized = parseActivityEntry(entry)
+    if (!normalized) {
+      throw new AuditLogError("Discord activity has an invalid content-free shape")
+    }
     try {
       await mkdir(dirname(this.#file), { mode: 0o700, recursive: true })
       const handle = await open(this.#file, "a", 0o600)
       try {
-        await handle.appendFile(`${JSON.stringify(entry)}\n`, "utf8")
+        await handle.appendFile(`${JSON.stringify(normalized)}\n`, "utf8")
       } finally {
         await handle.close()
       }
@@ -471,11 +579,7 @@ export class JsonlActivityLog implements ActivityStore {
         if (!line.trim()) continue
         try {
           const value: unknown = JSON.parse(line)
-          const entry = parseChannelCreationActivity(value)
-            || parseRoleCreationActivity(value)
-            || parseDeletionActivity(value)
-            || parseInteractionActivity(value)
-            || parseMemberModerationActivity(value)
+          const entry = parseActivityEntry(value)
           if (entry) entries.push(entry)
           else skippedLines += 1
         } catch {

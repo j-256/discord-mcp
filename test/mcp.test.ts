@@ -15,6 +15,10 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
+import type {
+  AttachmentMessagePlan,
+  AttachmentMessageRequest,
+} from "../src/attachment-message-service.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
 import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
@@ -24,6 +28,8 @@ import {
 } from "../src/role-administration-service.js"
 import {
   AdministrationExecutionError,
+  AttachmentMessageExecutionError,
+  AttachmentMessageOperationConflictError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
   DiscordApiError,
@@ -65,6 +71,8 @@ const USER_ID = "400000000000000001"
 const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
+const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
+const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
@@ -174,6 +182,72 @@ function moderationPlan(digest = DIGEST) {
       nickname: null,
       username: "member",
     },
+  }
+}
+
+function attachmentPlan(
+  request: AttachmentMessageRequest,
+  digest = DIGEST,
+): AttachmentMessagePlan {
+  const filename = request.filename || "report.txt"
+  return {
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      parentId: null,
+      type: 0,
+    },
+    createdAt: "2026-08-20T00:00:00.000Z",
+    digest,
+    file: {
+      canonicalPath: request.filePath,
+      containedByConfiguredRoot: true,
+      description: request.description ?? null,
+      filename,
+      maxBytes: 10 * 1_024 * 1_024,
+      ownerMatchesProcess: true,
+      regularFile: true,
+      singleLink: true,
+      sizeBytes: 14,
+      stableRead: true,
+    },
+    notificationUserIds: [...(request.notifyUserIds || [])].sort(),
+    notifyReplyAuthor: request.notifyReplyAuthor ?? false,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "SEND_MESSAGES",
+        "ATTACH_FILES",
+        "READ_MESSAGE_HISTORY",
+      ],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.SEND_MESSAGES
+        | DISCORD_PERMISSIONS.ATTACH_FILES
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+      ).toString(),
+      permissionSourceChannelId: request.channelId,
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "ATTACH_FILES",
+        "SEND_MESSAGES",
+      ],
+    },
+    reply: request.replyToMessageId
+      ? { authorId: USER_ID, messageId: request.replyToMessageId }
+      : null,
+    schemaVersion: 1,
+    status: "planned",
+    target: {
+      content: request.content ?? null,
+      description: request.description ?? null,
+      filename,
+    },
+    warnings: ["One-shot reviewed local file upload"],
   }
 }
 
@@ -324,6 +398,10 @@ function fixturePolicy(): PolicyDescription {
     administrationGuildIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
+    attachmentChannelIds: [],
+    attachmentMaxBytes: 0,
+    attachmentRootCount: 0,
+    attachmentsEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -348,6 +426,8 @@ function fixturePolicy(): PolicyDescription {
 function serviceFixture(overrides: {
   administrationError?: Error
   activityError?: Error
+  attachmentError?: Error
+  attachmentPlanDigest?: string
   channelCreationAction?: "create" | "none"
   channelCreationError?: Error
   channelCreationPlanDigest?: string
@@ -364,6 +444,8 @@ function serviceFixture(overrides: {
     archived: 0,
     administrationExecute: 0,
     administrationPlan: 0,
+    attachmentExecute: 0,
+    attachmentPlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     delete: 0,
@@ -404,6 +486,27 @@ function serviceFixture(overrides: {
       }
     },
     describePolicy: fixturePolicy,
+    async executeAttachmentMessage(request, planDigest) {
+      if (overrides.attachmentError) throw overrides.attachmentError
+      calls.attachmentExecute += 1
+      const planned = attachmentPlan(request, planDigest)
+      return {
+        activityId: "activity-attachment",
+        attachment: {
+          descriptionPresent: request.description !== undefined,
+          filename: planned.file.filename,
+          sizeBytes: planned.file.sizeBytes,
+        },
+        channelId: request.channelId,
+        guildId: GUILD_ID,
+        messageId: MESSAGE_ID,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${MESSAGE_ID}`,
+      }
+    },
     async executeChannelCreation(request, planDigest) {
       if (overrides.channelCreationError) throw overrides.channelCreationError
       calls.channelCreationExecute += 1
@@ -623,6 +726,13 @@ function serviceFixture(overrides: {
       calls.plan += 1
       return plan(overrides.planDigest)
     },
+    async planAttachmentMessage(request) {
+      calls.attachmentPlan += 1
+      return attachmentPlan(
+        request,
+        overrides.attachmentPlanDigest || DIGEST,
+      )
+    },
     async planChannelCreation(request) {
       calls.channelCreationPlan += 1
       return channelPlan(
@@ -811,6 +921,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "delete_messages",
       "plan_channel_creation",
       "execute_channel_creation",
+      "plan_attachment_message",
+      "execute_attachment_message",
       "plan_role_creation",
       "execute_role_creation",
       "plan_member_moderation",
@@ -871,6 +983,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     tool.name === "execute_role_creation"
   ))
   assert.deepEqual(roleCreation?.annotations, {
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const attachmentPlanTool = result.tools.find((tool) => (
+    tool.name === "plan_attachment_message"
+  ))
+  assert.deepEqual(attachmentPlanTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const attachmentExecuteTool = result.tools.find((tool) => (
+    tool.name === "execute_attachment_message"
+  ))
+  assert.deepEqual(attachmentExecuteTool?.annotations, {
     destructiveHint: false,
     idempotentHint: false,
     openWorldHint: true,
@@ -962,6 +1092,19 @@ test("MCP tool discovery returns bounded exact contracts without contacting Disc
   assert.equal((secretQuery.matches as unknown[]).length, 0)
   assert.doesNotMatch(JSON.stringify(secretQuery), new RegExp(TOKEN))
   assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
+test("MCP activity results omit the private local file path", async (context) => {
+  const { client } = await connectedFixture(context)
+
+  const result = await client.callTool({
+    arguments: {},
+    name: "list_activity",
+  })
+
+  assert.notEqual(result.isError, true)
+  assert.equal("file" in structuredContent(result), false)
+  assert.doesNotMatch(JSON.stringify(result), /\/memory\/activity\.jsonl/)
 })
 
 test("progressive discovery enables exact reviewed workflows and emits list changes", async (context) => {
@@ -1074,6 +1217,30 @@ test("progressive discovery enables the complete reviewed channel-creation workf
     [
       "plan_channel_creation",
       "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed attachment-message workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_attachment_message" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_attachment_message",
+    "plan_attachment_message",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_attachment_message",
+      "execute_attachment_message",
       "discover_discord_tools",
     ],
   )
@@ -1205,6 +1372,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     administrationExecute: 0,
     administrationPlan: 0,
     archived: 1,
+    attachmentExecute: 0,
+    attachmentPlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     delete: 0,
@@ -1605,6 +1774,195 @@ test("MCP deletion refuses a changed plan before requesting confirmation", async
   assert.equal(result.isError, true)
   assert.equal(confirmations, 0)
   assert.equal(calls.delete, 0)
+})
+
+test("MCP attachment messages validate bounded local-file plans", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "Reviewed report",
+      description: "Accessible report",
+      filePath: ATTACHMENT_PATH,
+      filename: "report.txt",
+      operationKey: ATTACHMENT_OPERATION_KEY,
+    },
+    name: "plan_attachment_message",
+  })
+  const unsafeFilename = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: ATTACHMENT_PATH,
+      filename: "../secret.txt",
+      operationKey: ATTACHMENT_OPERATION_KEY,
+    },
+    name: "plan_attachment_message",
+  })
+  const shortKey = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: ATTACHMENT_PATH,
+      operationKey: "short",
+    },
+    name: "plan_attachment_message",
+  })
+  const relativePath = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: "relative/report.txt",
+      operationKey: ATTACHMENT_OPERATION_KEY,
+    },
+    name: "plan_attachment_message",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(unsafeFilename.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(relativePath.isError, true)
+  assert.equal(calls.attachmentPlan, 1)
+})
+
+test("MCP attachment messages bind signed approval to the exact file and message", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: `Reviewed report for <@${USER_ID}>`,
+      description: "Accessible report",
+      filePath: ATTACHMENT_PATH,
+      filename: "report.txt",
+      notifyReplyAuthor: true,
+      notifyUserIds: [USER_ID],
+      operationKey: ATTACHMENT_OPERATION_KEY,
+      planDigest: DIGEST,
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: "execute_attachment_message",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.attachmentPlan, 1)
+  assert.equal(calls.attachmentExecute, 1)
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /report\.txt/)
+  assert.match(confirmationMessage, /14 bytes/)
+  assert.match(confirmationMessage, /Accessible report/)
+  assert.match(confirmationMessage, /ATTACH_FILES/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(ATTACHMENT_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ATTACHMENT_OPERATION_KEY),
+  )
+})
+
+test("MCP attachment messages stop on declined confirmation or a changed plan", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: ATTACHMENT_PATH,
+      operationKey: ATTACHMENT_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_attachment_message",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.attachmentExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { attachmentPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: ATTACHMENT_PATH,
+      operationKey: ATTACHMENT_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_attachment_message",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.attachmentExecute, 0)
+})
+
+test("MCP attachment messages expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      attachmentError: new AttachmentMessageExecutionError(
+        "Discord attachment outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: ATTACHMENT_PATH,
+      operationKey: ATTACHMENT_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_attachment_message",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-attachment-1",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-20T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      attachmentError: new AttachmentMessageOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      filePath: ATTACHMENT_PATH,
+      operationKey: ATTACHMENT_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_attachment_message",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(ATTACHMENT_OPERATION_KEY))
 })
 
 test("MCP channel creation plans bounded additive types and rejects category settings", async (context) => {
@@ -2581,8 +2939,8 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 27)
-  assert.equal(prompts.prompts.length, 6)
+  assert.equal(tools.tools.length, 29)
+  assert.equal(prompts.prompts.length, 7)
   assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 5)
   for (const catalog of [tools, prompts, resources, templates]) {

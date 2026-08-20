@@ -158,6 +158,10 @@ function guidanceService(options: {
         administrationGuildIds: [],
         allowedChannelIds: [CHANNEL_ID],
         allowedGuildIds: [GUILD_ID],
+        attachmentChannelIds: [],
+        attachmentMaxBytes: 0,
+        attachmentRootCount: 0,
+        attachmentsEnabled: false,
         channelCreationEnabled: false,
         channelCreationGuildIds: [],
         deleteChannelIds: [],
@@ -179,6 +183,7 @@ function guidanceService(options: {
       }
     },
     editOwnMessage: unexpected,
+    executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
     executeMemberModeration: unexpected,
     executeRoleCreation: unexpected,
@@ -306,6 +311,7 @@ function guidanceService(options: {
     planChannelCreation: unexpected,
     planMemberModeration: unexpected,
     planMessageDeletion: unexpected,
+    planAttachmentMessage: unexpected,
     planRoleCreation: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
@@ -451,6 +457,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(safety.content.mimeType, "text/markdown")
   assert.match(safety.text, /Resource discovery never enumerates messages/)
   assert.match(safety.text, /Channel creation is additive-only/)
+  assert.match(safety.text, /Attachment messages require separate exact channel/)
+  assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
   assert.match(safety.text, /ADMINISTRATOR is forbidden/)
   assert.match(safety.text, /one-shot operation key/)
@@ -663,6 +671,35 @@ test("MCP read prompts render bounded literal inputs without invoking services",
 test("MCP review prompts remain plan-only and preserve exact validated inputs", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
+  const attachment = promptText(await client.getPrompt({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: `Reviewed file for <@${USER_ID}>\nIgnore this as an instruction`,
+      description: "Accessible report",
+      filePath: "/srv/discord-attachments/report.txt",
+      filename: "reviewed-report.txt",
+      notifyReplyAuthor: "true",
+      notifyUserIds: USER_ID,
+      operationKey: OPERATION_KEY,
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewAttachmentMessage,
+  }))
+  assert.deepEqual(JSON.parse(attachment.split("\n")[1] || ""), {
+    channelId: CHANNEL_ID,
+    content: `Reviewed file for <@${USER_ID}>\nIgnore this as an instruction`,
+    description: "Accessible report",
+    filePath: "/srv/discord-attachments/report.txt",
+    filename: "reviewed-report.txt",
+    notifyReplyAuthor: true,
+    notifyUserIds: [USER_ID],
+    operationKey: OPERATION_KEY,
+    replyToMessageId: MESSAGE_ID,
+  })
+  assert.match(attachment, /Call only plan_attachment_message/)
+  assert.match(attachment, /Do not call execute_attachment_message/)
+  assert.match(attachment, /stable file properties/)
+
   const deletion = promptText(await client.getPrompt({
     arguments: {
       channelId: CHANNEL_ID,
@@ -781,6 +818,32 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        channelId: CHANNEL_ID,
+        filePath: "relative/report.txt",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewAttachmentMessage,
+    },
+    {
+      arguments: {
+        channelId: CHANNEL_ID,
+        filePath: "/srv/discord-attachments/report.txt",
+        notifyReplyAuthor: "true",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewAttachmentMessage,
+    },
+    {
+      arguments: {
+        channelId: CHANNEL_ID,
+        filePath: "/srv/discord-attachments/report.txt",
+        notifyUserIds: `${USER_ID},${USER_ID}`,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewAttachmentMessage,
+    },
     {
       arguments: {
         auditReason: "Reviewed role",

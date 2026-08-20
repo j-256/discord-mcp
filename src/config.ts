@@ -1,8 +1,18 @@
+import {
+  lstatSync,
+  realpathSync,
+} from "node:fs"
 import { homedir } from "node:os"
-import { isAbsolute, join, resolve } from "node:path"
+import {
+  isAbsolute,
+  join,
+  parse,
+  resolve,
+} from "node:path"
 
 import {
   CONNECTOR_LIMITS,
+  DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
   ENVIRONMENT_NAMES,
   GATEWAY_DEFAULTS,
@@ -25,12 +35,16 @@ export interface ConnectorConfig {
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
+  allowAttachments: boolean
   allowChannelCreation: boolean
   allowDeletions: boolean
   allowGateway: boolean
   allowInteractions: boolean
   allowRoleCreation: boolean
   auditFile: string
+  attachmentChannelIds: ReadonlySet<string>
+  attachmentMaxBytes: number
+  attachmentRoots: readonly string[]
   channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
@@ -103,6 +117,77 @@ function parseInteger(
   return result
 }
 
+function parseAttachmentRoots(
+  value: string | undefined,
+  name: string,
+): readonly string[] {
+  if (!value?.trim()) return []
+  const normalized = value.trim()
+  let entries: unknown
+  try {
+    entries = normalized.startsWith("[")
+      ? JSON.parse(normalized)
+      : [normalized]
+  } catch (error) {
+    throw new ConfigurationError(
+      `${name} must be one absolute directory or a JSON array of absolute directories`,
+      { cause: error },
+    )
+  }
+  if (
+    !Array.isArray(entries)
+    || entries.length < 1
+    || entries.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    throw new ConfigurationError(
+      `${name} must be one absolute directory or a JSON array of absolute directories`,
+    )
+  }
+  if (typeof process.getuid !== "function") {
+    throw new ConfigurationError(
+      `${name} requires numeric process ownership evidence on this runtime`,
+    )
+  }
+  const processUserId = process.getuid()
+  const roots = entries.map((entry) => {
+    const candidate = (entry as string).trim()
+    if (
+      !isAbsolute(candidate)
+      || candidate.includes("\0")
+      || resolve(candidate) !== candidate
+    ) {
+      throw new ConfigurationError(`${name} entries must be absolute directory paths`)
+    }
+    let root: string
+    let metadata
+    try {
+      metadata = lstatSync(candidate)
+      root = realpathSync.native(candidate)
+    } catch (error) {
+      throw new ConfigurationError(`${name} entries must be existing directories`, {
+        cause: error,
+      })
+    }
+    if (
+      !metadata.isDirectory()
+      || metadata.isSymbolicLink()
+      || root !== candidate
+      || root === parse(root).root
+      || metadata.uid !== processUserId
+    ) {
+      throw new ConfigurationError(
+        `${name} entries must be owned, canonical directories below the filesystem root`,
+      )
+    }
+    return root
+  })
+  const unique = [...new Set(roots)].sort()
+  if (unique.length !== roots.length) {
+    throw new ConfigurationError(`${name} must not contain duplicate directories`)
+  }
+  return unique
+}
+
 function defaultAuditFile(environment: NodeJS.ProcessEnv, homeDirectory: string): string {
   const stateRoot = environment.XDG_STATE_HOME?.trim()
   return join(stateRoot || join(homeDirectory, ".local", "state"), "discord-mcp", "activity.jsonl")
@@ -139,6 +224,10 @@ export function loadConnectorConfig(
   const channelCreationGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.channelCreationGuildIds],
     ENVIRONMENT_NAMES.channelCreationGuildIds,
+  )
+  const attachmentChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.attachmentChannelIds],
+    ENVIRONMENT_NAMES.attachmentChannelIds,
   )
   const deleteChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.deleteChannelIds],
@@ -177,6 +266,7 @@ export function loadConnectorConfig(
   }
 
   for (const [name, channelIds] of [
+    [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
   ] as const) {
@@ -215,6 +305,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowAdministration],
       ENVIRONMENT_NAMES.allowAdministration,
     ),
+    allowAttachments: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowAttachments],
+      ENVIRONMENT_NAMES.allowAttachments,
+    ),
     allowChannelCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowChannelCreation],
       ENVIRONMENT_NAMES.allowChannelCreation,
@@ -236,6 +330,18 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.auditFile],
       environment,
       options.homeDirectory || homedir(),
+    ),
+    attachmentChannelIds,
+    attachmentMaxBytes: parseInteger(
+      environment[ENVIRONMENT_NAMES.attachmentMaxBytes],
+      ENVIRONMENT_NAMES.attachmentMaxBytes,
+      DISCORD_LIMITS.attachmentBytes,
+      1,
+      DISCORD_LIMITS.attachmentBytes,
+    ),
+    attachmentRoots: parseAttachmentRoots(
+      environment[ENVIRONMENT_NAMES.attachmentRoots],
+      ENVIRONMENT_NAMES.attachmentRoots,
     ),
     channelCreationGuildIds,
     deleteChannelIds,

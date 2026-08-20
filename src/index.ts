@@ -1,5 +1,7 @@
 export * from "./activity-log.js"
 export * from "./administration-service.js"
+export * from "./attachment-file.js"
+export * from "./attachment-message-service.js"
 export * from "./channel-administration-service.js"
 export * from "./config.js"
 export * from "./constants.js"

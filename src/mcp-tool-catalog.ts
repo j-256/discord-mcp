@@ -37,6 +37,7 @@ const MCP_DISCOVERY_DETAILS = [
 
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
 type McpToolWorkflow =
+  | "attachment-message"
   | "channel-creation"
   | "member-moderation"
   | "message-deletion"
@@ -68,6 +69,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   edit_own_message: {
     keywords: ["edit", "message", "own", "update"],
     toolset: "interactions",
+  },
+  execute_attachment_message: {
+    keywords: ["attachment", "execute", "file", "message", "send", "upload"],
+    toolset: "attachments",
+    workflow: "attachment-message",
   },
   execute_channel_creation: {
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
@@ -140,6 +146,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  plan_attachment_message: {
+    keywords: ["attachment", "file", "message", "plan", "review", "upload"],
+    toolset: "attachments",
+    workflow: "attachment-message",
   },
   plan_channel_creation: {
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],

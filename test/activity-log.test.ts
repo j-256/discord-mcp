@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import {
   appendFile,
   mkdtemp,
+  readFile,
   rm,
   stat,
 } from "node:fs/promises"
@@ -11,12 +12,34 @@ import test from "node:test"
 
 import {
   JsonlActivityLog,
+  type AttachmentMessageActivity,
   type ChannelCreationActivity,
   type DeletionActivity,
   type InteractionActivity,
   type MemberModerationActivity,
   type RoleCreationActivity,
 } from "../src/activity-log.js"
+
+function attachmentMessage(
+  id: string,
+  status: AttachmentMessageActivity["status"],
+): AttachmentMessageActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status) ? "DiscordApiError.500.unknown" : null,
+    guildId: "100",
+    id,
+    kind: "attachment-message-send",
+    messageId: ["completed", "uncertain"].includes(status) ? "300" : null,
+    operationKeyHash: `sha256:${"e".repeat(64)}`,
+    planDigest: `hmac-sha256:${"f".repeat(64)}`,
+    replyToMessageId: "400",
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
 
 function activity(id: string, status: DeletionActivity["status"]): DeletionActivity {
   return {
@@ -270,6 +293,49 @@ test("JSONL activity log strips role content and raw operation keys from creatio
   assert.doesNotMatch(
     JSON.stringify(result),
     /private audit|private-role|private-operation|private permission|private role/,
+  )
+})
+
+test("JSONL activity log strips all attachment and message content from attachment records", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...attachmentMessage("1", "pending"),
+    content: "must never reach disk",
+    filePath: "/private/must-not-persist.txt",
+  } as AttachmentMessageActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...attachmentMessage("2", "completed"),
+      attachmentUrl: "https://cdn.discordapp.com/private",
+      content: "private message",
+      description: "private description",
+      fileDigest: "private digest",
+      filePath: "/private/report.txt",
+      filename: "private-name.txt",
+      notifyUserIds: ["private user"],
+      operationKey: "private-operation-key",
+      sizeBytes: 123,
+    })}\n${JSON.stringify({
+      ...attachmentMessage("3", "failed"),
+      error: "private error text with spaces",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "attachment-message-send")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /cdn\.discordapp|private message|private description|private digest|private\/report|private-name|private user|private-operation|sizeBytes/,
   )
 })
 

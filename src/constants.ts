@@ -22,6 +22,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 
 export const MCP_TOOLSET_NAMES = [
   "activity",
+  "attachments",
   "channel-creation",
   "connector",
   "deletion",
@@ -43,6 +44,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
   allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
+  allowAttachments: "DISCORD_MCP_ALLOW_ATTACHMENTS",
   allowChannelCreation: "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
@@ -50,6 +52,9 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowRoleCreation: "DISCORD_MCP_ALLOW_ROLE_CREATION",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
+  attachmentChannelIds: "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
+  attachmentMaxBytes: "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
+  attachmentRoots: "DISCORD_MCP_ATTACHMENT_ROOTS",
   auditFile: "DISCORD_MCP_AUDIT_FILE",
   channelCreationGuildIds: "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
@@ -86,6 +91,9 @@ export const ENVIRONMENT_NAMES = Object.freeze({
 
 export const DISCORD_LIMITS = Object.freeze({
   allowedMentionUsers: 100,
+  attachmentBytes: 10 * 1_024 * 1_024,
+  attachmentDescriptionCharacters: 1_024,
+  attachmentFilenameCharacters: 240,
   auditReasonEncodedCharacters: 512,
   automaticRetryWaitMs: 5_000,
   archivedThreads: 100,
@@ -124,6 +132,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   activityEntries: 100,
   activityPageDefault: 25,
   activeThreads: 100,
+  attachmentPathCharacters: 4_096,
   contentPreviewCharacters: 240,
   gatewayChannelMappings: 10_000,
   gatewayCursorCharacters: 128,

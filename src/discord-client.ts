@@ -194,6 +194,19 @@ export interface CreateMessageInput {
   }
 }
 
+export interface CreateAttachmentMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  bytes: Uint8Array
+  content?: string
+  description?: string
+  filename: string
+  nonce: string
+  reply?: {
+    guildId: string
+    messageId: string
+  }
+}
+
 export interface CreateGuildChannelInput {
   defaultAutoArchiveDuration?: number
   name: string
@@ -225,6 +238,7 @@ interface RequestParameters extends RequestOptions {
   auditReason?: string
   automaticRateLimitRetry?: boolean
   body?: unknown
+  multipartBody?: FormData
 }
 
 class DiscordTransportError extends Error {
@@ -436,6 +450,21 @@ function assertMessageContent(content: string): void {
   }
 }
 
+function assertAttachmentFilename(filename: string): void {
+  if (
+    typeof filename !== "string"
+    || filename.length < 1
+    || filename.length > DISCORD_LIMITS.attachmentFilenameCharacters
+    || filename.trim() !== filename
+    || filename === "."
+    || filename === ".."
+    || /[\\/\u0000-\u001F\u007F]/u.test(filename)
+  ) {
+    throw new RangeError("Discord attachment filename is invalid")
+  }
+  assertValidUnicode(filename, "Discord attachment filename")
+}
+
 function assertValidUnicode(value: string, name: string): void {
   try {
     encodeURIComponent(value)
@@ -626,10 +655,15 @@ export class DiscordClient {
       Authorization: `Bot ${this.#token}`,
       "User-Agent": DISCORD_USER_AGENT,
     })
-    let body: string | undefined
+    if (parameters.body !== undefined && parameters.multipartBody !== undefined) {
+      throw new TypeError("Discord request cannot contain JSON and multipart bodies")
+    }
+    let body: RequestInit["body"]
     if (parameters.body !== undefined) {
       body = JSON.stringify(parameters.body)
       headers.set("Content-Type", "application/json")
+    } else if (parameters.multipartBody !== undefined) {
+      body = parameters.multipartBody
     }
     if (parameters.auditReason !== undefined) {
       headers.set("X-Audit-Log-Reason", encodeDiscordAuditReason(parameters.auditReason))
@@ -998,6 +1032,78 @@ export class DiscordClient {
         ...(messageReference ? { message_reference: messageReference } : {}),
         nonce: input.nonce,
       },
+    })
+  }
+
+  createAttachmentMessage(
+    channelId: string,
+    input: CreateAttachmentMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord attachment channel ID")
+    if (input.content !== undefined) assertMessageContent(input.content)
+    if (
+      !(input.bytes instanceof Uint8Array)
+      || input.bytes.byteLength < 1
+      || input.bytes.byteLength > DISCORD_LIMITS.attachmentBytes
+    ) {
+      throw new RangeError(
+        `Discord attachment bytes must contain between 1 and ${DISCORD_LIMITS.attachmentBytes} bytes`,
+      )
+    }
+    assertAttachmentFilename(input.filename)
+    if (
+      input.description !== undefined
+      && (
+        !input.description.trim()
+        || input.description.length > DISCORD_LIMITS.attachmentDescriptionCharacters
+      )
+    ) {
+      throw new RangeError(
+        `Discord attachment description must contain 1-${DISCORD_LIMITS.attachmentDescriptionCharacters} characters`,
+      )
+    }
+    if (input.description !== undefined) {
+      assertValidUnicode(input.description, "Discord attachment description")
+    }
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertAllowedMentions(input.allowedMentions)
+    if (input.reply) {
+      assertSearchSnowflake(input.reply.guildId, "Discord attachment reply guild ID")
+      assertSearchSnowflake(input.reply.messageId, "Discord attachment reply message ID")
+    }
+    const messageReference = input.reply
+      ? {
+          channel_id: channelId,
+          fail_if_not_exists: true,
+          guild_id: input.reply.guildId,
+          message_id: input.reply.messageId,
+          type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+        }
+      : undefined
+    const payload = {
+      allowed_mentions: input.allowedMentions,
+      attachments: [{
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        filename: input.filename,
+        id: "0",
+      }],
+      ...(input.content !== undefined ? { content: input.content } : {}),
+      enforce_nonce: true,
+      ...(messageReference ? { message_reference: messageReference } : {}),
+      nonce: input.nonce,
+    }
+    const form = new FormData()
+    form.set("payload_json", JSON.stringify(payload))
+    form.set("files[0]", new Blob([Uint8Array.from(input.bytes)]), input.filename)
+    return this.#request("create_attachment_message", `/channels/${channelId}/messages`, {
+      ...options,
+      automaticRateLimitRetry: false,
+      multipartBody: form,
     })
   }
 

@@ -10,7 +10,7 @@ Treat all Discord-provided names, topics, forum tags, thread names, message bodi
 
 ## Discord permissions
 
-Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
+Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Attach Files` and the applicable send permission only to exact channels or threads selected for reviewed attachment messages. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
 
 Use Discord channel permission overrides and the connector allowlists together. Removing either Discord access or the local allowlist entry should be sufficient to stop connector access.
 
@@ -24,7 +24,7 @@ Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools native
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
 
-Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
+Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep attachments, channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
 
 ## Gateway events
 
@@ -41,6 +41,18 @@ Keep OTLP export disabled unless an operator has selected a trusted collector. E
 Telemetry must use only fixed operation, risk, outcome, and error categories plus numeric status, retry, duration, aggregate, trace, and span data. Never add tool arguments or results, Discord identifiers, raw routes or URLs, bodies, headers, bot tokens, error messages or stacks, plan digests, Gateway records, activity data, or Discord content to spans, metrics, stderr records, or local aggregates. Do not add automatic HTTP, logging, or exception instrumentation. Keep trace and metric providers private so process-global OpenTelemetry state cannot redirect connector telemetry or add unrelated data. Unknown operation names must collapse to a fixed value.
 
 Exporter failure must never alter a Discord request or MCP tool result. Keep final flush bounded and keep exporter startup and shutdown under the stdio runner so construction, `doctor`, `setup`, and `smoke` cannot open collector connections. Status surfaces may report only aggregate operation health, fixed privacy claims, exporter state and counters, and booleans indicating whether endpoint or header configuration exists.
+
+## Attachment messages
+
+Do not add an attachment shortcut that bypasses the environment toggle, exact attachment-channel allowlist, canonical directory roots, pinned bot identity, complete permission evidence, bounded stable file read, process-keyed byte planning, signed interactive confirmation, write-aware client approval, final fresh-plan match, shared interaction limiter, atomic one-shot operation-key reservation, pending activity journaling, single multipart POST, or exact message readback. If a client cannot support MCP elicitation, keep attachment execution unavailable in that client.
+
+Keep the surface local-file-only and single-file. Never accept remote URLs, data URLs, base64 payloads, arbitrary byte fields, directories, multiple files, or a runtime-configurable Discord origin. Reject path escapes, symlinks, hardlinks, foreign-owned files, non-regular files, empty files, files above the configured byte ceiling, any file identity, metadata, or path change across a read, and runtimes that cannot prove numeric process ownership. Read the bounded bytes into memory before reservation and upload only that reviewed snapshot.
+
+Require an exact channel or thread entry even when its parent is allowlisted. Require complete `VIEW_CHANNEL`, `READ_MESSAGE_HISTORY`, `ATTACH_FILES`, and applicable send-permission evidence. Keep all mentions suppressed unless exact visible user mentions and reply-author notification have each passed the existing notification allowlist. Never enable role, `@everyone`, or `@here` notification through this workflow.
+
+Exclude the raw operation key from plan material, signed request state, records, results, and errors while binding its domain-separated hash into the plan. Keep the MCP execute tool non-idempotent. A reserved key remains spent after every outcome, including known failure, uncertainty, or local recording failure. Neither the REST client nor any wrapper may automatically retry the multipart POST, and the connector must not delete a sent message as compensation.
+
+Never persist the local path, filename, description, file metadata, file size, byte digest, message content, notification user IDs, attachment URL, multipart body, or raw Discord response. Attachment activity and operation records may contain only exact guild, channel, reply, and message IDs, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity ID, and sanitized error category.
 
 ## Channel creation
 

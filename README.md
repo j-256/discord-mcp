@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, permissions, and indexed message history through a dedicated bot. It includes exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, permissions, and indexed message history through a dedicated bot. It includes exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed local-file attachment messages, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -15,7 +15,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
-- Toolsets separate channel creation, role creation, deletion, and moderation from reads and ordinary interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
+- Toolsets separate attachments, channel creation, role creation, deletion, and moderation from reads and ordinary interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
@@ -29,6 +29,11 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Every actual send, edit, or reaction write requires a pending content-free activity record and passes process-local anti-spam guards
 - Sends require caller-provided idempotency keys, coalesce concurrent retries, and use deterministic Discord nonces with uniqueness enforcement
 - Only non-webhook messages owned by the verified bot can be edited
+- Attachment messages are disabled unless a separate toggle, non-empty exact channel allowlist, and one or more existing owned canonical directory roots are configured
+- Attachment planning accepts one exact absolute local path only, rejects URL and base64 inputs, reads no more than the configured 10 MiB ceiling, and rejects path escapes, symlinks, hardlinks, non-regular files, foreign-owned files, empty files, and files that change while being read
+- A keyed plan binds the stable file identity and bytes, exact channel and optional reply, message fields, explicit notification users, complete bot permission evidence, and a one-shot operation-key hash
+- MCP host write approval, signed MCP elicitation, two fresh byte-matching plans, the shared interaction limiter, a durable one-shot receipt, pending content-free activity, one non-retried multipart POST, and exact message readback all surround attachment execution
+- Attachment URLs, local paths, file properties, byte digests, message content, descriptions, filenames, notification user IDs, and raw operation keys are never persisted; uncertain sends are never retried or rolled back automatically
 - Channel creation is disabled unless a separate toggle and non-empty exact guild allowlist are both configured
 - Creation is additive-only and supports categories, text channels, and forum channels without permission overwrites, positioning, edits, deletion, rollback, or broad blueprint reconciliation
 - A keyed plan binds the exact request, bot identity, guild and optional parent permission evidence, logical-name collision candidates, relevant role state, visible capacity, and one-shot operation key hash
@@ -51,7 +56,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - MCP host write approval, signed MCP elicitation, a final fresh plan match, and a content-free pending activity record all precede member moderation
 - The bot token, message content, content hashes, embeds, components, attachment URLs, emoji, notification user IDs, raw idempotency or operation keys, channel names or topics, Discord audit-log reasons, profile names, role names, and Discord Interaction public key are never written to the activity log or operation receipts
 
-Treat channel creation, role creation, message deletion, and member moderation as consequential even though the connector records only bounded identifiers and outcomes.
+Treat attachment messages, channel creation, role creation, message deletion, and member moderation as consequential even though the connector records only bounded identifiers and outcomes.
 
 ## Requirements
 
@@ -61,6 +66,7 @@ Treat channel creation, role creation, message deletion, and member moderation a
 - `View Channels` and `Read Message History` in every channel the connector should read
 - The Message Content privileged intent enabled for full message bodies and native search; the optional content-free Gateway feed does not request it
 - `Send Messages` only in channels where message sends or edits will be enabled
+- `Attach Files`, `Read Message History`, and `Send Messages` or `Send Messages in Threads` only in exact channels or threads selected for attachment messages
 - `Add Reactions` only in channels where reaction writes will be enabled
 - `Manage Messages` only in channels where deletion will eventually be enabled
 - `Manage Channels` and `View Channels` only in exact guilds and parent categories where additive channel creation will be enabled
@@ -81,7 +87,7 @@ The application public key is not used by the local REST or Gateway connections.
 6. Restrict the bot role to the intended categories or channels.
 7. Run `discord-mcp setup` and confirm that Discord reports the expected application, bot, and scoped guild access.
 
-Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Channels` only after selecting exact channel-creation guilds and parent categories, and keep the local channel-creation toggle disabled until those guild IDs are configured. Add `Manage Roles` only after selecting exact role-creation guilds, keep the bot's highest role above the new-role position, and keep the local role-creation toggle disabled until those guild IDs are configured. Add `Manage Messages` only after selecting deletion channels. Add only the specific member permission needed for planned guild administration, keep the bot's highest role above eligible targets, and keep the local administration toggle disabled until exact guild and protected-user IDs are configured.
+Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Attach Files` and the applicable send permission only after selecting exact attachment channels and dedicated local attachment directories, and keep the local attachment toggle disabled until both scopes are configured. Add `Manage Channels` only after selecting exact channel-creation guilds and parent categories, and keep the local channel-creation toggle disabled until those guild IDs are configured. Add `Manage Roles` only after selecting exact role-creation guilds, keep the bot's highest role above the new-role position, and keep the local role-creation toggle disabled until those guild IDs are configured. Add `Manage Messages` only after selecting deletion channels. Add only the specific member permission needed for planned guild administration, keep the bot's highest role above eligible targets, and keep the local administration toggle disabled until exact guild and protected-user IDs are configured.
 
 The optional real-time feed needs no additional privileged intent in the Developer Portal. Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), Gateway connection behavior in its [Gateway reference](https://docs.discord.com/developers/events/gateway), channel and role creation in its [guild resource reference](https://docs.discord.com/developers/resources/guild), message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message), and member moderation in its [guild resource reference](https://docs.discord.com/developers/resources/guild).
 
@@ -117,7 +123,7 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, opening a Gateway connection, or starting telemetry export.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, attachment policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not read attachment files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, reading attachment files, opening a Gateway connection, or starting telemetry export.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
@@ -134,7 +140,7 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
 | `DISCORD_MCP_TOOL_SURFACE` | No | `full` advertises every selected canonical tool; `progressive` initially advertises only exact-tool discovery; defaults to `full` |
-| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `role-creation`, `roles`, and `threads`; defaults to `all` |
+| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `attachments`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `role-creation`, `roles`, and `threads`; defaults to `all` |
 | `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
@@ -147,6 +153,10 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`, `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` | No | Export timeout from 1 to 60000 milliseconds; defaults to 10000 |
 | `OTEL_SERVICE_NAME` | No | Safe exported service name; defaults to `discord-mcp` |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | No | Bounded sampler and optional ratio from 0 through 1 |
+| `DISCORD_MCP_ALLOW_ATTACHMENTS` | For attachment messages | Must be exactly `true` to enable reviewed local-file attachment messages |
+| `DISCORD_MCP_ATTACHMENT_CHANNEL_IDS` | For attachment messages | Non-empty exact channel or thread allowlist and a subset of the read channel allowlist when one exists |
+| `DISCORD_MCP_ATTACHMENT_ROOTS` | For attachment messages | One absolute canonical owned directory, or a JSON array of such directories, containing eligible local files |
+| `DISCORD_MCP_ATTACHMENT_MAX_BYTES` | No | Per-file ceiling from 1 byte through 10 MiB; defaults to 10 MiB |
 | `DISCORD_MCP_ALLOW_ADMINISTRATION` | For member moderation | Must be exactly `true` to enable reviewed member administration |
 | `DISCORD_MCP_ADMIN_GUILD_IDS` | For member moderation | Non-empty exact administration-guild allowlist and a subset of the read guild allowlist when one exists |
 | `DISCORD_MCP_PROTECTED_USER_IDS` | No | Exact user IDs that member administration must never target; defaults empty and is bounded to 100 configured IDs |
@@ -161,7 +171,7 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS` | No | Process-local spacing per interaction channel from 0 to 60000 milliseconds; defaults to 500 |
 | `DISCORD_MCP_ALLOW_DELETIONS` | For deletion | Must be exactly `true` to enable deletion |
 | `DISCORD_MCP_DELETE_CHANNEL_IDS` | For deletion | Non-empty deletion-channel allowlist and a subset of the read channel allowlist when one exists |
-| `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; channel- and role-creation operation receipts use an adjacent private directory; defaults under the user's local state directory |
+| `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; attachment-, channel-, and role-creation operation receipts use an adjacent private directory; defaults under the user's local state directory |
 
 An unset read allowlist means all guild channels Discord allows the bot to view. The bot's Discord role remains authoritative.
 
@@ -178,6 +188,10 @@ env_vars = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ALLOWED_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+  "DISCORD_MCP_ALLOW_ATTACHMENTS",
+  "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
+  "DISCORD_MCP_ATTACHMENT_ROOTS",
+  "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
   "DISCORD_MCP_TOOL_SURFACE",
   "DISCORD_MCP_TOOLSETS",
   "DISCORD_MCP_ALLOW_GATEWAY",
@@ -237,9 +251,9 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 
 ## Tools
 
-The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
+The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the attachments, channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
 
-`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
+`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `attachments`, `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
 
 | Tool | Access | Purpose |
 | --- | --- | --- |
@@ -261,6 +275,8 @@ The default `full` surface is recommended for MCP hosts with native deferred-too
 | `send_message` | Discord write | Send one idempotent plain-text message or exact reply with notifications suppressed by default |
 | `edit_own_message` | Discord write | Replace one exact non-webhook message owned by the verified bot |
 | `add_reaction` | Discord write | Idempotently add the bot's own single reaction to one exact message |
+| `plan_attachment_message` | Discord and local read | Verify one exact local file, channel, optional reply, notification set, and complete permission evidence and produce a byte-bound keyed plan |
+| `execute_attachment_message` | Discord write | Confirm, re-read and revalidate, reserve the one-shot key, journal, upload once without retry, and verify the exact attachment message without returning its attachment URL |
 | `plan_message_deletion` | Discord read | Prepare exact previews and a keyed deletion digest |
 | `delete_messages` | Discord write | Confirm, revalidate, journal, and delete the reviewed IDs |
 | `plan_channel_creation` | Discord read | Verify one additive category, text, or forum target against live permission, collision, parent, and visible-capacity evidence and produce a keyed digest |
@@ -269,7 +285,7 @@ The default `full` surface is recommended for MCP hosts with native deferred-too
 | `execute_role_creation` | Discord write | Confirm, revalidate, reserve the one-shot key, journal, create once without automatic retry, and read back the exact reviewed role without editing or rollback |
 | `plan_member_moderation` | Discord read | Verify one exact target, permission and hierarchy evidence, action state, and keyed moderation digest |
 | `execute_member_moderation` | Discord write | Confirm, revalidate, journal, and execute the reviewed exact-ID member action |
-| `list_activity` | Local read | Read content-free channel-creation, role-creation, deletion, interaction, and member-moderation activity |
+| `list_activity` | Local read | Read content-free attachment, channel-creation, role-creation, deletion, interaction, and member-moderation activity |
 
 ## Resources
 
@@ -325,18 +341,19 @@ Exporter failures are observational: they update fixed health counters but never
 
 ## Prompts
 
-MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned. Message prompts are listed only with the `messages` toolset, and each reviewed prompt is listed only with its matching `channel-creation`, `role-creation`, `deletion`, or `moderation` toolset.
+MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local-file, local-activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned. Message prompts are listed only with the `messages` toolset, and each reviewed prompt is listed only with its matching `attachments`, `channel-creation`, `role-creation`, `deletion`, or `moderation` toolset.
 
 | Prompt | Workflow boundary |
 | --- | --- |
 | `summarize_channel` | Read one bounded message page, cite evidence, and make no search or write call |
 | `search_guild_messages` | Run one bounded native content search, preserve indexing status, and make no write call |
+| `review_attachment_message` | Build and review one exact byte-bound local-file attachment plan, then stop before execution |
 | `review_channel_creation` | Build and review one additive keyed channel-creation plan, then stop before execution |
 | `review_role_creation` | Build and review one additive keyed role-creation plan with exact named permissions, then stop before execution |
 | `review_message_deletion` | Build and review an exact keyed deletion plan, then stop before execution |
 | `review_member_moderation` | Build and review one exact keyed moderation plan, then stop before execution |
 
-The channel-creation, role-creation, deletion, and moderation prompts do not collapse approval stages. They explicitly forbid their execution tools, leaving client write approval, signed elicitation, fresh-plan verification, interactive confirmation, and pending content-free records on the separate write call.
+The attachment, channel-creation, role-creation, deletion, and moderation prompts do not collapse approval stages. They explicitly forbid their execution tools, leaving client write approval, signed elicitation, fresh-plan verification, interactive confirmation, and pending content-free records on the separate write call.
 
 ## Search
 
@@ -409,6 +426,27 @@ Discord's create-role endpoint has no idempotency token, so `execute_role_creati
 Within one connector process, executions for the same guild and normalized logical role name are serialized across operation keys. A queued execution rebuilds its plan after the preceding write and is blocked without reserving its key if that write ends uncertain. Overlapping role-creation scope across multiple connector processes remains unsafe because Discord does not enforce logical-name uniqueness.
 
 After the POST, the connector validates the returned role identity and performs an exact role GET. A matching readback returns `completed`; a safe identity with server-adjusted properties returns `completed-with-drift` and the observed role. Known Discord 4xx rejections before a role ID is known are `failed`; transport failures, Discord 5xx responses, or failed exact verification are `uncertain`. The connector never automatically retries the POST and never deletes a newly created role as compensation. See Discord's [role resource reference](https://docs.discord.com/developers/topics/permissions#role-object) and [create guild role reference](https://docs.discord.com/developers/resources/guild#create-guild-role).
+
+## Reviewed local-file attachment messages
+
+Attachment messages have no immediate-call path. Set `DISCORD_MCP_ALLOW_ATTACHMENTS=true`, list every eligible channel or thread by its own exact ID in `DISCORD_MCP_ATTACHMENT_CHANNEL_IDS`, and set `DISCORD_MCP_ATTACHMENT_ROOTS` to one absolute canonical owned directory or a JSON array of such directories. The channel allowlist must be a subset of `DISCORD_MCP_ALLOWED_CHANNEL_IDS` when the read allowlist exists. A parent channel never grants attachment scope to a child thread. With a channel read allowlist, a thread workflow requires both the parent and thread in read scope, plus the thread's own attachment-scope entry. Grant `View Channel`, `Read Message History`, `Attach Files`, and either `Send Messages` or `Send Messages in Threads` as applicable. Attachment-root configuration is rejected on runtimes without numeric process-ownership evidence; leave attachment roots unset to use the other capabilities there.
+
+The narrow surface accepts one exact absolute local path, optional plain-text message content, an optional safe attachment filename, an optional accessibility description, an optional exact reply, explicit notification settings, and a unique one-shot operation key. It never accepts remote URLs, data URLs, base64 payloads, directories, multiple files, or streams. The configured byte ceiling defaults to and cannot exceed 10 MiB, matching Discord's default per-file limit rather than assuming boosted-guild limits.
+
+1. Place the intended file inside a dedicated configured attachment root and ensure it has one hard link and is owned by the connector user.
+2. Call `plan_attachment_message` with the exact channel, path, message fields, optional reply and notification settings, and one-shot operation key.
+3. Review the exact guild and channel IDs, canonical path, stable file properties and byte size, filename and description, content, reply, notification users, required and effective permissions, warnings, operation-key hash, and keyed digest.
+4. Call `execute_attachment_message` with identical inputs plus the digest.
+5. Approve the signed MCP confirmation only if every exact ID, byte-bound file property, message field, permission, warning, hash, and digest remains intended.
+6. Review the returned message ID, jump URL, attachment filename and size, activity ID, and verified outcome. The result never exposes Discord's attachment URL.
+
+Each plan opens the file without following the final symlink, validates its identity and metadata before and after an exact bounded read, then checks the path again. Planning rejects path escapes, symlinks in the resolved path, hardlinks, foreign ownership, non-regular or empty files, oversized files, and files or paths that change while being read. A process-keyed HMAC of the bytes and stable device, inode, ownership, mode, size, and nanosecond timestamps are bound into the plan without exposing the byte digest. The MCP adapter plans again before elicitation, and the service reads and plans a third time immediately before mutation; any mismatch blocks execution.
+
+Notification behavior matches plain-text sends: nobody is notified by default, every notified user must be locally allowlisted and visibly mentioned in the content, role and mass mentions stay disabled, and reply-author notification is a separate reviewed boolean whose exact author is checked. The planner also requires complete role and overwrite evidence for every permission. Threads use their parent's permission overwrites but still require their own exact attachment-channel allowlist entry.
+
+After the final matching plan, execution consumes the shared process-local interaction budget, atomically reserves the operation-key hash in a durable private receipt, and appends a pending content-free activity record. It uploads the in-memory byte snapshot through one native multipart request with nonce enforcement and no automatic retry. The create response must match the nonce and complete reviewed message. An exact message GET must then match the verified bot, channel, guild, reply, content, and single attachment's filename, description, and size; an omitted optional nonce is accepted, but a conflicting nonce is not.
+
+The raw key, local path, filename, description, file size and digest, message content, notification user IDs, and attachment URL never enter the activity log or operation receipt. A reserved key remains spent after known failure, uncertainty, or local recording failure. Transport errors, Discord 5xx responses, and any outcome after a message ID becomes known are `uncertain`; do not retry them. Inspect the exact channel and returned message ID when available before considering a fresh reviewed request with a new key. The connector never retries the multipart POST or deletes a message as rollback. See Discord's [message resource reference](https://docs.discord.com/developers/resources/message#create-message) for multipart files, attachment metadata, nonce enforcement, replies, and allowed mentions.
 
 ## Safe message interactions
 
@@ -487,7 +525,7 @@ node dist/cli.js help
 node dist/cli.js version
 ```
 
-The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, content-free MCP catalogs, and read-only protocol path without listing Discord channels, reading messages, creating channels or roles, or performing member moderation:
+The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, content-free MCP catalogs, and read-only protocol path without listing Discord channels, reading messages or attachment files, sending attachments, creating channels or roles, or performing member moderation:
 
 ```sh
 node dist/cli.js doctor --online

@@ -38,6 +38,7 @@ export const SUPPORTED_NODE_MAJOR = 22
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
   applicationIdentity: "application-identity",
+  attachmentPolicy: "attachment-policy",
   channelCreationPolicy: "channel-creation-policy",
   channelScope: "channel-scope",
   configuration: "configuration",
@@ -172,6 +173,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowDeletions && config.deleteChannelIds.size === 0) {
     warnings.push("The deletion toggle is enabled but deletion remains blocked because no deletion-channel allowlist is configured")
   }
+  if (
+    config.allowAttachments
+    && (config.attachmentChannelIds.size === 0 || config.attachmentRoots.length === 0)
+  ) {
+    warnings.push("The attachment toggle is enabled but attachment messages remain blocked because an attachment-channel allowlist and canonical attachment roots are both required")
+  }
   if (config.allowAdministration && config.adminGuildIds.size === 0) {
     warnings.push("The administration toggle is enabled but administration remains blocked because no administration-guild allowlist is configured")
   }
@@ -186,6 +193,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
+    [config.allowAttachments, "attachments", "Attachment messages"],
     [config.allowChannelCreation, "channel-creation", "Channel creation"],
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowGateway, "gateway", "Gateway events"],
@@ -298,6 +306,28 @@ export async function diagnoseConnector(
       "pass",
       `MCP tool surface is ${config.mcpToolSurface} with ${config.mcpToolsets.size} of ${MCP_TOOLSET_NAMES.length} risk-separated toolsets and ${selectedCanonicalMcpToolNames(config.mcpToolsets).length} canonical tools`,
     ))
+    if (!config.allowAttachments) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.attachmentPolicy,
+        "pass",
+        "Reviewed attachment messages are disabled",
+      ))
+    } else if (
+      config.attachmentChannelIds.size === 0
+      || config.attachmentRoots.length === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.attachmentPolicy,
+        "warn",
+        "Attachment toggle is enabled, but an attachment-channel allowlist and canonical attachment roots are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.attachmentPolicy,
+        "pass",
+        `Reviewed attachment messages are constrained to ${config.attachmentChannelIds.size} channels and ${config.attachmentRoots.length} canonical roots with a ${config.attachmentMaxBytes}-byte ceiling and one-shot execution`,
+      ))
+    }
     if (!config.allowAdministration) {
       checks.push(check(
         DOCTOR_CHECK_IDS.administrationPolicy,
@@ -492,6 +522,10 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.token,
     ENVIRONMENT_NAMES.allowedGuildIds,
     ENVIRONMENT_NAMES.allowedChannelIds,
+    ENVIRONMENT_NAMES.allowAttachments,
+    ENVIRONMENT_NAMES.attachmentChannelIds,
+    ENVIRONMENT_NAMES.attachmentMaxBytes,
+    ENVIRONMENT_NAMES.attachmentRoots,
     ENVIRONMENT_NAMES.allowAdministration,
     ENVIRONMENT_NAMES.adminGuildIds,
     ENVIRONMENT_NAMES.protectedUserIds,
@@ -748,6 +782,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error("MCP smoke check found invalid execute_role_creation annotations")
+      }
+    }
+    if (selectedToolNames.includes("execute_attachment_message")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_attachment_message"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== false
+        || tool.annotations.idempotentHint !== false
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_attachment_message annotations")
       }
     }
     const interactionAnnotations = [

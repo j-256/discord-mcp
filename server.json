@@ -63,7 +63,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, channel-creation, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, role-creation, roles, threads, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, channel-creation, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, role-creation, roles, threads, or all",
           "default": "all",
           "format": "string"
         },
@@ -226,6 +226,31 @@
           ]
         },
         {
+          "name": "DISCORD_MCP_ALLOW_ATTACHMENTS",
+          "description": "Enable reviewed local-file attachment messages when exact channel and canonical directory scopes are also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
+          "description": "Exact channel or thread IDs eligible for reviewed local-file attachment messages",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
+          "description": "Per-file byte ceiling from 1 through Discord's default 10 MiB limit",
+          "default": "10485760",
+          "format": "number"
+        },
+        {
+          "name": "DISCORD_MCP_ATTACHMENT_ROOTS",
+          "description": "One absolute canonical directory or a JSON array of directories whose owned regular files may be reviewed for upload",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ADMIN_GUILD_IDS",
           "description": "Exact guild IDs eligible for reviewed member administration",
           "format": "string"
@@ -310,7 +335,7 @@
         },
         {
           "name": "DISCORD_MCP_AUDIT_FILE",
-          "description": "Content-free local activity JSONL path with adjacent private channel- and role-creation operation receipts",
+          "description": "Content-free local activity JSONL path with adjacent private attachment-, channel-, and role-creation operation receipts",
           "format": "string"
         }
       ]

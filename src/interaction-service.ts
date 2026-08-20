@@ -12,15 +12,10 @@ import type {
 import {
   CONNECTOR_LIMITS,
   DISCORD_LIMITS,
-  DISCORD_MESSAGE_REFERENCE_TYPES,
-  DISCORD_SNOWFLAKE_PATTERN,
   IDEMPOTENCY_KEY_PATTERN,
   SCHEMA_VERSION,
 } from "./constants.js"
-import type {
-  CreateMessageInput,
-  DiscordClient,
-} from "./discord-client.js"
+import type { DiscordClient } from "./discord-client.js"
 import {
   DiscordApiError,
   InteractionConflictError,
@@ -30,6 +25,15 @@ import {
   errorMessage,
 } from "./errors.js"
 import { InteractionLimiter } from "./interaction-limiter.js"
+import {
+  assertDiscordBotMessage,
+  assertDiscordMessageContent,
+  assertDiscordMessageIdentity,
+  assertDiscordReplyReference,
+  assertDiscordSnowflake,
+  discordAllowedMentions,
+  discordNotificationUserIds,
+} from "./message-safety.js"
 import {
   discordMessageUrl,
   stableString,
@@ -41,8 +45,6 @@ import type {
   RequestOptions,
 } from "./types.js"
 
-const MESSAGE_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
-const MESSAGE_USER_MENTION_PATTERN = /<@!?([0-9]{1,20})>/gu
 const CUSTOM_EMOJI_PATTERN = /^[A-Za-z0-9_]{2,32}:[0-9]{1,20}$/
 const EMOJI_CONTROL_OR_SPACE_PATTERN = /[\u0000-\u0020\u007F]/u
 const EMOJI_CODE_POINT_PATTERN = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3)/u
@@ -124,129 +126,6 @@ interface SendLedgerEntry {
   promise: Promise<SendMessageResult>
 }
 
-function assertSnowflake(value: string, name: string): void {
-  if (!DISCORD_SNOWFLAKE_PATTERN.test(value)) {
-    throw new RangeError(`${name} must be a Discord snowflake`)
-  }
-}
-
-function assertContent(content: string): void {
-  if (!content.trim()) throw new RangeError("Discord message content must not be blank")
-  if (content.length > DISCORD_LIMITS.messageContentCharacters) {
-    throw new RangeError(
-      `Discord message content must not exceed ${DISCORD_LIMITS.messageContentCharacters} characters`,
-    )
-  }
-  if (MESSAGE_CONTROL_PATTERN.test(content)) {
-    throw new RangeError("Discord message content contains unsupported control characters")
-  }
-  for (let index = 0; index < content.length; index += 1) {
-    const code = content.charCodeAt(index)
-    if (code < 0xD800 || code > 0xDFFF) continue
-    const next = content.charCodeAt(index + 1)
-    if (code <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) {
-      index += 1
-      continue
-    }
-    throw new RangeError("Discord message content contains invalid Unicode")
-  }
-}
-
-function notificationUserIds(
-  content: string,
-  requested: readonly string[] | undefined,
-  policy: ScopePolicy,
-): string[] {
-  const userIds = [...(requested || [])]
-  if (userIds.length > CONNECTOR_LIMITS.interactionNotificationUsers) {
-    throw new RangeError(
-      `Discord message notifications must not exceed ${CONNECTOR_LIMITS.interactionNotificationUsers} users`,
-    )
-  }
-  if (new Set(userIds).size !== userIds.length) {
-    throw new RangeError("Discord message notification user IDs must be unique")
-  }
-  for (const userId of userIds) assertSnowflake(userId, "Discord notification user ID")
-  policy.assertNotificationUsers(userIds)
-  const visibleMentions = new Set(
-    [...content.matchAll(MESSAGE_USER_MENTION_PATTERN)]
-      .map((match) => match[1])
-      .filter((value): value is string => value !== undefined),
-  )
-  for (const userId of userIds) {
-    if (!visibleMentions.has(userId)) {
-      throw new RangeError(
-        `Discord notification user ${userId} must have a visible user mention in content`,
-      )
-    }
-  }
-  return userIds.sort()
-}
-
-function allowedMentions(
-  userIds: readonly string[],
-  repliedUser: boolean,
-): CreateMessageInput["allowedMentions"] {
-  return userIds.length > 0
-    ? { replied_user: repliedUser, users: [...userIds] }
-    : { parse: [], replied_user: repliedUser }
-}
-
-function assertMessageIdentity(
-  message: DiscordMessage,
-  channelId: string,
-  guildId: string,
-  messageId?: string,
-): void {
-  if (
-    (messageId !== undefined && message.id !== messageId)
-    || !DISCORD_SNOWFLAKE_PATTERN.test(message.id)
-    || message.channel_id !== channelId
-    || Boolean(message.guild_id && message.guild_id !== guildId)
-  ) {
-    throw new InteractionIdentityError("Discord returned a different interaction message than requested")
-  }
-}
-
-function assertBotMessage(message: DiscordMessage, botId: string): void {
-  if (message.author.id !== botId || !message.author.bot || message.webhook_id !== undefined) {
-    throw new InteractionIdentityError("Discord interaction message is not owned by the verified bot")
-  }
-}
-
-function assertReplyReference(
-  message: DiscordMessage,
-  channelId: string,
-  guildId: string,
-  replyToMessageId: string | undefined,
-): void {
-  const reference = message.message_reference
-  if (replyToMessageId === undefined) {
-    if (reference !== undefined) {
-      throw new InteractionIdentityError(
-        "Discord returned a reply reference for a non-reply send",
-      )
-    }
-    return
-  }
-  if (reference === undefined) {
-    throw new InteractionIdentityError(
-      "Discord returned no reply reference for the requested send",
-    )
-  }
-  if (
-    reference.message_id !== replyToMessageId
-    || (reference.channel_id !== undefined && reference.channel_id !== channelId)
-    || (reference.guild_id !== undefined && reference.guild_id !== guildId)
-    || (reference.type !== undefined
-      && reference.type !== DISCORD_MESSAGE_REFERENCE_TYPES.default)
-  ) {
-    throw new InteractionIdentityError(
-      "Discord returned a reply reference that does not match the requested send",
-    )
-  }
-}
-
 function activityError(error: unknown): string {
   if (error instanceof DiscordApiError) {
     return `DiscordApiError status=${error.status} code=${error.code ?? "unknown"}`
@@ -312,7 +191,7 @@ export class InteractionService {
     channelId: string,
     options: RequestOptions,
   ): Promise<{ channel: DiscordChannel; guildId: string }> {
-    assertSnowflake(channelId, "Discord interaction channel ID")
+    assertDiscordSnowflake(channelId, "Discord interaction channel ID")
     const channel = await this.#client.getChannel(channelId, options)
     if (channel.id !== channelId) {
       throw new InteractionIdentityError("Discord returned a different interaction channel than requested")
@@ -326,9 +205,9 @@ export class InteractionService {
     messageId: string,
     options: RequestOptions,
   ): Promise<DiscordMessage> {
-    assertSnowflake(messageId, "Discord interaction message ID")
+    assertDiscordSnowflake(messageId, "Discord interaction message ID")
     const message = await this.#client.getMessage(channelId, messageId, options)
-    assertMessageIdentity(message, channelId, guildId, messageId)
+    assertDiscordMessageIdentity(message, channelId, guildId, messageId)
     return message
   }
 
@@ -433,7 +312,7 @@ export class InteractionService {
     request: SendMessageRequest,
     options: RequestOptions = {},
   ): Promise<SendMessageResult> {
-    assertContent(request.content)
+    assertDiscordMessageContent(request.content)
     if (
       request.idempotencyKey.length < CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters
       || request.idempotencyKey.length > CONNECTOR_LIMITS.idempotencyKeyCharacters
@@ -446,7 +325,7 @@ export class InteractionService {
     if (request.notifyReplyAuthor && !request.replyToMessageId) {
       throw new RangeError("Discord reply-author notification requires a reply target")
     }
-    const notifyUserIds = notificationUserIds(
+    const notifyUserIds = discordNotificationUserIds(
       request.content,
       request.notifyUserIds,
       this.#policy,
@@ -506,7 +385,7 @@ export class InteractionService {
         options,
       )
       if (request.notifyReplyAuthor) {
-        assertSnowflake(target.author.id, "Discord reply author ID")
+        assertDiscordSnowflake(target.author.id, "Discord reply author ID")
         this.#policy.assertNotificationUsers([target.author.id])
       }
     }
@@ -520,7 +399,7 @@ export class InteractionService {
       nonce,
       operation: async () => {
         const created = await this.#client.createMessage(request.channelId, {
-          allowedMentions: allowedMentions(
+          allowedMentions: discordAllowedMentions(
             notifyUserIds,
             request.notifyReplyAuthor || false,
           ),
@@ -530,9 +409,9 @@ export class InteractionService {
             ? { reply: { guildId, messageId: request.replyToMessageId } }
             : {}),
         }, options)
-        assertMessageIdentity(created, request.channelId, guildId)
-        assertBotMessage(created, botId)
-        assertReplyReference(
+        assertDiscordMessageIdentity(created, request.channelId, guildId)
+        assertDiscordBotMessage(created, botId)
+        assertDiscordReplyReference(
           created,
           request.channelId,
           guildId,
@@ -568,8 +447,8 @@ export class InteractionService {
     request: EditOwnMessageRequest,
     options: RequestOptions = {},
   ): Promise<EditOwnMessageResult> {
-    assertContent(request.content)
-    const notifyUserIds = notificationUserIds(
+    assertDiscordMessageContent(request.content)
+    const notifyUserIds = discordNotificationUserIds(
       request.content,
       request.notifyUserIds,
       this.#policy,
@@ -581,7 +460,7 @@ export class InteractionService {
       request.messageId,
       options,
     )
-    assertBotMessage(existing, botId)
+    assertDiscordBotMessage(existing, botId)
     const activityId = this.#randomId()
     if (existing.content === request.content && notifyUserIds.length === 0) {
       await this.#activityStore.append(this.#activity({
@@ -613,18 +492,18 @@ export class InteractionService {
           request.channelId,
           request.messageId,
           {
-            allowedMentions: allowedMentions(notifyUserIds, false),
+            allowedMentions: discordAllowedMentions(notifyUserIds, false),
             content: request.content,
           },
           options,
         )
-        assertMessageIdentity(
+        assertDiscordMessageIdentity(
           edited,
           request.channelId,
           guildId,
           request.messageId,
         )
-        assertBotMessage(edited, botId)
+        assertDiscordBotMessage(edited, botId)
         if (edited.content !== request.content) {
           throw new InteractionIdentityError(
             "Discord returned message content that does not match the requested edit",

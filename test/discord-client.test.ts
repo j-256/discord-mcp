@@ -1000,6 +1000,122 @@ test("Discord client sends safe message, edit, and own-reaction wire contracts",
   ])
 })
 
+test("Discord client sends one bounded attachment through native multipart form data", async () => {
+  let contentType: string | null = "unexpected"
+  let file: File | undefined
+  let payload: unknown
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests += 1
+      assert.equal(String(input), `${API_BASE_URL}/channels/200/messages`)
+      assert.equal(init?.method, "POST")
+      contentType = new Headers(init?.headers).get("Content-Type")
+      assert.ok(init?.body instanceof FormData)
+      const payloadJson = init.body.get("payload_json")
+      assert.equal(typeof payloadJson, "string")
+      payload = JSON.parse(payloadJson as string)
+      const part = init.body.get("files[0]")
+      assert.ok(part instanceof File)
+      file = part
+      return jsonResponse({
+        attachments: [{
+          description: "Accessible report",
+          filename: "report.txt",
+          id: "400",
+          size: 14,
+          url: "https://cdn.discord.test/private",
+        }],
+        author: { bot: true, id: "500", username: "bot" },
+        channel_id: "200",
+        content: "Review <@600>",
+        guild_id: "100",
+        id: "300",
+        nonce: "stable-nonce",
+        timestamp: "2026-08-20T00:00:00.000Z",
+        type: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  await client.createAttachmentMessage("200", {
+    allowedMentions: { replied_user: true, users: ["600"] },
+    bytes: new TextEncoder().encode("reviewed bytes"),
+    content: "Review <@600>",
+    description: "Accessible report",
+    filename: "report.txt",
+    nonce: "stable-nonce",
+    reply: { guildId: "100", messageId: "299" },
+  })
+
+  assert.equal(requests, 1)
+  assert.equal(contentType, null)
+  assert.deepEqual(payload, {
+    allowed_mentions: { replied_user: true, users: ["600"] },
+    attachments: [{
+      description: "Accessible report",
+      filename: "report.txt",
+      id: "0",
+    }],
+    content: "Review <@600>",
+    enforce_nonce: true,
+    message_reference: {
+      channel_id: "200",
+      fail_if_not_exists: true,
+      guild_id: "100",
+      message_id: "299",
+      type: 0,
+    },
+    nonce: "stable-nonce",
+  })
+  assert.equal(file?.name, "report.txt")
+  assert.equal(file?.size, 14)
+  assert.equal(await file?.text(), "reviewed bytes")
+})
+
+test("Discord client never retries attachment upload and rejects unsafe files", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "slow down", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  const safe = {
+    allowedMentions: { parse: [] as const, replied_user: false },
+    bytes: new Uint8Array([1]),
+    filename: "safe.txt",
+    nonce: "stable-nonce",
+  }
+
+  await assert.rejects(
+    client.createAttachmentMessage("200", safe),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.throws(
+    () => client.createAttachmentMessage("200", { ...safe, bytes: new Uint8Array() }),
+    /attachment bytes/,
+  )
+  assert.throws(
+    () => client.createAttachmentMessage("200", { ...safe, filename: "../secret" }),
+    /filename is invalid/,
+  )
+  assert.throws(
+    () => client.createAttachmentMessage("200", {
+      ...safe,
+      description: "x".repeat(1_025),
+    }),
+    /description/,
+  )
+  assert.equal(requests, 1)
+})
+
 test("Discord client rejects unsafe message wire inputs before fetching", () => {
   let requests = 0
   const client = new DiscordClient({

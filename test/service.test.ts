@@ -1,9 +1,21 @@
 import assert from "node:assert/strict"
+import {
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import type { ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
-import { ConfigurationError, PolicyError } from "../src/errors.js"
+import {
+  ConfigurationError,
+  InteractionRateLimitError,
+  PolicyError,
+} from "../src/errors.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import type {
   OperationReceipt,
@@ -161,16 +173,19 @@ function role(
 
 function serviceFixture(overrides: {
   application?: DiscordApplication
+  attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
+  interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   operationStore?: OperationStore
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
 } = {}) {
   const calls = {
     addReaction: 0,
     application: 0,
+    createAttachment: 0,
     createChannel: 0,
     createMessage: 0,
     createRole: 0,
@@ -187,6 +202,21 @@ function serviceFixture(overrides: {
     },
     async bulkDeleteMessages() {},
     async createGuildBan() {},
+    async createAttachmentMessage(_channelId, input) {
+      calls.createAttachment += 1
+      return message({
+        attachments: [{
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          filename: input.filename,
+          id: "800000000000000001",
+          size: input.bytes.byteLength,
+          url: "https://cdn.discord.test/private",
+        }],
+        author: bot(),
+        content: input.content ?? "",
+        nonce: input.nonce,
+      })
+    },
     async createGuildChannel() {
       calls.createChannel += 1
       return channel()
@@ -315,7 +345,13 @@ function serviceFixture(overrides: {
       ...(overrides.channelAdministrationOptions
         ? { channelAdministrationOptions: overrides.channelAdministrationOptions }
         : {}),
+      ...(overrides.attachmentMessageOptions
+        ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
+        : {}),
       ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
+      ...(overrides.interactionOptions
+        ? { interactionOptions: overrides.interactionOptions }
+        : {}),
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
         : {}),
@@ -366,6 +402,126 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.user, 1)
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 1)
+})
+
+test("service verifies identity before reviewed local-file attachment execution", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-service-attachment-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const filePath = join(root, "report.txt")
+  const fileContent = "reviewed service bytes"
+  const operationKey = "attachment-service-attempt-0001"
+  await writeFile(filePath, fileContent)
+  const operationStore = new MemoryOperationStore()
+  let uploaded: Parameters<DiscordServiceClient["createAttachmentMessage"]>[1]
+    | undefined
+  let uploadCalls = 0
+  const { calls, service } = serviceFixture({
+    attachmentMessageOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(11),
+      randomId: () => "activity-attachment-send",
+    },
+    client: {
+      async createAttachmentMessage(channelId, input) {
+        assert.equal(channelId, CHANNEL_ID)
+        uploaded = input
+        uploadCalls += 1
+        return message({
+          attachments: [{
+            ...(input.description === undefined
+              ? {}
+              : { description: input.description }),
+            filename: input.filename,
+            id: "800000000000000001",
+            size: input.bytes.byteLength,
+            url: "https://cdn.discord.test/private",
+          }],
+          author: bot(),
+          content: input.content ?? "",
+          nonce: input.nonce,
+        })
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.ATTACH_FILES
+            | DISCORD_PERMISSIONS.SEND_MESSAGES,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        if (!uploaded) throw new Error("Attachment upload input is missing")
+        return message({
+          attachments: [{
+            ...(uploaded.description === undefined
+              ? {}
+              : { description: uploaded.description }),
+            filename: uploaded.filename,
+            id: "800000000000000001",
+            size: uploaded.bytes.byteLength,
+            url: "https://cdn.discord.test/private",
+          }],
+          author: bot(),
+          content: uploaded.content ?? "",
+          nonce: uploaded.nonce,
+        })
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
+      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ATTACHMENT_MAX_BYTES: "1024",
+      DISCORD_MCP_ATTACHMENT_ROOTS: root,
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "1000",
+    },
+    interactionOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+    },
+    operationStore,
+  })
+  const request = {
+    channelId: CHANNEL_ID,
+    content: "Reviewed report",
+    description: "Accessible report",
+    filePath,
+    operationKey,
+  }
+
+  const plan = await service.planAttachmentMessage(request)
+  const result = await service.executeAttachmentMessage(request, plan.digest)
+
+  assert.equal(plan.file.canonicalPath, filePath)
+  assert.equal(plan.file.sizeBytes, Buffer.byteLength(fileContent))
+  assert.equal(result.status, "completed")
+  assert.equal(result.messageId, MESSAGE_ID)
+  assert.equal(uploadCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(operationStore.receipt?.kind, "attachment-message")
+  assert.equal(operationStore.receipt?.status, "completed")
+  await assert.rejects(
+    service.sendMessage({
+      channelId: CHANNEL_ID,
+      content: "Should share the attachment limiter",
+      idempotencyKey: "shared-limit-attempt-0001",
+    }),
+    InteractionRateLimitError,
+  )
+  assert.equal(calls.createMessage, 0)
+  const persisted = JSON.stringify(operationStore.receipt)
+  assert.equal(persisted.includes(operationKey), false)
+  assert.equal(persisted.includes(filePath), false)
+  assert.equal(persisted.includes(fileContent), false)
 })
 
 test("service verifies identity before planning and executing exact member moderation", async () => {

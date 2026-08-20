@@ -23,6 +23,7 @@ import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 export const OPERATION_KEY_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
 
 export const OPERATION_KINDS = [
+  "attachment-message",
   "channel-creation",
   "role-creation",
 ] as const
@@ -137,6 +138,9 @@ function parseReceipt(value: unknown): OperationReceipt {
   }
   if (record.status !== "completed" && record.verification !== null) {
     throw new OperationStoreError("Incomplete Discord operation receipt contains verification state")
+  }
+  if (record.kind === "attachment-message" && record.verification === "drift") {
+    throw new OperationStoreError("Discord attachment receipt cannot contain drift verification")
   }
   return {
     activityId: record.activityId,

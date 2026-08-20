@@ -14,6 +14,38 @@ export class OperationStoreError extends Error {
   override name = "OperationStoreError"
 }
 
+export class AttachmentMessagePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord and local file snapshot does not match the reviewed attachment plan")
+    this.name = "AttachmentMessagePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class AttachmentMessageOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord attachment message operation key has already been reserved")
+    this.name = "AttachmentMessageOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class AttachmentMessageExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AttachmentMessageExecutionError"
+    this.result = result
+  }
+}
+
 export class ChannelCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

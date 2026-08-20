@@ -4,6 +4,13 @@ import type {
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
 import type {
+  AttachmentMessagePlan,
+  AttachmentMessageRequest,
+  AttachmentMessageResult,
+  AttachmentMessageServiceOptions,
+} from "./attachment-message-service.js"
+import { AttachmentMessageService } from "./attachment-message-service.js"
+import type {
   AdministrationServiceOptions,
   MemberModerationPlan,
   MemberModerationRequest,
@@ -46,6 +53,7 @@ import type {
   SendMessageRequest,
 } from "./interaction-service.js"
 import { InteractionService } from "./interaction-service.js"
+import { InteractionLimiter } from "./interaction-limiter.js"
 import {
   normalizeChannel,
   normalizeGuild,
@@ -87,6 +95,7 @@ export interface DiscordServiceClient {
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildChannel: DiscordClient["createGuildChannel"]
   createGuildRole: DiscordClient["createGuildRole"]
+  createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
   deleteMessage: DiscordClient["deleteMessage"]
   editMessage: DiscordClient["editMessage"]
@@ -133,6 +142,10 @@ export interface ConnectorServiceOptions {
     "clock" | "planKey" | "randomId"
   >
   activityStore?: ActivityStore
+  attachmentMessageOptions?: Pick<
+    AttachmentMessageServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   channelAdministrationOptions?: Pick<
     ChannelAdministrationServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -253,6 +266,7 @@ function normalizedGuildChannel(channel: DiscordChannel, guildId: string) {
 export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
+  readonly #attachmentMessageService: AttachmentMessageService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
@@ -273,6 +287,12 @@ export class ConnectorService {
     const operationStore = options.operationStore || new FileOperationStore(
       operationReceiptDirectory(options.config.auditFile),
     )
+    const interactionClock = options.interactionOptions?.clock || (() => new Date())
+    const interactionLimiter = options.interactionOptions?.limiter || new InteractionLimiter({
+      clock: () => interactionClock().getTime(),
+      maxWritesPerMinute: options.config.interactionMaxWritesPerMinute,
+      minWriteIntervalMs: options.config.interactionMinWriteIntervalMs,
+    })
     this.#administrationService = new AdministrationService({
       activityStore: this.#activityStore,
       client: this.#client,
@@ -292,6 +312,16 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.deletionOptions,
     })
+    this.#attachmentMessageService = new AttachmentMessageService({
+      activityStore: this.#activityStore,
+      attachmentMaxBytes: options.config.attachmentMaxBytes,
+      attachmentRoots: options.config.attachmentRoots,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.attachmentMessageOptions,
+    })
     this.#interactionService = new InteractionService({
       activityStore: this.#activityStore,
       client: this.#client,
@@ -299,6 +329,7 @@ export class ConnectorService {
       minWriteIntervalMs: options.config.interactionMinWriteIntervalMs,
       policy: this.#policy,
       ...options.interactionOptions,
+      limiter: interactionLimiter,
     })
     this.#roleAdministrationService = new RoleAdministrationService({
       activityStore: this.#activityStore,
@@ -796,6 +827,14 @@ export class ConnectorService {
     return this.#roleAdministrationService.plan(identity.bot.id, request, options)
   }
 
+  async planAttachmentMessage(
+    request: AttachmentMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<AttachmentMessagePlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#attachmentMessageService.plan(identity.bot.id, request, options)
+  }
+
   async executeChannelCreation(
     request: ChannelCreationRequest,
     planDigest: string,
@@ -817,6 +856,20 @@ export class ConnectorService {
   ): Promise<RoleCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#roleAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeAttachmentMessage(
+    request: AttachmentMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<AttachmentMessageResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#attachmentMessageService.execute(
       identity.bot.id,
       request,
       planDigest,
