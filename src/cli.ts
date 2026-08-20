@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
 import {
+  checkDiscordCatalog,
+  runDiscordMcpCatalog,
+  type DiscordCatalogCheckReport,
+} from "./catalog.js"
+import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
   ENVIRONMENT_NAMES,
@@ -21,6 +26,7 @@ import {
 } from "./operator.js"
 
 const CLI_COMMANDS = Object.freeze([
+  "catalog",
   "doctor",
   "help",
   "serve",
@@ -32,6 +38,7 @@ const CLI_COMMANDS = Object.freeze([
 type CliCommand = typeof CLI_COMMANDS[number]
 
 export type ParsedCliArguments =
+  | { check: boolean; command: "catalog"; json: boolean }
   | { command: "doctor"; json: boolean; online: boolean }
   | { command: "help"; topic: CliCommand | undefined }
   | { command: "serve" }
@@ -46,6 +53,10 @@ export type ParsedCliArguments =
   | { command: "version" }
 
 export interface CliDependencies {
+  catalog(options: {
+    stderr: Pick<NodeJS.WriteStream, "write">
+  }): unknown
+  checkCatalog(): Promise<DiscordCatalogCheckReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
   serve(options: {
@@ -67,6 +78,8 @@ export interface CliOptions {
 }
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
+  catalog: runDiscordMcpCatalog,
+  checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
   prepareSetup,
   serve: runDiscordMcpServer,
@@ -175,12 +188,24 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
       online: options.has("--online"),
     }
   }
+  if (command === "catalog") {
+    const options = parseBooleanOptions(rest, new Set(["--check", "--json"]))
+    const check = options.has("--check")
+    const json = options.has("--json")
+    if (json && !check) {
+      throw new ConfigurationError("catalog --json requires --check")
+    }
+    return { check, command, json }
+  }
   if (command === "setup") return parseSetupOptions(rest)
   const options = parseBooleanOptions(rest, new Set(["--json"]))
   return { command: "smoke", json: options.has("--json") }
 }
 
 function helpText(topic: CliCommand | undefined): string {
+  if (topic === "catalog") {
+    return "Usage: discord-mcp catalog [--check] [--json]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify the packaged contract; --json requires --check."
+  }
   if (topic === "doctor") {
     return "Usage: discord-mcp doctor [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access."
   }
@@ -198,12 +223,30 @@ function helpText(topic: CliCommand | undefined): string {
     `Usage: ${CONNECTOR_NAME} <command> [options]`,
     "",
     "Commands:",
+    "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
     "  serve    Run the stdio MCP server (default)",
     "  setup    Verify the bot and generate safe client configuration",
     "  doctor   Diagnose environment, policy, and optional Discord access",
     "  smoke    Verify the read-only MCP path end to end",
     "  version  Print the package version",
     "  help     Show command help",
+  ].join("\n")
+}
+
+function renderCatalog(report: DiscordCatalogCheckReport): string {
+  return [
+    "Discord MCP catalog: ok",
+    `Server: ${report.serverName}@${report.serverVersion}`,
+    `Tools: ${report.toolCount}`,
+    `Prompts: ${report.promptCount}`,
+    `Resources: ${report.resourceCount}`,
+    `Resource templates: ${report.resourceTemplateCount}`,
+    `Execution guard: ${report.executionGuard}`,
+    "Credentials required: no",
+    "Discord execution: disabled",
+    "Gateway: disabled",
+    "Observability export: disabled",
+    "Activity records created: no",
   ].join("\n")
 }
 
@@ -273,6 +316,15 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
   try {
     const parsed = parseCliArguments(args)
     switch (parsed.command) {
+      case "catalog": {
+        if (!parsed.check) {
+          dependencies.catalog({ stderr })
+          return 0
+        }
+        const report = await dependencies.checkCatalog()
+        safeWrite(stdout, parsed.json ? jsonReport(report) : renderCatalog(report), environment)
+        return 0
+      }
       case "doctor": {
         const report = await dependencies.diagnose({
           environment,

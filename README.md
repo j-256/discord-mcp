@@ -13,6 +13,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Discord names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
 - Resource discovery is content-free; live resource templates require exact IDs and never enumerate messages
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
+- Credential-free catalog mode advertises the exact production tools, prompts, resources, and templates while a fixed guard rejects every tool call before argument validation or execution
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
 - Toolsets separate guild audit logs, permission diagnostics, attachments, forum posts, channel creation, role creation, deletion, and moderation from ordinary reads and interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
@@ -130,9 +131,12 @@ The CLI provides a safe path from environment configuration to a verified MCP co
 ```sh
 node dist/cli.js doctor
 node dist/cli.js doctor --online
+node dist/cli.js catalog --check
 node dist/cli.js setup
 node dist/cli.js smoke
 ```
+
+`catalog` starts a separate credential-free stdio server that reuses the production registrations while disabling all tool execution. It reads no ambient token or policy, constructs no Discord client, opens no Gateway or telemetry exporter, and creates no activity record. Static safety guidance and validated prompts remain inspectable; every listed, invalid, disabled, discovery, or unknown tool call returns the same fixed `CATALOG_ONLY` result. Add `--check` to verify the exact tool, prompt, resource, and resource-template identities, every tool schema and risk annotation, static safety resource, and execution guard in process without contacting Discord. Add `--json` with `--check` for a versioned machine-readable report.
 
 `doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, attachment policy, forum-post policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not read attachment files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, reading attachment files, opening a Gateway connection, or starting telemetry export.
 
@@ -140,7 +144,7 @@ node dist/cli.js smoke
 
 `smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read messages, open a Gateway connection, start telemetry export, or write to Discord.
 
-Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
+Add `--json` to `setup`, `doctor`, or `smoke`, or use it with `catalog --check`, for a versioned machine-readable report. Run `node dist/cli.js help` for the complete command summary.
 
 ## Configuration
 
@@ -572,13 +576,14 @@ npm run pack:verify
 npm run security:check
 ```
 
-`pack:verify` rebuilds and packs twice under one npm toolchain, requires byte-identical archives, enforces the published-file allowlist, scans for sensitive environment values, installs the archive without lifecycle scripts, exercises the packaged CLI, negotiates the installed MCP catalogs, and reads only the static safety resource. CI also requires byte-identical decompressed tar payloads across supported Node lines because npm patch releases can encode the same payload with different gzip bytes. Neither check contacts Discord.
+`pack:verify` rebuilds and packs twice under one npm toolchain, requires byte-identical archives, enforces the published-file allowlist, scans for sensitive environment values, installs the archive without lifecycle scripts, runs the installed credential-free catalog check without a token, exercises the packaged operational CLI, negotiates the installed MCP catalogs, and reads only the static safety resource. CI also requires byte-identical decompressed tar payloads across supported Node lines because npm patch releases can encode the same payload with different gzip bytes. Neither check contacts Discord.
 
 Generate and validate an SPDX production-dependency SBOM with `npm run --silent sbom -- --output sbom.spdx.json`. The release workflow attests the verified archive with that SBOM.
 
 After building, verify the compiled CLI without contacting Discord:
 
 ```sh
+node dist/cli.js catalog --check
 node dist/cli.js doctor
 node dist/cli.js help
 node dist/cli.js version

@@ -112,7 +112,7 @@ async function assertNoSecrets(packageDirectory, files) {
   }
 }
 
-function verificationEnvironment(homeDirectory) {
+function baseVerificationEnvironment(homeDirectory) {
   const environment = {}
   for (const name of [
     "ALL_PROXY",
@@ -134,7 +134,6 @@ function verificationEnvironment(homeDirectory) {
     if (process.env[name]) environment[name] = process.env[name]
   }
   Object.assign(environment, {
-    DISCORD_BOT_TOKEN: DUMMY_TOKEN,
     HOME: homeDirectory,
     LANG: environment.LANG || "C.UTF-8",
     NPM_CONFIG_REGISTRY: "https://registry.npmjs.org",
@@ -144,6 +143,13 @@ function verificationEnvironment(homeDirectory) {
     XDG_STATE_HOME: join(homeDirectory, "state"),
   })
   return environment
+}
+
+function verificationEnvironment(homeDirectory) {
+  return {
+    ...baseVerificationEnvironment(homeDirectory),
+    DISCORD_BOT_TOKEN: DUMMY_TOKEN,
+  }
 }
 
 const INSTALLED_SMOKE = `
@@ -157,6 +163,40 @@ const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
+const catalogTransport = new StdioClientTransport({
+  command: process.execPath,
+  args: [entrypoint, "catalog"],
+  env: {},
+})
+const catalogClient = new Client({ name: "installed-catalog-verifier", version: "1.0.0" }, { capabilities: {} })
+try {
+  await catalogClient.connect(catalogTransport)
+  const [tools, resources, templates, prompts] = await Promise.all([
+    catalogClient.listTools(),
+    catalogClient.listResources(),
+    catalogClient.listResourceTemplates(),
+    catalogClient.listPrompts(),
+  ])
+  assert.ok(tools.tools.some(({ name }) => name === "read_messages"))
+  assert.ok(resources.resources.length > 0)
+  assert.ok(templates.resourceTemplates.length > 0)
+  assert.ok(prompts.prompts.length > 0)
+  const listedGuard = await catalogClient.callTool({
+    arguments: {},
+    name: "read_messages",
+  })
+  const unknownGuard = await catalogClient.callTool({
+    arguments: { ignored: true },
+    name: "installed_unknown_probe",
+  })
+  assert.deepEqual(unknownGuard, listedGuard)
+  assert.equal(listedGuard.isError, true)
+  assert.equal(listedGuard.structuredContent.error.code, "CATALOG_ONLY")
+  const catalogSafety = await catalogClient.readResource({ uri: "${STATIC_RESOURCE_URI}" })
+  assert.equal(catalogSafety.contents.length, 1)
+} finally {
+  await catalogClient.close().catch(() => undefined)
+}
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [entrypoint, "serve"],
@@ -227,6 +267,31 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     env: environment,
   })
   assert.match(helpResult.stdout, /Run the stdio MCP server/)
+  const catalogEnvironment = baseVerificationEnvironment(
+    join(workDirectory, "catalog-home"),
+  )
+  await mkdir(catalogEnvironment.HOME, { recursive: true })
+  const catalogResult = await run(bin, ["catalog", "--check", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  const catalog = JSON.parse(catalogResult.stdout)
+  invariant(catalog.status === "ok", "installed credential-free catalog check failed")
+  invariant(catalog.credentialsRequired === false, "installed catalog unexpectedly requires credentials")
+  invariant(catalog.discordExecution === "disabled", "installed catalog enabled Discord execution")
+  invariant(catalog.executionGuard === "CATALOG_ONLY", "installed catalog execution guard changed")
+  invariant(catalog.gateway === "disabled", "installed catalog enabled the Gateway")
+  invariant(catalog.observabilityExport === "disabled", "installed catalog enabled telemetry export")
+  invariant(catalog.activityRecordsCreated === false, "installed catalog created activity records")
+  for (const name of [
+    "toolCount",
+    "promptCount",
+    "resourceCount",
+    "resourceTemplateCount",
+  ]) {
+    invariant(Number.isSafeInteger(catalog[name]) && catalog[name] > 0, `installed catalog ${name} is invalid`)
+  }
   const doctorResult = await run(process.execPath, [entrypoint, "doctor", "--json"], {
     capture: true,
     cwd: consumer,

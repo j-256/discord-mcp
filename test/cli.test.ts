@@ -6,6 +6,7 @@ import {
   runCli,
   type CliDependencies,
 } from "../src/cli.js"
+import type { DiscordCatalogCheckReport } from "../src/catalog.js"
 import type {
   DoctorReport,
   SetupReport,
@@ -81,8 +82,31 @@ function smokeReport(): SmokeReport {
   }
 }
 
+function catalogReport(): DiscordCatalogCheckReport {
+  return {
+    activityRecordsCreated: false,
+    credentialsRequired: false,
+    discordExecution: "disabled",
+    executionGuard: "CATALOG_ONLY",
+    gateway: "disabled",
+    observabilityExport: "disabled",
+    promptCount: 8,
+    resourceCount: 7,
+    resourceTemplateCount: 5,
+    schemaVersion: 1,
+    serverName: "discord-mcp",
+    serverVersion: "0.1.0",
+    status: "ok",
+    toolCount: 35,
+  }
+}
+
 function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies {
   return {
+    catalog() {},
+    async checkCatalog() {
+      return catalogReport()
+    },
     async diagnose() {
       return doctorReport()
     },
@@ -99,6 +123,16 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
 
 test("CLI parser defaults to serve and strictly parses operator commands", () => {
   assert.deepEqual(parseCliArguments([]), { command: "serve" })
+  assert.deepEqual(parseCliArguments(["catalog"]), {
+    check: false,
+    command: "catalog",
+    json: false,
+  })
+  assert.deepEqual(parseCliArguments(["catalog", "--check", "--json"]), {
+    check: true,
+    command: "catalog",
+    json: true,
+  })
   assert.deepEqual(parseCliArguments(["doctor", "--online", "--json"]), {
     command: "doctor",
     json: true,
@@ -128,6 +162,8 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(() => parseCliArguments(["setup", "--client", "other"]), /Only the host/)
   assert.throws(() => parseCliArguments(["setup", "--name"]), /requires a value/)
   assert.throws(() => parseCliArguments(["smoke", "--other"]), /Unknown option/)
+  assert.throws(() => parseCliArguments(["catalog", "--json"]), /requires --check/)
+  assert.throws(() => parseCliArguments(["catalog", "--check", "--check"]), /only once/)
 })
 
 test("CLI defaults to the stdio server without writing normal output", async () => {
@@ -150,6 +186,51 @@ test("CLI defaults to the stdio server without writing normal output", async () 
   assert.equal(serves, 1)
   assert.equal(stdout.value(), "")
   assert.equal(stderr.value(), "")
+})
+
+test("CLI starts the credential-free catalog without normal output or configuration", async () => {
+  let catalogs = 0
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exitCode = await runCli({
+    args: ["catalog"],
+    dependencies: dependencies({
+      catalog() {
+        catalogs += 1
+      },
+    }),
+    environment: {},
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.equal(catalogs, 1)
+  assert.equal(stdout.value(), "")
+  assert.equal(stderr.value(), "")
+})
+
+test("CLI renders credential-free catalog checks as exact text and JSON", async () => {
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+
+  assert.equal(await runCli({
+    args: ["catalog", "--check"],
+    dependencies: dependencies(),
+    environment: {},
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["catalog", "--check", "--json"],
+    dependencies: dependencies(),
+    environment: {},
+    stdout: jsonOutput.stream,
+  }), 0)
+
+  assert.match(textOutput.value(), /Discord MCP catalog: ok/)
+  assert.match(textOutput.value(), /Execution guard: CATALOG_ONLY/)
+  assert.match(textOutput.value(), /Credentials required: no/)
+  assert.deepEqual(JSON.parse(jsonOutput.value()), catalogReport())
 })
 
 test("CLI returns diagnostic failure while preserving secret-free JSON", async () => {
@@ -226,6 +307,7 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
 test("CLI renders smoke, help, and version output", async () => {
   const smokeOutput = outputStream()
   const helpOutput = outputStream()
+  const catalogHelpOutput = outputStream()
   const versionOutput = outputStream()
 
   assert.equal(await runCli({
@@ -239,6 +321,11 @@ test("CLI renders smoke, help, and version output", async () => {
     stdout: helpOutput.stream,
   }), 0)
   assert.equal(await runCli({
+    args: ["catalog", "--help"],
+    dependencies: dependencies(),
+    stdout: catalogHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
     args: ["--version"],
     dependencies: dependencies(),
     stdout: versionOutput.stream,
@@ -248,6 +335,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \[--online\]/)
+  assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\]/)
   assert.match(versionOutput.value(), /0\.1\.0/)
 })
 

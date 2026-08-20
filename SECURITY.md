@@ -34,6 +34,10 @@ Reasons remain opt-in Discord content. Omit them by default and make the selecte
 
 ## MCP tool surface
 
+The `catalog` command is a separate credential-free trust boundary. It must build the full production registration surface from fixed internal configuration without consulting ambient credentials, policy, activity paths, attachment roots, Gateway settings, or telemetry settings. It must not construct a Discord client or operational service. Replace low-level tool dispatch before the transport connects so listed tools, invalid arguments, discovery, disabled capabilities, and unknown names all return the same fixed `CATALOG_ONLY` result without reaching a registered handler.
+
+Keep catalog checks self-contained and content-free. They may negotiate the four MCP catalogs, inspect schemas and annotations, render validated prompts, and read static safety or fixed policy guidance. Live Discord, activity, Gateway-event, and operational observability reads must remain unavailable. The check report may contain only fixed safety claims, package identity, schema version, and catalog counts. Pack verification must exercise the installed check without providing a bot token.
+
 Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools natively. This retains each canonical tool's exact name, schema, annotations, and approval identity while the client controls context loading. The portable `progressive` mode may hide a canonical tool only by disabling its registration through the MCP SDK. `discover_discord_tools` must reveal and enable those same registrations through standard tool-list change notifications; do not replace exact tools with a generic read, write, or destructive dispatcher.
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
