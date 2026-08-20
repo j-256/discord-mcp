@@ -140,6 +140,7 @@ const SEARCH_SORT_ORDER_VALUES: ReadonlySet<string> = new Set(["asc", "desc"])
 const ISO_8601_TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$/
 const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const CHANNEL_TOPIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const ROLE_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 
 export interface GuildMessageSearchOptions extends RequestOptions {
   attachmentExtensions?: readonly string[]
@@ -201,6 +202,14 @@ export interface CreateGuildChannelInput {
   rateLimitPerUser?: number
   topic?: string | null
   type: number
+}
+
+export interface CreateGuildRoleInput {
+  hoist: boolean
+  mentionable: boolean
+  name: string
+  permissions: string
+  primaryColor: number
 }
 
 export interface EditMessageInput {
@@ -508,6 +517,42 @@ function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
   }
 }
 
+function assertCreateGuildRoleInput(input: CreateGuildRoleInput): void {
+  if (
+    typeof input.name !== "string"
+    || input.name.length < 1
+    || input.name.length > DISCORD_LIMITS.roleNameCharacters
+    || input.name.trim() !== input.name
+    || ROLE_NAME_CONTROL_PATTERN.test(input.name)
+  ) {
+    throw new RangeError(
+      `Discord role name must contain 1-${DISCORD_LIMITS.roleNameCharacters} characters without surrounding whitespace or controls`,
+    )
+  }
+  assertValidUnicode(input.name, "Discord role name")
+  if (
+    typeof input.permissions !== "string"
+    || !/^(0|[1-9][0-9]*)$/.test(input.permissions)
+  ) {
+    throw new RangeError("Discord role permissions must be a canonical decimal bitfield")
+  }
+  if (typeof input.primaryColor !== "number") {
+    throw new RangeError("Discord role primary color must be a number")
+  }
+  assertIntegerRange(
+    input.primaryColor,
+    0,
+    DISCORD_LIMITS.roleColor,
+    "Discord role primary color",
+  )
+  if (typeof input.hoist !== "boolean") {
+    throw new RangeError("Discord role hoist setting must be a boolean")
+  }
+  if (typeof input.mentionable !== "boolean") {
+    throw new RangeError("Discord role mentionable setting must be a boolean")
+  }
+}
+
 export function encodeDiscordAuditReason(auditReason: string): string {
   if (!auditReason.trim()) {
     throw new RangeError("Discord audit reason must not be blank")
@@ -765,6 +810,56 @@ export class DiscordClient {
 
   getGuildRoles(guildId: string, options: RequestOptions = {}): Promise<DiscordRole[]> {
     return this.#request("get_guild_roles", `/guilds/${guildId}/roles`, options)
+  }
+
+  getGuildRole(
+    guildId: string,
+    roleId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordRole> {
+    if (
+      !DISCORD_SNOWFLAKE_PATTERN.test(guildId)
+      || !DISCORD_SNOWFLAKE_PATTERN.test(roleId)
+    ) {
+      throw new RangeError("Discord exact role lookup requires snowflake IDs")
+    }
+    return this.#request(
+      "get_guild_role",
+      `/guilds/${guildId}/roles/${roleId}`,
+      options,
+    )
+  }
+
+  createGuildRole(
+    guildId: string,
+    input: CreateGuildRoleInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordRole> {
+    if (!DISCORD_SNOWFLAKE_PATTERN.test(guildId)) {
+      throw new RangeError("Discord role creation guild ID must be a snowflake")
+    }
+    assertCreateGuildRoleInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord role creation audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("create_guild_role", `/guilds/${guildId}/roles`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      body: {
+        colors: {
+          primary_color: input.primaryColor,
+          secondary_color: null,
+          tertiary_color: null,
+        },
+        hoist: input.hoist,
+        mentionable: input.mentionable,
+        name: input.name,
+        permissions: input.permissions,
+      },
+    })
   }
 
   getGuildBan(

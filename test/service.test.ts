@@ -34,6 +34,7 @@ const THREAD_ID = "400000000000000003"
 const SECOND_THREAD_ID = "400000000000000004"
 const MESSAGE_ID = "500000000000000001"
 const CREATED_CHANNEL_ID = "400000000000000005"
+const CREATED_ROLE_ID = "700000000000000001"
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -139,11 +140,22 @@ function role(
   name = "role",
 ): DiscordRole {
   return {
+    color: 0,
+    colors: {
+      primary_color: 0,
+      secondary_color: null,
+      tertiary_color: null,
+    },
+    flags: 0,
+    hoist: false,
     id,
+    icon: null,
     managed: false,
+    mentionable: false,
     name,
     permissions: permissions.toString(),
     position: 0,
+    unicode_emoji: null,
   }
 }
 
@@ -154,13 +166,16 @@ function serviceFixture(overrides: {
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
   operationStore?: OperationStore
+  roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
 } = {}) {
   const calls = {
     addReaction: 0,
     application: 0,
     createChannel: 0,
     createMessage: 0,
+    createRole: 0,
     editMessage: 0,
+    getRole: 0,
     guilds: 0,
     listMessages: 0,
     removeMember: 0,
@@ -175,6 +190,10 @@ function serviceFixture(overrides: {
     async createGuildChannel() {
       calls.createChannel += 1
       return channel()
+    },
+    async createGuildRole() {
+      calls.createRole += 1
+      return role(CREATED_ROLE_ID, 0n, "created")
     },
     async createMessage(_channelId, input) {
       calls.createMessage += 1
@@ -214,6 +233,10 @@ function serviceFixture(overrides: {
     },
     async getGuildMember(): Promise<DiscordGuildMember> {
       return { roles: [] }
+    },
+    async getGuildRole(_guildId, roleId) {
+      calls.getRole += 1
+      return role(roleId, 0n, "role")
     },
     async getGuildRoles() {
       return [role(
@@ -293,6 +316,9 @@ function serviceFixture(overrides: {
         ? { channelAdministrationOptions: overrides.channelAdministrationOptions }
         : {}),
       ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
+      ...(overrides.roleAdministrationOptions
+        ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
+        : {}),
     }),
   }
 }
@@ -479,6 +505,151 @@ test("service verifies identity before reviewed additive channel creation", asyn
   assert.equal(calls.createChannel, 1)
   assert.equal(operationStore.receipt?.status, "completed")
   assert.doesNotMatch(JSON.stringify(operationStore.receipt), /channel-create-attempt/)
+})
+
+test("service returns bounded role inventory and one exact role", async () => {
+  const supportRole: DiscordRole = {
+    ...role(
+      CREATED_ROLE_ID,
+      DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.SEND_MESSAGES,
+      "Support",
+    ),
+    color: 3_447_003,
+    colors: {
+      primary_color: 3_447_003,
+      secondary_color: null,
+      tertiary_color: null,
+    },
+    position: 2,
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildRole(guildId, roleId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(roleId, CREATED_ROLE_ID)
+        calls.getRole += 1
+        return supportRole
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, 0n, "@everyone"), supportRole]
+      },
+    },
+    environment: { DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID },
+  })
+
+  const listed = await service.listRoles(GUILD_ID)
+  const exact = await service.getRole(GUILD_ID, CREATED_ROLE_ID)
+  assert.equal(listed.page.documentedLimit, 250)
+  assert.equal(listed.page.returned, 2)
+  assert.equal(listed.roles[0]?.id, CREATED_ROLE_ID)
+  assert.deepEqual(listed.roles[0]?.permissionNames, ["VIEW_CHANNEL", "SEND_MESSAGES"])
+  assert.equal(exact.role.id, CREATED_ROLE_ID)
+  assert.equal(calls.getRole, 1)
+
+  const mismatched = serviceFixture({
+    client: {
+      async getGuildRole() {
+        return { ...supportRole, id: "999000000000000001" }
+      },
+    },
+    environment: { DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID },
+  }).service
+  await assert.rejects(
+    mismatched.getRole(GUILD_ID, CREATED_ROLE_ID),
+    /incomplete or invalid role evidence/,
+  )
+})
+
+test("service verifies identity before reviewed additive role creation", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "600000000000000001"
+  const requestedPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  const created: DiscordRole = {
+    ...role(CREATED_ROLE_ID, requestedPermissions, "Support"),
+    color: 3_447_003,
+    colors: {
+      primary_color: 3_447_003,
+      secondary_color: null,
+      tertiary_color: null,
+    },
+    position: 1,
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async createGuildRole(guildId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(auditReason, "Reviewed role addition")
+        assert.deepEqual(input, {
+          hoist: false,
+          mentionable: false,
+          name: "Support",
+          permissions: requestedPermissions.toString(),
+          primaryColor: 3_447_003,
+        })
+        calls.createRole += 1
+        return created
+      },
+      async getGuild() {
+        return { ...guild(), features: [], owner_id: "800000000000000001" }
+      },
+      async getGuildMember() {
+        return { roles: [botRoleId], user: bot() }
+      },
+      async getGuildRole(guildId, roleId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(roleId, CREATED_ROLE_ID)
+        calls.getRole += 1
+        return created
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.MANAGE_ROLES | requestedPermissions,
+              "connector",
+            ),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
+      DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+    roleAdministrationOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+      randomId: () => "activity-role-create",
+    },
+  })
+  const creationRequest = {
+    auditReason: "Reviewed role addition",
+    guildId: GUILD_ID,
+    name: "Support",
+    operationKey: "role-create-attempt-0001",
+    permissions: ["SEND_MESSAGES", "VIEW_CHANNEL"] as const,
+    primaryColor: 3_447_003,
+  }
+
+  const plan = await service.planRoleCreation(creationRequest)
+  const result = await service.executeRoleCreation(creationRequest, plan.digest)
+  assert.equal(plan.action, "create")
+  assert.equal(result.roleId, CREATED_ROLE_ID)
+  assert.equal(result.status, "completed")
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.createRole, 1)
+  assert.equal(calls.getRole, 1)
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.doesNotMatch(JSON.stringify(operationStore.receipt), /role-create-attempt|Support/)
 })
 
 test("service verifies identity once and reports scope without message reads", async () => {

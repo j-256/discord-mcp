@@ -29,6 +29,7 @@ export interface ConnectorConfig {
   allowDeletions: boolean
   allowGateway: boolean
   allowInteractions: boolean
+  allowRoleCreation: boolean
   auditFile: string
   channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
@@ -42,6 +43,7 @@ export interface ConnectorConfig {
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
   protectedUserIds: ReadonlySet<string>
+  roleCreationGuildIds: ReadonlySet<string>
   token: string
 }
 
@@ -156,10 +158,15 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.protectedUserIds,
     CONNECTOR_LIMITS.protectedUserAllowlist,
   )
+  const roleCreationGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.roleCreationGuildIds],
+    ENVIRONMENT_NAMES.roleCreationGuildIds,
+  )
 
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
+    [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
       if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
@@ -221,6 +228,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
     ),
+    allowRoleCreation: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowRoleCreation],
+      ENVIRONMENT_NAMES.allowRoleCreation,
+    ),
     auditFile: auditFile(
       environment[ENVIRONMENT_NAMES.auditFile],
       environment,
@@ -262,6 +273,7 @@ export function loadConnectorConfig(
     ),
     observability: loadObservabilityConfig(environment, [rawToken || "", token]),
     protectedUserIds,
+    roleCreationGuildIds,
     token,
   }
 }

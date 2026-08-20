@@ -23,19 +23,24 @@ export const MCP_RESOURCE_URIS = Object.freeze({
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelAccess: "channel_access",
   exactMessage: "exact_message",
+  exactRole: "exact_role",
   guildChannels: "guild_channels",
+  guildRoles: "guild_roles",
 })
 
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelAccess: "discord://channels/{channelId}/access",
   exactMessage: "discord://channels/{channelId}/messages/{messageId}",
+  exactRole: "discord://guilds/{guildId}/roles/{roleId}",
   guildChannels: "discord://guilds/{guildId}/channels",
+  guildRoles: "discord://guilds/{guildId}/roles",
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
   reviewChannelCreation: "review_channel_creation",
   reviewMemberModeration: "review_member_moderation",
   reviewMessageDeletion: "review_message_deletion",
+  reviewRoleCreation: "review_role_creation",
   searchGuildMessages: "search_guild_messages",
   summarizeChannel: "summarize_channel",
 })
@@ -48,6 +53,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",
   [MCP_PROMPT_NAMES.reviewMemberModeration]: "moderation",
   [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",
+  [MCP_PROMPT_NAMES.reviewRoleCreation]: "role-creation",
   [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",
   [MCP_PROMPT_NAMES.summarizeChannel]: "messages",
 } satisfies Record<McpPromptName, McpToolsetName>)

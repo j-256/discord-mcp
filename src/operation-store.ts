@@ -24,6 +24,7 @@ export const OPERATION_KEY_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
 
 export const OPERATION_KINDS = [
   "channel-creation",
+  "role-creation",
 ] as const
 
 export type OperationKind = typeof OPERATION_KINDS[number]

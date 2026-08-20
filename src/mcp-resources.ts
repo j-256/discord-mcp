@@ -178,6 +178,8 @@ export function registerDiscordResources(
           "",
           "Channel creation is additive-only and requires a separate exact guild allowlist. Planning checks visible inventory, logical-name collisions, guild and parent permissions, and capacity. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, a pending content-free receipt, and post-write readback. It never edits permission overwrites, deletes, or rolls back channels.",
           "",
+          "Role creation is additive-only and requires a separate exact guild allowlist. Planning checks the complete bounded role inventory, logical-name collisions, capacity, bot hierarchy, MANAGE_ROLES, and every named permission as a subset of the bot's effective permissions. ADMINISTRATOR is forbidden. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, pending content-free records, one non-retried create request, and exact role readback. It never edits, moves, assigns, deletes, or rolls back roles.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,
@@ -271,6 +273,55 @@ export function registerDiscordResources(
       secrets,
       () => service.listChannels(
         templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildRoles, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete normalized Discord role inventory for one exact permitted guild ID, bounded by Discord's documented role limit.",
+      mimeType: "application/json",
+      title: "Discord guild roles",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listRoles(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.exactRole,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.exactRole, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact normalized Discord role from a permitted guild, including colors, hierarchy, known permission names, unknown permission bits, and managed-role classification.",
+      mimeType: "application/json",
+      title: "Exact Discord role",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getRole(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "roleId"),
         { signal: context.mcpReq.signal },
       ),
     ),

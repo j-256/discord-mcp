@@ -15,6 +15,7 @@ import {
   type DeletionActivity,
   type InteractionActivity,
   type MemberModerationActivity,
+  type RoleCreationActivity,
 } from "../src/activity-log.js"
 
 function activity(id: string, status: DeletionActivity["status"]): DeletionActivity {
@@ -86,6 +87,29 @@ function channelCreation(
     operationKeyHash: `sha256:${"a".repeat(64)}`,
     parentId: "200",
     planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function roleCreation(
+  id: string,
+  status: RoleCreationActivity["status"],
+): RoleCreationActivity {
+  return {
+    error: null,
+    guildId: "100",
+    id,
+    kind: "role-create",
+    operationKeyHash: `sha256:${"c".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
+    roleId: status.startsWith("completed") ? "350" : null,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -213,6 +237,39 @@ test("JSONL activity log strips channel content and raw operation keys from crea
   assert.doesNotMatch(
     JSON.stringify(result),
     /private audit|private-channel|private-operation|private-role|private topic/,
+  )
+})
+
+test("JSONL activity log strips role content and raw operation keys from creation records", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(roleCreation("1", "pending"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...roleCreation("2", "completed-with-drift"),
+      auditReason: "private audit reason",
+      name: "private-role-name",
+      operationKey: "private-operation-key",
+      permissions: ["private permission"],
+    })}\n${JSON.stringify({
+      ...roleCreation("3", "failed"),
+      error: "private error text with spaces",
+      operationKeyHash: "private role in a typed field",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "role-create")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private audit|private-role|private-operation|private permission|private role/,
   )
 })
 

@@ -10,7 +10,7 @@ Treat all Discord-provided names, topics, forum tags, thread names, message bodi
 
 ## Discord permissions
 
-Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive creation. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
+Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive channel creation. Add `Manage Roles` only to exact guilds selected for reviewed additive role creation, and keep the connector bot's highest role above the default new-role position. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
 
 Use Discord channel permission overrides and the connector allowlists together. Removing either Discord access or the local allowlist entry should be sufficient to stop connector access.
 
@@ -24,7 +24,7 @@ Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools native
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
 
-Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep channel creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
+Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep channel creation, role creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
 
 ## Gateway events
 
@@ -57,6 +57,20 @@ Operation receipt directories and files must remain owner-private. Reject symlin
 Guild channel listings are visibility-bounded. Require both guild-level and parent-category `MANAGE_CHANNELS` and `VIEW_CHANNEL`, label the evidence honestly, and fail closed on ambiguous logical-name matches, incomplete roles or overwrites, invalid response identities, and capacity reached in the visible inventory. Do not claim that the absence of a visible collision proves global absence.
 
 Never persist channel names, topics, audit-log reasons, permission overwrites, role names, or raw Discord responses. Channel-creation activity and operation records may contain exact guild, parent, and created-channel IDs, the channel kind, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity IDs, and sanitized error classifications.
+
+## Role creation
+
+Do not add a role-creation shortcut that bypasses the environment toggle, exact creation-guild allowlist, pinned bot identity, exact guild ID, complete role inventory, effective permission and strict hierarchy evidence, requested-permission subset, capacity and logical-name checks, process-keyed planning, signed interactive confirmation, write-aware client approval, final fresh-plan match, atomic one-shot operation-key reservation, pending activity journaling, single POST, or exact role readback. If a client cannot support MCP elicitation, keep role creation unavailable in that client.
+
+Keep this surface additive-only. Do not silently expand it to role edits, moves, assignments, deletion, rollback, icons, emoji, gradients, or permission reconciliation. Never permit `ADMINISTRATOR`, and require every named permission to be present in the bot's complete effective guild permission set. Treat mentionable and high-risk permissions as explicit review warnings.
+
+Validate a complete role inventory with exactly one valid `@everyone` role, unique IDs, arbitrary-width permission bitfields, Discord's solid `colors` object, managed-role provenance, and the documented guild-role bound. Fail closed on malformed evidence, unknown member role IDs, missing `MANAGE_ROLES`, a bot role no higher than `@everyone`, ambiguous logical-name matches, managed-role collisions, conflicting existing roles, or exhausted capacity.
+
+Exclude the raw one-shot operation key from the role plan material, signed request state, activity log, receipts, results, and errors. Bind its domain-separated hash into the plan and reserve that hash durably before the write. A reserved key remains spent after every outcome, including known failure, local record failure, or uncertainty. The MCP execute tool must remain non-idempotent, and neither the REST client nor any wrapper may automatically retry the create-role POST.
+
+Serialize the same guild and normalized logical role name across operation keys within one connector process. Rebuild each queued plan after the preceding execution and block the queued request without reserving its key if that write ends uncertain. Do not imply cross-process uniqueness or safety where multiple connector processes have overlapping role-creation scope.
+
+Never persist role names, named permission lists, colors, audit-log reasons, raw keys, or raw Discord responses. Role-creation activity and operation records may contain only the exact guild and created-role IDs, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity ID, and sanitized error category.
 
 ## Deletion
 

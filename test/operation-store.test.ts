@@ -122,6 +122,25 @@ test("file operation store atomically selects one concurrent reservation", async
   )
 })
 
+test("file operation store isolates channel and role operation-key domains", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const store = new FileOperationStore(join(root, "receipts"))
+  const channel = receipt()
+  const role = { ...receipt(), kind: "role-creation" as const }
+
+  assert.equal((await store.reserve(channel)).created, true)
+  assert.equal((await store.reserve(role)).created, true)
+  assert.deepEqual(
+    await store.get("channel-creation", channel.operationKeyHash),
+    channel,
+  )
+  assert.deepEqual(
+    await store.get("role-creation", role.operationKeyHash),
+    role,
+  )
+})
+
 test("file operation store rejects identity changes and divergent terminal state", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))

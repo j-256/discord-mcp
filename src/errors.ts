@@ -46,6 +46,38 @@ export class ChannelCreationExecutionError extends Error {
   }
 }
 
+export class RoleCreationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord role snapshot does not match the reviewed creation plan")
+    this.name = "RoleCreationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class RoleCreationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord role creation operation key has already been reserved")
+    this.name = "RoleCreationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class RoleCreationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "RoleCreationExecutionError"
+    this.result = result
+  }
+}
+
 export class AdministrationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -12,9 +12,11 @@ export type DiscordGuidanceService = Pick<
   ConnectorService,
   | "explainChannelAccess"
   | "getMessage"
+  | "getRole"
   | "listActivity"
   | "listChannels"
   | "listGuilds"
+  | "listRoles"
 >
 
 export interface DiscordGuidanceOptions {

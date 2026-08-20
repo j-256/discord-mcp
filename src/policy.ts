@@ -29,6 +29,8 @@ export interface PolicyDescription {
   protectedUserCount: number
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
+  roleCreationEnabled: boolean
+  roleCreationGuildIds: string[]
 }
 
 export class ScopePolicy {
@@ -40,6 +42,7 @@ export class ScopePolicy {
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowGateway: boolean
+  readonly #allowRoleCreation: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
@@ -50,6 +53,7 @@ export class ScopePolicy {
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
   readonly #protectedUserIds: ReadonlySet<string>
+  readonly #roleCreationGuildIds: ReadonlySet<string>
 
   constructor(config: Pick<
     ConnectorConfig,
@@ -69,10 +73,12 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowGateway"
     | "allowChannelCreation"
+    | "allowRoleCreation"
     | "channelCreationGuildIds"
     | "gatewayEventBufferSize"
     | "mcpToolsets"
     | "mcpToolSurface"
+    | "roleCreationGuildIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
@@ -82,6 +88,7 @@ export class ScopePolicy {
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowGateway = config.allowGateway ?? false
+    this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
@@ -93,6 +100,7 @@ export class ScopePolicy {
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#protectedUserIds = config.protectedUserIds
+    this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
   }
 
   describe(): PolicyDescription {
@@ -118,6 +126,9 @@ export class ScopePolicy {
       protectedUserCount: this.#protectedUserIds.size,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
+      roleCreationEnabled: this.#allowRoleCreation
+        && this.#roleCreationGuildIds.size > 0,
+      roleCreationGuildIds: [...this.#roleCreationGuildIds].sort(),
     }
   }
 
@@ -168,6 +179,19 @@ export class ScopePolicy {
     }
     if (!this.#channelCreationGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the channel creation scope`)
+    }
+  }
+
+  assertRoleCreationAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowRoleCreation) {
+      throw new PolicyError("Discord role creation is disabled by connector configuration")
+    }
+    if (this.#roleCreationGuildIds.size === 0) {
+      throw new PolicyError("Discord role creation requires an explicit guild allowlist")
+    }
+    if (!this.#roleCreationGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the role creation scope`)
     }
   }
 

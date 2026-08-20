@@ -104,11 +104,33 @@ export interface ChannelCreationActivity {
   verification: "drift" | "match" | null
 }
 
+export type RoleCreationActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface RoleCreationActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "role-create"
+  operationKeyHash: string
+  planDigest: string
+  roleId: string | null
+  schemaVersion: number
+  status: RoleCreationActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ActivityEntry =
   | ChannelCreationActivity
   | DeletionActivity
   | InteractionActivity
   | MemberModerationActivity
+  | RoleCreationActivity
 
 export interface ActivityList {
   entries: ActivityEntry[]
@@ -319,6 +341,75 @@ function parseChannelCreationActivity(
   }
 }
 
+function parseRoleCreationActivity(
+  value: unknown,
+): RoleCreationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "role-create"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.roleId === null || (
+      typeof record.roleId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.roleId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.roleId !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.roleId === null
+      || record.verification !== "match"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.roleId === null
+      || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "role-create",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    roleId: record.roleId,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as RoleCreationActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 export class JsonlActivityLog implements ActivityStore {
   readonly #file: string
 
@@ -381,6 +472,7 @@ export class JsonlActivityLog implements ActivityStore {
         try {
           const value: unknown = JSON.parse(line)
           const entry = parseChannelCreationActivity(value)
+            || parseRoleCreationActivity(value)
             || parseDeletionActivity(value)
             || parseInteractionActivity(value)
             || parseMemberModerationActivity(value)

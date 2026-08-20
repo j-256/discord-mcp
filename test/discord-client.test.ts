@@ -735,6 +735,150 @@ test("Discord client never retries a rate-limited channel creation", async () =>
   assert.equal(sleeps, 0)
 })
 
+test("Discord client sends current role creation and exact lookup contracts", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({
+        color: 3_447_003,
+        colors: {
+          primary_color: 3_447_003,
+          secondary_color: null,
+          tertiary_color: null,
+        },
+        flags: 0,
+        hoist: false,
+        id: "300",
+        managed: false,
+        mentionable: false,
+        name: "Support",
+        permissions: "3072",
+        position: 1,
+      })
+    },
+    token: TOKEN,
+  })
+
+  await client.createGuildRole("100", {
+    hoist: false,
+    mentionable: false,
+    name: "Support",
+    permissions: "3072",
+    primaryColor: 3_447_003,
+  }, "Support / case 42")
+  await client.getGuildRole("100", "300")
+
+  assert.deepEqual(requests, [
+    {
+      body: {
+        colors: {
+          primary_color: 3_447_003,
+          secondary_color: null,
+          tertiary_color: null,
+        },
+        hoist: false,
+        mentionable: false,
+        name: "Support",
+        permissions: "3072",
+      },
+      method: "POST",
+      reason: "Support%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/roles`,
+    },
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/guilds/100/roles/300`,
+    },
+  ])
+})
+
+test("Discord client never retries rate-limited role creation", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createGuildRole("100", {
+      hoist: false,
+      mentionable: false,
+      name: "Support",
+      permissions: "0",
+      primaryColor: 0,
+    }, "Reviewed support role"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client rejects unsafe role contracts before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const valid = {
+    hoist: false,
+    mentionable: false,
+    name: "Support",
+    permissions: "0",
+    primaryColor: 0,
+  }
+
+  assert.throws(() => client.getGuildRole("invalid", "300"), /snowflake IDs/)
+  assert.throws(() => client.getGuildRole("100", "invalid"), /snowflake IDs/)
+  assert.throws(
+    () => client.createGuildRole("invalid", valid, "reviewed"),
+    /guild ID must be a snowflake/,
+  )
+  assert.throws(
+    () => client.createGuildRole("100", { ...valid, name: " Support" }, "reviewed"),
+    /surrounding whitespace/,
+  )
+  assert.throws(
+    () => client.createGuildRole("100", { ...valid, permissions: "01" }, "reviewed"),
+    /canonical decimal/,
+  )
+  assert.throws(
+    () => client.createGuildRole("100", { ...valid, primaryColor: 0x1_00_00_00 }, "reviewed"),
+    /between 0 and/,
+  )
+  assert.throws(
+    () => client.createGuildRole("100", { ...valid, hoist: "yes" } as never, "reviewed"),
+    /hoist setting must be a boolean/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client rejects unsupported channel creation before fetching", () => {
   let requests = 0
   const client = new DiscordClient({

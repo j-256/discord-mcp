@@ -36,7 +36,11 @@ const MCP_DISCOVERY_DETAILS = [
 ] as const
 
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
-type McpToolWorkflow = "channel-creation" | "member-moderation" | "message-deletion"
+type McpToolWorkflow =
+  | "channel-creation"
+  | "member-moderation"
+  | "message-deletion"
+  | "role-creation"
 
 interface ToolCatalogMetadata {
   keywords: readonly string[]
@@ -75,6 +79,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "moderation",
     workflow: "member-moderation",
   },
+  execute_role_creation: {
+    keywords: ["create", "execute", "permission", "role"],
+    toolset: "role-creation",
+    workflow: "role-creation",
+  },
   explain_channel_access: {
     keywords: ["access", "permissions", "read", "view"],
     toolset: "guilds",
@@ -99,6 +108,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["health", "metrics", "observability", "telemetry", "traces"],
     toolset: "observability",
   },
+  get_role: {
+    keywords: ["exact", "permission", "read", "role"],
+    toolset: "roles",
+  },
   list_active_threads: {
     keywords: ["active", "forum", "list", "thread"],
     toolset: "threads",
@@ -119,6 +132,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["guild", "list", "server"],
     toolset: "guilds",
   },
+  list_roles: {
+    keywords: ["guild", "hierarchy", "list", "permission", "role"],
+    toolset: "roles",
+  },
   plan_member_moderation: {
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
@@ -133,6 +150,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["delete", "exact ids", "plan", "remove", "review"],
     toolset: "deletion",
     workflow: "message-deletion",
+  },
+  plan_role_creation: {
+    keywords: ["create", "permission", "plan", "review", "role"],
+    toolset: "role-creation",
+    workflow: "role-creation",
   },
   read_messages: {
     keywords: ["channel", "history", "list", "message", "read"],

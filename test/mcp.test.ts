@@ -17,12 +17,20 @@ import {
 } from "../src/constants.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
 import {
+  ROLE_CREATION_HIGH_RISK_PERMISSIONS,
+  type NormalizedDiscordRole,
+  type RoleCreationPlan,
+  type RoleCreationRequest,
+} from "../src/role-administration-service.js"
+import {
   AdministrationExecutionError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
   DiscordApiError,
   InteractionExecutionError,
   InteractionRateLimitError,
+  RoleCreationExecutionError,
+  RoleCreationOperationConflictError,
 } from "../src/errors.js"
 import {
   createDiscordMcpServer,
@@ -37,6 +45,8 @@ import { loadObservabilityConfig } from "../src/observability-config.js"
 import { OperationalTelemetry } from "../src/observability.js"
 import {
   DISCORD_PERMISSIONS,
+  discordPermissionBitfield,
+  discordPermissionNames,
   evaluateBotChannelPermissions,
 } from "../src/permissions.js"
 import type { PolicyDescription } from "../src/policy.js"
@@ -50,9 +60,11 @@ const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const PARENT_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
+const ROLE_ID = "350000000000000001"
 const USER_ID = "400000000000000001"
 const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
+const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
@@ -227,6 +239,85 @@ function channelPlan(
   }
 }
 
+function normalizedCreatedRole(
+  request: RoleCreationRequest,
+): NormalizedDiscordRole {
+  const permissionBits = discordPermissionBitfield(request.permissions || [])
+  return {
+    colors: {
+      primaryColor: request.primaryColor ?? 0,
+      secondaryColor: null,
+      tertiaryColor: null,
+    },
+    flags: 0,
+    hoist: request.hoist ?? false,
+    icon: null,
+    id: ROLE_ID,
+    managed: false,
+    management: { id: null, type: "standard" },
+    mentionable: request.mentionable ?? false,
+    name: request.name,
+    permissionNames: discordPermissionNames(permissionBits),
+    permissions: permissionBits.toString(),
+    position: 1,
+    unicodeEmoji: null,
+    unknownPermissionBits: "0",
+  }
+}
+
+function rolePlan(
+  request: RoleCreationRequest,
+  digest = DIGEST,
+  action: "create" | "none" = "create",
+): RoleCreationPlan {
+  const permissions = [...(request.permissions || [])]
+  const permissionBits = discordPermissionBitfield(permissions)
+  const botPermissionBits = permissionBits | DISCORD_PERMISSIONS.MANAGE_ROLES
+  const observed = normalizedCreatedRole(request)
+  const highRiskPermissionSet = new Set<string>(ROLE_CREATION_HIGH_RISK_PERMISSIONS)
+  return {
+    action,
+    auditReason: request.auditReason,
+    createdAt: "2026-08-14T00:00:00.000Z",
+    digest,
+    existingRole: action === "none" ? observed : null,
+    guild: {
+      features: [],
+      id: request.guildId,
+      name: "Guild",
+      ownerId: USER_ID,
+    },
+    highRiskPermissions: permissions.filter((permission) => (
+      highRiskPermissionSet.has(permission)
+    )),
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      botAdministrator: false,
+      botEffectivePermissionNames: discordPermissionNames(botPermissionBits),
+      botEffectivePermissions: botPermissionBits.toString(),
+      botHighestRoleIds: ["350000000000000002"],
+      botHighestRolePosition: 2,
+      guildManageRoles: true,
+      requestedSubset: true,
+    },
+    schemaVersion: 1,
+    status: action === "none" ? "already-current" : "planned",
+    target: {
+      hoist: request.hoist ?? false,
+      mentionable: request.mentionable ?? false,
+      name: request.name,
+      permissionBits: permissionBits.toString(),
+      permissions,
+      primaryColor: request.primaryColor ?? 0,
+    },
+    visibleInventory: {
+      guildLimit: 250,
+      guildRoles: action === "none" ? 3 : 2,
+    },
+    warnings: ["New Discord roles begin at the bottom of the hierarchy"],
+  }
+}
+
 function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
@@ -248,6 +339,8 @@ function fixturePolicy(): PolicyDescription {
     mcpToolSurface: "full",
     protectedUserCount: 0,
     readChannelScope: "all-visible",
+    roleCreationEnabled: false,
+    roleCreationGuildIds: [],
     readGuildScope: "all-visible",
   }
 }
@@ -261,6 +354,9 @@ function serviceFixture(overrides: {
   interactionError?: Error
   messageContent?: string
   planDigest?: string
+  roleCreationAction?: "create" | "none"
+  roleCreationError?: Error
+  roleCreationPlanDigest?: string
 } = {}) {
   const calls = {
     active: 0,
@@ -273,7 +369,11 @@ function serviceFixture(overrides: {
     delete: 0,
     edit: 0,
     explain: 0,
+    getRole: 0,
+    listRoles: 0,
     plan: 0,
+    roleCreationExecute: 0,
+    roleCreationPlan: 0,
     search: 0,
     send: 0,
   }
@@ -341,6 +441,26 @@ function serviceFixture(overrides: {
         userId: request.userId,
       }
     },
+    async executeRoleCreation(request, planDigest) {
+      if (overrides.roleCreationError) throw overrides.roleCreationError
+      calls.roleCreationExecute += 1
+      const planned = rolePlan(
+        request,
+        planDigest,
+        overrides.roleCreationAction,
+      )
+      const observed = planned.existingRole || normalizedCreatedRole(request)
+      return {
+        activityId: planned.action === "none" ? null : "activity-role-create",
+        guildId: request.guildId,
+        observed,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        roleId: observed.id,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-current" : "completed",
+      }
+    },
     async explainChannelAccess(channelId) {
       calls.explain += 1
       const discordChannel = rawChannel({ id: channelId })
@@ -387,6 +507,21 @@ function serviceFixture(overrides: {
         channel: normalizeChannel(rawChannel()),
         guildId: GUILD_ID,
         message: normalizeMessage(rawMessage(overrides.messageContent), GUILD_ID),
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async getRole(guildId) {
+      calls.getRole += 1
+      return {
+        guildId,
+        role: normalizedCreatedRole({
+          auditReason: AUDIT_REASON,
+          guildId,
+          name: "reviewer",
+          operationKey: OPERATION_KEY,
+          permissions: ["VIEW_CHANNEL"],
+        }),
         schemaVersion: 1,
         status: "ok",
       }
@@ -468,6 +603,22 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listRoles(guildId) {
+      calls.listRoles += 1
+      return {
+        guildId,
+        page: { documentedLimit: 250, returned: 1 },
+        roles: [normalizedCreatedRole({
+          auditReason: AUDIT_REASON,
+          guildId,
+          name: "reviewer",
+          operationKey: OPERATION_KEY,
+          permissions: ["VIEW_CHANNEL"],
+        })],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async planMessageDeletion() {
       calls.plan += 1
       return plan(overrides.planDigest)
@@ -483,6 +634,14 @@ function serviceFixture(overrides: {
     async planMemberModeration() {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
+    },
+    async planRoleCreation(request) {
+      calls.roleCreationPlan += 1
+      return rolePlan(
+        request,
+        overrides.roleCreationPlanDigest || DIGEST,
+        overrides.roleCreationAction,
+      )
     },
     async readMessages() {
       return {
@@ -637,6 +796,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_gateway_events",
       "list_guilds",
       "list_channels",
+      "list_roles",
+      "get_role",
       "list_active_threads",
       "list_archived_threads",
       "explain_channel_access",
@@ -650,6 +811,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "delete_messages",
       "plan_channel_creation",
       "execute_channel_creation",
+      "plan_role_creation",
+      "execute_role_creation",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -692,6 +855,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.deepEqual(channelCreation?.annotations, {
     destructiveHint: false,
     idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const roleCreationPlanTool = result.tools.find((tool) => (
+    tool.name === "plan_role_creation"
+  ))
+  assert.deepEqual(roleCreationPlanTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const roleCreation = result.tools.find((tool) => (
+    tool.name === "execute_role_creation"
+  ))
+  assert.deepEqual(roleCreation?.annotations, {
+    destructiveHint: false,
+    idempotentHint: false,
     openWorldHint: true,
     readOnlyHint: false,
   })
@@ -898,6 +1079,30 @@ test("progressive discovery enables the complete reviewed channel-creation workf
   )
 })
 
+test("progressive discovery enables the complete reviewed role-creation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_role_creation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_role_creation",
+    "plan_role_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_role_creation",
+      "execute_role_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOLSETS: "messages,connector" },
@@ -1005,10 +1210,37 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     delete: 0,
     edit: 0,
     explain: 1,
+    getRole: 0,
+    listRoles: 0,
     plan: 0,
+    roleCreationExecute: 0,
+    roleCreationPlan: 0,
     search: 0,
     send: 0,
   })
+})
+
+test("MCP role reads expose complete inventory and exact lookup with snowflake validation", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const inventory = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_roles",
+  })
+  const exact = await client.callTool({
+    arguments: { guildId: GUILD_ID, roleId: ROLE_ID },
+    name: "get_role",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: GUILD_ID, roleId: "not-a-snowflake" },
+    name: "get_role",
+  })
+
+  assert.equal(structuredContent(inventory).status, "ok")
+  assert.equal(structuredContent(exact).status, "ok")
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.listRoles, 1)
+  assert.equal(calls.getRole, 1)
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {
@@ -1681,6 +1913,305 @@ test("MCP channel creation exposes uncertain and one-shot conflict outcomes", as
   )
 })
 
+test("MCP role creation plans named permissions and rejects unsafe schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      hoist: true,
+      mentionable: false,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      primaryColor: 0x12_34_56,
+    },
+    name: "plan_role_creation",
+  })
+  const administrator = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "admin",
+      operationKey: ROLE_OPERATION_KEY,
+      permissions: ["ADMINISTRATOR"],
+    },
+    name: "plan_role_creation",
+  })
+  const duplicate = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      permissions: ["VIEW_CHANNEL", "VIEW_CHANNEL"],
+    },
+    name: "plan_role_creation",
+  })
+  const reserved = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "@everyone",
+      operationKey: ROLE_OPERATION_KEY,
+    },
+    name: "plan_role_creation",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(administrator.isError, true)
+  assert.equal(duplicate.isError, true)
+  assert.equal(reserved.isError, true)
+  assert.equal(calls.roleCreationPlan, 1)
+})
+
+test("MCP role creation binds signed approval to exact properties and permissions", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      hoist: true,
+      mentionable: false,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      planDigest: DIGEST,
+      primaryColor: 0x12_34_56,
+    },
+    name: "execute_role_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.roleCreationPlan, 1)
+  assert.equal(calls.roleCreationExecute, 1)
+  assert.match(confirmationMessage, /Action: create/)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, /Role name: "reviewer"/)
+  assert.match(confirmationMessage, /VIEW_CHANNEL, READ_MESSAGE_HISTORY/)
+  assert.match(confirmationMessage, /Primary color: 1193046/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(ROLE_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(ROLE_OPERATION_KEY))
+})
+
+test("MCP role creation handles no-op and refused confirmation without unsafe writes", async (context) => {
+  let confirmations = 0
+  const current = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { roleCreationAction: "none" },
+  })
+  const currentResult = await current.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      permissions: ["VIEW_CHANNEL"],
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(structuredContent(currentResult).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(current.calls.roleCreationExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.roleCreationExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.roleCreationExecute, 0)
+})
+
+test("MCP role creation refuses changed plans before requesting confirmation", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { roleCreationPlanDigest: DIFFERENT_DIGEST },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "plan-changed")
+  assert.equal(result.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.roleCreationExecute, 0)
+})
+
+test("MCP role creation exposes uncertain and one-shot conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleCreationError: new RoleCreationExecutionError(
+        "Discord role creation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const blocked = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleCreationError: new RoleCreationExecutionError(
+        "A concurrent logical target ended uncertain",
+        { status: "blocked-prior-uncertain" },
+      ),
+    },
+  })
+  const blockedResult = await blocked.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(
+    structuredContent(blockedResult).status,
+    "blocked-prior-uncertain",
+  )
+
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleCreationError: new RoleCreationOperationConflictError({
+        operationKey: ROLE_OPERATION_KEY,
+        operationKeyHash: OPERATION_KEY_HASH,
+        status: "uncertain",
+      }),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(ROLE_OPERATION_KEY))
+
+  const receipt = {
+    activityId: "activity-role-create",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    roleId: ROLE_ID,
+    status: "completed",
+    timestamp: "2026-08-14T00:00:00.000Z",
+    verification: "match",
+  }
+  const completedConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleCreationError: new RoleCreationOperationConflictError(receipt),
+    },
+  })
+  const completedConflictResult = await completedConflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      name: "reviewer",
+      operationKey: ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_role_creation",
+  })
+  assert.equal(
+    structuredContent(completedConflictResult).status,
+    "operation-key-conflict",
+  )
+  assert.deepEqual(
+    (structuredContent(completedConflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+})
+
 test("MCP member moderation plans exact targets and enforces action-specific schemas", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -2050,10 +2581,10 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 23)
-  assert.equal(prompts.prompts.length, 5)
+  assert.equal(tools.tools.length, 27)
+  assert.equal(prompts.prompts.length, 6)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 3)
+  assert.equal(templates.resourceTemplates.length, 5)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

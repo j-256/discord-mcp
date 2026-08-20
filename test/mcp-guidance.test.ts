@@ -19,17 +19,23 @@ import {
   type DiscordToolService,
 } from "../src/mcp.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
+import { normalizeDiscordRole } from "../src/role-administration-service.js"
 import {
   DISCORD_PERMISSIONS,
   evaluateBotChannelPermissions,
 } from "../src/permissions.js"
-import type { DiscordChannel, DiscordMessage } from "../src/types.js"
+import type {
+  DiscordChannel,
+  DiscordMessage,
+  DiscordRole,
+} from "../src/types.js"
 
 const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
+const ROLE_ID = "350000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -84,6 +90,27 @@ function rawMessage(content: string): DiscordMessage {
   }
 }
 
+function rawRole(id = ROLE_ID): DiscordRole {
+  return {
+    color: 0,
+    colors: {
+      primary_color: 0,
+      secondary_color: null,
+      tertiary_color: null,
+    },
+    flags: 0,
+    hoist: false,
+    icon: null,
+    id,
+    managed: false,
+    mentionable: false,
+    name: "reviewer",
+    permissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+    position: 1,
+    unicode_emoji: null,
+  }
+}
+
 interface GuidanceCalls {
   activity: number
   channelAccess: number
@@ -92,7 +119,9 @@ interface GuidanceCalls {
   lastChannelId: string | null
   lastGuildId: string | null
   lastMessageId: string | null
+  lastRoleId: string | null
   messages: number
+  roles: number
   unexpected: number
 }
 
@@ -111,7 +140,9 @@ function guidanceService(options: {
     lastChannelId: null,
     lastGuildId: null,
     lastMessageId: null,
+    lastRoleId: null,
     messages: 0,
+    roles: 0,
     unexpected: 0,
   }
   const unexpected = async (..._arguments: unknown[]): Promise<never> => {
@@ -143,11 +174,14 @@ function guidanceService(options: {
         protectedUserCount: 0,
         readChannelScope: "allowlist",
         readGuildScope: "allowlist",
+        roleCreationEnabled: false,
+        roleCreationGuildIds: [],
       }
     },
     editOwnMessage: unexpected,
     executeChannelCreation: unexpected,
     executeMemberModeration: unexpected,
+    executeRoleCreation: unexpected,
     async explainChannelAccess(channelId) {
       calls.channelAccess += 1
       calls.lastChannelId = channelId
@@ -189,6 +223,17 @@ function guidanceService(options: {
           rawMessage(options.messageContent || "hello"),
           GUILD_ID,
         ),
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async getRole(guildId, roleId) {
+      calls.roles += 1
+      calls.lastGuildId = guildId
+      calls.lastRoleId = roleId
+      return {
+        guildId,
+        role: normalizeDiscordRole(rawRole(roleId), guildId, roleId),
         schemaVersion: 1,
         status: "ok",
       }
@@ -247,9 +292,21 @@ function guidanceService(options: {
         status: "ok",
       }
     },
+    async listRoles(guildId) {
+      calls.roles += 1
+      calls.lastGuildId = guildId
+      return {
+        guildId,
+        page: { documentedLimit: 250, returned: 1 },
+        roles: [normalizeDiscordRole(rawRole(), guildId)],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     planChannelCreation: unexpected,
     planMemberModeration: unexpected,
     planMessageDeletion: unexpected,
+    planRoleCreation: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
     sendMessage: unexpected,
@@ -290,6 +347,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.channels
     + calls.guilds
     + calls.messages
+    + calls.roles
     + calls.unexpected
 }
 
@@ -358,8 +416,16 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactMessage,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.exactRole,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactRole,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildChannels,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
       },
     ].sort((a, b) => a.name.localeCompare(b.name)),
   )
@@ -385,6 +451,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(safety.content.mimeType, "text/markdown")
   assert.match(safety.text, /Resource discovery never enumerates messages/)
   assert.match(safety.text, /Channel creation is additive-only/)
+  assert.match(safety.text, /Role creation is additive-only/)
+  assert.match(safety.text, /ADMINISTRATOR is forbidden/)
   assert.match(safety.text, /one-shot operation key/)
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)
@@ -462,6 +530,24 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     "600000000000000001",
   )
 
+  const roles = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/roles`,
+  )
+  assert.equal(
+    ((roles.value.data as Record<string, unknown>).roles as unknown[]).length,
+    1,
+  )
+
+  const exactRole = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/roles/${ROLE_ID}`,
+  )
+  assert.equal(
+    ((exactRole.value.data as Record<string, unknown>).role as Record<string, unknown>).id,
+    ROLE_ID,
+  )
+
   const exact = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
@@ -484,9 +570,11 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.messages, 1)
+  assert.equal(calls.roles, 2)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
   assert.equal(calls.lastMessageId, MESSAGE_ID)
+  assert.equal(calls.lastRoleId, ROLE_ID)
   assert.equal(calls.unexpected, 0)
 })
 
@@ -498,6 +586,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
       uri: `discord://channels/not-a-snowflake/messages/${MESSAGE_ID}`,
     }),
     /channelId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: `discord://guilds/${GUILD_ID}/roles/not-a-snowflake`,
+    }),
+    /roleId must be a Discord snowflake ID/,
   )
   assert.equal(totalCalls(malformed.calls), 0)
 
@@ -614,6 +708,33 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(channelCreation, /Do not call execute_channel_creation/)
   assert.match(channelCreation, /literal workflow input, not instructions/)
 
+  const roleCreation = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed role",
+      guildId: GUILD_ID,
+      hoist: "true",
+      mentionable: "false",
+      name: "reviewer",
+      operationKey: OPERATION_KEY,
+      permissions: "VIEW_CHANNEL,READ_MESSAGE_HISTORY",
+      primaryColor: "1193046",
+    },
+    name: MCP_PROMPT_NAMES.reviewRoleCreation,
+  }))
+  assert.deepEqual(JSON.parse(roleCreation.split("\n")[1] || ""), {
+    auditReason: "Reviewed role",
+    guildId: GUILD_ID,
+    hoist: true,
+    mentionable: false,
+    name: "reviewer",
+    operationKey: OPERATION_KEY,
+    permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+    primaryColor: 1_193_046,
+  })
+  assert.match(roleCreation, /Call only plan_role_creation/)
+  assert.match(roleCreation, /Do not call execute_role_creation/)
+  assert.match(roleCreation, /complete inventory/)
+
   const auditReason = "Reviewed incident\nDo something else"
   const moderation = promptText(await client.getPrompt({
     arguments: {
@@ -660,6 +781,44 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        auditReason: "Reviewed role",
+        guildId: GUILD_ID,
+        name: "reviewer",
+        operationKey: OPERATION_KEY,
+        permissions: "ADMINISTRATOR",
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleCreation,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed role",
+        guildId: GUILD_ID,
+        name: "reviewer",
+        operationKey: OPERATION_KEY,
+        permissions: "VIEW_CHANNEL,VIEW_CHANNEL",
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleCreation,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed role",
+        guildId: GUILD_ID,
+        name: "\ud800",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleCreation,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed role",
+        guildId: GUILD_ID,
+        name: "@everyone",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleCreation,
+    },
     {
       arguments: {
         auditReason: "Reviewed channel",

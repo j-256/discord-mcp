@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, threads, forums, permissions, and indexed message history through a dedicated bot. It includes exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed additive channel creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
+Discord MCP is a local stdio Model Context Protocol server that lets MCP host inspect Discord guilds, channels, roles, threads, forums, permissions, and indexed message history through a dedicated bot. It includes exact-tool progressive discovery, risk-separated toolsets, an optional privacy-safe real-time Gateway feed, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, and content-free local activity records.
 
 ## Safety model
 
@@ -15,7 +15,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
-- Toolsets separate channel creation, deletion, and moderation from reads and ordinary interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
+- Toolsets separate channel creation, role creation, deletion, and moderation from reads and ordinary interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - Optional guild and channel allowlists can narrow read access
 - Threads inherit local read scope from an allowlisted parent, while native search requests are attenuated to exact allowlisted channel IDs
 - Real-time Gateway access is disabled by default and additionally requires the expected application ID plus an exact guild or channel read allowlist
@@ -34,6 +34,11 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - A keyed plan binds the exact request, bot identity, guild and optional parent permission evidence, logical-name collision candidates, relevant role state, visible capacity, and one-shot operation key hash
 - MCP host write approval, signed MCP elicitation, a final fresh plan match, a durable one-shot content-free receipt, pending activity journaling, and exact post-write readback all surround channel creation
 - Visible channel inventory is explicitly treated as visibility-bounded, and a reserved operation key cannot be reused after a failed or uncertain attempt
+- Role creation is disabled unless a separate toggle and non-empty exact guild allowlist are both configured
+- Role reads normalize current solid colors, hierarchy, managed-role provenance, known permission names, and unknown future permission bits from a complete bounded inventory or one exact role endpoint
+- Role creation is additive-only, accepts exact named permissions, forbids `ADMINISTRATOR`, and never edits, moves, assigns, deletes, rolls back, or creates role icons, emoji, or gradients
+- A keyed plan binds the complete role inventory, exact request without the raw operation key, operation-key hash, bot identity, effective permissions, hierarchy, capacity, and logical-name collision candidates
+- MCP host write approval, signed MCP elicitation, a final fresh plan match, a durable one-shot content-free receipt, pending activity journaling, a single non-retried POST, and exact post-write readback all surround role creation
 - Deletion is disabled unless an explicit environment toggle and deletion-channel allowlist are both present
 - Deletion accepts exact message IDs rather than free-form filters
 - A keyed snapshot digest detects message edits or replacements
@@ -46,7 +51,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - MCP host write approval, signed MCP elicitation, a final fresh plan match, and a content-free pending activity record all precede member moderation
 - The bot token, message content, content hashes, embeds, components, attachment URLs, emoji, notification user IDs, raw idempotency or operation keys, channel names or topics, Discord audit-log reasons, profile names, role names, and Discord Interaction public key are never written to the activity log or operation receipts
 
-Treat channel creation, message deletion, and member moderation as consequential even though the connector records only bounded identifiers and outcomes.
+Treat channel creation, role creation, message deletion, and member moderation as consequential even though the connector records only bounded identifiers and outcomes.
 
 ## Requirements
 
@@ -59,6 +64,7 @@ Treat channel creation, message deletion, and member moderation as consequential
 - `Add Reactions` only in channels where reaction writes will be enabled
 - `Manage Messages` only in channels where deletion will eventually be enabled
 - `Manage Channels` and `View Channels` only in exact guilds and parent categories where additive channel creation will be enabled
+- `Manage Roles` only in exact guilds where additive role creation will be enabled, with the bot's own highest role above the newly created role
 - `Kick Members`, `Ban Members`, or `Moderate Members` only in exact guilds where the corresponding member administration action will be enabled
 
 Do not grant the bot `Administrator`. Restrict its Discord role at the category or channel level wherever possible.
@@ -75,9 +81,9 @@ The application public key is not used by the local REST or Gateway connections.
 6. Restrict the bot role to the intended categories or channels.
 7. Run `discord-mcp setup` and confirm that Discord reports the expected application, bot, and scoped guild access.
 
-Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Channels` only after selecting exact channel-creation guilds and parent categories, and keep the local channel-creation toggle disabled until those guild IDs are configured. Add `Manage Messages` only after selecting deletion channels. Add only the specific member permission needed for planned guild administration, keep the bot's highest role above eligible targets, and keep the local administration toggle disabled until exact guild and protected-user IDs are configured.
+Add `Send Messages` and `Add Reactions` later only for exact channels selected for interactions. Add `Manage Channels` only after selecting exact channel-creation guilds and parent categories, and keep the local channel-creation toggle disabled until those guild IDs are configured. Add `Manage Roles` only after selecting exact role-creation guilds, keep the bot's highest role above the new-role position, and keep the local role-creation toggle disabled until those guild IDs are configured. Add `Manage Messages` only after selecting deletion channels. Add only the specific member permission needed for planned guild administration, keep the bot's highest role above eligible targets, and keep the local administration toggle disabled until exact guild and protected-user IDs are configured.
 
-The optional real-time feed needs no additional privileged intent in the Developer Portal. Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), Gateway connection behavior in its [Gateway reference](https://docs.discord.com/developers/events/gateway), channel creation in its [guild resource reference](https://docs.discord.com/developers/resources/guild#create-guild-channel), message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message), and member moderation in its [guild resource reference](https://docs.discord.com/developers/resources/guild).
+The optional real-time feed needs no additional privileged intent in the Developer Portal. Discord documents bot installation in its [getting started guide](https://docs.discord.com/developers/quick-start/getting-started), Gateway connection behavior in its [Gateway reference](https://docs.discord.com/developers/events/gateway), channel and role creation in its [guild resource reference](https://docs.discord.com/developers/resources/guild), message deletion in its [message resource reference](https://docs.discord.com/developers/resources/message), and member moderation in its [guild resource reference](https://docs.discord.com/developers/resources/guild).
 
 ## Install
 
@@ -111,7 +117,7 @@ node dist/cli.js setup
 node dist/cli.js smoke
 ```
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, channel-creation policy, deletion policy, and administration policy. Offline checks do not contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, opening a Gateway connection, or starting telemetry export.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application identity pin, local allowlists, exact MCP tool surface and toolsets, Gateway policy, observability policy, interaction policy, channel-creation policy, role-creation policy, deletion policy, and administration policy. Offline checks do not contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content intent flag, and first guild-membership page without listing channels, reading messages, opening a Gateway connection, or starting telemetry export.
 
 `setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a MCP host configuration fragment. When invoked through the built CLI, the fragment points at that exact Node.js executable and CLI entrypoint. It embeds the verified public application ID but only refers to the bot token by environment-variable name.
 
@@ -128,7 +134,7 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
 | `DISCORD_MCP_ALLOWED_CHANNEL_IDS` | No | Comma- or whitespace-separated read channel allowlist |
 | `DISCORD_MCP_TOOL_SURFACE` | No | `full` advertises every selected canonical tool; `progressive` initially advertises only exact-tool discovery; defaults to `full` |
-| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, and `threads`; defaults to `all` |
+| `DISCORD_MCP_TOOLSETS` | No | `all` or a comma-separated selection of `activity`, `channel-creation`, `connector`, `deletion`, `gateway`, `guilds`, `interactions`, `messages`, `moderation`, `observability`, `role-creation`, `roles`, and `threads`; defaults to `all` |
 | `DISCORD_MCP_ALLOW_GATEWAY` | For real-time events | Must be exactly `true`; also requires the application ID and at least one exact read allowlist |
 | `DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE` | No | Process-local content-free event capacity from 1 to 1000; defaults to 100 |
 | `DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT` | For OTLP export | Must be exactly `true` before any collector connection can open |
@@ -146,6 +152,8 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_PROTECTED_USER_IDS` | No | Exact user IDs that member administration must never target; defaults empty and is bounded to 100 configured IDs |
 | `DISCORD_MCP_ALLOW_CHANNEL_CREATION` | For channel creation | Must be exactly `true` to enable reviewed additive channel creation |
 | `DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS` | For channel creation | Non-empty exact channel-creation guild allowlist and a subset of the read guild allowlist when one exists |
+| `DISCORD_MCP_ALLOW_ROLE_CREATION` | For role creation | Must be exactly `true` to enable reviewed additive role creation |
+| `DISCORD_MCP_ROLE_CREATION_GUILD_IDS` | For role creation | Non-empty exact role-creation guild allowlist and a subset of the read guild allowlist when one exists |
 | `DISCORD_MCP_ALLOW_INTERACTIONS` | For interactions | Must be exactly `true` to enable sends, own-message edits, or own-reaction adds |
 | `DISCORD_MCP_INTERACTION_CHANNEL_IDS` | For interactions | Non-empty exact interaction-channel or thread allowlist and a subset of the read channel allowlist when one exists |
 | `DISCORD_MCP_MENTION_USER_IDS` | No | Exact user IDs that interaction calls may explicitly notify; defaults empty and is bounded to 100 configured IDs |
@@ -153,7 +161,7 @@ Add `--json` to `setup`, `doctor`, or `smoke` for a versioned machine-readable r
 | `DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS` | No | Process-local spacing per interaction channel from 0 to 60000 milliseconds; defaults to 500 |
 | `DISCORD_MCP_ALLOW_DELETIONS` | For deletion | Must be exactly `true` to enable deletion |
 | `DISCORD_MCP_DELETE_CHANNEL_IDS` | For deletion | Non-empty deletion-channel allowlist and a subset of the read channel allowlist when one exists |
-| `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; channel-creation operation receipts use an adjacent private directory; defaults under the user's local state directory |
+| `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; channel- and role-creation operation receipts use an adjacent private directory; defaults under the user's local state directory |
 
 An unset read allowlist means all guild channels Discord allows the bot to view. The bot's Discord role remains authoritative.
 
@@ -199,6 +207,8 @@ env_vars = [
   "DISCORD_MCP_PROTECTED_USER_IDS",
   "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
   "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
+  "DISCORD_MCP_ALLOW_ROLE_CREATION",
+  "DISCORD_MCP_ROLE_CREATION_GUILD_IDS",
   "DISCORD_MCP_ALLOW_INTERACTIONS",
   "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   "DISCORD_MCP_MENTION_USER_IDS",
@@ -227,9 +237,9 @@ The [official MCP host configuration reference](https://modelcontextprotocol.io/
 
 ## Tools
 
-The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the channel-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
+The default `full` surface is recommended for MCP hosts with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `DISCORD_MCP_TOOL_SURFACE=progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of either tool in the channel-creation, role-creation, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives half of a reviewed workflow.
 
-`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `channel-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
+`DISCORD_MCP_TOOLSETS` is a callable-surface boundary, not an authorization substitute. It can remove tools but cannot override Discord permissions, local allowlists, feature toggles, planning, approval, confirmation, freshness, operation-key reservation, or journaling. The `channel-creation`, `role-creation`, `deletion`, and `moderation` sets are deliberately separate from `messages`, `guilds`, `roles`, and `interactions`. Omitted tools are absent from `tools/list`, rejected by direct calls, excluded from discovery, and have their dependent prompts omitted. Resources remain independently useful and continue to enforce their own policy.
 
 | Tool | Access | Purpose |
 | --- | --- | --- |
@@ -240,6 +250,8 @@ The default `full` surface is recommended for MCP hosts with native deferred-too
 | `get_gateway_events` | Local read | Page through retained content-free events after an optional process-bound cursor |
 | `list_guilds` | Discord read | List scoped bot guild memberships |
 | `list_channels` | Discord read | List scoped channels, thread metadata, and forum configuration without message content |
+| `list_roles` | Discord read | List the complete bounded role inventory with current colors, hierarchy, managed provenance, and arbitrary-width permission evidence |
+| `get_role` | Discord read | Fetch and normalize one exact role through Discord's exact guild-role endpoint |
 | `list_active_threads` | Discord read | List a bounded set of active threads and forum posts, optionally beneath one parent |
 | `list_archived_threads` | Discord read | Page through public, private, or joined-private archived threads with typed cursors |
 | `explain_channel_access` | Discord read | Explain the current bot's effective permissions and evidence confidence |
@@ -253,9 +265,11 @@ The default `full` surface is recommended for MCP hosts with native deferred-too
 | `delete_messages` | Discord write | Confirm, revalidate, journal, and delete the reviewed IDs |
 | `plan_channel_creation` | Discord read | Verify one additive category, text, or forum target against live permission, collision, parent, and visible-capacity evidence and produce a keyed digest |
 | `execute_channel_creation` | Discord write | Confirm, revalidate, reserve the one-shot key, journal, create once, and read back the reviewed channel without editing or rollback |
+| `plan_role_creation` | Discord read | Verify one additive role against complete inventory, collision, capacity, bot permission, hierarchy, and requested-permission-subset evidence and produce a keyed digest |
+| `execute_role_creation` | Discord write | Confirm, revalidate, reserve the one-shot key, journal, create once without automatic retry, and read back the exact reviewed role without editing or rollback |
 | `plan_member_moderation` | Discord read | Verify one exact target, permission and hierarchy evidence, action state, and keyed moderation digest |
 | `execute_member_moderation` | Discord write | Confirm, revalidate, journal, and execute the reviewed exact-ID member action |
-| `list_activity` | Local read | Read content-free channel-creation, deletion, interaction, and member-moderation activity |
+| `list_activity` | Local read | Read content-free channel-creation, role-creation, deletion, interaction, and member-moderation activity |
 
 ## Resources
 
@@ -276,6 +290,8 @@ Live templates are non-enumerable and require exact IDs:
 | Resource template | Purpose |
 | --- | --- |
 | `discord://guilds/{guildId}/channels` | Read normalized in-scope channel metadata for one guild |
+| `discord://guilds/{guildId}/roles` | Read the complete normalized role inventory for one guild |
+| `discord://guilds/{guildId}/roles/{roleId}` | Read one exact normalized role from one guild |
 | `discord://channels/{channelId}/access` | Explain the verified bot's effective access to one channel or thread |
 | `discord://channels/{channelId}/messages/{messageId}` | Read one exact message from one permitted channel |
 
@@ -309,17 +325,18 @@ Exporter failures are observational: they update fixed health counters but never
 
 ## Prompts
 
-MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned. Message prompts are listed only with the `messages` toolset, and each reviewed prompt is listed only with its matching `channel-creation`, `deletion`, or `moderation` toolset.
+MCP prompts are explicit user-selected workflow templates. Rendering a prompt performs no Discord, local activity, planning, or write call. Arguments remain flat MCP strings but are strictly validated and converted into a one-line JSON input object so arbitrary text cannot escape into workflow instructions. Rendered prompts pass through the connector's token-redaction boundary before they are returned. Message prompts are listed only with the `messages` toolset, and each reviewed prompt is listed only with its matching `channel-creation`, `role-creation`, `deletion`, or `moderation` toolset.
 
 | Prompt | Workflow boundary |
 | --- | --- |
 | `summarize_channel` | Read one bounded message page, cite evidence, and make no search or write call |
 | `search_guild_messages` | Run one bounded native content search, preserve indexing status, and make no write call |
 | `review_channel_creation` | Build and review one additive keyed channel-creation plan, then stop before execution |
+| `review_role_creation` | Build and review one additive keyed role-creation plan with exact named permissions, then stop before execution |
 | `review_message_deletion` | Build and review an exact keyed deletion plan, then stop before execution |
 | `review_member_moderation` | Build and review one exact keyed moderation plan, then stop before execution |
 
-The channel-creation, deletion, and moderation prompts do not collapse approval stages. They explicitly forbid their execution tools, leaving client write approval, signed elicitation, fresh-plan verification, interactive confirmation, and pending content-free records on the separate write call.
+The channel-creation, role-creation, deletion, and moderation prompts do not collapse approval stages. They explicitly forbid their execution tools, leaving client write approval, signed elicitation, fresh-plan verification, interactive confirmation, and pending content-free records on the separate write call.
 
 ## Search
 
@@ -367,6 +384,31 @@ Discord's create-channel endpoint has no idempotency token. Before the single PO
 Within one connector process, executions for the same guild, parent, and normalized logical name are serialized across different operation keys and supported channel kinds. A queued execution rebuilds its plan after the preceding write, and it is blocked without reserving its key if that preceding write ends uncertain. This closes the in-process duplicate-name race without pretending that Discord supplies a uniqueness constraint.
 
 After a successful POST, the connector validates the response identity and performs an exact channel GET. A matching readback returns `completed`; a safe identity with server-adjusted settings returns `completed-with-drift` and the observed values. A write whose receipt or final activity update fails reports that local recording failure without hiding the known channel ID. The connector never retries the POST and never deletes a newly created channel as compensation. See Discord's [create guild channel reference](https://docs.discord.com/developers/resources/guild#create-guild-channel).
+
+## Role inventory and reviewed additive role creation
+
+`list_roles` returns a guild's complete bounded role inventory, while `get_role` uses Discord's exact guild-role endpoint. Both normalize Discord's solid `colors` object, hierarchy position, hoist and mention settings, icon and Unicode emoji fields, flags, managed-role provenance, known permission names, raw decimal permission bitfield, and unknown future permission bits. Inventory validation requires exactly one valid `@everyone` role and rejects duplicate IDs, malformed evidence, and a response above Discord's documented guild-role limit.
+
+Role creation has no immediate-call path. Set `DISCORD_MCP_ALLOW_ROLE_CREATION=true` and list every eligible guild in `DISCORD_MCP_ROLE_CREATION_GUILD_IDS`. The role-creation guild allowlist must be a subset of `DISCORD_MCP_ALLOWED_GUILD_IDS` when the read allowlist is present. Grant the bot `Manage Roles`, keep its highest role above the default new-role position, and grant the bot only permissions this workflow may place on new roles. Do not grant the bot `Administrator`; the planner warns if it detects that permission.
+
+The narrow surface accepts an exact role name, a unique list of official permission names, one solid RGB primary color, hoist and mentionable booleans, a Discord audit-log reason, and a unique one-shot operation key. Permission arrays are canonicalized into arbitrary-width decimal bitfields. `ADMINISTRATOR` is always rejected, every requested permission must be a subset of the connector bot's effective guild permissions, and a defined high-risk set receives an explicit plan warning. The workflow never edits, moves, assigns, deletes, rolls back, adds icons or emoji, or creates gradient roles.
+
+1. Call `plan_role_creation` with the exact guild, name, named permissions, optional properties, audit reason, and one-shot operation key.
+2. Review the exact guild and owner IDs, untrusted names, named permissions and bitfield, high-risk permissions, color and display settings, complete role count, bot effective permissions and hierarchy, warnings, hashed operation key, action, and keyed digest.
+3. If the action is `none`, one exact standard role already has the requested state and no confirmation or write is needed.
+4. Call `execute_role_creation` with identical inputs plus the digest.
+5. Approve the signed MCP confirmation only if every exact ID, permission, property, warning, reason, operation-key hash, and digest remains intended.
+6. Review the returned role ID, exact readback state, activity ID, and outcome before any assignment or follow-up.
+
+Planning fetches the exact guild, connector bot member, and complete role inventory together. It requires complete effective-permission evidence, guild-level `MANAGE_ROLES`, a connector role above `@everyone`, available capacity, and an unambiguous logical name. Logical matching normalizes Unicode compatibility forms, letter case, spaces, underscores, and hyphens. A managed role or a standard role with different properties at the logical name is a blocking conflict rather than an implicit edit.
+
+The process-keyed digest covers the normalized request without the raw operation key, the operation-key hash, bot identity and role IDs, effective permissions and highest-role evidence, guild identity and features, every normalized role snapshot, logical-name candidates, action, and role limit. A connector restart invalidates the digest. The MCP adapter rebuilds the plan before approval, and the service rebuilds it immediately before mutation. Both require the exact same digest.
+
+Discord's create-role endpoint has no idempotency token, so `execute_role_creation` is accurately annotated as non-idempotent even though the connector surrounds it with replay defenses. Before the single POST, the connector atomically reserves the operation-key hash in a durable private receipt and appends a pending content-free activity record. The raw key, role name, named permissions, audit reason, and other Discord content are absent from both records. A reserved key is permanently spent after a known failure or uncertain result. Do not retry it; inspect `get_role`, `list_roles`, and the Discord audit log before considering a new reviewed request with a new key.
+
+Within one connector process, executions for the same guild and normalized logical role name are serialized across operation keys. A queued execution rebuilds its plan after the preceding write and is blocked without reserving its key if that write ends uncertain. Overlapping role-creation scope across multiple connector processes remains unsafe because Discord does not enforce logical-name uniqueness.
+
+After the POST, the connector validates the returned role identity and performs an exact role GET. A matching readback returns `completed`; a safe identity with server-adjusted properties returns `completed-with-drift` and the observed role. Known Discord 4xx rejections before a role ID is known are `failed`; transport failures, Discord 5xx responses, or failed exact verification are `uncertain`. The connector never automatically retries the POST and never deletes a newly created role as compensation. See Discord's [role resource reference](https://docs.discord.com/developers/topics/permissions#role-object) and [create guild role reference](https://docs.discord.com/developers/resources/guild#create-guild-role).
 
 ## Safe message interactions
 
@@ -445,7 +487,7 @@ node dist/cli.js help
 node dist/cli.js version
 ```
 
-The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, content-free MCP catalogs, and read-only protocol path without listing Discord channels, reading messages, creating channels, or performing member moderation:
+The online doctor and MCP smoke verify the token, expected application ID, bot identity, guild membership page, content-free MCP catalogs, and read-only protocol path without listing Discord channels, reading messages, creating channels or roles, or performing member moderation:
 
 ```sh
 node dist/cli.js doctor --online
@@ -489,7 +531,7 @@ New Discord capabilities should follow the existing layers:
 4. Register an accurately annotated MCP tool.
 5. Add transport, policy, service, and MCP contract tests.
 
-Additional channel mutation and role administration should reuse the reviewed-plan core but remain separate from additive channel creation so their edit, move, overwrite, and deletion risks receive distinct policy and confirmation gates. Slash commands and Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
+Additional channel and role mutation should reuse the reviewed-plan core but remain separate from additive creation so edit, move, assignment, overwrite, and deletion risks receive distinct policy and confirmation gates. Slash commands and Discord Interaction endpoints must verify Discord signatures with the application public key and should remain separate from the local stdio process.
 
 ## License
 

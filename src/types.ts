@@ -142,11 +142,34 @@ export interface DiscordPermissionOverwrite {
 }
 
 export interface DiscordRole {
+  color?: number
+  colors?: DiscordRoleColors
+  flags?: number
+  hoist?: boolean
   id: string
+  icon?: string | null
   managed: boolean
+  mentionable?: boolean
   name: string
   permissions: string
   position: number
+  tags?: DiscordRoleTags
+  unicode_emoji?: string | null
+}
+
+export interface DiscordRoleColors {
+  primary_color: number
+  secondary_color: number | null
+  tertiary_color: number | null
+}
+
+export interface DiscordRoleTags {
+  available_for_purchase?: null
+  bot_id?: string
+  guild_connections?: null
+  integration_id?: string
+  premium_subscriber?: null
+  subscription_listing_id?: string
 }
 
 export interface DiscordThreadList {

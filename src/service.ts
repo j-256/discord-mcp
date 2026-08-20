@@ -54,6 +54,17 @@ import {
 } from "./normalize.js"
 import { evaluateBotChannelPermissions } from "./permissions.js"
 import { ScopePolicy } from "./policy.js"
+import type {
+  RoleAdministrationServiceOptions,
+  RoleCreationPlan,
+  RoleCreationRequest,
+  RoleCreationResult,
+} from "./role-administration-service.js"
+import {
+  normalizeDiscordRole,
+  normalizeDiscordRoleInventory,
+  RoleAdministrationService,
+} from "./role-administration-service.js"
 import {
   FileOperationStore,
   operationReceiptDirectory,
@@ -75,6 +86,7 @@ export interface DiscordServiceClient {
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildChannel: DiscordClient["createGuildChannel"]
+  createGuildRole: DiscordClient["createGuildRole"]
   createMessage: DiscordClient["createMessage"]
   deleteMessage: DiscordClient["deleteMessage"]
   editMessage: DiscordClient["editMessage"]
@@ -85,6 +97,7 @@ export interface DiscordServiceClient {
   getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
+  getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoles: DiscordClient["getGuildRoles"]
   getMessage: DiscordClient["getMessage"]
   getUser: DiscordClient["getUser"]
@@ -134,6 +147,10 @@ export interface ConnectorServiceOptions {
   >
   operationStore?: OperationStore
   policy?: ScopePolicy
+  roleAdministrationOptions?: Pick<
+    RoleAdministrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
 }
 
 interface VerifiedIdentity {
@@ -243,6 +260,7 @@ export class ConnectorService {
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
   readonly #policy: ScopePolicy
+  readonly #roleAdministrationService: RoleAdministrationService
 
   constructor(options: ConnectorServiceOptions) {
     this.#config = options.config
@@ -281,6 +299,13 @@ export class ConnectorService {
       minWriteIntervalMs: options.config.interactionMinWriteIntervalMs,
       policy: this.#policy,
       ...options.interactionOptions,
+    })
+    this.#roleAdministrationService = new RoleAdministrationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.roleAdministrationOptions,
     })
   }
 
@@ -375,6 +400,45 @@ export class ConnectorService {
           - (right.position ?? Number.MAX_SAFE_INTEGER)
         )),
       guildId,
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+    }
+  }
+
+  async listRoles(guildId: string, options: RequestOptions = {}) {
+    await this.#verifyIdentity(options)
+    this.#policy.assertGuildAllowed(guildId)
+    const roles = normalizeDiscordRoleInventory(
+      await this.#client.getGuildRoles(guildId, options),
+      guildId,
+    )
+    return {
+      guildId,
+      page: {
+        documentedLimit: DISCORD_LIMITS.guildRoles,
+        returned: roles.length,
+      },
+      roles,
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+    }
+  }
+
+  async getRole(
+    guildId: string,
+    roleId: string,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    this.#policy.assertGuildAllowed(guildId)
+    const role = normalizeDiscordRole(
+      await this.#client.getGuildRole(guildId, roleId, options),
+      guildId,
+      roleId,
+    )
+    return {
+      guildId,
+      role,
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
@@ -724,6 +788,14 @@ export class ConnectorService {
     return this.#channelAdministrationService.plan(identity.bot.id, request, options)
   }
 
+  async planRoleCreation(
+    request: RoleCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleCreationPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleAdministrationService.plan(identity.bot.id, request, options)
+  }
+
   async executeChannelCreation(
     request: ChannelCreationRequest,
     planDigest: string,
@@ -731,6 +803,20 @@ export class ConnectorService {
   ): Promise<ChannelCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#channelAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeRoleCreation(
+    request: RoleCreationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<RoleCreationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleAdministrationService.execute(
       identity.bot.id,
       request,
       planDigest,

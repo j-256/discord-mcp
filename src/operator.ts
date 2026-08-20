@@ -49,6 +49,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   messageContentIntent: "message-content-intent",
   nodeVersion: "node-version",
   observability: "observability",
+  roleCreationPolicy: "role-creation-policy",
   token: "token",
   toolSurface: "tool-surface",
 })
@@ -177,6 +178,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowChannelCreation && config.channelCreationGuildIds.size === 0) {
     warnings.push("The channel-creation toggle is enabled but channel creation remains blocked because no channel-creation guild allowlist is configured")
   }
+  if (config.allowRoleCreation && config.roleCreationGuildIds.size === 0) {
+    warnings.push("The role-creation toggle is enabled but role creation remains blocked because no role-creation guild allowlist is configured")
+  }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
@@ -186,6 +190,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowInteractions, "interactions", "Message interactions"],
+    [config.allowRoleCreation, "role-creation", "Role creation"],
   ] as const) {
     if (enabled && !config.mcpToolsets.has(toolset)) {
       warnings.push(`${capability} is enabled by policy but omitted from the MCP ${toolset} toolset`)
@@ -350,6 +355,25 @@ export async function diagnoseConnector(
         `Message deletion is constrained to ${config.deleteChannelIds.size} channels`,
       ))
     }
+    if (!config.allowRoleCreation) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleCreationPolicy,
+        "pass",
+        "Additive role creation is disabled",
+      ))
+    } else if (config.roleCreationGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleCreationPolicy,
+        "warn",
+        "Role-creation toggle is enabled, but the required role-creation guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleCreationPolicy,
+        "pass",
+        `Additive role creation is constrained to ${config.roleCreationGuildIds.size} guilds with reviewed one-shot execution`,
+      ))
+    }
     if (!config.allowInteractions) {
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
@@ -473,6 +497,8 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.protectedUserIds,
     ENVIRONMENT_NAMES.allowChannelCreation,
     ENVIRONMENT_NAMES.channelCreationGuildIds,
+    ENVIRONMENT_NAMES.allowRoleCreation,
+    ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowInteractions,
@@ -708,6 +734,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error("MCP smoke check found invalid execute_channel_creation annotations")
+      }
+    }
+    if (selectedToolNames.includes("execute_role_creation")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_role_creation"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== false
+        || tool.annotations.idempotentHint !== false
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_role_creation annotations")
       }
     }
     const interactionAnnotations = [

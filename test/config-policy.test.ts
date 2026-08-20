@@ -64,6 +64,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.allowDeletions, true)
   assert.equal(config.allowGateway, false)
   assert.equal(config.allowInteractions, true)
+  assert.equal(config.allowRoleCreation, false)
+  assert.deepEqual([...config.roleCreationGuildIds], [])
   assert.equal(config.interactionMaxWritesPerMinute, 12)
   assert.equal(config.interactionMinWriteIntervalMs, 750)
   assert.equal(config.expectedApplicationId, "300000000000000001")
@@ -108,6 +110,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     protectedUserCount: 0,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
+    roleCreationEnabled: false,
+    roleCreationGuildIds: [],
   })
 
   for (const environment of [
@@ -234,6 +238,8 @@ test("configuration and policy require an exact administration guild and protect
     protectedUserCount: 1,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
+    roleCreationEnabled: false,
+    roleCreationGuildIds: [],
   })
 })
 
@@ -278,6 +284,39 @@ test("configuration and policy isolate exact channel creation authority", () => 
     () => moderationOnly.assertChannelCreationAllowed(GUILD_ID),
     /creation is disabled/,
   )
+})
+
+test("configuration and policy isolate exact role creation authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ROLE_CREATION_GUILD_IDS: "999999999999999999",
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertRoleCreationAllowed(GUILD_ID),
+    /role creation is disabled/,
+  )
+
+  const enabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
+    DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  enabled.assertRoleCreationAllowed(GUILD_ID)
+  assert.throws(
+    () => enabled.assertRoleCreationAllowed("999999999999999999"),
+    /outside the role creation scope/,
+  )
+  assert.equal(enabled.describe().roleCreationEnabled, true)
+  assert.deepEqual(enabled.describe().roleCreationGuildIds, [GUILD_ID])
 })
 
 test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
@@ -399,6 +438,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     protectedUserCount: 0,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",
+    roleCreationEnabled: false,
+    roleCreationGuildIds: [],
   })
 })
 

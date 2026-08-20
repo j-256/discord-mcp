@@ -66,6 +66,10 @@ export const DISCORD_PERMISSIONS = Object.freeze({
 
 export type DiscordPermissionName = keyof typeof DISCORD_PERMISSIONS
 
+export const DISCORD_PERMISSION_NAMES = Object.freeze(
+  Object.keys(DISCORD_PERMISSIONS) as DiscordPermissionName[],
+)
+
 const PERMISSION_ENTRIES = Object.entries(DISCORD_PERMISSIONS) as Array<[
   DiscordPermissionName,
   bigint,
@@ -133,7 +137,10 @@ interface PermissionBits {
   deny: bigint
 }
 
-function parsePermissionBits(value: string, description: string): bigint {
+export function parseDiscordPermissionBits(
+  value: string,
+  description = "role",
+): bigint {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) {
     throw new Error(`Discord returned an invalid ${description} permission bitfield`)
   }
@@ -145,8 +152,8 @@ function overwriteBits(
   description: string,
 ): PermissionBits {
   return {
-    allow: parsePermissionBits(overwrite?.allow ?? "0", `${description} allow`),
-    deny: parsePermissionBits(overwrite?.deny ?? "0", `${description} deny`),
+    allow: parseDiscordPermissionBits(overwrite?.allow ?? "0", `${description} allow`),
+    deny: parseDiscordPermissionBits(overwrite?.deny ?? "0", `${description} deny`),
   }
 }
 
@@ -184,10 +191,29 @@ function combinedRoleOverwrites(
   return { allow, deny }
 }
 
-function permissionNames(bits: bigint): DiscordPermissionName[] {
+export function discordPermissionNames(bits: bigint): DiscordPermissionName[] {
   return PERMISSION_ENTRIES
     .filter(([, permission]) => (bits & permission) === permission)
     .map(([name]) => name)
+}
+
+export function discordPermissionBitfield(
+  names: readonly DiscordPermissionName[],
+): bigint {
+  const unique = new Set<DiscordPermissionName>()
+  let bits = 0n
+  for (const name of names) {
+    if (unique.has(name)) {
+      throw new RangeError(`Discord permission ${name} is duplicated`)
+    }
+    unique.add(name)
+    bits |= DISCORD_PERMISSIONS[name]
+  }
+  return bits
+}
+
+export function unknownDiscordPermissionBits(bits: bigint): bigint {
+  return bits & ~ALL_KNOWN_PERMISSION_BITS
 }
 
 export function evaluateGuildMemberPermissions(
@@ -233,7 +259,7 @@ export function evaluateGuildMemberPermissions(
     complete = false
     warnings.push("Discord role evidence omitted the guild @everyone role")
   } else {
-    effective |= parsePermissionBits(everyone.permissions, "@everyone role")
+    effective |= parseDiscordPermissionBits(everyone.permissions, "@everyone role")
     appliedRoles.push(everyone)
   }
   for (const roleId of [...memberRoleIds].sort()) {
@@ -244,7 +270,7 @@ export function evaluateGuildMemberPermissions(
       warnings.push(`Discord member evidence references missing role ${roleId}`)
       continue
     }
-    effective |= parsePermissionBits(role.permissions, `role ${roleId}`)
+    effective |= parseDiscordPermissionBits(role.permissions, `role ${roleId}`)
     appliedRoles.push(role)
   }
 
@@ -263,7 +289,7 @@ export function evaluateGuildMemberPermissions(
     administrator,
     appliedRoleIds: appliedRoles.map((role) => role.id).sort(),
     complete,
-    effectivePermissionNames: permissionNames(effective),
+    effectivePermissionNames: discordPermissionNames(effective),
     effectivePermissions: effective.toString(),
     highestRoleIds,
     highestRolePosition,
@@ -312,7 +338,7 @@ export function evaluateBotChannelPermissions(
     complete = false
     warnings.push("Discord role evidence omitted the guild @everyone role")
   } else {
-    const everyoneBits = parsePermissionBits(everyone.permissions, "@everyone role")
+    const everyoneBits = parseDiscordPermissionBits(everyone.permissions, "@everyone role")
     observed |= everyoneBits
     effective = applyBits(
       trace,
@@ -333,7 +359,7 @@ export function evaluateBotChannelPermissions(
       warnings.push(`Discord member evidence references missing role ${roleId}`)
       continue
     }
-    const bits = parsePermissionBits(role.permissions, `role ${roleId}`)
+    const bits = parseDiscordPermissionBits(role.permissions, `role ${roleId}`)
     observed |= bits
     roleBits |= bits
     appliedRoleIds.push(roleId)
@@ -418,7 +444,7 @@ export function evaluateBotChannelPermissions(
     canReadMessages: complete ? missing.length === 0 : null,
     confidence: complete ? "complete" : "partial",
     decisionTrace: trace,
-    effectivePermissionNames: permissionNames(effective),
+    effectivePermissionNames: discordPermissionNames(effective),
     effectivePermissions: effective.toString(),
     missingReadPermissions: missing,
     permissionSourceChannelId: options.permissionChannel.id,
