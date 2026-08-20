@@ -33,6 +33,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
+  reviewChannelCreation: "review_channel_creation",
   reviewMemberModeration: "review_member_moderation",
   reviewMessageDeletion: "review_message_deletion",
   searchGuildMessages: "search_guild_messages",
@@ -44,6 +45,7 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
 ]
 
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
+  [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",
   [MCP_PROMPT_NAMES.reviewMemberModeration]: "moderation",
   [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",
   [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",

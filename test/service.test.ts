@@ -5,8 +5,13 @@ import type { ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
 import { ConfigurationError, PolicyError } from "../src/errors.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
+import type {
+  OperationReceipt,
+  OperationStore,
+} from "../src/operation-store.js"
 import {
   ConnectorService,
+  type ConnectorServiceOptions,
   type DiscordServiceClient,
 } from "../src/service.js"
 import type {
@@ -28,6 +33,25 @@ const OTHER_CHANNEL_ID = "400000000000000002"
 const THREAD_ID = "400000000000000003"
 const SECOND_THREAD_ID = "400000000000000004"
 const MESSAGE_ID = "500000000000000001"
+const CREATED_CHANNEL_ID = "400000000000000005"
+
+class MemoryOperationStore implements OperationStore {
+  receipt: OperationReceipt | undefined
+
+  async finish(receipt: OperationReceipt): Promise<void> {
+    this.receipt = receipt
+  }
+
+  async get(): Promise<OperationReceipt | undefined> {
+    return this.receipt
+  }
+
+  async reserve(receipt: OperationReceipt) {
+    if (this.receipt) return { created: false, receipt: this.receipt }
+    this.receipt = receipt
+    return { created: true, receipt }
+  }
+}
 
 function application(id = APPLICATION_ID): DiscordApplication {
   return {
@@ -125,13 +149,16 @@ function role(
 
 function serviceFixture(overrides: {
   application?: DiscordApplication
+  channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
+  operationStore?: OperationStore
 } = {}) {
   const calls = {
     addReaction: 0,
     application: 0,
+    createChannel: 0,
     createMessage: 0,
     editMessage: 0,
     guilds: 0,
@@ -145,6 +172,10 @@ function serviceFixture(overrides: {
     },
     async bulkDeleteMessages() {},
     async createGuildBan() {},
+    async createGuildChannel() {
+      calls.createChannel += 1
+      return channel()
+    },
     async createMessage(_channelId, input) {
       calls.createMessage += 1
       return message({
@@ -254,7 +285,15 @@ function serviceFixture(overrides: {
   }, { homeDirectory: "/test/home" })
   return {
     calls,
-    service: new ConnectorService({ activityStore, client, config }),
+    service: new ConnectorService({
+      activityStore,
+      client,
+      config,
+      ...(overrides.channelAdministrationOptions
+        ? { channelAdministrationOptions: overrides.channelAdministrationOptions }
+        : {}),
+      ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
+    }),
   }
 }
 
@@ -352,6 +391,94 @@ test("service verifies identity before planning and executing exact member moder
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.removeMember, 1)
+})
+
+test("service verifies identity before reviewed additive channel creation", async () => {
+  const operationStore = new MemoryOperationStore()
+  const { calls, service } = serviceFixture({
+    channelAdministrationOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(7),
+      randomId: () => "activity-channel-create",
+    },
+    client: {
+      async createGuildChannel(guildId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(auditReason, "Reviewed channel addition")
+        assert.deepEqual(input, {
+          defaultAutoArchiveDuration: 1_440,
+          name: "launches",
+          nsfw: false,
+          rateLimitPerUser: 0,
+          topic: null,
+          type: 0,
+        })
+        calls.createChannel += 1
+        return channel({
+          default_auto_archive_duration: 1_440,
+          id: CREATED_CHANNEL_ID,
+          name: "launches",
+          nsfw: false,
+          parent_id: null,
+          rate_limit_per_user: 0,
+          topic: null,
+        })
+      },
+      async getChannel(channelId) {
+        assert.equal(channelId, CREATED_CHANNEL_ID)
+        return channel({
+          default_auto_archive_duration: 1_440,
+          id: CREATED_CHANNEL_ID,
+          name: "launches",
+          nsfw: false,
+          parent_id: null,
+          rate_limit_per_user: 0,
+          topic: null,
+        })
+      },
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildChannels() {
+        return []
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_CHANNELS | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed channel addition",
+    guildId: GUILD_ID,
+    kind: "text" as const,
+    name: "launches",
+    operationKey: "channel-create-attempt-0001",
+  }
+
+  const plan = await service.planChannelCreation(request)
+  const result = await service.executeChannelCreation(request, plan.digest)
+
+  assert.equal(plan.action, "create")
+  assert.equal(result.channelId, CREATED_CHANNEL_ID)
+  assert.equal(result.status, "completed")
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.createChannel, 1)
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.doesNotMatch(JSON.stringify(operationStore.receipt), /channel-create-attempt/)
 })
 
 test("service verifies identity once and reports scope without message reads", async () => {

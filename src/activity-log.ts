@@ -7,12 +7,19 @@ import {
 import { dirname } from "node:path"
 
 import {
+  CHANNEL_CREATION_KINDS,
   CONNECTOR_LIMITS,
+  CONTENT_FREE_ERROR_PATTERN,
+  CONTENT_FREE_IDENTIFIER_PATTERN,
+  DISCORD_SNOWFLAKE_PATTERN,
   MEMBER_MODERATION_ACTIONS,
   SCHEMA_VERSION,
+  type ChannelCreationKind,
   type MemberModerationAction,
 } from "./constants.js"
 import { AuditLogError, errorMessage } from "./errors.js"
+import { OPERATION_KEY_HASH_PATTERN } from "./operation-store.js"
+import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 
 const MAX_ACTIVITY_READ_BYTES = 1_048_576
 
@@ -74,7 +81,34 @@ export interface MemberModerationActivity {
   userId: string
 }
 
-export type ActivityEntry = DeletionActivity | InteractionActivity | MemberModerationActivity
+export type ChannelCreationActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ChannelCreationActivity {
+  channelId: string | null
+  channelKind: ChannelCreationKind
+  error: string | null
+  guildId: string
+  id: string
+  kind: "channel-create"
+  operationKeyHash: string
+  parentId: string | null
+  planDigest: string
+  schemaVersion: number
+  status: ChannelCreationActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
+export type ActivityEntry =
+  | ChannelCreationActivity
+  | DeletionActivity
+  | InteractionActivity
+  | MemberModerationActivity
 
 export interface ActivityList {
   entries: ActivityEntry[]
@@ -209,6 +243,82 @@ function parseMemberModerationActivity(
   }
 }
 
+function parseChannelCreationActivity(
+  value: unknown,
+): ChannelCreationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "channel-create"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !CHANNEL_CREATION_KINDS.includes(record.channelKind as ChannelCreationKind)
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.channelId === null || (
+      typeof record.channelId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    ))
+    || !(record.parentId === null || (
+      typeof record.parentId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.parentId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.channelId !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.channelId === null
+      || record.verification !== "match"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.channelId === null
+      || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    channelKind: record.channelKind as ChannelCreationKind,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "channel-create",
+    operationKeyHash: record.operationKeyHash,
+    parentId: record.parentId,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ChannelCreationActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 export class JsonlActivityLog implements ActivityStore {
   readonly #file: string
 
@@ -270,7 +380,8 @@ export class JsonlActivityLog implements ActivityStore {
         if (!line.trim()) continue
         try {
           const value: unknown = JSON.parse(line)
-          const entry = parseDeletionActivity(value)
+          const entry = parseChannelCreationActivity(value)
+            || parseDeletionActivity(value)
             || parseInteractionActivity(value)
             || parseMemberModerationActivity(value)
           if (entry) entries.push(entry)

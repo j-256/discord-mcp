@@ -13,6 +13,8 @@ export interface PolicyDescription {
   administrationGuildIds: string[]
   allowedChannelIds: string[]
   allowedGuildIds: string[]
+  channelCreationEnabled: boolean
+  channelCreationGuildIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
   gatewayEnabled: boolean
@@ -34,10 +36,12 @@ export class ScopePolicy {
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
+  readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowGateway: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
+  readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
@@ -64,6 +68,8 @@ export class ScopePolicy {
   > & Partial<Pick<
     ConnectorConfig,
     | "allowGateway"
+    | "allowChannelCreation"
+    | "channelCreationGuildIds"
     | "gatewayEventBufferSize"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -72,10 +78,12 @@ export class ScopePolicy {
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
+    this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowGateway = config.allowGateway ?? false
     this.#deleteChannelIds = config.deleteChannelIds
+    this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
@@ -93,6 +101,9 @@ export class ScopePolicy {
       administrationGuildIds: [...this.#adminGuildIds].sort(),
       allowedChannelIds: [...this.#allowedChannelIds].sort(),
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
+      channelCreationEnabled: this.#allowChannelCreation
+        && this.#channelCreationGuildIds.size > 0,
+      channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       gatewayEnabled: this.#allowGateway,
@@ -144,6 +155,19 @@ export class ScopePolicy {
     }
     if (this.#protectedUserIds.has(userId)) {
       throw new PolicyError(`Discord user ${userId} is protected from administration`)
+    }
+  }
+
+  assertChannelCreationAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowChannelCreation) {
+      throw new PolicyError("Discord channel creation is disabled by connector configuration")
+    }
+    if (this.#channelCreationGuildIds.size === 0) {
+      throw new PolicyError("Discord channel creation requires an explicit guild allowlist")
+    }
+    if (!this.#channelCreationGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the channel creation scope`)
     }
   }
 

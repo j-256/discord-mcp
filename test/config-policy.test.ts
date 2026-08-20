@@ -92,6 +92,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     administrationGuildIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
+    channelCreationEnabled: false,
+    channelCreationGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     gatewayEnabled: false,
@@ -216,6 +218,8 @@ test("configuration and policy require an exact administration guild and protect
     administrationGuildIds: [GUILD_ID],
     allowedChannelIds: [],
     allowedGuildIds: [],
+    channelCreationEnabled: false,
+    channelCreationGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     gatewayEnabled: false,
@@ -231,6 +235,49 @@ test("configuration and policy require an exact administration guild and protect
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
   })
+})
+
+test("configuration and policy isolate exact channel creation authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: "999999999999999999",
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertChannelCreationAllowed(GUILD_ID),
+    /creation is disabled/,
+  )
+
+  const enabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+    DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  enabled.assertChannelCreationAllowed(GUILD_ID)
+  assert.throws(
+    () => enabled.assertChannelCreationAllowed("999999999999999999"),
+    /outside the channel creation scope/,
+  )
+  assert.equal(enabled.describe().channelCreationEnabled, true)
+  assert.deepEqual(enabled.describe().channelCreationGuildIds, [GUILD_ID])
+
+  const moderationOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => moderationOnly.assertChannelCreationAllowed(GUILD_ID),
+    /creation is disabled/,
+  )
 })
 
 test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
@@ -336,6 +383,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     administrationGuildIds: [],
     allowedChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
     allowedGuildIds: [GUILD_ID],
+    channelCreationEnabled: false,
+    channelCreationGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
     gatewayEnabled: false,

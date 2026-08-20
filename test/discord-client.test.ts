@@ -635,6 +635,160 @@ test("Discord client rejects invalid moderation parameters and audit reasons bef
   assert.equal(requests, 0)
 })
 
+test("Discord client sends narrow channel creation bodies and encoded audit reasons", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({
+        guild_id: "100",
+        id: requests.length === 1 ? "201" : "202",
+        name: body.name,
+        parent_id: body.parent_id ?? null,
+        type: body.type,
+      })
+    },
+    token: TOKEN,
+  })
+
+  await client.createGuildChannel("100", {
+    defaultAutoArchiveDuration: 1_440,
+    name: "customer-help",
+    nsfw: false,
+    parentId: "200",
+    rateLimitPerUser: 30,
+    topic: "Reviewed support queue",
+    type: 0,
+  }, "Support / case 42")
+  await client.createGuildChannel("100", {
+    name: "Support",
+    type: 4,
+  }, "Support / case 42")
+
+  assert.deepEqual(requests, [
+    {
+      body: {
+        default_auto_archive_duration: 1_440,
+        name: "customer-help",
+        nsfw: false,
+        parent_id: "200",
+        rate_limit_per_user: 30,
+        topic: "Reviewed support queue",
+        type: 0,
+      },
+      method: "POST",
+      reason: "Support%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/channels`,
+    },
+    {
+      body: { name: "Support", type: 4 },
+      method: "POST",
+      reason: "Support%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/channels`,
+    },
+  ])
+})
+
+test("Discord client never retries a rate-limited channel creation", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        message: "rate limited",
+        retry_after: 0.001,
+      }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createGuildChannel(
+      "100",
+      { name: "customer-help", type: 0 },
+      "Reviewed support queue",
+    ),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && error.retryAfterMs === 1
+    ),
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client rejects unsupported channel creation before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(
+    () => client.createGuildChannel("invalid", { name: "valid", type: 0 }, "reviewed"),
+    /guild ID must be a snowflake/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", { name: "valid", type: 2 }, "reviewed"),
+    /type is not supported/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      name: "Support",
+      parentId: "200",
+      type: 4,
+    }, "reviewed"),
+    /category creation does not accept/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      defaultAutoArchiveDuration: 30,
+      name: "valid",
+      type: 15,
+    }, "reviewed"),
+    /auto-archive duration is not supported/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", { name: " valid", type: 0 }, "reviewed"),
+    /without surrounding whitespace or controls/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", { name: "private\nname", type: 0 }, "reviewed"),
+    /without surrounding whitespace or controls/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      name: "valid",
+      topic: "private\u0000topic",
+      type: 0,
+    }, "reviewed"),
+    /without unsupported controls/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client sends safe message, edit, and own-reaction wire contracts", async () => {
   const requests: Array<{ body: unknown; method: string; url: string }> = []
   const client = new DiscordClient({

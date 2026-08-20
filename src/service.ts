@@ -10,6 +10,13 @@ import type {
   MemberModerationResult,
 } from "./administration-service.js"
 import { AdministrationService } from "./administration-service.js"
+import type {
+  ChannelAdministrationServiceOptions,
+  ChannelCreationPlan,
+  ChannelCreationRequest,
+  ChannelCreationResult,
+} from "./channel-administration-service.js"
+import { ChannelAdministrationService } from "./channel-administration-service.js"
 import type { ConnectorConfig } from "./config.js"
 import {
   CONNECTOR_LIMITS,
@@ -47,6 +54,11 @@ import {
 } from "./normalize.js"
 import { evaluateBotChannelPermissions } from "./permissions.js"
 import { ScopePolicy } from "./policy.js"
+import {
+  FileOperationStore,
+  operationReceiptDirectory,
+  type OperationStore,
+} from "./operation-store.js"
 import type {
   DiscordApplication,
   DiscordChannel,
@@ -62,6 +74,7 @@ export interface DiscordServiceClient {
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   createGuildBan: DiscordClient["createGuildBan"]
+  createGuildChannel: DiscordClient["createGuildChannel"]
   createMessage: DiscordClient["createMessage"]
   deleteMessage: DiscordClient["deleteMessage"]
   editMessage: DiscordClient["editMessage"]
@@ -107,6 +120,10 @@ export interface ConnectorServiceOptions {
     "clock" | "planKey" | "randomId"
   >
   activityStore?: ActivityStore
+  channelAdministrationOptions?: Pick<
+    ChannelAdministrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   client?: DiscordServiceClient
   clientOptions?: Omit<DiscordClientOptions, "token">
   config: ConnectorConfig
@@ -115,6 +132,7 @@ export interface ConnectorServiceOptions {
     InteractionServiceOptions,
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
   >
+  operationStore?: OperationStore
   policy?: ScopePolicy
 }
 
@@ -218,6 +236,7 @@ function normalizedGuildChannel(channel: DiscordChannel, guildId: string) {
 export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
+  readonly #channelAdministrationService: ChannelAdministrationService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
   readonly #deletionService: DeletionService
@@ -233,11 +252,21 @@ export class ConnectorService {
     })
     this.#policy = options.policy || new ScopePolicy(options.config)
     this.#activityStore = options.activityStore || new JsonlActivityLog(options.config.auditFile)
+    const operationStore = options.operationStore || new FileOperationStore(
+      operationReceiptDirectory(options.config.auditFile),
+    )
     this.#administrationService = new AdministrationService({
       activityStore: this.#activityStore,
       client: this.#client,
       policy: this.#policy,
       ...options.administrationOptions,
+    })
+    this.#channelAdministrationService = new ChannelAdministrationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.channelAdministrationOptions,
     })
     this.#deletionService = new DeletionService({
       activityStore: this.#activityStore,
@@ -685,6 +714,28 @@ export class ConnectorService {
   ): Promise<MemberModerationPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#administrationService.plan(identity.bot.id, request, options)
+  }
+
+  async planChannelCreation(
+    request: ChannelCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelCreationPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelAdministrationService.plan(identity.bot.id, request, options)
+  }
+
+  async executeChannelCreation(
+    request: ChannelCreationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelCreationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
   }
 
   async executeMemberModeration(

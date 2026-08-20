@@ -1,8 +1,10 @@
 import { setTimeout as wait } from "node:timers/promises"
 
 import {
+  CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
   DISCORD_API_BASE_URL,
+  DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -136,6 +138,8 @@ const SEARCH_HAS_TYPES: ReadonlySet<string> = new Set([
 const SEARCH_SORT_BY_VALUES: ReadonlySet<string> = new Set(["relevance", "timestamp"])
 const SEARCH_SORT_ORDER_VALUES: ReadonlySet<string> = new Set(["asc", "desc"])
 const ISO_8601_TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$/
+const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const CHANNEL_TOPIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 
 export interface GuildMessageSearchOptions extends RequestOptions {
   attachmentExtensions?: readonly string[]
@@ -189,6 +193,16 @@ export interface CreateMessageInput {
   }
 }
 
+export interface CreateGuildChannelInput {
+  defaultAutoArchiveDuration?: number
+  name: string
+  nsfw?: boolean
+  parentId?: string
+  rateLimitPerUser?: number
+  topic?: string | null
+  type: number
+}
+
 export interface EditMessageInput {
   allowedMentions: DiscordAllowedMentions
   content: string
@@ -200,6 +214,7 @@ export interface ModifyGuildMemberTimeoutInput {
 
 interface RequestParameters extends RequestOptions {
   auditReason?: string
+  automaticRateLimitRetry?: boolean
   body?: unknown
 }
 
@@ -412,6 +427,87 @@ function assertMessageContent(content: string): void {
   }
 }
 
+function assertValidUnicode(value: string, name: string): void {
+  try {
+    encodeURIComponent(value)
+  } catch (error) {
+    throw new RangeError(`${name} contains invalid Unicode`, { cause: error })
+  }
+}
+
+function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
+  const supportedTypes: ReadonlySet<number> = new Set([
+    DISCORD_CHANNEL_TYPES.category,
+    DISCORD_CHANNEL_TYPES.forum,
+    DISCORD_CHANNEL_TYPES.text,
+  ])
+  if (!supportedTypes.has(input.type)) {
+    throw new RangeError("Discord channel creation type is not supported")
+  }
+  if (
+    typeof input.name !== "string"
+    || input.name.length < 1
+    || input.name.length > DISCORD_LIMITS.channelNameCharacters
+    || input.name.trim() !== input.name
+    || CHANNEL_NAME_CONTROL_PATTERN.test(input.name)
+  ) {
+    throw new RangeError(
+      `Discord channel name must contain 1-${DISCORD_LIMITS.channelNameCharacters} characters without surrounding whitespace or controls`,
+    )
+  }
+  assertValidUnicode(input.name, "Discord channel name")
+  if (
+    input.parentId !== undefined
+    && (
+      typeof input.parentId !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(input.parentId)
+    )
+  ) {
+    throw new RangeError("Discord channel parent ID must be a snowflake")
+  }
+  if (input.topic !== undefined && input.topic !== null) {
+    if (
+      typeof input.topic !== "string"
+      || !input.topic.trim()
+      || input.topic.length > DISCORD_LIMITS.channelTopicCharacters
+      || CHANNEL_TOPIC_CONTROL_PATTERN.test(input.topic)
+    ) {
+      throw new RangeError(
+        `Discord channel topic must be nonblank and at most ${DISCORD_LIMITS.channelTopicCharacters} characters without unsupported controls`,
+      )
+    }
+    assertValidUnicode(input.topic, "Discord channel topic")
+  }
+  if (input.nsfw !== undefined && typeof input.nsfw !== "boolean") {
+    throw new RangeError("Discord channel NSFW setting must be a boolean")
+  }
+  assertIntegerRange(
+    input.rateLimitPerUser,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+    "Discord channel slowmode seconds",
+  )
+  if (
+    input.defaultAutoArchiveDuration !== undefined
+    && !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[])
+      .includes(input.defaultAutoArchiveDuration)
+  ) {
+    throw new RangeError("Discord channel default auto-archive duration is not supported")
+  }
+  if (
+    input.type === DISCORD_CHANNEL_TYPES.category
+    && (
+      input.defaultAutoArchiveDuration !== undefined
+      || input.nsfw !== undefined
+      || input.parentId !== undefined
+      || input.rateLimitPerUser !== undefined
+      || input.topic !== undefined
+    )
+  ) {
+    throw new RangeError("Discord category creation does not accept channel-specific settings")
+  }
+}
+
 export function encodeDiscordAuditReason(auditReason: string): string {
   if (!auditReason.trim()) {
     throw new RangeError("Discord audit reason must not be blank")
@@ -537,6 +633,7 @@ export class DiscordClient {
 
         if (
           response.status === 429
+          && parameters.automaticRateLimitRetry !== false
           && attempt < this.#maxRetries
           && retryAfterMs !== undefined
           && retryAfterMs <= this.#maxAutomaticRetryWaitMs
@@ -615,6 +712,43 @@ export class DiscordClient {
 
   getGuildChannels(guildId: string, options: RequestOptions = {}): Promise<DiscordChannel[]> {
     return this.#request("get_guild_channels", `/guilds/${guildId}/channels`, options)
+  }
+
+  createGuildChannel(
+    guildId: string,
+    input: CreateGuildChannelInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannel> {
+    if (
+      typeof guildId !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(guildId)
+    ) {
+      throw new RangeError("Discord channel creation guild ID must be a snowflake")
+    }
+    assertCreateGuildChannelInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord channel creation audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("create_guild_channel", `/guilds/${guildId}/channels`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      body: {
+        ...(input.defaultAutoArchiveDuration !== undefined
+          ? { default_auto_archive_duration: input.defaultAutoArchiveDuration }
+          : {}),
+        name: input.name,
+        ...(input.nsfw !== undefined ? { nsfw: input.nsfw } : {}),
+        ...(input.parentId !== undefined ? { parent_id: input.parentId } : {}),
+        ...(input.rateLimitPerUser !== undefined
+          ? { rate_limit_per_user: input.rateLimitPerUser }
+          : {}),
+        ...(input.topic !== undefined ? { topic: input.topic } : {}),
+        type: input.type,
+      },
+    })
   }
 
   getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {

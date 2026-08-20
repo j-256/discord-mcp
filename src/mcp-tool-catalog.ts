@@ -36,7 +36,7 @@ const MCP_DISCOVERY_DETAILS = [
 ] as const
 
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
-type McpToolWorkflow = "member-moderation" | "message-deletion"
+type McpToolWorkflow = "channel-creation" | "member-moderation" | "message-deletion"
 
 interface ToolCatalogMetadata {
   keywords: readonly string[]
@@ -64,6 +64,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   edit_own_message: {
     keywords: ["edit", "message", "own", "update"],
     toolset: "interactions",
+  },
+  execute_channel_creation: {
+    keywords: ["category", "channel", "create", "execute", "forum", "text"],
+    toolset: "channel-creation",
+    workflow: "channel-creation",
   },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
@@ -118,6 +123,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  plan_channel_creation: {
+    keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
+    toolset: "channel-creation",
+    workflow: "channel-creation",
   },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],

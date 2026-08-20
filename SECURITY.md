@@ -10,7 +10,7 @@ Treat all Discord-provided names, topics, forum tags, thread names, message bodi
 
 ## Discord permissions
 
-Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
+Grant only `View Channels` and `Read Message History` for read access. Native message search also requires the application's Message Content privileged intent. Add `Manage Channels` only to exact guilds and parent categories selected for reviewed additive creation. Add `Manage Messages` only to explicitly selected cleanup channels. Add `Kick Members`, `Ban Members`, or `Moderate Members` only to exact guilds where the corresponding reviewed action is required. Do not grant `Administrator`.
 
 Use Discord channel permission overrides and the connector allowlists together. Removing either Discord access or the local allowlist entry should be sufficient to stop connector access.
 
@@ -24,7 +24,7 @@ Keep `DISCORD_MCP_TOOL_SURFACE=full` for clients that already defer tools native
 
 Tool discovery is local and bounded. It must never contact Discord, return its query, log tool arguments or results, or reveal a tool excluded by `DISCORD_MCP_TOOLSETS`. Exact-name results may return the canonical input contract. Broader results must remain bounded, and an already enabled result must not create another list-change notification.
 
-Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, and pending activity records remain authoritative even when a tool is selected. Keep deletion and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete destructive workflow.
+Treat toolsets as a reduction in callable surface, never as authorization. Discord permissions, feature toggles, exact allowlists, protected targets, reviewed plans, approvals, signed confirmation, freshness checks, operation-key reservation, and pending activity records remain authoritative even when a tool is selected. Keep channel creation, deletion, and moderation in their separate toolsets, and reveal each reviewed plan-plus-execute pair together so clients cannot discover an incomplete reviewed workflow.
 
 ## Gateway events
 
@@ -42,11 +42,27 @@ Telemetry must use only fixed operation, risk, outcome, and error categories plu
 
 Exporter failure must never alter a Discord request or MCP tool result. Keep final flush bounded and keep exporter startup and shutdown under the stdio runner so construction, `doctor`, `setup`, and `smoke` cannot open collector connections. Status surfaces may report only aggregate operation health, fixed privacy claims, exporter state and counters, and booleans indicating whether endpoint or header configuration exists.
 
+## Channel creation
+
+Do not add a channel-creation shortcut that bypasses the environment toggle, exact creation-guild allowlist, pinned bot identity, exact guild and optional parent IDs, complete permission evidence, visibility-bounded collision and capacity checks, process-keyed planning, signed interactive confirmation, write-aware client approval, final fresh-plan match, atomic one-shot operation-key reservation, pending activity journaling, single POST, or exact readback. If a client cannot support MCP elicitation, keep channel creation unavailable in that client.
+
+Keep this surface additive-only. Do not silently expand it to edits, moves, positions, permission overwrites, deletion, rollback, or blueprint reconciliation. Those capabilities change existing authority and state and require separate policies, plans, confirmation language, and tests.
+
+Discord's create-channel operation has no idempotency token. Persist only the domain-separated operation-key hash, IDs, plan digest, timestamps, fixed outcome and verification states, activity ID, and sanitized error category in private one-shot receipts. Never persist or return the raw operation key. A reserved key must remain spent after every outcome, including a local recording failure or uncertainty. Never automatically retry the POST, and never treat an uncertain result as a failed write.
+
+Serialize the same guild, parent, and normalized logical name across operation keys and supported channel kinds within a connector process. Rebuild every queued plan after the preceding execution, and block a queued execution without reserving its key when the preceding target outcome is uncertain.
+
+Operation receipt directories and files must remain owner-private. Reject symlinks, hardlinked or foreign-owned files, public modes, oversized or malformed records, terminal records without a reservation, identity changes, and divergent terminal outcomes. Sync each receipt and its directory entry before the workflow advances.
+
+Guild channel listings are visibility-bounded. Require both guild-level and parent-category `MANAGE_CHANNELS` and `VIEW_CHANNEL`, label the evidence honestly, and fail closed on ambiguous logical-name matches, incomplete roles or overwrites, invalid response identities, and capacity reached in the visible inventory. Do not claim that the absence of a visible collision proves global absence.
+
+Never persist channel names, topics, audit-log reasons, permission overwrites, role names, or raw Discord responses. Channel-creation activity and operation records may contain exact guild, parent, and created-channel IDs, the channel kind, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity IDs, and sanitized error classifications.
+
 ## Deletion
 
 Do not add a deletion shortcut that bypasses exact IDs, local policy, keyed planning, fresh reads, signed interactive confirmation, write-aware client approval, or pending activity journaling. If a new client cannot support MCP elicitation, keep deletion unavailable in that client.
 
-The activity file intentionally excludes message bodies and attachment URLs. Preserve that property when adding fields or new moderation operations.
+The activity file intentionally excludes message bodies, attachment URLs, raw keys, audit-log reasons, and mutable Discord names. Preserve that property when adding fields or new write operations.
 
 ## Member administration
 

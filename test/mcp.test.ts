@@ -15,8 +15,11 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
+import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
 import {
   AdministrationExecutionError,
+  ChannelCreationExecutionError,
+  ChannelCreationOperationConflictError,
   DiscordApiError,
   InteractionExecutionError,
   InteractionRateLimitError,
@@ -45,9 +48,12 @@ const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
+const PARENT_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
 const USER_ID = "400000000000000001"
 const AUDIT_REASON = "Reviewed safety incident 42"
+const OPERATION_KEY = "channel-create-attempt-0001"
+const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
 
@@ -159,12 +165,76 @@ function moderationPlan(digest = DIGEST) {
   }
 }
 
+function channelPlan(
+  request: ChannelCreationRequest,
+  digest = DIGEST,
+  action: "create" | "none" = "create",
+) {
+  const category = request.kind === "category"
+  const observed = {
+    defaultAutoArchiveDuration: category
+      ? null
+      : request.defaultAutoArchiveDuration ?? 1_440,
+    id: CHANNEL_ID,
+    name: request.name,
+    nsfw: category ? null : request.nsfw ?? false,
+    parentId: request.parentId ?? null,
+    rateLimitPerUser: category ? null : request.rateLimitPerUser ?? 0,
+    topic: category ? null : request.topic ?? null,
+    type: category ? 4 : request.kind === "forum" ? 15 : 0,
+  }
+  return {
+    action,
+    auditReason: request.auditReason,
+    createdAt: "2026-08-14T00:00:00.000Z",
+    digest,
+    existingChannel: action === "none" ? observed : null,
+    guild: {
+      id: request.guildId,
+      name: "Guild",
+      ownerId: USER_ID,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    parent: request.parentId
+      ? { id: request.parentId, name: "Parent", visibleChildren: 2 }
+      : null,
+    permission: {
+      botAdministrator: false,
+      guildManageChannels: true,
+      guildViewChannel: true,
+      parentManageChannels: request.parentId ? true : null,
+      parentViewChannel: request.parentId ? true : null,
+    },
+    schemaVersion: 1,
+    status: action === "none" ? "already-current" as const : "planned" as const,
+    target: {
+      defaultAutoArchiveDuration: observed.defaultAutoArchiveDuration,
+      kind: request.kind,
+      name: request.name,
+      nsfw: observed.nsfw,
+      parentId: observed.parentId,
+      rateLimitPerUser: observed.rateLimitPerUser,
+      topic: observed.topic,
+      type: observed.type,
+    },
+    visibleInventory: {
+      guildChannels: 8,
+      guildLimit: 500,
+      parentChildren: request.parentId ? 2 : null,
+      parentLimit: request.parentId ? 50 : null,
+    },
+    warnings: ["Visible inventory is bounded by Discord visibility"],
+  }
+}
+
 function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
     administrationGuildIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
+    channelCreationEnabled: false,
+    channelCreationGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     gatewayEnabled: false,
@@ -185,6 +255,9 @@ function fixturePolicy(): PolicyDescription {
 function serviceFixture(overrides: {
   administrationError?: Error
   activityError?: Error
+  channelCreationAction?: "create" | "none"
+  channelCreationError?: Error
+  channelCreationPlanDigest?: string
   interactionError?: Error
   messageContent?: string
   planDigest?: string
@@ -195,6 +268,8 @@ function serviceFixture(overrides: {
     archived: 0,
     administrationExecute: 0,
     administrationPlan: 0,
+    channelCreationExecute: 0,
+    channelCreationPlan: 0,
     delete: 0,
     edit: 0,
     explain: 0,
@@ -229,6 +304,29 @@ function serviceFixture(overrides: {
       }
     },
     describePolicy: fixturePolicy,
+    async executeChannelCreation(request, planDigest) {
+      if (overrides.channelCreationError) throw overrides.channelCreationError
+      calls.channelCreationExecute += 1
+      const planned = channelPlan(
+        request,
+        planDigest,
+        overrides.channelCreationAction,
+      )
+      const observed = planned.existingChannel || {
+        ...planned.target,
+        id: CHANNEL_ID,
+      }
+      return {
+        activityId: planned.action === "none" ? null : "activity-channel-create",
+        channelId: observed.id,
+        guildId: request.guildId,
+        observed,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-current" : "completed",
+      }
+    },
     async executeMemberModeration(request, planDigest) {
       if (overrides.administrationError) throw overrides.administrationError
       calls.administrationExecute += 1
@@ -374,6 +472,14 @@ function serviceFixture(overrides: {
       calls.plan += 1
       return plan(overrides.planDigest)
     },
+    async planChannelCreation(request) {
+      calls.channelCreationPlan += 1
+      return channelPlan(
+        request,
+        overrides.channelCreationPlanDigest || DIGEST,
+        overrides.channelCreationAction,
+      )
+    },
     async planMemberModeration() {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
@@ -449,6 +555,7 @@ async function connectedFixture(
     }>
     environment?: NodeJS.ProcessEnv
     listChanged?: ClientOptions["listChanged"]
+    serverMessages?: unknown[]
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
     gateway?: GatewayEventSource
   } = {},
@@ -464,6 +571,13 @@ async function connectedFixture(
     service: serviceData.service,
   })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  if (options.serverMessages) {
+    const send = serverTransport.send.bind(serverTransport)
+    serverTransport.send = async (message, sendOptions) => {
+      options.serverMessages?.push(structuredClone(message))
+      await send(message, sendOptions)
+    }
+  }
   await server.connect(serverTransport)
   const client = new Client(
     { name: "discord-mcp-test", version: "1.0.0" },
@@ -534,6 +648,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "add_reaction",
       "plan_message_deletion",
       "delete_messages",
+      "plan_channel_creation",
+      "execute_channel_creation",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -560,6 +676,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     idempotentHint: true,
     openWorldHint: true,
     readOnlyHint: true,
+  })
+  const channelCreationPlan = result.tools.find((tool) => (
+    tool.name === "plan_channel_creation"
+  ))
+  assert.deepEqual(channelCreationPlan?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const channelCreation = result.tools.find((tool) => (
+    tool.name === "execute_channel_creation"
+  ))
+  assert.deepEqual(channelCreation?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
   })
   const discovery = result.tools.find((tool) => (
     tool.name === "discover_discord_tools"
@@ -740,6 +874,30 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
   assert.equal(notificationCount, notificationsAfterFirstDiscovery)
 })
 
+test("progressive discovery enables the complete reviewed channel-creation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_channel_creation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_channel_creation",
+    "plan_channel_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_channel_creation",
+      "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOLSETS: "messages,connector" },
@@ -842,6 +1000,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     administrationExecute: 0,
     administrationPlan: 0,
     archived: 1,
+    channelCreationExecute: 0,
+    channelCreationPlan: 0,
     delete: 0,
     edit: 0,
     explain: 1,
@@ -1215,6 +1375,312 @@ test("MCP deletion refuses a changed plan before requesting confirmation", async
   assert.equal(calls.delete, 0)
 })
 
+test("MCP channel creation plans bounded additive types and rejects category settings", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      defaultAutoArchiveDuration: 1_440,
+      guildId: GUILD_ID,
+      kind: "forum",
+      name: "launches",
+      nsfw: false,
+      operationKey: OPERATION_KEY,
+      parentId: PARENT_ID,
+      rateLimitPerUser: 30,
+      topic: "Reviewed releases",
+    },
+    name: "plan_channel_creation",
+  })
+  const invalidCategory = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "category",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      topic: "not accepted",
+    },
+    name: "plan_channel_creation",
+  })
+  const invalidKey = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: "short",
+    },
+    name: "plan_channel_creation",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(invalidCategory.isError, true)
+  assert.equal(invalidKey.isError, true)
+  assert.equal(calls.channelCreationPlan, 1)
+})
+
+test("MCP channel creation binds signed approval to the exact additive request", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      defaultAutoArchiveDuration: 4_320,
+      guildId: GUILD_ID,
+      kind: "forum",
+      name: "launches",
+      nsfw: false,
+      operationKey: OPERATION_KEY,
+      parentId: PARENT_ID,
+      planDigest: DIGEST,
+      rateLimitPerUser: 30,
+      topic: "Reviewed releases",
+    },
+    name: "execute_channel_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.channelCreationPlan, 1)
+  assert.equal(calls.channelCreationExecute, 1)
+  assert.match(confirmationMessage, /Action: create/)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(PARENT_ID))
+  assert.match(confirmationMessage, /Channel kind: forum/)
+  assert.match(confirmationMessage, /Reviewed releases/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(OPERATION_KEY))
+})
+
+test("MCP channel creation returns an already-current no-op without confirmation", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { channelCreationAction: "none" },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(calls.channelCreationPlan, 1)
+  assert.equal(calls.channelCreationExecute, 1)
+})
+
+test("MCP channel creation declines or rejects approval without reserving execution", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.channelCreationExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.channelCreationExecute, 0)
+})
+
+test("MCP channel creation refuses changed plans before requesting confirmation", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { channelCreationPlanDigest: DIFFERENT_DIGEST },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "plan-changed")
+  assert.equal(result.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.channelCreationExecute, 0)
+})
+
+test("MCP channel creation exposes uncertain and one-shot conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelCreationError: new ChannelCreationExecutionError(
+        "Discord channel creation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const blocked = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelCreationError: new ChannelCreationExecutionError(
+        "A concurrent logical target ended uncertain",
+        { status: "blocked-prior-uncertain" },
+      ),
+    },
+  })
+  const blockedResult = await blocked.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+  assert.equal(
+    structuredContent(blockedResult).status,
+    "blocked-prior-uncertain",
+  )
+
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelCreationError: new ChannelCreationOperationConflictError({
+        operationKeyHash: OPERATION_KEY_HASH,
+        operationKey: OPERATION_KEY,
+        status: "uncertain",
+      }),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(OPERATION_KEY))
+
+  const receipt = {
+    activityId: "activity-0001",
+    channelId: CHANNEL_ID,
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-14T00:00:00.000Z",
+    verification: "match",
+  }
+  const completedConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelCreationError: new ChannelCreationOperationConflictError(receipt),
+    },
+  })
+  const completedConflictResult = await completedConflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      kind: "text",
+      name: "launches",
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_creation",
+  })
+  assert.equal(
+    structuredContent(completedConflictResult).status,
+    "operation-key-conflict",
+  )
+  assert.deepEqual(
+    (structuredContent(completedConflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+})
+
 test("MCP member moderation plans exact targets and enforces action-specific schemas", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -1584,8 +2050,8 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.readResource({ uri: "discord://connector/safety" }),
   ])
 
-  assert.equal(tools.tools.length, 21)
-  assert.equal(prompts.prompts.length, 4)
+  assert.equal(tools.tools.length, 23)
+  assert.equal(prompts.prompts.length, 5)
   assert.equal(resources.resources.length, 7)
   assert.equal(templates.resourceTemplates.length, 3)
   for (const catalog of [tools, prompts, resources, templates]) {

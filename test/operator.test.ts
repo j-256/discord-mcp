@@ -53,6 +53,8 @@ function status(
       administrationGuildIds: [],
       allowedChannelIds: [CHANNEL_ID],
       allowedGuildIds: [GUILD_ID],
+      channelCreationEnabled: false,
+      channelCreationGuildIds: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
       gatewayEnabled: false,
@@ -92,6 +94,7 @@ function toolService(): DiscordToolService {
       return status().policy
     },
     editOwnMessage: unexpected,
+    executeChannelCreation: unexpected,
     executeMemberModeration: unexpected,
     explainChannelAccess: unexpected,
     getMessage: unexpected,
@@ -104,6 +107,7 @@ function toolService(): DiscordToolService {
     listChannels: unexpected,
     listGuilds: unexpected,
     planMessageDeletion: unexpected,
+    planChannelCreation: unexpected,
     planMemberModeration: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
@@ -192,7 +196,10 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
   )
   assert.equal(toolSurface?.status, "pass")
   assert.match(toolSurface?.summary || "", /progressive/)
-  assert.match(toolSurface?.summary || "", /2 of 10/)
+  assert.match(
+    toolSurface?.summary || "",
+    new RegExp(`2 of ${MCP_TOOLSET_NAMES.length}`),
+  )
   assert.match(toolSurface?.summary || "", /4 canonical tools/)
   assert.equal(setup.toolSurface, "progressive")
   assert.deepEqual(setup.toolsets, ["connector", "messages"])
@@ -263,6 +270,49 @@ test("doctor and setup explain exact administration scope without Discord writes
     "warn",
   )
   assert.match(setup.warnings.join("\n"), /administration-guild allowlist/)
+})
+
+test("doctor and setup explain reviewed channel-creation scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const creation = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelCreationPolicy,
+  )
+  assert.equal(creation?.status, "pass")
+  assert.match(creation?.summary || "", /1 guilds with reviewed one-shot execution/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.channelCreationPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /channel-creation guild allowlist/)
+  assert.match(omitted.warnings.join("\n"), /channel-creation toolset/)
 })
 
 test("doctor reports the privacy-safe Gateway policy without opening a connection", async () => {
@@ -430,6 +480,8 @@ test("MCP host configuration uses verified identity and environment forwarding w
   assert.match(result, /DISCORD_MCP_ALLOW_ADMINISTRATION/)
   assert.match(result, /DISCORD_MCP_ADMIN_GUILD_IDS/)
   assert.match(result, /DISCORD_MCP_PROTECTED_USER_IDS/)
+  assert.match(result, /DISCORD_MCP_ALLOW_CHANNEL_CREATION/)
+  assert.match(result, /DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS/)
   assert.match(result, /DISCORD_MCP_ALLOW_GATEWAY/)
   assert.match(result, /DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE/)
   assert.match(result, /DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT/)
@@ -492,10 +544,11 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, 21)
+  assert.equal(report.toolCount, 23)
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
+    "review_channel_creation",
     "review_member_moderation",
     "review_message_deletion",
     "search_guild_messages",
@@ -523,6 +576,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
+  assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
+  assert.equal(report.destructiveTools.includes("execute_channel_creation"), false)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(

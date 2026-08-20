@@ -25,10 +25,12 @@ export interface ConnectorConfig {
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
+  allowChannelCreation: boolean
   allowDeletions: boolean
   allowGateway: boolean
   allowInteractions: boolean
   auditFile: string
+  channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
   gatewayEventBufferSize: number
@@ -132,6 +134,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.adminGuildIds],
     ENVIRONMENT_NAMES.adminGuildIds,
   )
+  const channelCreationGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.channelCreationGuildIds],
+    ENVIRONMENT_NAMES.channelCreationGuildIds,
+  )
   const deleteChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.deleteChannelIds],
     ENVIRONMENT_NAMES.deleteChannelIds,
@@ -151,11 +157,16 @@ export function loadConnectorConfig(
     CONNECTOR_LIMITS.protectedUserAllowlist,
   )
 
-  for (const guildId of adminGuildIds) {
-    if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
-    throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.adminGuildIds} must be a subset of ${ENVIRONMENT_NAMES.allowedGuildIds}`,
-    )
+  for (const [name, guildIds] of [
+    [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
+    [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
+  ] as const) {
+    for (const guildId of guildIds) {
+      if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
+      throw new ConfigurationError(
+        `${name} must be a subset of ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+      )
+    }
   }
 
   for (const [name, channelIds] of [
@@ -197,6 +208,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowAdministration],
       ENVIRONMENT_NAMES.allowAdministration,
     ),
+    allowChannelCreation: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowChannelCreation],
+      ENVIRONMENT_NAMES.allowChannelCreation,
+    ),
     allowDeletions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowDeletions],
       ENVIRONMENT_NAMES.allowDeletions,
@@ -211,6 +226,7 @@ export function loadConnectorConfig(
       environment,
       options.homeDirectory || homedir(),
     ),
+    channelCreationGuildIds,
     deleteChannelIds,
     expectedApplicationId,
     gatewayEventBufferSize: parseInteger(

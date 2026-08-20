@@ -11,6 +11,7 @@ import test from "node:test"
 
 import {
   JsonlActivityLog,
+  type ChannelCreationActivity,
   type DeletionActivity,
   type InteractionActivity,
   type MemberModerationActivity,
@@ -68,6 +69,31 @@ function moderation(
     timeoutUntil: status === "pending" ? null : "2026-08-14T01:00:00.000Z",
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     userId: "400",
+  }
+}
+
+function channelCreation(
+  id: string,
+  status: ChannelCreationActivity["status"],
+): ChannelCreationActivity {
+  return {
+    channelId: status.startsWith("completed") ? "250" : null,
+    channelKind: "text",
+    error: null,
+    guildId: "100",
+    id,
+    kind: "channel-create",
+    operationKeyHash: `sha256:${"a".repeat(64)}`,
+    parentId: "200",
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
   }
 }
 
@@ -154,6 +180,40 @@ test("JSONL activity log strips profile data and reasons from member moderation 
     /private reason|private nickname|private role|private username/,
   )
   assert.equal(result.entries[0]?.kind, "member-moderation")
+})
+
+test("JSONL activity log strips channel content and raw operation keys from creation records", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(channelCreation("1", "pending"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...channelCreation("2", "completed-with-drift"),
+      auditReason: "private audit reason",
+      name: "private-channel-name",
+      operationKey: "private-operation-key",
+      permissionOverwrites: [{ id: "private-role" }],
+      topic: "private topic",
+    })}\n${JSON.stringify({
+      ...channelCreation("3", "failed"),
+      error: "private error text with spaces",
+      operationKeyHash: "private topic in a typed field",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "channel-create")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private audit|private-channel|private-operation|private-role|private topic/,
+  )
 })
 
 test("JSONL activity log returns an empty result before the first deletion", async (context) => {

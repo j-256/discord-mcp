@@ -23,6 +23,9 @@ import {
   AdministrationExecutionError,
   AdministrationPlanChangedError,
   AuditLogError,
+  ChannelCreationExecutionError,
+  ChannelCreationOperationConflictError,
+  ChannelCreationPlanChangedError,
   ConfigurationError,
   DeletionExecutionError,
   DeletionPlanChangedError,
@@ -31,6 +34,7 @@ import {
   InteractionExecutionError,
   InteractionIdentityError,
   InteractionRateLimitError,
+  OperationStoreError,
   PolicyError,
 } from "./errors.js"
 import {
@@ -245,16 +249,23 @@ export function classifyOperationalError(error: unknown): OperationalErrorCatego
   }
   if (
     error instanceof AdministrationPlanChangedError
+    || error instanceof ChannelCreationPlanChangedError
     || error instanceof DeletionPlanChangedError
   ) return "plan-changed"
   if (error instanceof PolicyError) return "policy-error"
   if (error instanceof ConfigurationError) return "configuration-error"
-  if (error instanceof AuditLogError) return "audit-error"
-  if (error instanceof InteractionConflictError) return "idempotency-conflict"
+  if (error instanceof AuditLogError || error instanceof OperationStoreError) {
+    return "audit-error"
+  }
+  if (
+    error instanceof ChannelCreationOperationConflictError
+    || error instanceof InteractionConflictError
+  ) return "idempotency-conflict"
   if (error instanceof InteractionIdentityError) return "identity-error"
   if (error instanceof InteractionRateLimitError) return "local-rate-limited"
   if (
     error instanceof AdministrationExecutionError
+    || error instanceof ChannelCreationExecutionError
     || error instanceof DeletionExecutionError
     || error instanceof InteractionExecutionError
   ) return "execution-error"

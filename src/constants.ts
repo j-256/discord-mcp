@@ -8,6 +8,8 @@ export const DISCORD_WEB_BASE_URL = "https://discord.com"
 export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION})`
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
+export const CONTENT_FREE_ERROR_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/
+export const CONTENT_FREE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
 export const MCP_DISCOVERY_TOOL_NAME = "discover_discord_tools"
 
@@ -20,6 +22,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 
 export const MCP_TOOLSET_NAMES = [
   "activity",
+  "channel-creation",
   "connector",
   "deletion",
   "gateway",
@@ -38,12 +41,14 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
   allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
+  allowChannelCreation: "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
   auditFile: "DISCORD_MCP_AUDIT_FILE",
+  channelCreationGuildIds: "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
   gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   interactionChannelIds: "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
@@ -85,9 +90,14 @@ export const DISCORD_LIMITS = Object.freeze({
   bulkDeleteSafetyMarginMs: 60_000,
   banDeleteMessageSeconds: 7 * 24 * 60 * 60,
   channelMessages: 100,
+  channelNameCharacters: 100,
+  channelRateLimitSeconds: 21_600,
+  channelTopicCharacters: 1_024,
+  categoryChannels: 50,
   currentUserGuilds: 200,
   deletionMessages: 100,
   guildMessageSearch: 25,
+  guildChannels: 500,
   messageContentCharacters: 2_000,
   messageNonceCharacters: 25,
   requestTimeoutMs: 30_000,
@@ -130,6 +140,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   observabilityOtlpEndpointCharacters: 2_048,
   observabilityServiceNameCharacters: 64,
   observabilityTimeoutMs: 60_000,
+  operationReceiptBytes: 16_384,
   protectedUserAllowlist: 100,
   searchFilterIds: 25,
   searchFilterStrings: 25,
@@ -175,6 +186,21 @@ export const DISCORD_GATEWAY_INTENT_MASK = DISCORD_GATEWAY_INTENTS.guilds
 export const ADMINISTRATION_LIMITS = Object.freeze({
   timeoutMinutes: 28 * 24 * 60 - 1,
 })
+
+export const CHANNEL_CREATION_KINDS = [
+  "category",
+  "forum",
+  "text",
+] as const
+
+export type ChannelCreationKind = typeof CHANNEL_CREATION_KINDS[number]
+
+export const CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS = [
+  60,
+  1_440,
+  4_320,
+  10_080,
+] as const
 
 export const MEMBER_MODERATION_ACTIONS = [
   "ban",

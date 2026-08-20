@@ -10,6 +10,42 @@ export class AuditLogError extends Error {
   override name = "AuditLogError"
 }
 
+export class OperationStoreError extends Error {
+  override name = "OperationStoreError"
+}
+
+export class ChannelCreationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord channel snapshot does not match the reviewed creation plan")
+    this.name = "ChannelCreationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelCreationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord channel creation operation key has already been reserved")
+    this.name = "ChannelCreationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelCreationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelCreationExecutionError"
+    this.result = result
+  }
+}
+
 export class AdministrationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

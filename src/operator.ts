@@ -38,6 +38,7 @@ export const SUPPORTED_NODE_MAJOR = 22
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
   applicationIdentity: "application-identity",
+  channelCreationPolicy: "channel-creation-policy",
   channelScope: "channel-scope",
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
@@ -173,11 +174,15 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowAdministration && config.adminGuildIds.size === 0) {
     warnings.push("The administration toggle is enabled but administration remains blocked because no administration-guild allowlist is configured")
   }
+  if (config.allowChannelCreation && config.channelCreationGuildIds.size === 0) {
+    warnings.push("The channel-creation toggle is enabled but channel creation remains blocked because no channel-creation guild allowlist is configured")
+  }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
+    [config.allowChannelCreation, "channel-creation", "Channel creation"],
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowInteractions, "interactions", "Message interactions"],
@@ -305,6 +310,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.administrationPolicy,
         "pass",
         `Member administration is constrained to ${config.adminGuildIds.size} guilds with ${config.protectedUserIds.size} protected users`,
+      ))
+    }
+    if (!config.allowChannelCreation) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCreationPolicy,
+        "pass",
+        "Additive channel creation is disabled",
+      ))
+    } else if (config.channelCreationGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCreationPolicy,
+        "warn",
+        "Channel-creation toggle is enabled, but the required channel-creation guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCreationPolicy,
+        "pass",
+        `Additive channel creation is constrained to ${config.channelCreationGuildIds.size} guilds with reviewed one-shot execution`,
       ))
     }
     if (!config.allowDeletions) {
@@ -447,6 +471,8 @@ export function renderHostConfiguration(options: {
     ENVIRONMENT_NAMES.allowAdministration,
     ENVIRONMENT_NAMES.adminGuildIds,
     ENVIRONMENT_NAMES.protectedUserIds,
+    ENVIRONMENT_NAMES.allowChannelCreation,
+    ENVIRONMENT_NAMES.channelCreationGuildIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowInteractions,
@@ -668,6 +694,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error(`MCP smoke check found invalid ${name} annotations`)
+      }
+    }
+    if (selectedToolNames.includes("execute_channel_creation")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_channel_creation"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== false
+        || tool.annotations.idempotentHint !== true
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_channel_creation annotations")
       }
     }
     const interactionAnnotations = [

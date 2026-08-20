@@ -63,7 +63,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, threads, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, channel-creation, connector, deletion, gateway, guilds, interactions, messages, moderation, observability, threads, or all",
           "default": "all",
           "format": "string"
         },
@@ -236,6 +236,20 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
+          "description": "Enable reviewed additive category, text, and forum channel creation when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
+          "description": "Exact guild IDs eligible for reviewed additive channel creation",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_INTERACTIONS",
           "description": "Enable bounded sends, own-message edits, and own-reaction adds in exact channels",
           "default": "false",
@@ -282,7 +296,7 @@
         },
         {
           "name": "DISCORD_MCP_AUDIT_FILE",
-          "description": "Content-free local activity JSONL path",
+          "description": "Content-free local activity JSONL path with adjacent private channel-creation operation receipts",
           "format": "string"
         }
       ]

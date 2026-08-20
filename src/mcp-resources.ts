@@ -176,6 +176,8 @@ export function registerDiscordResources(
           "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
+          "Channel creation is additive-only and requires a separate exact guild allowlist. Planning checks visible inventory, logical-name collisions, guild and parent permissions, and capacity. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, a pending content-free receipt, and post-write readback. It never edits permission overwrites, deletes, or rolls back channels.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,
