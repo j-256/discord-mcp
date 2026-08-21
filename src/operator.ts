@@ -61,6 +61,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildScaffoldPolicy: "guild-scaffold-policy",
   interactionPolicy: "interaction-policy",
   messageContentIntent: "message-content-intent",
+  messagePinPolicy: "message-pin-policy",
   nodeVersion: "node-version",
   observability: "observability",
   roleCreationPolicy: "role-creation-policy",
@@ -210,6 +211,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowDeletions && config.deleteChannelIds.size === 0) {
     warnings.push("The deletion toggle is enabled but deletion remains blocked because no deletion-channel allowlist is configured")
   }
+  if (config.allowPinManagement && config.pinChannelIds.size === 0) {
+    warnings.push("The message-pin toggle is enabled but pin management remains blocked because no pin-channel allowlist is configured")
+  }
   if (config.allowForumPosts && config.forumPostChannelIds.size === 0) {
     warnings.push("The forum-post toggle is enabled but forum-post creation remains blocked because no forum-channel allowlist is configured")
   }
@@ -243,6 +247,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
     [config.allowInteractions, "interactions", "Message interactions"],
+    [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
   ] as const) {
     if (enabled && !config.mcpToolsets.has(toolset)) {
@@ -460,6 +465,25 @@ export async function diagnoseConnector(
         `Reviewed forum-post creation is constrained to ${config.forumPostChannelIds.size} exact channels with one-shot execution and exact readback`,
       ))
     }
+    if (!config.allowPinManagement) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.messagePinPolicy,
+        "pass",
+        "Reviewed message pin management is disabled",
+      ))
+    } else if (config.pinChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.messagePinPolicy,
+        "warn",
+        "Message-pin toggle is enabled, but the required pin-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.messagePinPolicy,
+        "pass",
+        `Reviewed message pin management is constrained to ${config.pinChannelIds.size} exact channels with one-shot execution and exact state plus review-snapshot readback`,
+      ))
+    }
     if (!config.allowRoleCreation) {
       checks.push(check(
         DOCTOR_CHECK_IDS.roleCreationPolicy,
@@ -660,6 +684,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
+    ENVIRONMENT_NAMES.allowPinManagement,
+    ENVIRONMENT_NAMES.pinChannelIds,
     ENVIRONMENT_NAMES.allowForumPosts,
     ENVIRONMENT_NAMES.forumPostChannelIds,
     ENVIRONMENT_NAMES.allowInteractions,

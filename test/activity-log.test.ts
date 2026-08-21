@@ -18,6 +18,7 @@ import {
   type ForumPostActivity,
   type InteractionActivity,
   type MemberModerationActivity,
+  type MessagePinActivity,
   type RoleCreationActivity,
 } from "../src/activity-log.js"
 
@@ -168,6 +169,33 @@ function forumPost(
     schemaVersion: 1,
     status,
     threadId: hasThread ? "300" : null,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function messagePin(
+  id: string,
+  status: MessagePinActivity["status"],
+): MessagePinActivity {
+  return {
+    channelId: "200",
+    desiredState: "pinned",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "message-pin",
+    messageId: "300",
+    operationKeyHash: `sha256:${"3".repeat(64)}`,
+    planDigest: `hmac-sha256:${"4".repeat(64)}`,
+    schemaVersion: 1,
+    status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -409,6 +437,45 @@ test("JSONL activity log strips forum-post intent and rejects mismatched starter
   assert.doesNotMatch(
     JSON.stringify(result),
     /private-tag|private audit|private starter|private forum|private user|private-operation/,
+  )
+})
+
+test("JSONL activity log keeps message pin evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...messagePin("1", "pending"),
+    auditReason: "must never reach disk",
+    content: "must-not-persist",
+  } as MessagePinActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...messagePin("2", "completed-with-drift"),
+      auditReason: "private audit reason",
+      authorName: "private author",
+      channelName: "private channel",
+      content: "private message content",
+      operationKey: "private-operation-key",
+    })}\n${JSON.stringify({
+      ...messagePin("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "message-pin")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private audit|private author|private channel|private message|private-operation/,
   )
 })
 

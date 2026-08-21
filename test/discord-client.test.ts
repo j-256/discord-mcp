@@ -100,6 +100,48 @@ test("Discord client encodes bounded message pagination without undefined cursor
   assert.equal(requestUrl, `${API_BASE_URL}/channels/200/messages?before=300&limit=25`)
 })
 
+test("Discord client uses the current paginated message pin route", async () => {
+  let requestUrl = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      requestUrl = String(input)
+      return jsonResponse({ has_more: false, items: [] })
+    },
+    token: TOKEN,
+  })
+
+  await client.listMessagePins("200", {
+    before: "2026-08-20T12:34:56.000Z",
+    limit: 25,
+  })
+
+  assert.equal(
+    requestUrl,
+    `${API_BASE_URL}/channels/200/messages/pins?before=2026-08-20T12%3A34%3A56.000Z&limit=25`,
+  )
+})
+
+test("Discord client validates message pin pagination before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ has_more: false, items: [] })
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(() => client.listMessagePins("invalid"), /channel ID/)
+  assert.throws(() => client.listMessagePins("200", { limit: 51 }), /between 1 and 50/)
+  assert.throws(
+    () => client.listMessagePins("200", { before: "yesterday" }),
+    /ISO 8601 timestamp/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client encodes bounded guild audit-log filters and cursors", async () => {
   let requestUrl = ""
   const records: RecordedObservation[] = []
@@ -593,6 +635,77 @@ test("Discord client sends deletion bodies and audit reasons without response pa
       url: `${API_BASE_URL}/channels/200/messages/303`,
     },
   ])
+})
+
+test("Discord client uses current pin mutation routes with encoded audit reasons", async () => {
+  const requests: Array<{
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+
+  await client.pinMessage("200", "300", "Review / case 42")
+  await client.unpinMessage("200", "300", "Review / case 42")
+
+  assert.deepEqual(requests, [
+    {
+      method: "PUT",
+      reason: "Review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/channels/200/messages/pins/300`,
+    },
+    {
+      method: "DELETE",
+      reason: "Review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/channels/200/messages/pins/300`,
+    },
+  ])
+})
+
+test("Discord client validates pin mutations and never retries their rate limits", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.pinMessage("200", "300", "reviewed"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  await assert.rejects(
+    () => client.unpinMessage("bad", "300", "reviewed"),
+    /channel ID/,
+  )
+  await assert.rejects(
+    () => client.unpinMessage("200", "bad", "reviewed"),
+    /message ID/,
+  )
+  await assert.rejects(
+    () => client.unpinMessage("200", "300", " "),
+    /must not be blank/,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
 })
 
 test("Discord client sends exact member moderation routes, bodies, and encoded reasons", async () => {

@@ -154,6 +154,38 @@ export class GuildScaffoldExecutionError extends Error {
   }
 }
 
+export class MessagePinPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord message snapshot does not match the reviewed pin plan")
+    this.name = "MessagePinPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class MessagePinOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord message pin operation key has already been reserved")
+    this.name = "MessagePinOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class MessagePinExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "MessagePinExecutionError"
+    this.result = result
+  }
+}
+
 export class RoleCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

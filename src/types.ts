@@ -151,6 +151,16 @@ export interface DiscordMessage {
   webhook_id?: string
 }
 
+export interface DiscordMessagePin {
+  message: DiscordMessage
+  pinned_at: string
+}
+
+export interface DiscordMessagePinPage {
+  has_more: boolean
+  items: DiscordMessagePin[]
+}
+
 export interface DiscordMessageSearchIndexing {
   code: 110000
   documents_indexed?: number

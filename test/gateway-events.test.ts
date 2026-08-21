@@ -179,11 +179,24 @@ test("Gateway event kinds retain only bounded identifiers", () => {
     parent_id: CHANNEL_ID,
     type: 11,
   }), true)
+  assert.equal(feed.ingestDispatch("CHANNEL_PINS_UPDATE", {
+    channel_id: THREAD_ID,
+    guild_id: GUILD_ID,
+    last_pin_timestamp: "2026-08-19T00:00:00.000Z",
+  }), true)
 
   const events = feed.listEvents().events
   assert.deepEqual(events[0]?.messageIds, [MESSAGE_ID, SECOND_MESSAGE_ID])
   assert.equal(events[1]?.roleId, "500000000000000001")
   assert.equal(events[2]?.parentChannelId, CHANNEL_ID)
+  assert.deepEqual(events[3], {
+    channelId: THREAD_ID,
+    cursor: "gw1.testcursor12.0.4",
+    guildId: GUILD_ID,
+    kind: "channel-pins-updated",
+    parentChannelId: CHANNEL_ID,
+    receivedAt: "2026-08-19T00:00:03.000Z",
+  })
   assert.doesNotMatch(JSON.stringify(events), new RegExp(TOKEN))
 })
 

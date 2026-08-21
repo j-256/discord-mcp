@@ -181,6 +181,8 @@ function guidanceService(options: {
         mcpToolsets: [...MCP_TOOLSET_NAMES],
         mcpToolSurface: "full",
         protectedUserCount: 0,
+        pinChannelIds: [],
+        pinManagementEnabled: false,
         readChannelScope: "allowlist",
         readGuildScope: "allowlist",
         roleCreationEnabled: false,
@@ -193,6 +195,7 @@ function guidanceService(options: {
     executeForumPost: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
+    executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     async explainChannelAccess(channelId) {
       calls.channelAccess += 1
@@ -307,6 +310,7 @@ function guidanceService(options: {
       }
     },
     listGuildAuditEntries: unexpected,
+    listMessagePins: unexpected,
     async listRoles(guildId) {
       calls.roles += 1
       calls.lastGuildId = guildId
@@ -321,6 +325,7 @@ function guidanceService(options: {
     planChannelCreation: unexpected,
     planMemberModeration: unexpected,
     planMessageDeletion: unexpected,
+    planMessagePin: unexpected,
     planAttachmentMessage: unexpected,
     planForumPost: unexpected,
     planGuildScaffold: unexpected,
@@ -473,6 +478,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /exact thread plus starter-message readback/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
   assert.match(safety.text, /survive process restarts/)
+  assert.match(safety.text, /Message pin listing uses Discord's current timestamp-paginated endpoint/)
+  assert.match(safety.text, /complete message-read and PIN_MESSAGES permission evidence/)
   assert.match(safety.text, /Attachment messages require separate exact channel/)
   assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
@@ -731,6 +738,27 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   })
   assert.match(deletion, /Call only plan_message_deletion/)
   assert.match(deletion, /Do not call delete_messages/)
+
+  const messagePin = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed knowledge pin",
+      channelId: CHANNEL_ID,
+      desiredState: "pinned",
+      messageId: MESSAGE_ID,
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewMessagePin,
+  }))
+  assert.deepEqual(JSON.parse(messagePin.split("\n")[1] || ""), {
+    auditReason: "Reviewed knowledge pin",
+    channelId: CHANNEL_ID,
+    desiredState: "pinned",
+    messageId: MESSAGE_ID,
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(messagePin, /Call only plan_message_pin/)
+  assert.match(messagePin, /Do not call execute_message_pin/)
+  assert.match(messagePin, /PIN_MESSAGES/)
 
   const channelCreation = promptText(await client.getPrompt({
     arguments: {
@@ -1051,6 +1079,16 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         messageIds: `${MESSAGE_ID},${MESSAGE_ID}`,
       },
       name: MCP_PROMPT_NAMES.reviewMessageDeletion,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed knowledge pin",
+        channelId: CHANNEL_ID,
+        desiredState: "toggle",
+        messageId: MESSAGE_ID,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewMessagePin,
     },
     {
       arguments: {

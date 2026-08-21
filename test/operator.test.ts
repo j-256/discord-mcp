@@ -89,6 +89,8 @@ function status(
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
       protectedUserCount: 0,
+      pinChannelIds: [],
+      pinManagementEnabled: false,
       readChannelScope: "allowlist",
       readGuildScope: "allowlist",
       roleCreationEnabled: false,
@@ -124,6 +126,7 @@ function toolService(): DiscordToolService {
     executeForumPost: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
+    executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     explainChannelAccess: unexpected,
     explainPrincipalPermissions: unexpected,
@@ -139,8 +142,10 @@ function toolService(): DiscordToolService {
     listChannels: unexpected,
     listGuilds: unexpected,
     listGuildAuditEntries: unexpected,
+    listMessagePins: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
+    planMessagePin: unexpected,
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
     planForumPost: unexpected,
@@ -445,6 +450,50 @@ test("doctor and setup explain reviewed forum-post scope without Discord writes"
   )
   assert.match(setup.warnings.join("\n"), /forum-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /forum-posts toolset/)
+})
+
+test("doctor and setup explain reviewed message-pin scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
+      DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
+      DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const messagePin = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.messagePinPolicy,
+  )
+  assert.equal(messagePin?.status, "pass")
+  assert.match(messagePin?.summary || "", /1 exact channels/)
+  assert.match(messagePin?.summary || "", /exact state plus review-snapshot readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.messagePinPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /pin-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /pins toolset/)
 })
 
 test("doctor and setup explain reviewed role-creation scope without Discord writes", async () => {
@@ -986,6 +1035,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_scaffold",
     "review_member_moderation",
     "review_message_deletion",
+    "review_message_pin",
     "review_role_creation",
     "search_guild_messages",
     "summarize_channel",
@@ -1010,6 +1060,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "delete_messages",
     "edit_own_message",
     "execute_member_moderation",
+    "execute_message_pin",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)

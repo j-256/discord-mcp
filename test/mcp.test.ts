@@ -29,6 +29,10 @@ import type {
   GuildScaffoldPlan,
   GuildScaffoldRequest,
 } from "../src/guild-scaffold-service.js"
+import type {
+  MessagePinPlan,
+  MessagePinRequest,
+} from "../src/message-pin-service.js"
 import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
   type NormalizedDiscordRole,
@@ -48,6 +52,8 @@ import {
   GuildScaffoldOperationConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
+  MessagePinExecutionError,
+  MessagePinOperationConflictError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
 } from "../src/errors.js"
@@ -94,6 +100,7 @@ const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
+const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -170,6 +177,66 @@ function plan(digest = DIGEST) {
     }],
     schemaVersion: 1,
     status: "planned" as const,
+  }
+}
+
+function messagePinPlan(
+  request: MessagePinRequest,
+  digest = DIGEST,
+  action: "change" | "none" = "change",
+): MessagePinPlan {
+  const desiredPinned = request.desiredState === "pinned"
+  const pinned = action === "none" ? desiredPinned : !desiredPinned
+  return {
+    action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    channel: normalizeChannel(rawChannel({ id: request.channelId })),
+    createdAt: "2026-08-20T00:00:00.000Z",
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    message: {
+      attachmentFilenames: ["private-file.txt"],
+      author: {
+        bot: false,
+        globalName: null,
+        id: USER_ID,
+        username: "private-member",
+      },
+      contentLength: 13,
+      contentPreview: "private hello",
+      editedTimestamp: null,
+      id: request.messageId,
+      jumpUrl: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+      pinned,
+      timestamp: "2026-08-20T00:00:00.000Z",
+      truncated: false,
+      type: 0,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      canReadMessages: true,
+      confidence: "complete",
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.PIN_MESSAGES
+      ).toString(),
+      permissionSourceChannelId: request.channelId,
+      pinMessages: true,
+      privateThreadAccess: "not-applicable",
+      readMessageHistory: true,
+      viewChannel: true,
+    },
+    schemaVersion: 1,
+    status: action === "none" ? "already-current" : "planned",
+    target: {
+      desiredState: request.desiredState,
+      pinned: desiredPinned,
+    },
+    warnings: ["One-shot reviewed message pin change"],
   }
 }
 
@@ -594,6 +661,8 @@ function fixturePolicy(): PolicyDescription {
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
     protectedUserCount: 0,
+    pinChannelIds: [],
+    pinManagementEnabled: false,
     readChannelScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
@@ -615,6 +684,9 @@ function serviceFixture(overrides: {
   guildScaffoldPlanDigest?: string
   interactionError?: Error
   messageContent?: string
+  messagePinAction?: "change" | "none"
+  messagePinError?: Error
+  messagePinPlanDigest?: string
   planDigest?: string
   roleCreationAction?: "create" | "none"
   roleCreationError?: Error
@@ -640,6 +712,9 @@ function serviceFixture(overrides: {
     explain: 0,
     getRole: 0,
     listRoles: 0,
+    messagePinExecute: 0,
+    messagePinList: 0,
+    messagePinPlan: 0,
     plan: 0,
     principalExplain: 0,
     roleCreationExecute: 0,
@@ -813,6 +888,28 @@ function serviceFixture(overrides: {
         status: "completed",
         timeoutUntil: null,
         userId: request.userId,
+      }
+    },
+    async executeMessagePin(request, planDigest) {
+      if (overrides.messagePinError) throw overrides.messagePinError
+      calls.messagePinExecute += 1
+      const planned = messagePinPlan(
+        request,
+        planDigest,
+        overrides.messagePinAction,
+      )
+      return {
+        activityId: planned.action === "none" ? null : "activity-message-pin",
+        channelId: request.channelId,
+        guildId: GUILD_ID,
+        messageSnapshotMatched: true,
+        messageId: request.messageId,
+        observedPinned: request.desiredState === "pinned",
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-current" : "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
       }
     },
     async executeRoleCreation(request, planDigest) {
@@ -1101,6 +1198,25 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listMessagePins(channelId, options) {
+      calls.messagePinList += 1
+      return {
+        channel: normalizeChannel(rawChannel({ id: channelId })),
+        guildId: GUILD_ID,
+        page: {
+          hasMore: false,
+          nextCursor: null,
+          requestedLimit: options?.limit ?? 50,
+          returned: 1,
+        },
+        pins: [{
+          message: normalizeMessage({ ...rawMessage("pinned"), pinned: true }),
+          pinnedAt: "2026-08-20T00:00:00.000Z",
+        }],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async listRoles(guildId) {
       calls.listRoles += 1
       return {
@@ -1153,6 +1269,14 @@ function serviceFixture(overrides: {
     async planMemberModeration() {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
+    },
+    async planMessagePin(request) {
+      calls.messagePinPlan += 1
+      return messagePinPlan(
+        request,
+        overrides.messagePinPlanDigest || DIGEST,
+        overrides.messagePinAction,
+      )
     },
     async planRoleCreation(request) {
       calls.roleCreationPlan += 1
@@ -1327,11 +1451,14 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "read_messages",
       "search_messages",
       "get_message",
+      "list_message_pins",
       "send_message",
       "edit_own_message",
       "add_reaction",
       "plan_message_deletion",
       "delete_messages",
+      "plan_message_pin",
+      "execute_message_pin",
       "plan_channel_creation",
       "execute_channel_creation",
       "plan_forum_post",
@@ -1349,10 +1476,11 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     ],
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
+  const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
   const administration = result.tools.find((tool) => (
     tool.name === "execute_member_moderation"
   ))
-  for (const tool of [deletion, administration]) {
+  for (const tool of [deletion, messagePin, administration]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
       idempotentHint: true,
@@ -1369,6 +1497,14 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: true,
   })
+  for (const name of ["list_message_pins", "plan_message_pin"]) {
+    assert.deepEqual(listedTool(result.tools, name).annotations, {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    })
+  }
   const channelCreationPlan = result.tools.find((tool) => (
     tool.name === "plan_channel_creation"
   ))
@@ -1784,6 +1920,30 @@ test("progressive discovery enables the complete reviewed role-creation workflow
   )
 })
 
+test("progressive discovery enables the complete reviewed message-pin workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_message_pin" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_message_pin",
+    "plan_message_pin",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_message_pin",
+      "execute_message_pin",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOLSETS: "messages,connector" },
@@ -1900,6 +2060,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     guildScaffoldPlan: 0,
     getRole: 0,
     listRoles: 0,
+    messagePinExecute: 0,
+    messagePinList: 0,
+    messagePinPlan: 0,
     plan: 0,
     principalExplain: 0,
     roleCreationExecute: 0,
@@ -2630,6 +2793,249 @@ test("MCP attachment messages expose uncertain and one-shot conflict outcomes sa
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(ATTACHMENT_OPERATION_KEY))
+})
+
+test("MCP message pins list current timestamp-paginated pin pages", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: {
+      before: "2026-08-20T00:00:00.000Z",
+      channelId: CHANNEL_ID,
+      limit: 25,
+    },
+    name: "list_message_pins",
+  })
+  const invalidCursor = await client.callTool({
+    arguments: {
+      before: MESSAGE_ID,
+      channelId: CHANNEL_ID,
+    },
+    name: "list_message_pins",
+  })
+  const invalidLimit = await client.callTool({
+    arguments: { channelId: CHANNEL_ID, limit: 51 },
+    name: "list_message_pins",
+  })
+
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal((structuredContent(listed).page as Record<string, unknown>).requestedLimit, 25)
+  assert.equal((structuredContent(listed).pins as unknown[]).length, 1)
+  assert.equal(invalidCursor.isError, true)
+  assert.equal(invalidLimit.isError, true)
+  assert.equal(calls.messagePinList, 1)
+})
+
+test("MCP message pins validate exact reviewed plan inputs", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "pinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+    },
+    name: "plan_message_pin",
+  })
+  const invalidState = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "toggle",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+    },
+    name: "plan_message_pin",
+  })
+  const shortKey = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "unpinned",
+      messageId: MESSAGE_ID,
+      operationKey: "short",
+    },
+    name: "plan_message_pin",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(invalidState.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(calls.messagePinPlan, 1)
+})
+
+test("MCP message pins bind signed approval to the exact pin transition", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "pinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_message_pin",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.messagePinPlan, 1)
+  assert.equal(calls.messagePinExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Current pinned state: false/)
+  assert.match(confirmationMessage, /Desired pinned state: true/)
+  assert.match(confirmationMessage, /PIN_MESSAGES: true/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(MESSAGE_PIN_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MESSAGE_PIN_OPERATION_KEY),
+  )
+})
+
+test("MCP message pins skip confirmation for no-ops and stop on refusal or drift", async (context) => {
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { messagePinAction: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "unpinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_message_pin",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.messagePinExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "unpinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_message_pin",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.messagePinExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { messagePinPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "pinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_message_pin",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.messagePinExecute, 0)
+})
+
+test("MCP message pins expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      messagePinError: new MessagePinExecutionError(
+        "Discord message pin outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "pinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_message_pin",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-message-pin",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-20T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      messagePinError: new MessagePinOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      desiredState: "unpinned",
+      messageId: MESSAGE_ID,
+      operationKey: MESSAGE_PIN_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_message_pin",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(MESSAGE_PIN_OPERATION_KEY),
+  )
 })
 
 test("MCP channel creation plans bounded additive types and rejects category settings", async (context) => {

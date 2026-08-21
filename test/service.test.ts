@@ -315,6 +315,9 @@ function serviceFixture(overrides: {
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
     },
+    async listMessagePins() {
+      return { has_more: false, items: [] }
+    },
     async listMessages() {
       calls.listMessages += 1
       return [message()]
@@ -332,6 +335,7 @@ function serviceFixture(overrides: {
         user: { id: userId, username: "target" },
       }
     },
+    async pinMessage() {},
     async removeGuildBan() {},
     async removeGuildMember() {
       calls.removeMember += 1
@@ -343,6 +347,7 @@ function serviceFixture(overrides: {
         total_results: 0,
       }
     },
+    async unpinMessage() {},
   }
   Object.assign(client, overrides.client)
   const activityStore: ActivityStore = {

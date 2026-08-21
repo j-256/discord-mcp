@@ -35,6 +35,8 @@ export interface PolicyDescription {
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
   protectedUserCount: number
+  pinChannelIds: string[]
+  pinManagementEnabled: boolean
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
   roleCreationEnabled: boolean
@@ -50,6 +52,7 @@ export class ScopePolicy {
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
+  readonly #allowPinManagement: boolean
   readonly #allowGateway: boolean
   readonly #allowGuildScaffolds: boolean
   readonly #allowForumPosts: boolean
@@ -69,6 +72,7 @@ export class ScopePolicy {
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
   readonly #protectedUserIds: ReadonlySet<string>
+  readonly #pinChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
 
   constructor(config: Pick<
@@ -90,6 +94,7 @@ export class ScopePolicy {
     | "allowAttachments"
     | "allowGateway"
     | "allowGuildScaffolds"
+    | "allowPinManagement"
     | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
@@ -102,6 +107,7 @@ export class ScopePolicy {
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
+    | "pinChannelIds"
     | "roleCreationGuildIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
@@ -112,6 +118,7 @@ export class ScopePolicy {
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
+    this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowGateway = config.allowGateway ?? false
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
@@ -132,6 +139,7 @@ export class ScopePolicy {
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#protectedUserIds = config.protectedUserIds
+    this.#pinChannelIds = config.pinChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
   }
 
@@ -167,6 +175,8 @@ export class ScopePolicy {
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
       protectedUserCount: this.#protectedUserIds.size,
+      pinChannelIds: [...this.#pinChannelIds].sort(),
+      pinManagementEnabled: this.#allowPinManagement && this.#pinChannelIds.size > 0,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
       roleCreationEnabled: this.#allowRoleCreation
@@ -332,6 +342,20 @@ export class ScopePolicy {
     }
     if (!this.#interactionChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the interaction scope`)
+    }
+    return guildId
+  }
+
+  assertChannelPinManageable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowPinManagement) {
+      throw new PolicyError("Discord pin management is disabled by connector configuration")
+    }
+    if (this.#pinChannelIds.size === 0) {
+      throw new PolicyError("Discord pin management requires an explicit pin-channel allowlist")
+    }
+    if (!this.#pinChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the pin-management scope`)
     }
     return guildId
   }

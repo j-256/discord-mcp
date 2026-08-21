@@ -43,6 +43,7 @@ type McpToolWorkflow =
   | "guild-scaffold"
   | "member-moderation"
   | "message-deletion"
+  | "message-pin"
   | "role-creation"
 
 interface ToolCatalogMetadata {
@@ -100,6 +101,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  execute_message_pin: {
+    keywords: ["execute", "message", "pin", "state", "unpin"],
+    toolset: "pins",
+    workflow: "message-pin",
   },
   execute_role_creation: {
     keywords: ["create", "execute", "permission", "role"],
@@ -162,6 +168,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["guild", "list", "server"],
     toolset: "guilds",
   },
+  list_message_pins: {
+    keywords: ["list", "message", "paginated", "pin", "pinned"],
+    toolset: "pins",
+  },
   list_guild_audit_entries: {
     keywords: ["action", "actor", "audit", "guild", "history", "moderation"],
     toolset: "audit-logs",
@@ -199,6 +209,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["delete", "exact ids", "plan", "remove", "review"],
     toolset: "deletion",
     workflow: "message-deletion",
+  },
+  plan_message_pin: {
+    keywords: ["message", "pin", "plan", "review", "state", "unpin"],
+    toolset: "pins",
+    workflow: "message-pin",
   },
   plan_role_creation: {
     keywords: ["create", "permission", "plan", "review", "role"],

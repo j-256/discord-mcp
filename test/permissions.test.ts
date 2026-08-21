@@ -361,6 +361,56 @@ test("principal evaluator applies timeout restrictions after channel overwrites"
   assert.equal(result.decisionTrace.at(-1)?.stage, "member-timeout")
 })
 
+test("principal evaluator maps pin-message to the current dedicated permission", () => {
+  const allowed = evaluatePrincipalPermissions({
+    action: "pin-message",
+    channel: channel(),
+    guildId: GUILD_ID,
+    guildOwnerId: OWNER_ID,
+    permissionChannel: channel(),
+    roles: [role(
+      GUILD_ID,
+      DISCORD_PERMISSIONS.PIN_MESSAGES
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+      "@everyone",
+    )],
+    subject: {
+      id: BOT_ID,
+      kind: "member",
+      member: { roles: [], user: { id: BOT_ID, username: "subject" } },
+    },
+  })
+  const legacyOnly = evaluatePrincipalPermissions({
+    action: "pin-message",
+    channel: channel(),
+    guildId: GUILD_ID,
+    guildOwnerId: OWNER_ID,
+    permissionChannel: channel(),
+    roles: [role(
+      GUILD_ID,
+      DISCORD_PERMISSIONS.MANAGE_MESSAGES
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+      "@everyone",
+    )],
+    subject: {
+      id: BOT_ID,
+      kind: "member",
+      member: { roles: [], user: { id: BOT_ID, username: "subject" } },
+    },
+  })
+
+  assert.equal(allowed.allowed, true)
+  assert.deepEqual(allowed.requestedPermissions, [
+    "VIEW_CHANNEL",
+    "READ_MESSAGE_HISTORY",
+    "PIN_MESSAGES",
+  ])
+  assert.equal(legacyOnly.allowed, false)
+  assert.deepEqual(legacyOnly.missingPermissions, ["PIN_MESSAGES"])
+})
+
 test("principal evaluator distinguishes exact private-thread membership from role baselines", () => {
   const privateThread = channel({
     id: THREAD_ID,

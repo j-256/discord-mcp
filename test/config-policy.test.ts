@@ -51,6 +51,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
     DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
     DISCORD_MCP_BOT_ID: "300000000000000002",
     DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
@@ -58,6 +59,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
     DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "750",
     DISCORD_MCP_MENTION_USER_IDS: USER_ID,
+    DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
     XDG_STATE_HOME: "/test/state",
   }, { homeDirectory: "/test/home" })
@@ -79,6 +81,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.forumPostChannelIds], [])
   assert.equal(config.allowGateway, false)
   assert.equal(config.allowInteractions, true)
+  assert.equal(config.allowPinManagement, true)
+  assert.deepEqual([...config.pinChannelIds], [CHANNEL_ID])
   assert.equal(config.allowRoleCreation, false)
   assert.deepEqual([...config.roleCreationGuildIds], [])
   assert.equal(config.interactionMaxWritesPerMinute, 12)
@@ -132,6 +136,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
     protectedUserCount: 0,
+    pinChannelIds: [],
+    pinManagementEnabled: false,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
@@ -276,6 +282,8 @@ test("configuration and policy require an exact administration guild and protect
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
     protectedUserCount: 1,
+    pinChannelIds: [],
+    pinManagementEnabled: false,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
@@ -430,6 +438,44 @@ test("configuration and policy isolate forum posts to exact readable channels", 
   assert.deepEqual(enabled.describe().forumPostChannelIds, [CHANNEL_ID])
 })
 
+test("configuration and policy isolate pin management to exact readable channels", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_PIN_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertChannelPinManageable(channel()),
+    /pin management is disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
+    DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabledConfig.allowPinManagement, true)
+  assert.deepEqual([...enabledConfig.pinChannelIds], [CHANNEL_ID])
+  assert.equal(enabled.assertChannelPinManageable(channel()), GUILD_ID)
+  assert.throws(
+    () => enabled.assertChannelPinManageable(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the pin-management scope/,
+  )
+  assert.equal(enabled.describe().pinManagementEnabled, true)
+  assert.deepEqual(enabled.describe().pinChannelIds, [CHANNEL_ID])
+})
+
 test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -562,6 +608,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
     protectedUserCount: 0,
+    pinChannelIds: [],
+    pinManagementEnabled: false,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",
     roleCreationEnabled: false,

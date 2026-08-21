@@ -190,6 +190,8 @@ export function registerDiscordResources(
           "",
           "Role creation is additive-only and requires a separate exact guild allowlist. Planning checks the complete bounded role inventory, logical-name collisions, capacity, bot hierarchy, MANAGE_ROLES, and every named permission as a subset of the bot's effective permissions. ADMINISTRATOR is forbidden. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, pending content-free records, one non-retried create request, and exact role readback. It never edits, moves, assigns, deletes, or rolls back roles.",
           "",
+          "Message pin listing uses Discord's current timestamp-paginated endpoint and persists nothing. Pin and unpin both require a separate exact channel allowlist and a review-first workflow that binds verified application and bot identity, exact message state, thread membership, complete message-read and PIN_MESSAGES permission evidence, audit reason, and one-shot key hash into a keyed plan. Execution requires fresh matching evidence, signed approval, durable reservation, pending content-free activity, one non-retried mutation, and exact state plus review-snapshot readback. An uncertain outcome permanently spends the key and blocks queued same-target changes in the process; overlapping scope across connector processes remains unsafe.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,

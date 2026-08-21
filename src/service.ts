@@ -47,6 +47,7 @@ import type {
   DiscordClientOptions,
   GuildPageOptions,
   GuildMessageSearchOptions,
+  MessagePinPageOptions,
   MessagePageOptions,
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
@@ -73,6 +74,14 @@ import type {
 } from "./interaction-service.js"
 import { InteractionService } from "./interaction-service.js"
 import { InteractionLimiter } from "./interaction-limiter.js"
+import type {
+  MessagePinListResult,
+  MessagePinPlan,
+  MessagePinRequest,
+  MessagePinResult,
+  MessagePinServiceOptions,
+} from "./message-pin-service.js"
+import { MessagePinService } from "./message-pin-service.js"
 import {
   normalizeChannel,
   normalizeGuild,
@@ -141,13 +150,16 @@ export interface DiscordServiceClient {
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
+  listMessagePins: DiscordClient["listMessagePins"]
   listMessages: DiscordClient["listMessages"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  pinMessage: DiscordClient["pinMessage"]
   removeGuildBan: DiscordClient["removeGuildBan"]
   removeGuildMember: DiscordClient["removeGuildMember"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
+  unpinMessage: DiscordClient["unpinMessage"]
 }
 
 export interface ActiveThreadListOptions extends RequestOptions {
@@ -193,6 +205,10 @@ export interface ConnectorServiceOptions {
   interactionOptions?: Pick<
     InteractionServiceOptions,
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
+  >
+  messagePinOptions?: Pick<
+    MessagePinServiceOptions,
+    "clock" | "planKey" | "randomId"
   >
   operationStore?: OperationStore
   permissionOptions?: Pick<PermissionServiceOptions, "clock">
@@ -310,6 +326,7 @@ export class ConnectorService {
   readonly #deletionService: DeletionService
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
+  readonly #messagePinService: MessagePinService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
   readonly #guildScaffoldService: GuildScaffoldService
@@ -371,6 +388,13 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.interactionOptions,
       limiter: interactionLimiter,
+    })
+    this.#messagePinService = new MessagePinService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.messagePinOptions,
     })
     this.#forumPostService = new ForumPostService({
       activityStore: this.#activityStore,
@@ -909,6 +933,27 @@ export class ConnectorService {
     return this.#deletionService.plan(channelId, messageIds, options)
   }
 
+  async listMessagePins(
+    channelId: string,
+    options: MessagePinPageOptions = {},
+  ): Promise<MessagePinListResult> {
+    await this.#verifyIdentity(options)
+    return this.#messagePinService.list(channelId, options)
+  }
+
+  async planMessagePin(
+    request: MessagePinRequest,
+    options: RequestOptions = {},
+  ): Promise<MessagePinPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#messagePinService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberModeration(
     request: MemberModerationRequest,
     options: RequestOptions = {},
@@ -1055,6 +1100,21 @@ export class ConnectorService {
   ): Promise<DeletionResult> {
     await this.#verifyIdentity(options)
     return this.#deletionService.execute(channelId, messageIds, planDigest, options)
+  }
+
+  async executeMessagePin(
+    request: MessagePinRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MessagePinResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#messagePinService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
   }
 
   async sendMessage(

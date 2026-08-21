@@ -32,6 +32,7 @@ import type {
   DiscordGuildAuditLog,
   DiscordGuildMember,
   DiscordMessage,
+  DiscordMessagePinPage,
   DiscordMessageSearchIndexing,
   DiscordMessageSearchResponse,
   DiscordRole,
@@ -78,6 +79,11 @@ export interface GuildAuditLogPageOptions extends RequestOptions {
 }
 
 export interface MessagePageOptions extends MessageCursor, RequestOptions {
+  limit?: number
+}
+
+export interface MessagePinPageOptions extends RequestOptions {
+  before?: string
   limit?: number
 }
 
@@ -1214,6 +1220,67 @@ export class DiscordClient {
     options: RequestOptions = {},
   ): Promise<DiscordMessage> {
     return this.#request("get_message", `/channels/${channelId}/messages/${messageId}`, options)
+  }
+
+  listMessagePins(
+    channelId: string,
+    options: MessagePinPageOptions = {},
+  ): Promise<DiscordMessagePinPage> {
+    assertSearchSnowflake(channelId, "Discord pin channel ID")
+    assertBoundedLimit(
+      options.limit,
+      DISCORD_LIMITS.channelPins,
+      "Discord message pin page limit",
+    )
+    assertIsoTimestamp(options.before, "Discord message pin cursor")
+    return this.#request(
+      "list_message_pins",
+      `/channels/${channelId}/messages/pins${queryString({
+        before: options.before,
+        limit: options.limit,
+      })}`,
+      options,
+    )
+  }
+
+  async pinMessage(
+    channelId: string,
+    messageId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(channelId, "Discord pin channel ID")
+    assertSearchSnowflake(messageId, "Discord pinned message ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "pin_message",
+      `/channels/${channelId}/messages/pins/${messageId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async unpinMessage(
+    channelId: string,
+    messageId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(channelId, "Discord pin channel ID")
+    assertSearchSnowflake(messageId, "Discord pinned message ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "unpin_message",
+      `/channels/${channelId}/messages/pins/${messageId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
   }
 
   createMessage(

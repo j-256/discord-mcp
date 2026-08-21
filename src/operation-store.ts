@@ -27,6 +27,7 @@ export const OPERATION_KINDS = [
   "channel-creation",
   "forum-post",
   "guild-scaffold",
+  "message-pin",
   "role-creation",
 ] as const
 

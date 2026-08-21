@@ -42,6 +42,7 @@ export interface ConnectorConfig {
   allowGateway: boolean
   allowGuildScaffolds: boolean
   allowInteractions: boolean
+  allowPinManagement: boolean
   allowRoleCreation: boolean
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
@@ -62,6 +63,7 @@ export interface ConnectorConfig {
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
   protectedUserIds: ReadonlySet<string>
+  pinChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
   token: string
 }
@@ -242,6 +244,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.interactionChannelIds],
     ENVIRONMENT_NAMES.interactionChannelIds,
   )
+  const pinChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.pinChannelIds],
+    ENVIRONMENT_NAMES.pinChannelIds,
+  )
   const forumPostChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.forumPostChannelIds],
     ENVIRONMENT_NAMES.forumPostChannelIds,
@@ -284,6 +290,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
+    [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
       if (allowedChannelIds.size === 0 || allowedChannelIds.has(channelId)) continue
@@ -349,6 +356,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
     ),
+    allowPinManagement: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowPinManagement],
+      ENVIRONMENT_NAMES.allowPinManagement,
+    ),
     allowRoleCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowRoleCreation],
       ENVIRONMENT_NAMES.allowRoleCreation,
@@ -409,6 +420,7 @@ export function loadConnectorConfig(
     ),
     observability: loadObservabilityConfig(environment, [rawToken || "", token]),
     protectedUserIds,
+    pinChannelIds,
     roleCreationGuildIds,
     token,
   }

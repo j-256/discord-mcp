@@ -32,8 +32,11 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   plan_forum_post: "discord-read",
   plan_guild_scaffold: "discord-read",
   plan_message_deletion: "discord-read",
+  plan_message_pin: "discord-read",
   plan_role_creation: "discord-read",
   read_messages: "discord-read",
+  list_message_pins: "discord-read",
+  execute_message_pin: "destructive-write",
   search_messages: "discord-read",
   send_message: "interaction-write",
 })
@@ -69,12 +72,15 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   list_current_user_guilds: "GET",
   list_joined_private_archived_threads: "GET",
   list_messages: "GET",
+  list_message_pins: "GET",
   list_private_archived_threads: "GET",
   list_public_archived_threads: "GET",
   modify_guild_member_timeout: "PATCH",
+  pin_message: "PUT",
   remove_guild_ban: "DELETE",
   remove_guild_member: "DELETE",
   search_guild_messages: "GET",
+  unpin_message: "DELETE",
 })
 
 export type DiscordRestOperation = keyof typeof DISCORD_REST_OPERATIONS

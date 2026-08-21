@@ -469,6 +469,7 @@ export const DISCORD_PERMISSION_ACTIONS = [
   "attach-file",
   "add-reaction",
   "delete-message",
+  "pin-message",
   "manage-channel",
   "assign-role",
   "remove-role",
@@ -486,6 +487,7 @@ export const DISCORD_CHANNEL_PERMISSION_ACTIONS = [
   "attach-file",
   "add-reaction",
   "delete-message",
+  "pin-message",
   "manage-channel",
 ] as const satisfies readonly DiscordPermissionAction[]
 
@@ -751,6 +753,13 @@ function actionPermissions(
       "VIEW_CHANNEL",
       "READ_MESSAGE_HISTORY",
       "MANAGE_MESSAGES",
+    ])
+  }
+  if (action === "pin-message") {
+    return withVoiceConnect([
+      "VIEW_CHANNEL",
+      "READ_MESSAGE_HISTORY",
+      "PIN_MESSAGES",
     ])
   }
   if (action === "manage-channel") {
