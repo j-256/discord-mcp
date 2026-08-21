@@ -101,6 +101,9 @@ function status(
       readGuildScope: "allowlist",
       roleCreationEnabled: false,
       roleCreationGuildIds: [],
+      webhookAuditEnabled: false,
+      webhookChannelIds: [],
+      webhookDeletionsEnabled: false,
     },
     schemaVersion: 1,
     status: "ok",
@@ -121,6 +124,10 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    executeWebhookDeletion: unexpected,
+    getChannelWebhook: unexpected,
+    listChannelWebhooks: unexpected,
+    planWebhookDeletion: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -506,6 +513,65 @@ test("doctor and setup explain reviewed message-pin scope without Discord writes
   )
   assert.match(setup.warnings.join("\n"), /pin-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /pins toolset/)
+})
+
+test("doctor and setup explain credential-redacted webhook audit and cleanup", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+    DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.webhookAuditPolicy,
+  )
+  const deletion = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.webhookDeletionPolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /credential-redacted webhook inventory/i)
+  assert.match(audit?.summary || "", /1 exact channels/)
+  assert.equal(deletion?.status, "pass")
+  assert.match(deletion?.summary || "", /Incoming-webhook deletion/)
+  assert.match(deletion?.summary || "", /one-shot execution and absence readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.webhookAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.webhookDeletionPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /webhook-audit toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-deletion toggle/)
+  assert.match(omitted.warnings.join("\n"), /webhooks toolset/)
 })
 
 test("doctor and setup explain reviewed permission-overwrite scope without Discord writes", async () => {
@@ -1174,6 +1240,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_message_deletion",
     "review_message_pin",
     "review_role_creation",
+    "review_webhook_deletion",
     "search_guild_messages",
     "summarize_channel",
   ])
@@ -1190,6 +1257,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/access",
     "discord://channels/{channelId}/messages/{messageId}",
     "discord://channels/{channelId}/permission-overwrites",
+    "discord://channels/{channelId}/webhooks",
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/members/{userId}",
     "discord://guilds/{guildId}/roles",
@@ -1201,6 +1269,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_member_moderation",
     "execute_message_pin",
+    "execute_webhook_deletion",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)

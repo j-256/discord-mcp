@@ -13,7 +13,12 @@ import {
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_USER_AGENT,
 } from "./constants.js"
-import { DiscordApiError, errorMessage, redactText } from "./errors.js"
+import {
+  DiscordApiError,
+  errorMessage,
+  redactText,
+  WebhookEvidenceError,
+} from "./errors.js"
 import {
   DISCORD_REST_OPERATIONS,
   type DiscordRestOperation,
@@ -96,6 +101,16 @@ export interface MessagePageOptions extends MessageCursor, RequestOptions {
 export interface MessagePinPageOptions extends RequestOptions {
   before?: string
   limit?: number
+}
+
+export interface DiscordWebhookSummary {
+  applicationId: string | null
+  channelId: string | null
+  creatorUserId: string | null
+  guildId: string | null
+  id: string
+  name: string | null
+  type: number
 }
 
 export type SearchAuthorType =
@@ -363,9 +378,86 @@ type QueryScalar = boolean | number | string
 type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
+  "list_channel_webhooks",
   "search_guild_members",
   "search_guild_messages",
 ])
+
+function projectWebhook(value: unknown): DiscordWebhookSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WebhookEvidenceError("Discord returned an invalid webhook object")
+  }
+  const record = value as Record<string, unknown>
+  const user = record.user
+  if (
+    typeof record.id !== "string"
+    || !Number.isSafeInteger(record.type)
+    || !(record.name === null || typeof record.name === "string")
+    || !(
+      record.guild_id === null
+      || record.guild_id === undefined
+      || typeof record.guild_id === "string"
+    )
+    || !(record.channel_id === null || typeof record.channel_id === "string")
+    || !(
+      record.application_id === null
+      || typeof record.application_id === "string"
+    )
+    || !(user === null || user === undefined || (
+      user !== null
+      && typeof user === "object"
+      && !Array.isArray(user)
+      && typeof (user as Record<string, unknown>).id === "string"
+    ))
+  ) {
+    throw new WebhookEvidenceError("Discord returned an invalid webhook object")
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord webhook ID")
+    if (typeof record.guild_id === "string") {
+      assertPositiveSnowflake(record.guild_id, "Discord webhook guild ID")
+    }
+    if (typeof record.channel_id === "string") {
+      assertPositiveSnowflake(record.channel_id, "Discord webhook channel ID")
+    }
+    if (typeof record.application_id === "string") {
+      assertPositiveSnowflake(record.application_id, "Discord webhook application ID")
+    }
+    if (user && typeof user === "object") {
+      assertPositiveSnowflake(
+        (user as Record<string, unknown>).id as string,
+        "Discord webhook creator ID",
+      )
+    }
+    if (typeof record.name === "string") {
+      if (
+        [...record.name].length < 1
+        || [...record.name].length > DISCORD_LIMITS.webhookNameCharacters
+        || /[\u0000-\u001F\u007F]/u.test(record.name)
+      ) {
+        throw new RangeError("Discord webhook name is invalid")
+      }
+      assertValidUnicode(record.name, "Discord webhook name")
+    }
+  } catch (error) {
+    throw new WebhookEvidenceError("Discord returned an invalid webhook object", {
+      cause: error,
+    })
+  }
+  return {
+    applicationId: typeof record.application_id === "string"
+      ? record.application_id
+      : null,
+    channelId: typeof record.channel_id === "string" ? record.channel_id : null,
+    creatorUserId: user && typeof user === "object"
+      ? (user as Record<string, unknown>).id as string
+      : null,
+    guildId: typeof record.guild_id === "string" ? record.guild_id : null,
+    id: record.id,
+    name: record.name,
+    type: record.type as number,
+  }
+}
 
 function queryString(values: Record<string, QueryValue>): string {
   const parameters = new URLSearchParams()
@@ -1275,6 +1367,39 @@ export class DiscordClient {
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {
     return this.#request("get_channel", `/channels/${channelId}`, options)
+  }
+
+  async listChannelWebhooks(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordWebhookSummary[]> {
+    assertPositiveSnowflake(channelId, "Discord webhook channel ID")
+    const response = await this.#request<unknown>(
+      "list_channel_webhooks",
+      `/channels/${channelId}/webhooks`,
+      options,
+    )
+    if (!Array.isArray(response)) {
+      throw new WebhookEvidenceError("Discord returned an invalid channel webhook inventory")
+    }
+    if (response.length > DISCORD_LIMITS.webhooksPerChannel) {
+      throw new WebhookEvidenceError("Discord returned an invalid channel webhook inventory")
+    }
+    return response.map(projectWebhook)
+  }
+
+  async deleteWebhook(
+    webhookId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(webhookId, "Discord webhook ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>("delete_webhook", `/webhooks/${webhookId}`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+    })
   }
 
   async editChannelPermissionOverwrite(

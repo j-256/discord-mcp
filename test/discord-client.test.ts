@@ -1722,3 +1722,248 @@ test("Discord client rejects unsafe message wire inputs before fetching", () => 
   )
   assert.equal(requests, 0)
 })
+
+test("Discord client projects channel webhook inventory before returning it", async () => {
+  const privateToken = "incoming-webhook-secret"
+  const privateUrl = "https://discord.test/api/webhooks/300/incoming-webhook-secret"
+  const privateProfile = "private-creator-profile"
+  const records: RecordedObservation[] = []
+  let request: {
+    authorization: string | null
+    method: string | undefined
+    url: string
+  } | null = null
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      request = {
+        authorization: new Headers(init?.headers).get("Authorization"),
+        method: init?.method,
+        url: String(input),
+      }
+      return jsonResponse([{
+        application_id: "500",
+        avatar: "private-avatar",
+        channel_id: "200",
+        guild_id: "100",
+        id: "300",
+        name: "reviewed-hook",
+        source_channel: { id: "201", name: "private-source-channel" },
+        source_guild: { id: "101", name: "private-source-guild" },
+        token: privateToken,
+        type: 1,
+        unknown: "private-unknown-field",
+        url: privateUrl,
+        user: {
+          avatar: "private-user-avatar",
+          discriminator: "0001",
+          global_name: privateProfile,
+          id: "400",
+          username: privateProfile,
+        },
+      }, {
+        application_id: null,
+        channel_id: "200",
+        guild_id: null,
+        id: "301",
+        name: null,
+        type: 3,
+        user: null,
+      }])
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const inventory = await client.listChannelWebhooks("200")
+
+  assert.deepEqual(inventory, [{
+    applicationId: "500",
+    channelId: "200",
+    creatorUserId: "400",
+    guildId: "100",
+    id: "300",
+    name: "reviewed-hook",
+    type: 1,
+  }, {
+    applicationId: null,
+    channelId: "200",
+    creatorUserId: null,
+    guildId: null,
+    id: "301",
+    name: null,
+    type: 3,
+  }])
+  assert.deepEqual(request, {
+    authorization: `Bot ${TOKEN}`,
+    method: "GET",
+    url: `${API_BASE_URL}/channels/200/webhooks`,
+  })
+  const serialized = JSON.stringify(inventory)
+  for (const secret of [
+    privateToken,
+    privateUrl,
+    privateProfile,
+    "private-avatar",
+    "private-source-channel",
+    "private-source-guild",
+    "private-unknown-field",
+  ]) {
+    assert.equal(serialized.includes(secret), false)
+  }
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "list_channel_webhooks",
+    retries: 0,
+    runs: 1,
+  }])
+})
+
+test("Discord client rejects invalid webhook inventory without exposing response data", async () => {
+  const privateFailure = "private-webhook-response-detail"
+  let requests = 0
+  const malformedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse([{
+        channel_id: "200",
+        id: "300",
+        name: null,
+        type: 1,
+        user: { id: 400 },
+      }])
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => malformedClient.listChannelWebhooks("200"),
+    /invalid webhook object/,
+  )
+
+  const failedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: privateFailure }, 403)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => failedClient.listChannelWebhooks("200"),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.doesNotMatch(error.message, new RegExp(privateFailure))
+      return true
+    },
+  )
+
+  const oversizedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse(Array.from({ length: 16 }, (_, index) => ({
+        application_id: null,
+        channel_id: "200",
+        guild_id: "100",
+        id: String(300 + index),
+        name: "reviewed-hook",
+        type: 1,
+      })))
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => oversizedClient.listChannelWebhooks("200"),
+    /invalid channel webhook inventory/,
+  )
+
+  await assert.rejects(
+    () => malformedClient.listChannelWebhooks("invalid"),
+    /webhook channel ID/,
+  )
+  await assert.rejects(
+    () => malformedClient.listChannelWebhooks("0"),
+    /positive Discord snowflake/,
+  )
+  assert.equal(requests, 3)
+})
+
+test("Discord client deletes an exact webhook once with an encoded audit reason", async () => {
+  const requests: Array<{
+    authorization: string | null
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("Authorization"),
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return new Response(null, { status: 204 })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.deleteWebhook("300", "Reviewed cleanup / case 42")
+
+  assert.deepEqual(requests, [{
+    authorization: `Bot ${TOKEN}`,
+    method: "DELETE",
+    reason: "Reviewed%20cleanup%20%2F%20case%2042",
+    url: `${API_BASE_URL}/webhooks/300`,
+  }])
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "delete_webhook",
+    retries: 0,
+    runs: 1,
+  }])
+})
+
+test("Discord client never retries webhook deletion and validates before fetching", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.deleteWebhook("300", "Reviewed cleanup"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && error.retryAfterMs === 1
+    ),
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+  await assert.rejects(
+    () => client.deleteWebhook("invalid", "Reviewed cleanup"),
+    /webhook ID/,
+  )
+  await assert.rejects(
+    () => client.deleteWebhook("0", "Reviewed cleanup"),
+    /positive Discord snowflake/,
+  )
+  await assert.rejects(
+    () => client.deleteWebhook("300", " "),
+    /must not be blank/,
+  )
+  assert.equal(requests, 1)
+})

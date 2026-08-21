@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.j-256/discord-mcp",
   "title": "Discord MCP",
-  "description": "Least-privilege Discord reads, reviewed access and message changes, and resumable guild scaffolds",
+  "description": "Least-privilege Discord reads, credential-safe webhook audit, reviewed changes, and guild scaffolds",
   "repository": {
     "url": "https://github.com/j-256/discord-mcp",
     "source": "github",
@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, threads, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -392,6 +392,29 @@
         {
           "name": "DISCORD_MCP_PIN_CHANNEL_IDS",
           "description": "Exact channel or thread IDs eligible for reviewed message pin changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
+          "description": "Enable credential-redacted webhook inventory when an exact direct-channel allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
+          "description": "Enable reviewed exact Incoming-webhook deletion; requires webhook audit and its exact channel allowlist",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
+          "description": "Exact direct guild-channel IDs eligible for credential-redacted webhook audit and reviewed cleanup",
           "format": "string"
         },
         {

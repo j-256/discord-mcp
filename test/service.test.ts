@@ -50,6 +50,7 @@ const CREATED_CHANNEL_ID = "400000000000000005"
 const CREATED_ROLE_ID = "700000000000000001"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
+const WEBHOOK_ID = "900000000000000001"
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -187,6 +188,7 @@ function serviceFixture(overrides: {
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
+  webhookOptions?: ConnectorServiceOptions["webhookOptions"]
 } = {}) {
   const calls = {
     activityAppends: 0,
@@ -249,6 +251,7 @@ function serviceFixture(overrides: {
     },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
+    async deleteWebhook() {},
     async editChannelPermissionOverwrite() {},
     async editMessage(_channelId, _messageId, input) {
       calls.editMessage += 1
@@ -324,6 +327,9 @@ function serviceFixture(overrides: {
     },
     async listMessagePins() {
       return { has_more: false, items: [] }
+    },
+    async listChannelWebhooks() {
+      return []
     },
     async listMessages() {
       calls.listMessages += 1
@@ -407,6 +413,9 @@ function serviceFixture(overrides: {
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
         : {}),
+      ...(overrides.webhookOptions
+        ? { webhookOptions: overrides.webhookOptions }
+        : {}),
     }),
   }
 }
@@ -474,6 +483,82 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.user, 1)
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 1)
+})
+
+test("service verifies identity through credential-free webhook audit and cleanup", async () => {
+  const operationStore = new MemoryOperationStore()
+  let inventory = [{
+    applicationId: APPLICATION_ID,
+    channelId: CHANNEL_ID,
+    creatorUserId: MEMBER_USER_ID,
+    guildId: GUILD_ID,
+    id: WEBHOOK_ID,
+    name: "reviewed-hook",
+    type: 1,
+  }]
+  let deleteCalls = 0
+  let inventoryCalls = 0
+  const botPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+  const { calls, service } = serviceFixture({
+    client: {
+      async deleteWebhook(webhookId, auditReason) {
+        assert.equal(webhookId, WEBHOOK_ID)
+        assert.equal(auditReason, "Reviewed webhook cleanup")
+        deleteCalls += 1
+        inventory = inventory.filter((entry) => entry.id !== webhookId)
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, botPermissions, "@everyone")]
+      },
+      async listChannelWebhooks(channelId) {
+        assert.equal(channelId, CHANNEL_ID)
+        inventoryCalls += 1
+        return inventory
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+      DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+      DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+    },
+    operationStore,
+    webhookOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(19),
+      randomId: () => "activity-webhook-deletion",
+    },
+  })
+  const request = {
+    auditReason: "Reviewed webhook cleanup",
+    channelId: CHANNEL_ID,
+    operationKey: "webhook-service-attempt-0001",
+    webhookId: WEBHOOK_ID,
+  }
+
+  const listed = await service.listChannelWebhooks(CHANNEL_ID)
+  const exact = await service.getChannelWebhook(CHANNEL_ID, WEBHOOK_ID)
+  const plan = await service.planWebhookDeletion(request)
+  const result = await service.executeWebhookDeletion(request, plan.digest)
+
+  assert.equal(listed.webhooks.length, 1)
+  assert.equal(exact.webhook.webhookId, WEBHOOK_ID)
+  assert.equal(plan.target.webhookId, WEBHOOK_ID)
+  assert.equal(plan.privacy.credentialsProjectedOut, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.verifiedAbsent, true)
+  assert.equal(deleteCalls, 1)
+  assert.equal(inventoryCalls, 5)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "webhook-deletion")
+  assert.equal(operationStore.receipt?.resourceId, WEBHOOK_ID)
 })
 
 test("service verifies identity through reviewed channel permission changes", async () => {

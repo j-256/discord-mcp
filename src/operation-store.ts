@@ -30,6 +30,7 @@ export const OPERATION_KINDS = [
   "guild-scaffold",
   "message-pin",
   "role-creation",
+  "webhook-deletion",
 ] as const
 
 export type OperationKind = typeof OPERATION_KINDS[number]

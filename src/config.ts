@@ -46,6 +46,8 @@ export interface ConnectorConfig {
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
+  allowWebhookAudit: boolean
+  allowWebhookDeletions: boolean
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
@@ -70,6 +72,7 @@ export interface ConnectorConfig {
   pinChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
   token: string
+  webhookChannelIds: ReadonlySet<string>
 }
 
 export interface ConfigOptions {
@@ -282,6 +285,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.guildScaffoldGuildIds],
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
   )
+  const webhookChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.webhookChannelIds],
+    ENVIRONMENT_NAMES.webhookChannelIds,
+  )
 
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
@@ -305,6 +312,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
+    [ENVIRONMENT_NAMES.webhookChannelIds, webhookChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
       if (allowedChannelIds.size === 0 || allowedChannelIds.has(channelId)) continue
@@ -334,6 +342,19 @@ export function loadConnectorConfig(
   if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGateway} requires an exact guild or channel read allowlist`,
+    )
+  }
+  const allowWebhookAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWebhookAudit],
+    ENVIRONMENT_NAMES.allowWebhookAudit,
+  )
+  const allowWebhookDeletions = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWebhookDeletions],
+    ENVIRONMENT_NAMES.allowWebhookDeletions,
+  )
+  if (allowWebhookDeletions && !allowWebhookAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowWebhookDeletions} requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
     )
   }
 
@@ -386,6 +407,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowRoleCreation],
       ENVIRONMENT_NAMES.allowRoleCreation,
     ),
+    allowWebhookAudit,
+    allowWebhookDeletions,
     auditFile: auditFile(
       environment[ENVIRONMENT_NAMES.auditFile],
       environment,
@@ -447,5 +470,6 @@ export function loadConnectorConfig(
     pinChannelIds,
     roleCreationGuildIds,
     token,
+    webhookChannelIds,
   }
 }

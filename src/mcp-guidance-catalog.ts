@@ -23,6 +23,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelAccess: "channel_access",
   channelPermissionOverwrites: "channel_permission_overwrites",
+  channelWebhooks: "channel_webhooks",
   exactMessage: "exact_message",
   exactMember: "exact_member",
   exactRole: "exact_role",
@@ -33,6 +34,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelAccess: "discord://channels/{channelId}/access",
   channelPermissionOverwrites: "discord://channels/{channelId}/permission-overwrites",
+  channelWebhooks: "discord://channels/{channelId}/webhooks",
   exactMessage: "discord://channels/{channelId}/messages/{messageId}",
   exactMember: "discord://guilds/{guildId}/members/{userId}",
   exactRole: "discord://guilds/{guildId}/roles/{roleId}",
@@ -51,6 +53,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewMessageDeletion: "review_message_deletion",
   reviewMessagePin: "review_message_pin",
   reviewRoleCreation: "review_role_creation",
+  reviewWebhookDeletion: "review_webhook_deletion",
   searchGuildMessages: "search_guild_messages",
   summarizeChannel: "summarize_channel",
 })
@@ -70,6 +73,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",
   [MCP_PROMPT_NAMES.reviewMessagePin]: "pins",
   [MCP_PROMPT_NAMES.reviewRoleCreation]: "role-creation",
+  [MCP_PROMPT_NAMES.reviewWebhookDeletion]: "webhooks",
   [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",
   [MCP_PROMPT_NAMES.summarizeChannel]: "messages",
 } satisfies Record<McpPromptName, McpToolsetName>)

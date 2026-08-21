@@ -21,6 +21,7 @@ import {
   type MemberModerationActivity,
   type MessagePinActivity,
   type RoleCreationActivity,
+  type WebhookDeletionActivity,
 } from "../src/activity-log.js"
 
 function attachmentMessage(
@@ -203,6 +204,32 @@ function messagePin(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function webhookDeletion(
+  id: string,
+  status: WebhookDeletionActivity["status"],
+): WebhookDeletionActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "webhook-deletion",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+    webhookId: "300",
   }
 }
 
@@ -560,4 +587,65 @@ test("JSONL activity log returns an empty result before the first deletion", asy
     file,
     skippedLines: 0,
   })
+})
+
+test("JSONL activity log keeps webhook deletion evidence credential-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-creator-profile",
+    "private-operation-key",
+    "private-webhook-name",
+    "private-webhook-secret",
+    "private-webhook-url",
+  ]
+
+  await store.append(webhookDeletion("1", "pending"))
+  await store.append({
+    ...webhookDeletion("2", "completed"),
+    auditReason: privateValues[0],
+    creatorProfile: privateValues[1],
+    operationKey: privateValues[2],
+    name: privateValues[3],
+    token: privateValues[4],
+    url: privateValues[5],
+  } as WebhookDeletionActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...webhookDeletion("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+      "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
 })

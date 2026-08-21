@@ -121,6 +121,15 @@ import {
   normalizeDiscordRoleInventory,
   RoleAdministrationService,
 } from "./role-administration-service.js"
+import type {
+  WebhookDeletionPlan,
+  WebhookDeletionRequest,
+  WebhookDeletionResult,
+  WebhookInventoryResult,
+  WebhookLookupResult,
+  WebhookServiceOptions,
+} from "./webhook-service.js"
+import { WebhookService } from "./webhook-service.js"
 import {
   FileOperationStore,
   operationReceiptDirectory,
@@ -148,6 +157,7 @@ export interface DiscordServiceClient {
   createMessage: DiscordClient["createMessage"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteMessage: DiscordClient["deleteMessage"]
+  deleteWebhook: DiscordClient["deleteWebhook"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
@@ -168,6 +178,7 @@ export interface DiscordServiceClient {
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listMessagePins: DiscordClient["listMessagePins"]
+  listChannelWebhooks: DiscordClient["listChannelWebhooks"]
   listMessages: DiscordClient["listMessages"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
@@ -239,6 +250,7 @@ export interface ConnectorServiceOptions {
     RoleAdministrationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
 }
 
 interface VerifiedIdentity {
@@ -379,6 +391,7 @@ export class ConnectorService {
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
+  readonly #webhookService: WebhookService
 
   constructor(options: ConnectorServiceOptions) {
     this.#config = options.config
@@ -441,6 +454,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.messagePinOptions,
+    })
+    this.#webhookService = new WebhookService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.webhookOptions,
     })
     this.#memberDirectoryService = new MemberDirectoryService({
       client: this.#client,
@@ -1037,6 +1057,41 @@ export class ConnectorService {
     )
   }
 
+  async listChannelWebhooks(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookService.list(identity.bot.id, channelId, options)
+  }
+
+  async getChannelWebhook(
+    channelId: string,
+    webhookId: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookService.get(
+      identity.bot.id,
+      channelId,
+      webhookId,
+      options,
+    )
+  }
+
+  async planWebhookDeletion(
+    request: WebhookDeletionRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookDeletionPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async listChannelPermissionOverwrites(
     channelId: string,
     options: ChannelPermissionOverwriteListOptions = {},
@@ -1213,6 +1268,21 @@ export class ConnectorService {
   ): Promise<MessagePinResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#messagePinService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeWebhookDeletion(
+    request: WebhookDeletionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookDeletionResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookService.execute(
       identity.application.id,
       identity.bot.id,
       request,

@@ -44,6 +44,7 @@ export const MCP_TOOLSET_NAMES = [
   "role-creation",
   "roles",
   "threads",
+  "webhooks",
 ] as const
 
 export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
@@ -65,6 +66,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowPermissionOverwrites: "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
   allowRoleCreation: "DISCORD_MCP_ALLOW_ROLE_CREATION",
+  allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
+  allowWebhookDeletions: "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
   attachmentChannelIds: "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
   attachmentMaxBytes: "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
@@ -107,6 +110,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   token: "DISCORD_BOT_TOKEN",
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
   toolsets: "DISCORD_MCP_TOOLSETS",
+  webhookChannelIds: "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
 })
 
 export const DISCORD_LIMITS = Object.freeze({
@@ -150,6 +154,8 @@ export const DISCORD_LIMITS = Object.freeze({
   searchOffset: 9_975,
   searchSlop: 100,
   snowflakeCharacters: 20,
+  webhookNameCharacters: 80,
+  webhooksPerChannel: 15,
 })
 
 export const PERMISSION_LIMITS = Object.freeze({

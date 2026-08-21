@@ -1,5 +1,6 @@
 import type { ConnectorConfig } from "./config.js"
 import {
+  DISCORD_CHANNEL_TYPES,
   GATEWAY_DEFAULTS,
   MCP_TOOLSET_NAMES,
   type McpToolsetName,
@@ -45,7 +46,19 @@ export interface PolicyDescription {
   readGuildScope: "all-visible" | "allowlist"
   roleCreationEnabled: boolean
   roleCreationGuildIds: string[]
+  webhookAuditEnabled: boolean
+  webhookChannelIds: string[]
+  webhookDeletionsEnabled: boolean
 }
+
+const WEBHOOK_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
 
 export class ScopePolicy {
   readonly #adminGuildIds: ReadonlySet<string>
@@ -63,6 +76,8 @@ export class ScopePolicy {
   readonly #allowGuildScaffolds: boolean
   readonly #allowForumPosts: boolean
   readonly #allowRoleCreation: boolean
+  readonly #allowWebhookAudit: boolean
+  readonly #allowWebhookDeletions: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #attachmentChannelIds: ReadonlySet<string>
   readonly #attachmentMaxBytes: number
@@ -82,6 +97,7 @@ export class ScopePolicy {
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
+  readonly #webhookChannelIds: ReadonlySet<string>
 
   constructor(config: Pick<
     ConnectorConfig,
@@ -108,6 +124,8 @@ export class ScopePolicy {
     | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
+    | "allowWebhookAudit"
+    | "allowWebhookDeletions"
     | "channelCreationGuildIds"
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
@@ -121,6 +139,7 @@ export class ScopePolicy {
     | "permissionOverwriteChannelIds"
     | "pinChannelIds"
     | "roleCreationGuildIds"
+    | "webhookChannelIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
@@ -137,6 +156,8 @@ export class ScopePolicy {
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
+    this.#allowWebhookAudit = config.allowWebhookAudit ?? false
+    this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
@@ -157,6 +178,7 @@ export class ScopePolicy {
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
+    this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
   }
 
   describe(): PolicyDescription {
@@ -204,6 +226,12 @@ export class ScopePolicy {
       roleCreationEnabled: this.#allowRoleCreation
         && this.#roleCreationGuildIds.size > 0,
       roleCreationGuildIds: [...this.#roleCreationGuildIds].sort(),
+      webhookAuditEnabled: this.#allowWebhookAudit
+        && this.#webhookChannelIds.size > 0,
+      webhookChannelIds: [...this.#webhookChannelIds].sort(),
+      webhookDeletionsEnabled: this.#allowWebhookAudit
+        && this.#allowWebhookDeletions
+        && this.#webhookChannelIds.size > 0,
     }
   }
 
@@ -395,6 +423,31 @@ export class ScopePolicy {
     }
     if (!this.#pinChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the pin-management scope`)
+    }
+    return guildId
+  }
+
+  assertChannelWebhookAuditable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!WEBHOOK_CHANNEL_TYPES.has(channel.type)) {
+      throw new PolicyError("Discord channel type does not support webhook inventory")
+    }
+    if (!this.#allowWebhookAudit) {
+      throw new PolicyError("Discord webhook audit is disabled by connector configuration")
+    }
+    if (this.#webhookChannelIds.size === 0) {
+      throw new PolicyError("Discord webhook audit requires an explicit channel allowlist")
+    }
+    if (!this.#webhookChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the webhook scope`)
+    }
+    return guildId
+  }
+
+  assertChannelWebhookDeletable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelWebhookAuditable(channel)
+    if (!this.#allowWebhookDeletions) {
+      throw new PolicyError("Discord webhook deletion is disabled by connector configuration")
     }
     return guildId
   }

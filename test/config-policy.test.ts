@@ -11,7 +11,10 @@ import { join } from "node:path"
 import test from "node:test"
 
 import { loadConnectorConfig } from "../src/config.js"
-import { MCP_TOOLSET_NAMES } from "../src/constants.js"
+import {
+  DISCORD_CHANNEL_TYPES,
+  MCP_TOOLSET_NAMES,
+} from "../src/constants.js"
 import { ConfigurationError, PolicyError } from "../src/errors.js"
 import { ScopePolicy } from "../src/policy.js"
 import type { DiscordChannel } from "../src/types.js"
@@ -155,6 +158,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    webhookAuditEnabled: false,
+    webhookChannelIds: [],
+    webhookDeletionsEnabled: false,
   })
 
   for (const environment of [
@@ -228,6 +234,98 @@ test("configuration rejects deletion channels outside a read channel allowlist",
       DISCORD_MCP_DELETE_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
     ConfigurationError,
+  )
+})
+
+test("configuration and policy isolate webhook audit and deletion authority", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+    DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(config)
+
+  assert.equal(config.allowWebhookAudit, true)
+  assert.equal(config.allowWebhookDeletions, true)
+  assert.deepEqual([...config.webhookChannelIds], [CHANNEL_ID])
+  assert.equal(enabled.assertChannelWebhookAuditable(channel()), GUILD_ID)
+  assert.equal(enabled.assertChannelWebhookDeletable(channel()), GUILD_ID)
+  assert.deepEqual(
+    {
+      webhookAuditEnabled: enabled.describe().webhookAuditEnabled,
+      webhookChannelIds: enabled.describe().webhookChannelIds,
+      webhookDeletionsEnabled: enabled.describe().webhookDeletionsEnabled,
+    },
+    {
+      webhookAuditEnabled: true,
+      webhookChannelIds: [CHANNEL_ID],
+      webhookDeletionsEnabled: true,
+    },
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertChannelWebhookAuditable(channel()),
+    /webhook audit is disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertChannelWebhookAuditable(channel()),
+    /requires an explicit channel allowlist/,
+  )
+
+  const deletionDisabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => deletionDisabled.assertChannelWebhookDeletable(channel()),
+    /webhook deletion is disabled/,
+  )
+  assert.throws(
+    () => enabled.assertChannelWebhookAuditable(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the webhook scope/,
+  )
+  assert.throws(
+    () => enabled.assertChannelWebhookAuditable(channel({
+      type: DISCORD_CHANNEL_TYPES.publicThread,
+    })),
+    /does not support webhook inventory/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+      DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_WEBHOOK_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_WEBHOOK_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_WEBHOOK_CHANNEL_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
   )
 })
 
@@ -305,6 +403,9 @@ test("configuration and policy require an exact administration guild and protect
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    webhookAuditEnabled: false,
+    webhookChannelIds: [],
+    webhookDeletionsEnabled: false,
   })
 })
 
@@ -717,6 +818,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     readGuildScope: "allowlist",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    webhookAuditEnabled: false,
+    webhookChannelIds: [],
+    webhookDeletionsEnabled: false,
   })
 })
 

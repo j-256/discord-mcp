@@ -46,6 +46,7 @@ type McpToolWorkflow =
   | "message-deletion"
   | "message-pin"
   | "role-creation"
+  | "webhook-deletion"
 
 interface ToolCatalogMetadata {
   keywords: readonly string[]
@@ -118,6 +119,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "role-creation",
     workflow: "role-creation",
   },
+  execute_webhook_deletion: {
+    keywords: ["cleanup", "delete", "execute", "integration", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-deletion",
+  },
   explain_channel_access: {
     keywords: ["access", "permissions", "read", "view"],
     toolset: "guilds",
@@ -158,6 +164,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["exact", "permission", "read", "role"],
     toolset: "roles",
   },
+  get_channel_webhook: {
+    keywords: ["audit", "exact", "integration", "lookup", "webhook"],
+    toolset: "webhooks",
+  },
   list_active_threads: {
     keywords: ["active", "forum", "list", "thread"],
     toolset: "threads",
@@ -197,6 +207,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_roles: {
     keywords: ["guild", "hierarchy", "list", "permission", "role"],
     toolset: "roles",
+  },
+  list_channel_webhooks: {
+    keywords: ["audit", "channel", "integration", "inventory", "list", "webhook"],
+    toolset: "webhooks",
   },
   plan_member_moderation: {
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
@@ -242,6 +256,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "permission", "plan", "review", "role"],
     toolset: "role-creation",
     workflow: "role-creation",
+  },
+  plan_webhook_deletion: {
+    keywords: ["cleanup", "delete", "integration", "plan", "review", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-deletion",
   },
   read_messages: {
     keywords: ["channel", "history", "list", "message", "read"],

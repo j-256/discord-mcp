@@ -186,6 +186,42 @@ export class MessagePinExecutionError extends Error {
   }
 }
 
+export class WebhookDeletionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord webhook snapshot does not match the reviewed deletion plan")
+    this.name = "WebhookDeletionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class WebhookDeletionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord webhook deletion operation key has already been reserved")
+    this.name = "WebhookDeletionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class WebhookDeletionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "WebhookDeletionExecutionError"
+    this.result = result
+  }
+}
+
+export class WebhookEvidenceError extends Error {
+  override name = "WebhookEvidenceError"
+}
+
 export class ChannelPermissionOverwritePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

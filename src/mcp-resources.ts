@@ -196,6 +196,8 @@ export function registerDiscordResources(
           "",
           "Channel permission-overwrite inventory is read-only, bounded, thread-inheritance aware, and persists nothing. Changes require a separate exact direct-channel allowlist and accept one exact role or member target with named allow, deny, or inherit deltas, or an explicit whole-overwrite delete. Planning preserves unspecified known channel bits, blocks unknown-bit or non-channel-bit updates, verifies the connector holds every outgoing permission, prevents loss of VIEW_CHANNEL or MANAGE_ROLES, and reports target effective-access plus parent synchronization impact. Execution requires a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried PUT or DELETE, and complete overwrite-set readback. Raw bitfields, bulk reset, copy, sync, thread mutation, retry, and rollback are unsupported.",
           "",
+          "Webhook inventory requires a separate exact direct-channel allowlist and complete VIEW_CHANNEL plus MANAGE_WEBHOOKS evidence. Incoming webhook credentials, complete execution URLs, avatars, creator profiles, source guild and channel objects, unknown raw fields, and unrelated channel metadata are projected out before any result is built and are never persisted. Creation, execution, editing, credential-authenticated tools, and guild-wide inventory are intentionally absent. Deletion requires an additional feature gate and accepts one exact Incoming webhook only after a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried DELETE, and exact channel-inventory absence readback. Discord can move a webhook between the final inventory and ID-only deletion, so every plan exposes the race and the same exact webhook ID serializes across channel claims within one process. An uncertain outcome permanently spends the key and blocks queued same-target deletion in the process.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,
@@ -410,6 +412,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listChannelPermissionOverwrites(
+        templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelWebhooks,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelWebhooks, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete credential-redacted Discord webhook inventory for one exact separately allowlisted direct guild channel. Webhook credentials, execution URLs, avatars, creator profiles, source objects, unknown fields, and unrelated channel metadata are omitted.",
+      mimeType: "application/json",
+      title: "Credential-redacted Discord channel webhooks",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listChannelWebhooks(
         templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),

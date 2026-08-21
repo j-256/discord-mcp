@@ -36,6 +36,7 @@ const CHANNEL_ID = "200000000000000001"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const ROLE_ID = "350000000000000001"
+const WEBHOOK_ID = "360000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -52,6 +53,17 @@ function rawChannel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
     topic: "Connector discussion",
     type: 0,
     ...overrides,
+  }
+}
+
+function webhookChannel(channelId = CHANNEL_ID) {
+  return {
+    guildId: GUILD_ID,
+    id: channelId,
+    name: "general",
+    parentId: null,
+    type: 0,
+    typeName: "guild-text",
   }
 }
 
@@ -126,6 +138,7 @@ interface GuidanceCalls {
   permissionOverwrites: number
   roles: number
   unexpected: number
+  webhooks: number
 }
 
 function guidanceService(options: {
@@ -150,6 +163,7 @@ function guidanceService(options: {
     permissionOverwrites: 0,
     roles: 0,
     unexpected: 0,
+    webhooks: 0,
   }
   const unexpected = async (..._arguments: unknown[]): Promise<never> => {
     calls.unexpected += 1
@@ -157,6 +171,9 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    executeWebhookDeletion: unexpected,
+    getChannelWebhook: unexpected,
+    planWebhookDeletion: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -197,6 +214,9 @@ function guidanceService(options: {
         readGuildScope: "allowlist",
         roleCreationEnabled: false,
         roleCreationGuildIds: [],
+        webhookAuditEnabled: false,
+        webhookChannelIds: [],
+        webhookDeletionsEnabled: false,
       }
     },
     editOwnMessage: unexpected,
@@ -350,6 +370,50 @@ function guidanceService(options: {
         status: "ok" as const,
       }
     },
+    async listChannelWebhooks(channelId) {
+      calls.webhooks += 1
+      calls.lastChannelId = channelId
+      return {
+        channel: webhookChannel(channelId),
+        guild: { id: GUILD_ID, name: "Private guild name" },
+        page: { returned: 1, safetyLimit: 15 },
+        permission: {
+          administrator: false,
+          confidence: "complete",
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+          ).toString(),
+          manageWebhooks: true,
+          permissionSourceChannelId: channelId,
+          viewChannel: true,
+        },
+        privacy: {
+          credentialsProjectedOut: true,
+          omittedFields: [
+            "avatar",
+            "sourceChannel",
+            "sourceGuild",
+            "token",
+            "unknownRawFields",
+            "url",
+            "userProfile",
+          ],
+        },
+        schemaVersion: 1,
+        status: "ok",
+        webhooks: [{
+          applicationId: "500000000000000001",
+          channelId,
+          createdAt: "2016-10-17T18:21:34.577Z",
+          creatorUserId: USER_ID,
+          guildId: GUILD_ID,
+          name: "Private webhook name",
+          type: "incoming",
+          webhookId: WEBHOOK_ID,
+        }],
+      }
+    },
     async listGuilds() {
       calls.guilds += 1
       return {
@@ -438,6 +502,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.permissionOverwrites
     + calls.roles
     + calls.unexpected
+    + calls.webhooks
 }
 
 async function readTextResource(client: Client, uri: string) {
@@ -505,6 +570,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelPermissionOverwrites,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelWebhooks,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelWebhooks,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.exactMessage,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactMessage,
       },
@@ -559,6 +628,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
   assert.match(safety.text, /ADMINISTRATOR is forbidden/)
+  assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
+  assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
   assert.match(safety.text, /Guild audit-log reads are separately selectable/)
   assert.match(safety.text, /include reasons only by explicit opt-in/)
   assert.match(safety.text, /Member-directory reads require a separate feature gate/)
@@ -649,6 +720,28 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     1,
   )
 
+  const webhooks = await readJsonResource(
+    client,
+    `discord://channels/${CHANNEL_ID}/webhooks`,
+  )
+  const webhookData = webhooks.value.data as Record<string, unknown>
+  const projectedWebhook = (webhookData.webhooks as Array<Record<string, unknown>>)[0]
+  assert.deepEqual(Object.keys(projectedWebhook || {}).sort(), [
+    "applicationId",
+    "channelId",
+    "createdAt",
+    "creatorUserId",
+    "guildId",
+    "name",
+    "type",
+    "webhookId",
+  ])
+  assert.equal(projectedWebhook?.webhookId, WEBHOOK_ID)
+  assert.equal(
+    (webhookData.privacy as Record<string, unknown>).credentialsProjectedOut,
+    true,
+  )
+
   const roles = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/roles`,
@@ -703,6 +796,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.members, 1)
   assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.roles, 2)
+  assert.equal(calls.webhooks, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
   assert.equal(calls.lastMessageId, MESSAGE_ID)
@@ -731,6 +825,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
       uri: `discord://guilds/${GUILD_ID}/members/not-a-snowflake`,
     }),
     /userId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: "discord://channels/not-a-snowflake/webhooks",
+    }),
+    /channelId must be a Discord snowflake ID/,
   )
   assert.equal(totalCalls(malformed.calls), 0)
 
@@ -882,6 +982,26 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(messagePin, /Call only plan_message_pin/)
   assert.match(messagePin, /Do not call execute_message_pin/)
   assert.match(messagePin, /PIN_MESSAGES/)
+
+  const webhookDeletion = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed webhook cleanup",
+      channelId: CHANNEL_ID,
+      operationKey: OPERATION_KEY,
+      webhookId: WEBHOOK_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewWebhookDeletion,
+  }))
+  assert.deepEqual(JSON.parse(webhookDeletion.split("\n")[1] || ""), {
+    auditReason: "Reviewed webhook cleanup",
+    channelId: CHANNEL_ID,
+    operationKey: OPERATION_KEY,
+    webhookId: WEBHOOK_ID,
+  })
+  assert.match(webhookDeletion, /Call only plan_webhook_deletion/)
+  assert.match(webhookDeletion, /Do not call execute_webhook_deletion/)
+  assert.match(webhookDeletion, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
+  assert.match(webhookDeletion, /credential and private-field omissions/)
 
   const permissionOverwrite = promptText(await client.getPrompt({
     arguments: {
@@ -1275,6 +1395,16 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewMessagePin,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed webhook cleanup",
+        channelId: CHANNEL_ID,
+        operationKey: OPERATION_KEY,
+        token: "credential-must-be-rejected",
+        webhookId: WEBHOOK_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewWebhookDeletion,
     },
     {
       arguments: {

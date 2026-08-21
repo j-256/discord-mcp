@@ -70,6 +70,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   roleCreationPolicy: "role-creation-policy",
   token: "token",
   toolSurface: "tool-surface",
+  webhookAuditPolicy: "webhook-audit-policy",
+  webhookDeletionPolicy: "webhook-deletion-policy",
 })
 
 const DEFAULT_CLI_COMMAND = "discord-mcp"
@@ -250,6 +252,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowMemberDirectory && config.memberDirectoryGuildIds.size === 0) {
     warnings.push("The member-directory toggle is enabled but member lookup remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowWebhookAudit && config.webhookChannelIds.size === 0) {
+    warnings.push("The webhook-audit toggle is enabled but inventory remains blocked because an exact channel allowlist is required")
+  }
+  if (config.allowWebhookDeletions && config.webhookChannelIds.size === 0) {
+    warnings.push("The webhook-deletion toggle is enabled but deletion remains blocked because an exact channel allowlist is required")
+  }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [config.allowAttachments, "attachments", "Attachment messages"],
@@ -263,6 +271,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
+    [
+      config.allowWebhookAudit || config.allowWebhookDeletions,
+      "webhooks",
+      "Webhook audit and cleanup",
+    ],
   ] as const) {
     if (enabled && !config.mcpToolsets.has(toolset)) {
       warnings.push(`${capability} is enabled by policy but omitted from the MCP ${toolset} toolset`)
@@ -593,6 +606,44 @@ export async function diagnoseConnector(
         `Member-directory reads are constrained to ${config.memberDirectoryGuildIds.size} exact guilds with bounded privacy-minimized pages`,
       ))
     }
+    if (!config.allowWebhookAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookAuditPolicy,
+        "pass",
+        "Credential-redacted webhook inventory is disabled",
+      ))
+    } else if (config.webhookChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookAuditPolicy,
+        "warn",
+        "Webhook-audit toggle is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookAuditPolicy,
+        "pass",
+        `Credential-redacted webhook inventory is constrained to ${config.webhookChannelIds.size} exact channels`,
+      ))
+    }
+    if (!config.allowWebhookDeletions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookDeletionPolicy,
+        "pass",
+        "Reviewed webhook deletion is disabled",
+      ))
+    } else if (config.webhookChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookDeletionPolicy,
+        "warn",
+        "Webhook-deletion toggle is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookDeletionPolicy,
+        "pass",
+        `Reviewed Incoming-webhook deletion is constrained to ${config.webhookChannelIds.size} exact channels with one-shot execution and absence readback`,
+      ))
+    }
     checks.push(config.allowGateway
       ? check(
         DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -770,6 +821,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
+    ENVIRONMENT_NAMES.allowWebhookAudit,
+    ENVIRONMENT_NAMES.allowWebhookDeletions,
+    ENVIRONMENT_NAMES.webhookChannelIds,
     ENVIRONMENT_NAMES.allowGateway,
     ENVIRONMENT_NAMES.gatewayEventBufferSize,
     ENVIRONMENT_NAMES.allowObservabilityExport,
