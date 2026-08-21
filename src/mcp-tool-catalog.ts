@@ -160,6 +160,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "entry", "exact", "guild", "history", "moderation"],
     toolset: "audit-logs",
   },
+  get_guild_ban: {
+    keywords: ["audit", "ban", "exact", "guild", "moderation", "user"],
+    toolset: "bans",
+  },
   get_automod_rule: {
     keywords: ["automod", "exact", "moderation", "policy", "rule"],
     toolset: "automod",
@@ -243,6 +247,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_guild_audit_entries: {
     keywords: ["action", "actor", "audit", "guild", "history", "moderation"],
     toolset: "audit-logs",
+  },
+  list_guild_bans: {
+    keywords: ["audit", "ban", "cursor", "guild", "list", "moderation"],
+    toolset: "bans",
   },
   list_guild_members: {
     keywords: ["cursor", "directory", "guild", "list", "member", "user"],

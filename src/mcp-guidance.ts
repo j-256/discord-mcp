@@ -12,6 +12,7 @@ export type DiscordGuidanceService = Pick<
   ConnectorService,
   | "explainChannelAccess"
   | "getGuildMember"
+  | "getGuildBan"
   | "getMessage"
   | "getRole"
   | "listActivity"

@@ -78,6 +78,8 @@ function status(
       automodAuditEnabled: false,
       automodChangesEnabled: false,
       automodGuildIds: [],
+      banAuditEnabled: false,
+      banAuditGuildIds: [],
       channelCreationEnabled: false,
       channelCreationGuildIds: [],
       deleteChannelIds: [],
@@ -177,6 +179,7 @@ function toolService(): DiscordToolService {
     explainChannelAccess: unexpected,
     explainPrincipalPermissions: unexpected,
     getGuildAuditEntry: unexpected,
+    getGuildBan: unexpected,
     getGuildMember: unexpected,
     getMessage: unexpected,
     getRole: unexpected,
@@ -190,6 +193,7 @@ function toolService(): DiscordToolService {
     listChannelPermissionOverwrites: unexpected,
     listGuilds: unexpected,
     listGuildAuditEntries: unexpected,
+    listGuildBans: unexpected,
     listGuildMembers: unexpected,
     listMessagePins: unexpected,
     listRoles: unexpected,
@@ -1206,6 +1210,50 @@ test("doctor and setup diagnose the separately gated Guild Members intent", asyn
   assert.match(omittedToolset.warnings.join("\n"), /members toolset/)
 })
 
+test("doctor and setup explain privacy-safe ban audit without privileged intent", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
+    DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const empty = await diagnoseConnector({
+    environment: environment({ DISCORD_MCP_ALLOW_BAN_AUDIT: "true" }),
+    nodeVersion: "22.14.0",
+  })
+  const omittedToolset = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
+      DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: {
+      async getStatus() {
+        return status(1, "enabled", "disabled")
+      },
+    },
+  })
+
+  const policy = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.banAuditPolicy,
+  )
+  assert.equal(policy?.status, "pass")
+  assert.match(policy?.summary || "", /BAN_MEMBERS/)
+  assert.match(policy?.summary || "", /default-redacted reasons/)
+  assert.equal(
+    empty.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.banAuditPolicy)?.status,
+    "warn",
+  )
+  assert.match(omittedToolset.warnings.join("\n"), /bans toolset/)
+  assert.doesNotMatch(setup.warnings.join("\n"), /Guild Members intent/)
+})
+
 test("doctor fails online verification when local scope contains no accessible guild", async () => {
   const report = await diagnoseConnector({
     environment: environment(),
@@ -1254,6 +1302,8 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
   assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowMemberDirectory), true)
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.memberDirectoryGuildIds), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowBanAudit), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.banAuditGuildIds), true)
   assert.deepEqual(
     [...result.environment.forward].sort(),
     Object.values(ENVIRONMENT_NAMES)
@@ -1522,6 +1572,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
     "find_guild_members",
+    "inspect_guild_ban",
     "review_attachment_message",
     "review_automod_change",
     "review_channel_creation",
@@ -1554,6 +1605,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/permission-overwrites",
     "discord://channels/{channelId}/webhooks",
     "discord://guilds/{guildId}/automod-rules",
+    "discord://guilds/{guildId}/bans/{userId}",
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/members/{userId}",

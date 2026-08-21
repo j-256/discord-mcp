@@ -130,6 +130,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 interface GuidanceCalls {
   activity: number
   automod: number
+  bans: number
   channelAccess: number
   channels: number
   guilds: number
@@ -158,6 +159,7 @@ function guidanceService(options: {
   const calls: GuidanceCalls = {
     activity: 0,
     automod: 0,
+    bans: 0,
     channelAccess: 0,
     channels: 0,
     guilds: 0,
@@ -377,6 +379,8 @@ function guidanceService(options: {
         automodAuditEnabled: false,
         automodChangesEnabled: false,
         automodGuildIds: [],
+        banAuditEnabled: false,
+        banAuditGuildIds: [],
         channelCreationEnabled: false,
         channelCreationGuildIds: [],
         deleteChannelIds: [],
@@ -463,6 +467,40 @@ function guidanceService(options: {
     },
     explainPrincipalPermissions: unexpected,
     getGuildAuditEntry: unexpected,
+    async getGuildBan(guildId, userId) {
+      calls.bans += 1
+      calls.lastGuildId = guildId
+      calls.lastUserId = userId
+      return {
+        access: {
+          banMembers: true as const,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true as const,
+          requiredPermission: "BAN_MEMBERS" as const,
+        },
+        applicationId: "500000000000000001",
+        ban: {
+          bot: false,
+          globalName: "Banned member",
+          hasReason: true,
+          userId,
+          username: "banned-member",
+        },
+        botId: "600000000000000001",
+        found: true as const,
+        guildId,
+        privacy: {
+          caches: "none" as const,
+          persistence: "none" as const,
+          profiles: "minimized" as const,
+          rawPayloads: "omitted" as const,
+          reasons: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     async getGuildMember(guildId, userId) {
       calls.members += 1
       calls.lastGuildId = guildId
@@ -639,6 +677,7 @@ function guidanceService(options: {
       }
     },
     listGuildAuditEntries: unexpected,
+    listGuildBans: unexpected,
     listGuildMembers: unexpected,
     listMessagePins: unexpected,
     async listRoles(guildId) {
@@ -698,6 +737,7 @@ async function connectedFixture(
 
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
+    + calls.bans
     + calls.channelAccess
     + calls.channels
     + calls.guilds
@@ -777,6 +817,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelWebhooks,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelWebhooks,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.exactGuildBan,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactGuildBan,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.exactMessage,
@@ -1082,6 +1126,21 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("avatar" in member, false)
   assert.equal("presence" in member, false)
 
+  const exactBan = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/bans/${USER_ID}`,
+  )
+  const banData = exactBan.value.data as Record<string, unknown>
+  const ban = banData.ban as Record<string, unknown>
+  assert.equal(ban.userId, USER_ID)
+  assert.equal(ban.hasReason, true)
+  assert.equal("reason" in ban, false)
+  assert.equal(
+    (banData.privacy as Record<string, unknown>).reasons,
+    "omitted",
+  )
+  assert.doesNotMatch(exactBan.text, /Private reason|avatar|discriminator/)
+
   const exact = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
@@ -1107,6 +1166,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.messages, 1)
   assert.equal(calls.members, 1)
+  assert.equal(calls.bans, 1)
   assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.roles, 2)
   assert.equal(calls.scheduledEvents, 1)
@@ -1137,6 +1197,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
   await assert.rejects(
     () => malformed.client.readResource({
       uri: `discord://guilds/${GUILD_ID}/members/not-a-snowflake`,
+    }),
+    /userId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: `discord://guilds/${GUILD_ID}/bans/0`,
     }),
     /userId must be a Discord snowflake ID/,
   )
@@ -1217,6 +1283,23 @@ test("MCP read prompts render bounded literal inputs without invoking services",
   assert.match(members, /Call search_guild_members exactly once/)
   assert.match(members, /explicit exact-ID review/)
   assert.match(members, /Do not broaden the query/)
+
+  const ban = promptText(await client.getPrompt({
+    arguments: {
+      guildId: GUILD_ID,
+      includeReason: "true",
+      userId: USER_ID,
+    },
+    name: MCP_PROMPT_NAMES.inspectGuildBan,
+  }))
+  assert.deepEqual(JSON.parse(ban.split("\n")[1] || ""), {
+    guildId: GUILD_ID,
+    includeReason: true,
+    userId: USER_ID,
+  })
+  assert.match(ban, /Call get_guild_ban exactly once/)
+  assert.match(ban, /Stop after the exact read/)
+  assert.doesNotMatch(ban, /list_guild_bans/)
 
   const redacted = promptText(await client.getPrompt({
     arguments: {
@@ -1664,6 +1747,21 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        guildId: GUILD_ID,
+        includeReason: "yes",
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.inspectGuildBan,
+    },
+    {
+      arguments: {
+        guildId: GUILD_ID,
+        userId: "0",
+      },
+      name: MCP_PROMPT_NAMES.inspectGuildBan,
+    },
     {
       arguments: {
         channelId: CHANNEL_ID,

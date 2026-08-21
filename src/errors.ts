@@ -6,6 +6,10 @@ export class DiscordAuditEvidenceError extends ConfigurationError {
   override name = "DiscordAuditEvidenceError"
 }
 
+export class BanAuditEvidenceError extends ConfigurationError {
+  override name = "BanAuditEvidenceError"
+}
+
 export class PolicyError extends Error {
   override name = "PolicyError"
 }

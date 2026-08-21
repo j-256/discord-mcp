@@ -9,6 +9,7 @@ import {
 import {
   CONNECTOR_LIMITS,
   DISCORD_LIMITS,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   SCHEMA_VERSION,
 } from "./constants.js"
@@ -58,7 +59,12 @@ function protocolError(
 
 function templateSnowflake(variables: Variables, name: string): string {
   const value = variables[name]
-  if (typeof value !== "string" || !DISCORD_SNOWFLAKE_PATTERN.test(value)) {
+  if (
+    typeof value !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(value)
+    || BigInt(value) < 1n
+    || BigInt(value) > DISCORD_SNOWFLAKE_MAX
+  ) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
       `${name} must be a Discord snowflake ID`,
@@ -179,6 +185,8 @@ export function registerDiscordResources(
           "Guild audit-log reads are separately selectable, exact-guild scoped, bounded, and read-only. They validate remote ordering, cursors, filters, and identifiers; omit embedded Discord objects plus change and option values; redact non-snowflake targets; include reasons only by explicit opt-in; and persist nothing.",
           "",
           "Member-directory reads require a separate feature gate and exact guild allowlist; member listing additionally requires Discord's Guild Members privileged intent. Exact lookup, ascending cursor pages, and username-or-nickname prefix search return only user IDs, bounded names, bot state, role IDs, join and screening state, and timeout expiry. They omit avatars, presence, voice state, boost state, permissions, flags, and raw payloads; persist and cache nothing; and never convert a name into a write target.",
+          "",
+          "Guild ban audit requires a separate feature gate, exact guild allowlist, verified connector identity, and complete BAN_MEMBERS evidence. Bounded ascending pages use private lookahead, exact lookup requires a user ID, and both return minimized profiles without avatars or raw payloads. Reasons require explicit tool opt-in, are always omitted from the exact resource, and are never cached, persisted, or exported.",
           "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
@@ -470,6 +478,31 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.getGuildMember(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "userId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.exactGuildBan,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.exactGuildBan, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact privacy-minimized Discord guild ban from the separately gated ban audit. The resource never includes the ban reason, persists nothing, and omits avatars, discriminators, and raw payloads.",
+      mimeType: "application/json",
+      title: "Exact privacy-safe Discord guild ban",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildBan(
         templateSnowflake(variables, "guildId"),
         templateSnowflake(variables, "userId"),
         { signal: context.mcpReq.signal },

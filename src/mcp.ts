@@ -64,6 +64,7 @@ import {
 import {
   ADMINISTRATION_LIMITS,
   AUDIT_LOG_LIMITS,
+  BAN_AUDIT_LIMITS,
   CHANNEL_CREATION_KINDS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
@@ -72,6 +73,7 @@ import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
   DISCORD_LIMITS,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GUILD_SCAFFOLD_SYMBOL_PATTERN,
   ENVIRONMENT_NAMES,
@@ -254,6 +256,10 @@ const EDIT_ANNOTATIONS = Object.freeze({
 })
 
 const snowflakeSchema = z.string().regex(DISCORD_SNOWFLAKE_PATTERN)
+const positiveSnowflakeSchema = snowflakeSchema.refine(
+  (value) => BigInt(value) >= 1n && BigInt(value) <= DISCORD_SNOWFLAKE_MAX,
+  "Discord snowflake must be positive and fit an unsigned 64-bit integer",
+)
 const emptyInputSchema = z.strictObject({})
 const guildPageInputSchema = z.strictObject({
   after: snowflakeSchema.optional(),
@@ -295,6 +301,27 @@ const guildMemberSearchInputSchema = z.strictObject({
       message: "query must not contain controls",
     })
     .describe("Literal username or nickname prefix"),
+})
+const guildBanListInputSchema = z.strictObject({
+  afterUserId: positiveSnowflakeSchema.optional()
+    .describe("Optional exact user ID cursor from nextAfterUserId"),
+  guildId: positiveSnowflakeSchema.describe("Exact separately allowlisted Discord guild ID"),
+  includeReasons: z.boolean()
+    .default(false)
+    .describe("Explicitly include bounded ban reasons"),
+  limit: z.number()
+    .int()
+    .min(1)
+    .max(BAN_AUDIT_LIMITS.listPage)
+    .default(BAN_AUDIT_LIMITS.listPageDefault)
+    .describe("Maximum privacy-minimized bans to return"),
+})
+const guildBanInputSchema = z.strictObject({
+  guildId: positiveSnowflakeSchema.describe("Exact separately allowlisted Discord guild ID"),
+  includeReason: z.boolean()
+    .default(false)
+    .describe("Explicitly include the bounded ban reason"),
+  userId: positiveSnowflakeSchema.describe("Exact banned Discord user ID"),
 })
 const guildAuditListInputSchema = z.strictObject({
   actionType: z.number()
@@ -2670,6 +2697,7 @@ export interface DiscordToolService {
   getAutoModerationRule: ConnectorService["getAutoModerationRule"]
   getChannelWebhook: ConnectorService["getChannelWebhook"]
   getGuildAuditEntry: ConnectorService["getGuildAuditEntry"]
+  getGuildBan: ConnectorService["getGuildBan"]
   getGuildMember: ConnectorService["getGuildMember"]
   getGuildExpression: ConnectorService["getGuildExpression"]
   getRole: ConnectorService["getRole"]
@@ -2683,6 +2711,7 @@ export interface DiscordToolService {
   listChannelPermissionOverwrites: ConnectorService["listChannelPermissionOverwrites"]
   listGuilds: ConnectorService["listGuilds"]
   listGuildAuditEntries: ConnectorService["listGuildAuditEntries"]
+  listGuildBans: ConnectorService["listGuildBans"]
   listGuildMembers: ConnectorService["listGuildMembers"]
   listGuildExpressions: ConnectorService["listGuildExpressions"]
   listMessagePins: ConnectorService["listMessagePins"]
@@ -4747,6 +4776,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "The optional Gateway feed requests no privileged intents, retains only scoped identifiers and fixed event kinds, and reports cursor discontinuities explicitly.",
       "Observability is process-local unless separately enabled for privacy-safe OTLP export, and status surfaces expose only fixed operation aggregates and exporter health.",
       "Guild audit-log reads omit embedded Discord objects plus all change and option values, redact non-snowflake targets, persist nothing, and include reasons only by explicit opt-in.",
+      "Guild ban audit uses a separate exact guild scope and complete BAN_MEMBERS evidence. It returns minimized user profiles, omits reasons by default, persists nothing, and requires exact user IDs for lookup.",
       "Member-directory reads require a separate exact guild allowlist, and member listing additionally requires the Guild Members privileged intent. They return bounded privacy-minimized records, persist nothing, and never turn a display name into a write target.",
       "Prompts render validated read-only or plan-only workflows and never perform service calls themselves.",
       "Native search requires a substantive filter and may report that Discord is still indexing.",
@@ -5038,6 +5068,58 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord returned ${result.members.length} privacy-minimized member-prefix matches from guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_guild_bans", server.registerTool(
+    "list_guild_bans",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "List one bounded ascending page of privacy-minimized bans from a separately gated Discord guild. Ban reasons require explicit opt-in, and nextAfterUserId is returned only when a private lookahead proves another page exists.",
+      inputSchema: guildBanListInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List privacy-safe Discord guild bans",
+    },
+    safeToolHandler("list_guild_bans", async (
+      input: z.infer<typeof guildBanListInputSchema>,
+      context,
+    ) => {
+      const result = await service.listGuildBans(input.guildId, {
+        ...(input.afterUserId ? { afterUserId: input.afterUserId } : {}),
+        includeReasons: input.includeReasons,
+        limit: input.limit,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord returned ${result.bans.length} privacy-minimized bans from guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("get_guild_ban", server.registerTool(
+    "get_guild_ban",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Fetch one exact privacy-minimized Discord guild ban through a separately gated read. The ban reason is omitted unless explicitly requested, and the result persists nothing.",
+      inputSchema: guildBanInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Get exact privacy-safe Discord guild ban",
+    },
+    safeToolHandler("get_guild_ban", async (
+      input: z.infer<typeof guildBanInputSchema>,
+      context,
+    ) => {
+      const result = await service.getGuildBan(input.guildId, input.userId, {
+        includeReason: input.includeReason,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        result.found
+          ? `Discord ban ${input.userId} exists in guild ${input.guildId}`
+          : `Discord ban ${input.userId} was not found in guild ${input.guildId}`,
       )
     }, secrets, observability),
   ))

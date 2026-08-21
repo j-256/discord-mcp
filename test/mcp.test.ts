@@ -13,6 +13,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
 import {
   AUDIT_LOG_LIMITS,
+  BAN_AUDIT_LIMITS,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
@@ -108,6 +109,7 @@ import {
 import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
 import {
   MCP_PROMPT_NAMES,
+  MCP_RESOURCE_TEMPLATE_NAMES,
   MCP_RESOURCE_URIS,
 } from "../src/mcp-guidance.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
@@ -1428,6 +1430,8 @@ function fixturePolicy(): PolicyDescription {
     automodAuditEnabled: false,
     automodChangesEnabled: false,
     automodGuildIds: [],
+    banAuditEnabled: false,
+    banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -1527,6 +1531,8 @@ function serviceFixture(overrides: {
     autoModerationGet: 0,
     autoModerationList: 0,
     autoModerationPlan: 0,
+    banGet: 0,
+    banList: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     delete: 0,
@@ -2269,6 +2275,39 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async getGuildBan(guildId, userId, options) {
+      calls.banGet += 1
+      return {
+        access: {
+          banMembers: true as const,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true as const,
+          requiredPermission: "BAN_MEMBERS" as const,
+        },
+        applicationId: APPLICATION_ID,
+        ban: {
+          bot: false,
+          globalName: "Banned member",
+          hasReason: true,
+          ...(options?.includeReason ? { reason: "Private reason" } : {}),
+          userId,
+          username: "banned-member",
+        },
+        botId: BOT_ID,
+        found: true as const,
+        guildId,
+        privacy: {
+          caches: "none" as const,
+          persistence: "none" as const,
+          profiles: "minimized" as const,
+          rawPayloads: "omitted" as const,
+          reasons: options?.includeReason ? "included" as const : "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     async getRole(guildId) {
       calls.getRole += 1
       return {
@@ -2442,6 +2481,45 @@ function serviceFixture(overrides: {
         },
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async listGuildBans(guildId, options) {
+      calls.banList += 1
+      return {
+        access: {
+          banMembers: true as const,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true as const,
+          requiredPermission: "BAN_MEMBERS" as const,
+        },
+        applicationId: APPLICATION_ID,
+        bans: [{
+          bot: false,
+          globalName: "Banned member",
+          hasReason: true,
+          ...(options?.includeReasons ? { reason: "Private reason" } : {}),
+          userId: USER_ID,
+          username: "banned-member",
+        }],
+        botId: BOT_ID,
+        guildId,
+        page: {
+          afterUserId: options?.afterUserId ?? null,
+          hasMore: false,
+          nextAfterUserId: null,
+          requestedLimit: options?.limit ?? 25,
+          returned: 1,
+        },
+        privacy: {
+          caches: "none" as const,
+          persistence: "none" as const,
+          profiles: "minimized" as const,
+          rawPayloads: "omitted" as const,
+          reasons: options?.includeReasons ? "included" as const : "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
       }
     },
     async listMessagePins(channelId, options) {
@@ -2720,6 +2798,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_member",
       "list_guild_members",
       "search_guild_members",
+      "list_guild_bans",
+      "get_guild_ban",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -2982,6 +3062,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "audit_channel_role_access",
     "list_guild_audit_entries",
     "get_guild_audit_entry",
+    "list_guild_bans",
+    "get_guild_ban",
   ]) {
     assert.deepEqual(listedTool(result.tools, name).annotations, {
       destructiveHint: false,
@@ -3538,6 +3620,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     autoModerationGet: 0,
     autoModerationList: 0,
     autoModerationPlan: 0,
+    banGet: 0,
+    banList: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     delete: 0,
@@ -3735,6 +3819,78 @@ test("MCP member directory exposes bounded privacy-minimized exact, cursor, and 
   assert.equal(calls.memberGet, 1)
   assert.equal(calls.memberList, 1)
   assert.equal(calls.memberSearch, 1)
+})
+
+test("MCP ban audit exposes bounded default-redacted pages and exact reads", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const tools = (await client.listTools()).tools
+  const listTool = listedTool(tools, "list_guild_bans")
+
+  assert.equal(
+    (listTool.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .limit?.maximum,
+    BAN_AUDIT_LIMITS.listPage,
+  )
+  const listed = await client.callTool({
+    arguments: { afterUserId: USER_ID, guildId: GUILD_ID, limit: 9 },
+    name: "list_guild_bans",
+  })
+  const invalidId = await client.callTool({
+    arguments: { guildId: GUILD_ID, userId: "0" },
+    name: "get_guild_ban",
+  })
+  const listedWithReasons = await client.callTool({
+    arguments: { guildId: GUILD_ID, includeReasons: true, limit: 1 },
+    name: "list_guild_bans",
+  })
+  const exact = await client.callTool({
+    arguments: { guildId: GUILD_ID, userId: USER_ID },
+    name: "get_guild_ban",
+  })
+  const exactWithReason = await client.callTool({
+    arguments: { guildId: GUILD_ID, includeReason: true, userId: USER_ID },
+    name: "get_guild_ban",
+  })
+  const invalid = await client.callTool({
+    arguments: {
+      guildId: GUILD_ID,
+      limit: BAN_AUDIT_LIMITS.listPage + 1,
+    },
+    name: "list_guild_bans",
+  })
+
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal(JSON.stringify(listed).includes("Private reason"), false)
+  assert.equal(JSON.stringify(listedWithReasons).includes("Private reason"), true)
+  assert.equal(structuredContent(exact).found, true)
+  assert.equal(JSON.stringify(exact).includes("Private reason"), false)
+  assert.equal(JSON.stringify(exactWithReason).includes("Private reason"), true)
+  assert.doesNotMatch(JSON.stringify(listed.content), /banned-member|Private reason/)
+  assert.doesNotMatch(JSON.stringify(exactWithReason.content), /banned-member|Private reason/)
+  assert.equal(invalid.isError, true)
+  assert.equal(invalidId.isError, true)
+  assert.equal(calls.banList, 2)
+  assert.equal(calls.banGet, 2)
+})
+
+test("progressive ban discovery reveals only the requested exact read", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: {
+      DISCORD_MCP_TOOLSETS: "bans",
+      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "get_guild_ban" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, ["get_guild_ban"])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["get_guild_ban", "discover_discord_tools"],
+  )
 })
 
 test("MCP guild audit-log tools enforce bounded privacy tiers and exact IDs", async (context) => {
@@ -7753,7 +7909,10 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 12)
+  assert.equal(
+    templates.resourceTemplates.length,
+    Object.keys(MCP_RESOURCE_TEMPLATE_NAMES).length,
+  )
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

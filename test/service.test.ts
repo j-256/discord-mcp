@@ -409,6 +409,9 @@ function serviceFixture(overrides: {
     async listGuildAutoModerationRules() {
       return []
     },
+    async listGuildBans() {
+      return []
+    },
     async listGuildScheduledEvents() {
       return []
     },
@@ -1933,6 +1936,73 @@ test("service exposes an opt-in minimized member directory through exact REST ca
   assert.equal(exactCalls, 1)
   assert.equal(listCalls, 1)
   assert.equal(searchCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+})
+
+test("service pins identity before privacy-safe ban audit and rejects local input first", async () => {
+  const bannedUserId = MEMBER_USER_ID
+  const remoteBan = {
+    reason: "Private reason",
+    user: {
+      avatar: "private-avatar",
+      discriminator: "0001",
+      global_name: "Banned member",
+      id: bannedUserId,
+      username: "banned-member",
+    },
+  }
+  let exactCalls = 0
+  let listCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.BAN_MEMBERS, "@everyone")]
+      },
+      async getGuildBan(_guildId, userId) {
+        assert.equal(userId, bannedUserId)
+        exactCalls += 1
+        return remoteBan
+      },
+      async listGuildBans(_guildId, options) {
+        assert.equal(options?.limit, 3)
+        listCalls += 1
+        return [remoteBan]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
+      DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
+    },
+  })
+
+  await assert.rejects(() => service.listGuildBans("bad"), /guild ID/)
+  await assert.rejects(
+    () => service.getGuildBan(GUILD_ID, "bad"),
+    /user ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const listed = await service.listGuildBans(GUILD_ID, { limit: 2 })
+  const exact = await service.getGuildBan(GUILD_ID, bannedUserId, {
+    includeReason: true,
+  })
+
+  assert.equal(listed.bans[0]?.userId, bannedUserId)
+  assert.equal("reason" in (listed.bans[0] || {}), false)
+  assert.equal(exact.found, true)
+  assert.equal(exact.ban?.reason, "Private reason")
+  assert.doesNotMatch(
+    JSON.stringify([listed, exact]),
+    /private-avatar|"discriminator"/,
+  )
+  assert.equal(listCalls, 1)
+  assert.equal(exactCalls, 1)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
 })

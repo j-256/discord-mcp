@@ -51,6 +51,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   attachmentPolicy: "attachment-policy",
   automodAuditPolicy: "automod-audit-policy",
   automodChangePolicy: "automod-change-policy",
+  banAuditPolicy: "ban-audit-policy",
   botIdentity: "bot-identity",
   channelCreationPolicy: "channel-creation-policy",
   channelScope: "channel-scope",
@@ -259,6 +260,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowMemberDirectory && config.memberDirectoryGuildIds.size === 0) {
     warnings.push("The member-directory toggle is enabled but member lookup remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowBanAudit && config.banAuditGuildIds.size === 0) {
+    warnings.push("The ban-audit toggle is enabled but ban inspection remains blocked because an exact guild allowlist is required")
+  }
   if (
     config.allowMemberRoleChanges
     && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
@@ -323,6 +327,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     ],
     [config.allowInteractions, "interactions", "Message interactions"],
     [config.allowMemberDirectory, "members", "Member directory"],
+    [config.allowBanAudit, "bans", "Guild ban audit"],
     [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
     [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
@@ -665,6 +670,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.memberDirectoryPolicy,
         "pass",
         `Member-directory reads are constrained to ${config.memberDirectoryGuildIds.size} exact guilds with bounded privacy-minimized pages`,
+      ))
+    }
+    if (!config.allowBanAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.banAuditPolicy,
+        "pass",
+        "Privacy-safe guild ban audit is disabled",
+      ))
+    } else if (config.banAuditGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.banAuditPolicy,
+        "warn",
+        "Ban-audit toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.banAuditPolicy,
+        "pass",
+        `Guild ban audit is constrained to ${config.banAuditGuildIds.size} exact guilds with minimized profiles, default-redacted reasons, and complete BAN_MEMBERS evidence`,
       ))
     }
     if (!config.allowMemberRoleChanges) {
@@ -1042,6 +1066,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
+    ENVIRONMENT_NAMES.allowBanAudit,
+    ENVIRONMENT_NAMES.banAuditGuildIds,
     ENVIRONMENT_NAMES.allowMemberRoleChanges,
     ENVIRONMENT_NAMES.memberRoleGuildIds,
     ENVIRONMENT_NAMES.memberRoleIds,

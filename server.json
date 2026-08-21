@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, member-roles, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, member-roles, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -277,6 +277,20 @@
         {
           "name": "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
           "description": "Exact guild IDs eligible for privacy-minimized member-directory reads",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_BAN_AUDIT",
+          "description": "Enable privacy-minimized guild-ban reads when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_BAN_AUDIT_GUILD_IDS",
+          "description": "Exact guild IDs eligible for privacy-minimized ban audit",
           "format": "string"
         },
         {

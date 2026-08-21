@@ -27,6 +27,7 @@ export const MCP_TOOLSET_NAMES = [
   "attachments",
   "audit-logs",
   "automod",
+  "bans",
   "channel-creation",
   "connector",
   "deletion",
@@ -61,6 +62,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowAttachments: "DISCORD_MCP_ALLOW_ATTACHMENTS",
   allowAutomodAudit: "DISCORD_MCP_ALLOW_AUTOMOD_AUDIT",
   allowAutomodChanges: "DISCORD_MCP_ALLOW_AUTOMOD_CHANGES",
+  allowBanAudit: "DISCORD_MCP_ALLOW_BAN_AUDIT",
   allowChannelCreation: "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
   allowForumPosts: "DISCORD_MCP_ALLOW_FORUM_POSTS",
@@ -85,6 +87,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   attachmentRoots: "DISCORD_MCP_ATTACHMENT_ROOTS",
   automodAlertChannelIds: "DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS",
   automodGuildIds: "DISCORD_MCP_AUTOMOD_GUILD_IDS",
+  banAuditGuildIds: "DISCORD_MCP_BAN_AUDIT_GUILD_IDS",
   auditFile: "DISCORD_MCP_AUDIT_FILE",
   botId: "DISCORD_MCP_BOT_ID",
   channelCreationGuildIds: "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
@@ -234,6 +237,14 @@ export const AUDIT_LOG_LIMITS = Object.freeze({
   reasonCharacters: 512,
   reflectedKeyCharacters: 100,
   responseEntries: 100,
+})
+
+export const BAN_AUDIT_LIMITS = Object.freeze({
+  listPage: 100,
+  listPageDefault: 25,
+  reasonCharacters: 512,
+  responseEntries: 101,
+  userTextCharacters: 100,
 })
 
 export const CONNECTOR_LIMITS = Object.freeze({

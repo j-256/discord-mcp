@@ -22,6 +22,8 @@ export interface PolicyDescription {
   automodAuditEnabled: boolean
   automodChangesEnabled: boolean
   automodGuildIds: string[]
+  banAuditEnabled: boolean
+  banAuditGuildIds: string[]
   channelCreationEnabled: boolean
   channelCreationGuildIds: string[]
   deleteChannelIds: string[]
@@ -85,6 +87,7 @@ export class ScopePolicy {
   readonly #allowAttachments: boolean
   readonly #allowAutomodAudit: boolean
   readonly #allowAutomodChanges: boolean
+  readonly #allowBanAudit: boolean
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
@@ -108,6 +111,7 @@ export class ScopePolicy {
   readonly #attachmentRoots: readonly string[]
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
+  readonly #banAuditGuildIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
@@ -150,6 +154,7 @@ export class ScopePolicy {
     | "allowAttachments"
     | "allowAutomodAudit"
     | "allowAutomodChanges"
+    | "allowBanAudit"
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
@@ -171,6 +176,7 @@ export class ScopePolicy {
     | "attachmentRoots"
     | "automodAlertChannelIds"
     | "automodGuildIds"
+    | "banAuditGuildIds"
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
     | "guildExpressionGuildIds"
@@ -195,6 +201,7 @@ export class ScopePolicy {
     this.#allowAttachments = config.allowAttachments ?? false
     this.#allowAutomodAudit = config.allowAutomodAudit ?? false
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
+    this.#allowBanAudit = config.allowBanAudit ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
@@ -218,6 +225,7 @@ export class ScopePolicy {
     this.#attachmentRoots = config.attachmentRoots ?? []
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
+    this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
@@ -262,6 +270,8 @@ export class ScopePolicy {
         && this.#allowAutomodChanges
         && this.#automodGuildIds.size > 0,
       automodGuildIds: [...this.#automodGuildIds].sort(),
+      banAuditEnabled: this.#allowBanAudit && this.#banAuditGuildIds.size > 0,
+      banAuditGuildIds: [...this.#banAuditGuildIds].sort(),
       channelCreationEnabled: this.#allowChannelCreation
         && this.#channelCreationGuildIds.size > 0,
       channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
@@ -362,6 +372,19 @@ export class ScopePolicy {
     }
     if (!this.#memberDirectoryGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the member-directory scope`)
+    }
+  }
+
+  assertBanAuditAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowBanAudit) {
+      throw new PolicyError("Discord ban audit is disabled by connector configuration")
+    }
+    if (this.#banAuditGuildIds.size === 0) {
+      throw new PolicyError("Discord ban audit requires an explicit guild allowlist")
+    }
+    if (!this.#banAuditGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the ban-audit scope`)
     }
   }
 

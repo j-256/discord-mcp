@@ -2,6 +2,7 @@ import { setTimeout as wait } from "node:timers/promises"
 
 import {
   AUDIT_LOG_LIMITS,
+  BAN_AUDIT_LIMITS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
   DISCORD_API_BASE_URL,
@@ -89,6 +90,11 @@ export interface GuildAuditLogPageOptions extends RequestOptions {
   actorUserId?: string
   after?: string
   before?: string
+  limit?: number
+}
+
+export interface GuildBanPageOptions extends RequestOptions {
+  after?: string
   limit?: number
 }
 
@@ -4108,7 +4114,29 @@ export class DiscordClient {
     userId: string,
     options: RequestOptions = {},
   ): Promise<DiscordBan> {
+    assertPositiveSnowflake(guildId, "Discord ban-audit guild ID")
+    assertPositiveSnowflake(userId, "Discord ban-audit user ID")
     return this.#request("get_guild_ban", `/guilds/${guildId}/bans/${userId}`, options)
+  }
+
+  listGuildBans(
+    guildId: string,
+    options: GuildBanPageOptions = {},
+  ): Promise<DiscordBan[]> {
+    assertPositiveSnowflake(guildId, "Discord ban-audit guild ID")
+    if (options.after !== undefined) {
+      assertPositiveSnowflake(options.after, "Discord ban-audit after cursor")
+    }
+    assertBoundedLimit(
+      options.limit,
+      BAN_AUDIT_LIMITS.responseEntries,
+      "Discord ban-audit list limit",
+    )
+    const route = `/guilds/${guildId}/bans${queryString({
+      after: options.after,
+      limit: options.limit,
+    })}`
+    return this.#request("list_guild_bans", route, options)
   }
 
   modifyGuildMemberTimeout(

@@ -25,6 +25,15 @@ import type {
 } from "./automod-service.js"
 import { AutoModerationService } from "./automod-service.js"
 import type {
+  BanAuditGetOptions,
+  BanAuditListOptions,
+} from "./ban-audit-service.js"
+import {
+  assertBanAuditGetInput,
+  assertBanAuditListInput,
+  BanAuditService,
+} from "./ban-audit-service.js"
+import type {
   AdministrationServiceOptions,
   MemberModerationPlan,
   MemberModerationRequest,
@@ -224,6 +233,7 @@ export interface DiscordServiceClient {
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
+  listGuildBans: DiscordClient["listGuildBans"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
@@ -450,6 +460,7 @@ export class ConnectorService {
   readonly #activityStore: ActivityStore
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #automodService: AutoModerationService
+  readonly #banAuditService: BanAuditService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
@@ -522,6 +533,10 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.automodOptions,
+    })
+    this.#banAuditService = new BanAuditService({
+      client: this.#client,
+      policy: this.#policy,
     })
     this.#interactionService = new InteractionService({
       activityStore: this.#activityStore,
@@ -742,6 +757,36 @@ export class ConnectorService {
   ) {
     await this.#verifyIdentity(options)
     return this.#memberDirectoryService.get(guildId, userId, options)
+  }
+
+  async listGuildBans(
+    guildId: string,
+    options: BanAuditListOptions = {},
+  ) {
+    assertBanAuditListInput(guildId, options)
+    const identity = await this.#verifyIdentity(options)
+    return this.#banAuditService.list(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async getGuildBan(
+    guildId: string,
+    userId: string,
+    options: BanAuditGetOptions = {},
+  ) {
+    assertBanAuditGetInput(guildId, userId, options)
+    const identity = await this.#verifyIdentity(options)
+    return this.#banAuditService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      userId,
+      options,
+    )
   }
 
   async listGuildMembers(

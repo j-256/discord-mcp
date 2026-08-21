@@ -38,6 +38,7 @@ export interface ConnectorConfig {
   allowAttachments: boolean
   allowAutomodAudit: boolean
   allowAutomodChanges: boolean
+  allowBanAudit: boolean
   allowChannelCreation: boolean
   allowDeletions: boolean
   allowForumPosts: boolean
@@ -61,6 +62,7 @@ export interface ConnectorConfig {
   attachmentRoots: readonly string[]
   automodAlertChannelIds: ReadonlySet<string>
   automodGuildIds: ReadonlySet<string>
+  banAuditGuildIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
@@ -250,6 +252,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.automodGuildIds],
     ENVIRONMENT_NAMES.automodGuildIds,
   )
+  const banAuditGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.banAuditGuildIds],
+    ENVIRONMENT_NAMES.banAuditGuildIds,
+  )
   const adminGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.adminGuildIds],
     ENVIRONMENT_NAMES.adminGuildIds,
@@ -333,6 +339,7 @@ export function loadConnectorConfig(
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
     [ENVIRONMENT_NAMES.automodGuildIds, automodGuildIds],
+    [ENVIRONMENT_NAMES.banAuditGuildIds, banAuditGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
@@ -456,6 +463,10 @@ export function loadConnectorConfig(
     ),
     allowAutomodAudit,
     allowAutomodChanges,
+    allowBanAudit: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowBanAudit],
+      ENVIRONMENT_NAMES.allowBanAudit,
+    ),
     allowChannelCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowChannelCreation],
       ENVIRONMENT_NAMES.allowChannelCreation,
@@ -522,6 +533,7 @@ export function loadConnectorConfig(
     ),
     automodAlertChannelIds,
     automodGuildIds,
+    banAuditGuildIds,
     channelCreationGuildIds,
     deleteChannelIds,
     expectedApplicationId,

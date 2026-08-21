@@ -55,12 +55,14 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+    DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
     DISCORD_MCP_ALLOW_INTERACTIONS: "true",
     DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
     DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
     DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_BOT_ID: "300000000000000002",
     DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_INTERACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
@@ -84,6 +86,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.protectedUserIds], [USER_ID])
   assert.equal(config.allowAdministration, true)
   assert.equal(config.allowAttachments, false)
+  assert.equal(config.allowBanAudit, true)
+  assert.deepEqual([...config.banAuditGuildIds], [GUILD_ID])
   assert.deepEqual([...config.attachmentChannelIds], [])
   assert.deepEqual(config.attachmentRoots, [])
   assert.equal(config.allowDeletions, true)
@@ -139,6 +143,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     automodAuditEnabled: false,
     automodChangesEnabled: false,
     automodGuildIds: [],
+    banAuditEnabled: false,
+    banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -401,6 +407,8 @@ test("configuration and policy require an exact administration guild and protect
     automodAuditEnabled: false,
     automodChangesEnabled: false,
     automodGuildIds: [],
+    banAuditEnabled: false,
+    banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -489,6 +497,57 @@ test("configuration and policy require an opt-in exact member-directory guild sc
       DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
     /DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS must be a subset/,
+  )
+})
+
+test("configuration and policy require an opt-in exact ban-audit guild scope", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
+    DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(policy.describe().banAuditEnabled, true)
+  assert.deepEqual(policy.describe().banAuditGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertBanAuditAllowed(GUILD_ID))
+  assert.throws(
+    () => policy.assertBanAuditAllowed(OTHER_GUILD_ID),
+    /outside the ban-audit scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertBanAuditAllowed(GUILD_ID),
+    /ban audit is disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertBanAuditAllowed(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_BAN_AUDIT_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_BAN_AUDIT_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_BAN_AUDIT: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
   )
 })
 
@@ -914,6 +973,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     automodAuditEnabled: false,
     automodChangesEnabled: false,
     automodGuildIds: [],
+    banAuditEnabled: false,
+    banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
