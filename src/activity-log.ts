@@ -287,6 +287,27 @@ export interface InviteDeletionActivity {
   verification: "drift" | "match" | null
 }
 
+export type OnboardingActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface OnboardingActivity {
+  enabled: boolean
+  error: string | null
+  guildId: string
+  id: string
+  kind: "onboarding-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: OnboardingActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type GuildExpressionActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -371,6 +392,7 @@ export type ActivityEntry =
   | MemberModerationActivity
   | MemberRoleActivity
   | MessagePinActivity
+  | OnboardingActivity
   | RoleCreationActivity
   | ScheduledEventActivity
   | WebhookDeletionActivity
@@ -980,6 +1002,65 @@ function parseInviteDeletionActivity(
   }
 }
 
+function parseOnboardingActivity(
+  value: unknown,
+): OnboardingActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "onboarding-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.enabled !== "boolean"
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    enabled: record.enabled,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "onboarding-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as OnboardingActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseGuildExpressionActivity(
   value: unknown,
 ): GuildExpressionActivity | undefined {
@@ -1390,6 +1471,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseScheduledEventActivity(value)
     || parseWebhookDeletionActivity(value)
     || parseInviteDeletionActivity(value)
+    || parseOnboardingActivity(value)
     || parseMemberRoleActivity(value)
     || parseRoleCreationActivity(value)
     || parseDeletionActivity(value)

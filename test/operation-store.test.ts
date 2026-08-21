@@ -135,6 +135,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const expression = { ...receipt(), kind: "guild-expression-change" as const }
   const scaffold = { ...receipt(), kind: "guild-scaffold" as const }
   const invite = { ...receipt(), kind: "invite-deletion" as const }
+  const onboarding = { ...receipt(), kind: "onboarding-change" as const }
   const memberRole = { ...receipt(), kind: "member-role-change" as const }
   const pin = { ...receipt(), kind: "message-pin" as const }
   const role = { ...receipt(), kind: "role-creation" as const }
@@ -149,6 +150,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(expression)).created, true)
   assert.equal((await store.reserve(scaffold)).created, true)
   assert.equal((await store.reserve(invite)).created, true)
+  assert.equal((await store.reserve(onboarding)).created, true)
   assert.equal((await store.reserve(memberRole)).created, true)
   assert.equal((await store.reserve(pin)).created, true)
   assert.equal((await store.reserve(role)).created, true)
@@ -185,6 +187,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("invite-deletion", invite.operationKeyHash),
     invite,
+  )
+  assert.deepEqual(
+    await store.get("onboarding-change", onboarding.operationKeyHash),
+    onboarding,
   )
   assert.deepEqual(
     await store.get("member-role-change", memberRole.operationKeyHash),

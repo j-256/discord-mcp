@@ -5,7 +5,10 @@ import {
   type CreateForumPostInput,
   DiscordClient,
 } from "../src/discord-client.js"
-import { DiscordApiError } from "../src/errors.js"
+import {
+  DiscordApiError,
+  OnboardingEvidenceError,
+} from "../src/errors.js"
 import type {
   OperationCompletion,
   OperationalErrorCategory,
@@ -2280,4 +2283,370 @@ test("Discord client validates expression writes before fetching and does not re
     /must contain a name, description, or tags/,
   )
   assert.equal(requests, 1)
+})
+
+test("Discord client projects bounded onboarding evidence and counts unknown fields", async () => {
+  let requestUrl = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      requestUrl = String(input)
+      return jsonResponse({
+        default_channel_ids: ["200"],
+        enabled: false,
+        future_top_level: { private: "omitted" },
+        guild_id: "100",
+        mode: 7,
+        prompts: [{
+          future_prompt_field: true,
+          id: "300",
+          in_onboarding: true,
+          options: [{
+            channel_ids: ["200"],
+            description: null,
+            emoji: {
+              animated: false,
+              future_emoji_field: true,
+              id: null,
+              name: "😀",
+            },
+            future_option_field: true,
+            id: "400",
+            role_ids: ["500"],
+            title: "Community",
+          }],
+          required: true,
+          single_select: true,
+          title: "Choose access",
+          type: 9,
+        }],
+      })
+    },
+    token: TOKEN,
+  })
+
+  const onboarding = await client.getGuildOnboarding("100")
+
+  assert.equal(requestUrl, `${API_BASE_URL}/guilds/100/onboarding`)
+  assert.equal(onboarding.guildId, "100")
+  assert.equal(onboarding.unknownEnumCount, 2)
+  assert.equal(onboarding.unknownFieldCount, 4)
+  assert.deepEqual(onboarding.prompts[0]?.options[0], {
+    channelIds: ["200"],
+    description: null,
+    emoji: { animated: false, id: null, name: "😀" },
+    id: "400",
+    roleIds: ["500"],
+    title: "Community",
+  })
+  assert.equal(JSON.stringify(onboarding).includes("private"), false)
+})
+
+test("Discord client sends an exact non-retried onboarding replacement", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+  }> = []
+  let sleeps = 0
+  const responseBody = {
+    default_channel_ids: ["200"],
+    enabled: false,
+    guild_id: "100",
+    mode: 0,
+    prompts: [{
+      id: "300",
+      in_onboarding: true,
+      options: [{
+        channel_ids: ["200"],
+        description: "",
+        emoji: { animated: true, id: "500", name: "wave" },
+        id: "400",
+        role_ids: [],
+        title: "Community",
+      }, {
+        channel_ids: [],
+        description: null,
+        emoji: null,
+        id: "401",
+        role_ids: [],
+        title: "General",
+      }],
+      required: true,
+      single_select: true,
+      title: "Choose access",
+      type: 0,
+    }],
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)) as unknown,
+        method: String(init?.method),
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+      })
+      return jsonResponse(responseBody)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildOnboarding("100", {
+    defaultChannelIds: ["200"],
+    enabled: false,
+    mode: 0,
+    prompts: [{
+      id: "300",
+      inOnboarding: true,
+      options: [{
+        channelIds: ["200"],
+        description: "",
+        emoji: { animated: true, id: "500", name: "wave" },
+        id: "400",
+        roleIds: [],
+        title: "Community",
+      }, {
+        channelIds: [],
+        description: null,
+        emoji: null,
+        id: "401",
+        roleIds: [],
+        title: "General",
+      }],
+      required: true,
+      singleSelect: true,
+      title: "Choose access",
+      type: 0,
+    }],
+  }, "Reviewed / onboarding")
+
+  assert.equal(result.guildId, "100")
+  assert.deepEqual(requests, [{
+    body: {
+      default_channel_ids: ["200"],
+      enabled: false,
+      mode: 0,
+      prompts: [{
+        id: "300",
+        in_onboarding: true,
+        options: [{
+          channel_ids: ["200"],
+          description: "",
+          emoji_animated: true,
+          emoji_id: "500",
+          emoji_name: "wave",
+          id: "400",
+          role_ids: [],
+          title: "Community",
+        }, {
+          channel_ids: [],
+          description: null,
+          emoji_animated: false,
+          emoji_id: null,
+          emoji_name: null,
+          id: "401",
+          role_ids: [],
+          title: "General",
+        }],
+        required: true,
+        single_select: true,
+        title: "Choose access",
+        type: 0,
+      }],
+    },
+    method: "PUT",
+    reason: "Reviewed%20%2F%20onboarding",
+  }])
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client does not retry rate-limited onboarding replacements", async () => {
+  let requests = 0
+  let sleeps = 0
+  const privateResponseDetail = "private-onboarding-rate-limit-detail"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        message: privateResponseDetail,
+        retry_after: 0.001,
+      }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.modifyGuildOnboarding("100", {
+      defaultChannelIds: [],
+      enabled: false,
+      mode: 0,
+      prompts: [],
+    }, "Reviewed onboarding"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && error.retryAfterMs === 1
+      && !error.message.includes(privateResponseDetail)
+    ),
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client validates onboarding replacements before fetching", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const valid = {
+    defaultChannelIds: ["200"],
+    enabled: false,
+    mode: 0 as const,
+    prompts: [{
+      id: "300",
+      inOnboarding: true,
+      options: [],
+      required: true,
+      singleSelect: true,
+      title: "Choose access",
+      type: 0 as const,
+    }],
+  }
+
+  await assert.rejects(
+    client.modifyGuildOnboarding("bad", valid, "Reviewed onboarding"),
+    /guild ID/,
+  )
+  await assert.rejects(
+    client.modifyGuildOnboarding("100", {
+      ...valid,
+      defaultChannelIds: ["200", "200"],
+    }, "Reviewed onboarding"),
+    /must be unique/,
+  )
+  await assert.rejects(
+    client.modifyGuildOnboarding("100", {
+      ...valid,
+      prompts: [{ ...valid.prompts[0]!, title: "" }],
+    }, "Reviewed onboarding"),
+    /prompt title/,
+  )
+  await assert.rejects(
+    client.modifyGuildOnboarding("100", {
+      ...valid,
+      prompts: [{
+        ...valid.prompts[0]!,
+        options: [{
+          channelIds: [],
+          description: null,
+          emoji: { id: null, name: "😀" },
+          roleIds: [],
+          title: "Community",
+        }],
+      }],
+    } as unknown as Parameters<DiscordClient["modifyGuildOnboarding"]>[1], "Reviewed onboarding"),
+    /emoji is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildOnboarding("100", {
+      ...valid,
+      future: true,
+    } as unknown as Parameters<DiscordClient["modifyGuildOnboarding"]>[1], "Reviewed onboarding"),
+    /input is invalid/,
+  )
+  assert.equal(requests, 0)
+})
+
+test("Discord client sanitizes onboarding evidence and transport failures", async () => {
+  const privateDetail = "private-onboarding-response-detail"
+  const apiClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateDetail }, 500),
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => apiClient.getGuildOnboarding("100"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && !error.message.includes(privateDetail)
+    ),
+  )
+
+  const malformedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      default_channel_ids: [],
+      enabled: false,
+      guild_id: "different",
+      mode: 0,
+      prompts: [],
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => malformedClient.getGuildOnboarding("100"),
+    OnboardingEvidenceError,
+  )
+
+  const incompleteClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      default_channel_ids: [],
+      enabled: false,
+      guild_id: "100",
+      mode: 0,
+      prompts: [{
+        id: "300",
+        in_onboarding: true,
+        options: [{
+          channel_ids: [],
+          description: null,
+          emoji: null,
+          id: "400",
+          title: "Community",
+        }],
+        required: false,
+        single_select: false,
+        title: "Choose access",
+        type: 0,
+      }],
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => incompleteClient.getGuildOnboarding("100"),
+    OnboardingEvidenceError,
+  )
+
+  const transportDetail = "private-onboarding-transport-detail"
+  const transportClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(transportDetail)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => transportClient.getGuildOnboarding("100"),
+    (error: unknown) => (
+      error instanceof Error
+      && !error.message.includes(transportDetail)
+      && error.cause === undefined
+    ),
+  )
 })

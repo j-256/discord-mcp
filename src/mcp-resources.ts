@@ -202,6 +202,8 @@ export function registerDiscordResources(
           "",
           "Guild invite audit requires separate audit and exact-guild scope, verified connector identity, a complete bounded guild role and channel snapshot, and complete MANAGE_GUILD evidence. Raw invite codes and URLs are bearer capabilities, so the connector replaces them with process-keyed opaque references before building any MCP result. Authenticated cursors bind a local page to the complete fresh projected inventory and fail when it changes. Reviewed revocation requires an additional toggle, fresh keyed plan, signed approval, one-shot reservation, pending content-free activity, one non-retried secret-route DELETE, returned-identity validation, and full-inventory absence readback. Codes, URLs, profiles, role names, audit reasons, raw keys, and raw payloads are never persisted or emitted through diagnostics.",
           "",
+          "Guild onboarding audit requires a separate exact guild allowlist, verified connector identity, and complete bounded guild-feature, onboarding, role, channel, overwrite, emoji, and membership evidence. Prompt, option, description, and Unicode emoji text is omitted by default and returned only transiently through explicit tool opt-in; unknown fields and enums are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD and MANAGE_ROLES evidence, zero-authority standard roles below the connector, directly visible referenced channels, conservative enablement constraints, the COMMUNITY guild feature when enabling, exact ownership of existing IDs, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PUT, authoritative response-ID validation, and a fresh full readback. Omitted prompts, options, assignments, and default channels are deletions. New-item placeholder IDs exist only in the outbound transport. Same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client join flow. Onboarding text, names, audit reasons, raw operation keys, and raw payloads are never persisted.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Attachment messages require separate exact channel and canonical local-directory scopes. Planning performs a bounded stable read of one owned regular file and binds its bytes, path, exact message fields, reply, notifications, and complete permissions into a keyed plan. Execution requires fresh byte-matching plans, signed approval, a unique one-shot operation key, the shared anti-spam guard, pending content-free records, one non-retried multipart request, and exact message readback. It never accepts URLs or base64, persists file or message content, returns an attachment URL, retries, or rolls back.",
@@ -419,6 +421,31 @@ export function registerDiscordResources(
       secrets,
       () => service.listAutoModerationRules(
         templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildOnboarding,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildOnboarding, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded privacy-minimized onboarding audit for one exact separately allowlisted Discord guild. Prompt, option, description, and Unicode emoji text is always omitted; unknown future fields are counts only, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Privacy-minimized Discord guild onboarding",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildOnboarding(
+        templateSnowflake(variables, "guildId"),
+        false,
         { signal: context.mcpReq.signal },
       ),
     ),

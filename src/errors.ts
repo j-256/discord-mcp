@@ -334,6 +334,42 @@ export class GuildExpressionEvidenceError extends Error {
   override name = "GuildExpressionEvidenceError"
 }
 
+export class OnboardingPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord onboarding snapshot does not match the reviewed plan")
+    this.name = "OnboardingPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class OnboardingOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord onboarding operation key has already been reserved")
+    this.name = "OnboardingOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class OnboardingExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "OnboardingExecutionError"
+    this.result = result
+  }
+}
+
+export class OnboardingEvidenceError extends Error {
+  override name = "OnboardingEvidenceError"
+}
+
 export class ScheduledEventPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -6,7 +6,10 @@ import {
   InMemoryTransport,
 } from "@modelcontextprotocol/client"
 
-import { MCP_TOOLSET_NAMES } from "../src/constants.js"
+import {
+  MCP_TOOLSET_NAMES,
+  ONBOARDING_LIMITS,
+} from "../src/constants.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_NAMES,
@@ -39,6 +42,7 @@ const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
+const PRIVATE_ONBOARDING_TEXT = "private-onboarding-member-copy"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
@@ -145,6 +149,7 @@ interface GuidanceCalls {
   lastUserId: string | null
   members: number
   messages: number
+  onboarding: number
   permissionOverwrites: number
   roles: number
   scheduledEvents: number
@@ -175,6 +180,7 @@ function guidanceService(options: {
     lastUserId: null,
     members: 0,
     messages: 0,
+    onboarding: 0,
     permissionOverwrites: 0,
     roles: 0,
     scheduledEvents: 0,
@@ -191,6 +197,7 @@ function guidanceService(options: {
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeInviteDeletion: unexpected,
+    executeOnboardingChange: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
@@ -251,6 +258,105 @@ function guidanceService(options: {
         },
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async getGuildOnboarding(guildId) {
+      calls.onboarding += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD", "MANAGE_ROLES"],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.MANAGE_GUILD | DISCORD_PERMISSIONS.MANAGE_ROLES
+          ).toString(),
+          highestRoleIds: [ROLE_ID],
+          highestRolePosition: 2,
+          manageGuild: true,
+          manageRoles: true,
+          requiredChangePermissions: ["MANAGE_GUILD", "MANAGE_ROLES"],
+          unknownPermissionBits: "0",
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        configuration: {
+          communityGuild: true,
+          defaultChannels: [],
+          enabled: false,
+          enablement: {
+            constraintsMet: false,
+            defaultChannelCount: 0,
+            distinctDefaultChannelCount: 0,
+            requiredDefaultChannelCount: ONBOARDING_LIMITS.enabledDefaultChannels,
+            requiredSendableDefaultChannelCount:
+              ONBOARDING_LIMITS.enabledSendableDefaultChannels,
+            sendableDefaultChannelCount: 0,
+            visibleDefaultChannelCount: 0,
+          },
+          issues: [],
+          mode: { name: "default", value: 0 },
+          prompts: [{
+            id: "700000000000000001",
+            inOnboarding: true,
+            options: [{
+              channelReferences: [],
+              description: null,
+              descriptionCharacters: PRIVATE_ONBOARDING_TEXT.length,
+              emoji: {
+                animated: null,
+                guildEmojiId: null,
+                healthy: true,
+                kind: "none",
+                restrictedRoleIds: [],
+                unicode: null,
+              },
+              id: "710000000000000001",
+              roleReferences: [],
+              title: null,
+              titleCharacters: PRIVATE_ONBOARDING_TEXT.length,
+            }],
+            required: true,
+            singleSelect: true,
+            title: null,
+            titleCharacters: PRIVATE_ONBOARDING_TEXT.length,
+            type: { name: "multiple-choice", value: 0 },
+          }],
+          replacementBlockedReasons: [],
+          textIncluded: false,
+          unknownEnumCount: 0,
+          unknownFieldCount: 0,
+        },
+        guild: { id: guildId, name: "Private guild name" },
+        localLimits: {
+          defaultChannels: ONBOARDING_LIMITS.defaultChannels,
+          enabledDefaultChannels: ONBOARDING_LIMITS.enabledDefaultChannels,
+          enabledSendableDefaultChannels:
+            ONBOARDING_LIMITS.enabledSendableDefaultChannels,
+          optionDescriptionCharacters:
+            ONBOARDING_LIMITS.optionDescriptionCharacters,
+          optionReferences: ONBOARDING_LIMITS.optionReferences,
+          optionsPerPrompt: ONBOARDING_LIMITS.optionsPerPrompt,
+          optionTitleCharacters: ONBOARDING_LIMITS.optionTitleCharacters,
+          prompts: ONBOARDING_LIMITS.prompts,
+          promptTitleCharacters: ONBOARDING_LIMITS.promptTitleCharacters,
+        },
+        privacy: {
+          persistence: "none",
+          rawPayloads: "omitted",
+          text: "omitted",
+          unknownFields: "counts-only",
+        },
+        schemaVersion: 1,
+        status: "ok",
+        verificationBoundary: {
+          apiReadback: true,
+          freshNonStaffClientCheckRecommended: false,
+          memberExperienceVerified: false,
+        },
       }
     },
     planWebhookDeletion: unexpected,
@@ -426,6 +532,7 @@ function guidanceService(options: {
       }
     },
     planGuildExpressionChange: unexpected,
+    planOnboardingChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -479,6 +586,9 @@ function guidanceService(options: {
         mentionUserCount: 0,
         mcpToolsets: [...MCP_TOOLSET_NAMES],
         mcpToolSurface: "full",
+        onboardingAuditEnabled: false,
+        onboardingChangesEnabled: false,
+        onboardingGuildIds: [],
         permissionOverwriteChannelIds: [],
         permissionOverwritesEnabled: false,
         protectedUserCount: 0,
@@ -803,15 +913,19 @@ async function connectedFixture(
 
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
+    + calls.automod
     + calls.bans
     + calls.channelAccess
     + calls.channels
     + calls.guilds
     + calls.guildExpressions
+    + calls.invites
     + calls.messages
     + calls.members
+    + calls.onboarding
     + calls.permissionOverwrites
     + calls.roles
+    + calls.scheduledEvents
     + calls.unexpected
     + calls.webhooks
 }
@@ -917,6 +1031,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildEmojis,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildOnboarding,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildOnboarding,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
       },
@@ -968,6 +1086,10 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
   assert.match(safety.text, /Raw invite codes and URLs are bearer capabilities/)
   assert.match(safety.text, /full-inventory absence readback/)
+  assert.match(safety.text, /Guild onboarding audit requires a separate exact guild allowlist/)
+  assert.match(safety.text, /Prompt, option, description, and Unicode emoji text is omitted by default/)
+  assert.match(safety.text, /Omitted prompts, options, assignments, and default channels are deletions/)
+  assert.match(safety.text, /API readback never claims to verify the member client join flow/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
@@ -1230,6 +1352,18 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("url" in invite, false)
   assert.doesNotMatch(exactInvite.text, new RegExp(PRIVATE_INVITE_CODE))
 
+  const onboarding = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/onboarding`,
+  )
+  const onboardingData = onboarding.value.data as Record<string, unknown>
+  const onboardingPrivacy = onboardingData.privacy as Record<string, unknown>
+  const onboardingConfiguration = onboardingData.configuration as Record<string, unknown>
+  assert.equal(onboardingPrivacy.text, "omitted")
+  assert.equal(onboardingConfiguration.textIncluded, false)
+  assert.equal((onboardingConfiguration.prompts as unknown[]).length, 1)
+  assert.doesNotMatch(onboarding.text, new RegExp(PRIVATE_ONBOARDING_TEXT))
+
   const exact = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
@@ -1251,6 +1385,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.guilds, 1)
   assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.invites, 1)
+  assert.equal(calls.onboarding, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
@@ -1516,6 +1651,38 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(inviteDeletion, /complete MANAGE_GUILD evidence/)
   assert.match(inviteDeletion, /exposed invite code or URL/)
   assert.doesNotMatch(inviteDeletion, new RegExp(PRIVATE_INVITE_CODE))
+
+  const onboardingRequest = {
+    auditReason: "Reviewed community onboarding",
+    defaultChannelIds: [CHANNEL_ID],
+    enabled: false,
+    guildId: GUILD_ID,
+    mode: "default",
+    operationKey: OPERATION_KEY,
+    prompts: [{
+      inOnboarding: true,
+      options: [{
+        channelIds: [CHANNEL_ID],
+        description: PRIVATE_ONBOARDING_TEXT,
+        emoji: null,
+        roleIds: [ROLE_ID],
+        title: "Community member",
+      }],
+      required: true,
+      singleSelect: true,
+      title: "Choose your community path",
+      type: "multiple-choice",
+    }],
+  }
+  const onboarding = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(onboardingRequest) },
+    name: MCP_PROMPT_NAMES.reviewOnboardingChange,
+  }))
+  assert.deepEqual(JSON.parse(onboarding.split("\n")[1] || ""), onboardingRequest)
+  assert.match(onboarding, /Call only plan_onboarding_change/)
+  assert.match(onboarding, /Do not call execute_onboarding_change/)
+  assert.match(onboarding, /complete current and desired onboarding states/)
+  assert.match(onboarding, /verification boundary/)
 
   const guildExpression = promptText(await client.getPrompt({
     arguments: {

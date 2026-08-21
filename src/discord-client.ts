@@ -10,6 +10,7 @@ import {
   DISCORD_LIMITS,
   INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
+  ONBOARDING_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -21,6 +22,7 @@ import {
   errorMessage,
   GuildExpressionEvidenceError,
   InviteEvidenceError,
+  OnboardingEvidenceError,
   redactText,
   ScheduledEventEvidenceError,
   WebhookEvidenceError,
@@ -153,6 +155,83 @@ export interface DiscordDeletedInviteSummary {
   code: string
   guildId: string | null
   type: number
+}
+
+export const DISCORD_ONBOARDING_MODES = Object.freeze({
+  advanced: 1,
+  default: 0,
+} as const)
+
+export const DISCORD_ONBOARDING_PROMPT_TYPES = Object.freeze({
+  dropdown: 1,
+  multipleChoice: 0,
+} as const)
+
+export interface DiscordOnboardingEmoji {
+  animated: boolean
+  id: string | null
+  name: string | null
+}
+
+export interface DiscordGuildOnboardingOption {
+  channelIds: string[]
+  description: string | null
+  emoji: DiscordOnboardingEmoji | null
+  id: string
+  roleIds: string[]
+  title: string
+}
+
+export interface DiscordGuildOnboardingPrompt {
+  id: string
+  inOnboarding: boolean
+  options: DiscordGuildOnboardingOption[]
+  required: boolean
+  singleSelect: boolean
+  title: string
+  type: number
+}
+
+export interface DiscordGuildOnboarding {
+  defaultChannelIds: string[]
+  enabled: boolean
+  guildId: string
+  mode: number
+  prompts: DiscordGuildOnboardingPrompt[]
+  unknownEnumCount: number
+  unknownFieldCount: number
+}
+
+export interface DiscordOnboardingEmojiInput {
+  animated: boolean
+  id: string | null
+  name: string | null
+}
+
+export interface ModifyGuildOnboardingOptionInput {
+  channelIds: readonly string[]
+  description: string | null
+  emoji: DiscordOnboardingEmojiInput | null
+  id?: string
+  roleIds: readonly string[]
+  title: string
+}
+
+export interface ModifyGuildOnboardingPromptInput {
+  id: string
+  inOnboarding: boolean
+  options: readonly ModifyGuildOnboardingOptionInput[]
+  required: boolean
+  singleSelect: boolean
+  title: string
+  type: 0 | 1
+}
+
+export interface ModifyGuildOnboardingInput {
+  defaultChannelIds: readonly string[]
+  enabled: boolean
+  mode: 0 | 1
+  prompts: readonly ModifyGuildOnboardingPromptInput[]
 }
 
 export const DISCORD_AUTO_MODERATION_EVENT_TYPES = Object.freeze({
@@ -757,6 +836,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_sticker",
+  "get_guild_onboarding",
   "list_guild_invites",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
@@ -765,6 +845,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_emoji",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
+  "modify_guild_onboarding",
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
@@ -887,6 +968,451 @@ function projectInvite(value: unknown): DiscordInviteSummary {
     temporary: record.temporary,
     type: inviteInteger(record.type),
     uses: inviteInteger(record.uses),
+  }
+}
+
+const ONBOARDING_KEYS = [
+  "default_channel_ids",
+  "enabled",
+  "guild_id",
+  "mode",
+  "prompts",
+] as const
+const ONBOARDING_PROMPT_KEYS = [
+  "id",
+  "in_onboarding",
+  "options",
+  "required",
+  "single_select",
+  "title",
+  "type",
+] as const
+const ONBOARDING_OPTION_KEYS = [
+  "channel_ids",
+  "description",
+  "emoji",
+  "id",
+  "role_ids",
+  "title",
+] as const
+const ONBOARDING_EMOJI_KEYS = ["animated", "id", "name"] as const
+const ONBOARDING_INPUT_KEYS = [
+  "defaultChannelIds",
+  "enabled",
+  "mode",
+  "prompts",
+] as const
+const ONBOARDING_PROMPT_INPUT_KEYS = [
+  "id",
+  "inOnboarding",
+  "options",
+  "required",
+  "singleSelect",
+  "title",
+  "type",
+] as const
+const ONBOARDING_OPTION_INPUT_KEYS = [
+  "channelIds",
+  "description",
+  "emoji",
+  "id",
+  "roleIds",
+  "title",
+] as const
+const ONBOARDING_EMOJI_INPUT_KEYS = ["animated", "id", "name"] as const
+const ONBOARDING_ENUM_VALUES: ReadonlySet<number> = new Set([0, 1])
+const ONBOARDING_TEXT_CONTROL_PATTERN = /[\u0000\u007F]/u
+
+interface ProjectedOnboardingOption {
+  option: DiscordGuildOnboardingOption
+  unknownFieldCount: number
+}
+
+interface ProjectedOnboardingPrompt {
+  prompt: DiscordGuildOnboardingPrompt
+  unknownEnumCount: number
+  unknownFieldCount: number
+}
+
+function onboardingEvidenceError(options?: ErrorOptions): OnboardingEvidenceError {
+  return new OnboardingEvidenceError(
+    "Discord returned invalid guild onboarding evidence",
+    options,
+  )
+}
+
+function unknownOnboardingFieldCount(
+  value: Record<string, unknown>,
+  knownKeys: readonly string[],
+): number {
+  return Object.keys(value).filter((key) => !knownKeys.includes(key)).length
+}
+
+function onboardingReturnedText(
+  value: unknown,
+  nullable: boolean,
+): string | null {
+  if (value === null && nullable) return null
+  if (
+    typeof value !== "string"
+    || [...value].length > ONBOARDING_LIMITS.auditTextCharacters
+    || ONBOARDING_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw onboardingEvidenceError()
+  }
+  try {
+    assertValidUnicode(value, "Discord onboarding text")
+  } catch (error) {
+    throw onboardingEvidenceError({ cause: error })
+  }
+  return value
+}
+
+function onboardingReturnedIds(
+  value: unknown,
+  maximum: number,
+): string[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw onboardingEvidenceError()
+  }
+  const ids: string[] = []
+  try {
+    for (const entry of value) {
+      assertPositiveSnowflake(entry as string, "Discord onboarding reference ID")
+      ids.push(entry as string)
+    }
+  } catch (error) {
+    throw onboardingEvidenceError({ cause: error })
+  }
+  return ids
+}
+
+function projectOnboardingEmoji(
+  value: unknown,
+): { emoji: DiscordOnboardingEmoji | null; unknownFieldCount: number } {
+  if (value === undefined || value === null) {
+    return { emoji: null, unknownFieldCount: 0 }
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw onboardingEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const id = record.id
+  const name = record.name
+  if (
+    !Object.hasOwn(record, "id")
+    || !Object.hasOwn(record, "name")
+    || !(id === null || typeof id === "string")
+    || !(name === null || typeof name === "string")
+    || !(record.animated === undefined || typeof record.animated === "boolean")
+    || (id === null && name === null)
+  ) {
+    throw onboardingEvidenceError()
+  }
+  try {
+    if (typeof id === "string") {
+      assertPositiveSnowflake(id, "Discord onboarding emoji ID")
+    }
+    if (typeof name === "string") onboardingReturnedText(name, false)
+  } catch (error) {
+    if (error instanceof OnboardingEvidenceError) throw error
+    throw onboardingEvidenceError({ cause: error })
+  }
+  return {
+    emoji: {
+      animated: record.animated === true,
+      id,
+      name,
+    },
+    unknownFieldCount: unknownOnboardingFieldCount(record, ONBOARDING_EMOJI_KEYS),
+  }
+}
+
+function projectOnboardingOption(value: unknown): ProjectedOnboardingOption {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw onboardingEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== "string"
+    || !Array.isArray(record.channel_ids)
+    || !Array.isArray(record.role_ids)
+    || !(record.description === null || typeof record.description === "string")
+  ) {
+    throw onboardingEvidenceError()
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord onboarding option ID")
+  } catch (error) {
+    throw onboardingEvidenceError({ cause: error })
+  }
+  const emoji = projectOnboardingEmoji(record.emoji)
+  return {
+    option: {
+      channelIds: onboardingReturnedIds(
+        record.channel_ids,
+        ONBOARDING_LIMITS.auditReferencesPerOption,
+      ),
+      description: onboardingReturnedText(record.description, true),
+      emoji: emoji.emoji,
+      id: record.id,
+      roleIds: onboardingReturnedIds(
+        record.role_ids,
+        ONBOARDING_LIMITS.auditReferencesPerOption,
+      ),
+      title: onboardingReturnedText(record.title, false) as string,
+    },
+    unknownFieldCount:
+      unknownOnboardingFieldCount(record, ONBOARDING_OPTION_KEYS)
+      + emoji.unknownFieldCount,
+  }
+}
+
+function projectOnboardingPrompt(value: unknown): ProjectedOnboardingPrompt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw onboardingEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== "string"
+    || !Number.isSafeInteger(record.type)
+    || !Array.isArray(record.options)
+    || record.options.length > ONBOARDING_LIMITS.auditOptionsPerPrompt
+    || typeof record.single_select !== "boolean"
+    || typeof record.required !== "boolean"
+    || typeof record.in_onboarding !== "boolean"
+  ) {
+    throw onboardingEvidenceError()
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord onboarding prompt ID")
+  } catch (error) {
+    throw onboardingEvidenceError({ cause: error })
+  }
+  const options = record.options.map(projectOnboardingOption)
+  return {
+    prompt: {
+      id: record.id,
+      inOnboarding: record.in_onboarding,
+      options: options.map((entry) => entry.option),
+      required: record.required,
+      singleSelect: record.single_select,
+      title: onboardingReturnedText(record.title, false) as string,
+      type: record.type as number,
+    },
+    unknownEnumCount: ONBOARDING_ENUM_VALUES.has(record.type as number) ? 0 : 1,
+    unknownFieldCount:
+      unknownOnboardingFieldCount(record, ONBOARDING_PROMPT_KEYS)
+      + options.reduce((total, entry) => total + entry.unknownFieldCount, 0),
+  }
+}
+
+function projectGuildOnboarding(
+  value: unknown,
+  guildId: string,
+): DiscordGuildOnboarding {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw onboardingEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    record.guild_id !== guildId
+    || typeof record.enabled !== "boolean"
+    || !Number.isSafeInteger(record.mode)
+    || !Array.isArray(record.prompts)
+    || record.prompts.length > ONBOARDING_LIMITS.auditPrompts
+  ) {
+    throw onboardingEvidenceError()
+  }
+  const prompts = record.prompts.map(projectOnboardingPrompt)
+  const optionCount = prompts.reduce(
+    (total, entry) => total + entry.prompt.options.length,
+    0,
+  )
+  if (optionCount > ONBOARDING_LIMITS.auditTotalOptions) {
+    throw onboardingEvidenceError()
+  }
+  return {
+    defaultChannelIds: onboardingReturnedIds(
+      record.default_channel_ids,
+      DISCORD_LIMITS.guildChannels,
+    ),
+    enabled: record.enabled,
+    guildId,
+    mode: record.mode as number,
+    prompts: prompts.map((entry) => entry.prompt),
+    unknownEnumCount:
+      (ONBOARDING_ENUM_VALUES.has(record.mode as number) ? 0 : 1)
+      + prompts.reduce((total, entry) => total + entry.unknownEnumCount, 0),
+    unknownFieldCount:
+      unknownOnboardingFieldCount(record, ONBOARDING_KEYS)
+      + prompts.reduce((total, entry) => total + entry.unknownFieldCount, 0),
+  }
+}
+
+function assertOnboardingInputText(
+  value: unknown,
+  maximum: number,
+  name: string,
+  allowEmpty = false,
+): asserts value is string {
+  if (
+    typeof value !== "string"
+    || value.trim() !== value
+    || (!allowEmpty && value.length === 0)
+    || [...value].length > maximum
+    || ONBOARDING_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(`${name} is invalid`)
+  }
+  assertValidUnicode(value, name)
+}
+
+function assertOnboardingInputIds(
+  value: unknown,
+  maximum: number,
+  name: string,
+): asserts value is readonly string[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new RangeError(`${name} is invalid`)
+  }
+  for (const entry of value) {
+    assertPositiveSnowflake(entry as string, name)
+  }
+  if (new Set(value).size !== value.length) {
+    throw new RangeError(`${name} must be unique`)
+  }
+}
+
+function assertOnboardingEmojiInput(
+  value: unknown,
+): asserts value is DiscordOnboardingEmojiInput | null {
+  if (value === null) return
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord onboarding emoji must be an exact object or null")
+  }
+  const record = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(record, ONBOARDING_EMOJI_INPUT_KEYS)
+    || typeof record.animated !== "boolean"
+    || !(record.id === null || typeof record.id === "string")
+    || !(record.name === null || typeof record.name === "string")
+    || (record.id === null && record.name === null)
+    || (record.id === null && record.animated)
+  ) {
+    throw new RangeError("Discord onboarding emoji is invalid")
+  }
+  if (typeof record.id === "string") {
+    assertPositiveSnowflake(record.id, "Discord onboarding emoji ID")
+  }
+  if (typeof record.name === "string") {
+    assertOnboardingInputText(
+      record.name,
+      ONBOARDING_LIMITS.optionTitleCharacters,
+      "Discord onboarding emoji name",
+    )
+  }
+}
+
+function assertModifyGuildOnboardingInput(
+  value: unknown,
+): asserts value is ModifyGuildOnboardingInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord onboarding input must be an exact object")
+  }
+  const input = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(input, ONBOARDING_INPUT_KEYS)
+    || typeof input.enabled !== "boolean"
+    || !ONBOARDING_ENUM_VALUES.has(input.mode as number)
+    || !Array.isArray(input.prompts)
+    || input.prompts.length > ONBOARDING_LIMITS.prompts
+  ) {
+    throw new RangeError("Discord onboarding input is invalid")
+  }
+  assertOnboardingInputIds(
+    input.defaultChannelIds,
+    ONBOARDING_LIMITS.defaultChannels,
+    "Discord onboarding default channel IDs",
+  )
+  let optionCount = 0
+  const promptIds: string[] = []
+  const optionIds: string[] = []
+  for (const promptValue of input.prompts) {
+    if (!promptValue || typeof promptValue !== "object" || Array.isArray(promptValue)) {
+      throw new RangeError("Discord onboarding prompt must be an exact object")
+    }
+    const prompt = promptValue as Record<string, unknown>
+    if (
+      !hasOnlyKeys(prompt, ONBOARDING_PROMPT_INPUT_KEYS)
+      || typeof prompt.id !== "string"
+      || !ONBOARDING_ENUM_VALUES.has(prompt.type as number)
+      || typeof prompt.singleSelect !== "boolean"
+      || typeof prompt.required !== "boolean"
+      || typeof prompt.inOnboarding !== "boolean"
+      || !Array.isArray(prompt.options)
+      || prompt.options.length > ONBOARDING_LIMITS.optionsPerPrompt
+    ) {
+      throw new RangeError("Discord onboarding prompt is invalid")
+    }
+    assertPositiveSnowflake(prompt.id, "Discord onboarding prompt ID")
+    promptIds.push(prompt.id)
+    assertOnboardingInputText(
+      prompt.title,
+      ONBOARDING_LIMITS.promptTitleCharacters,
+      "Discord onboarding prompt title",
+    )
+    optionCount += prompt.options.length
+    for (const optionValue of prompt.options) {
+      if (!optionValue || typeof optionValue !== "object" || Array.isArray(optionValue)) {
+        throw new RangeError("Discord onboarding option must be an exact object")
+      }
+      const option = optionValue as Record<string, unknown>
+      if (
+        !hasOnlyKeys(option, ONBOARDING_OPTION_INPUT_KEYS)
+        || !(option.id === undefined || typeof option.id === "string")
+        || !(option.description === null || typeof option.description === "string")
+      ) {
+        throw new RangeError("Discord onboarding option is invalid")
+      }
+      if (typeof option.id === "string") {
+        assertPositiveSnowflake(option.id, "Discord onboarding option ID")
+        optionIds.push(option.id)
+      }
+      assertOnboardingInputText(
+        option.title,
+        ONBOARDING_LIMITS.optionTitleCharacters,
+        "Discord onboarding option title",
+      )
+      if (typeof option.description === "string") {
+        assertOnboardingInputText(
+          option.description,
+          ONBOARDING_LIMITS.optionDescriptionCharacters,
+          "Discord onboarding option description",
+          true,
+        )
+      }
+      assertOnboardingInputIds(
+        option.channelIds,
+        ONBOARDING_LIMITS.optionReferences,
+        "Discord onboarding option channel IDs",
+      )
+      assertOnboardingInputIds(
+        option.roleIds,
+        ONBOARDING_LIMITS.optionReferences,
+        "Discord onboarding option role IDs",
+      )
+      assertOnboardingEmojiInput(option.emoji)
+    }
+  }
+  if (optionCount > ONBOARDING_LIMITS.prompts * ONBOARDING_LIMITS.optionsPerPrompt) {
+    throw new RangeError("Discord onboarding option count is invalid")
+  }
+  if (new Set(promptIds).size !== promptIds.length) {
+    throw new RangeError("Discord onboarding prompt IDs must be unique")
+  }
+  if (new Set(optionIds).size !== optionIds.length) {
+    throw new RangeError("Discord onboarding option IDs must be unique")
   }
 }
 
@@ -3480,6 +4006,70 @@ export class DiscordClient {
 
   getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {
     return this.#request("get_guild", `/guilds/${guildId}`, options)
+  }
+
+  async getGuildOnboarding(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildOnboarding> {
+    assertPositiveSnowflake(guildId, "Discord onboarding guild ID")
+    const response = await this.#request<unknown>(
+      "get_guild_onboarding",
+      `/guilds/${guildId}/onboarding`,
+      {
+        ...options,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildOnboarding(response, guildId)
+  }
+
+  async modifyGuildOnboarding(
+    guildId: string,
+    input: ModifyGuildOnboardingInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildOnboarding> {
+    assertPositiveSnowflake(guildId, "Discord onboarding guild ID")
+    assertModifyGuildOnboardingInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord onboarding audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_onboarding",
+      `/guilds/${guildId}/onboarding`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          default_channel_ids: input.defaultChannelIds,
+          enabled: input.enabled,
+          mode: input.mode,
+          prompts: input.prompts.map((prompt) => ({
+            id: prompt.id,
+            in_onboarding: prompt.inOnboarding,
+            options: prompt.options.map((option) => ({
+              channel_ids: option.channelIds,
+              description: option.description,
+              emoji_animated: option.emoji?.animated ?? false,
+              emoji_id: option.emoji?.id ?? null,
+              emoji_name: option.emoji?.name ?? null,
+              ...(option.id !== undefined ? { id: option.id } : {}),
+              role_ids: option.roleIds,
+              title: option.title,
+            })),
+            required: prompt.required,
+            single_select: prompt.singleSelect,
+            title: prompt.title,
+            type: prompt.type,
+          })),
+        },
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildOnboarding(response, guildId)
   }
 
   getGuildAuditLog(

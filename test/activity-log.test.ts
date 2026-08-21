@@ -24,6 +24,7 @@ import {
   type MemberModerationActivity,
   type MemberRoleActivity,
   type MessagePinActivity,
+  type OnboardingActivity,
   type RoleCreationActivity,
   type ScheduledEventActivity,
   type WebhookDeletionActivity,
@@ -280,6 +281,31 @@ function inviteDeletion(
     kind: "invite-deletion",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function onboardingChange(
+  id: string,
+  status: OnboardingActivity["status"],
+): OnboardingActivity {
+  return {
+    enabled: true,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "onboarding-change",
+    operationKeyHash: `sha256:${"8".repeat(64)}`,
+    planDigest: `hmac-sha256:${"9".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -878,6 +904,68 @@ test("JSONL activity log keeps invite deletion evidence capability-free", async 
       "guildId",
       "id",
       "inviteRef",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps onboarding evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-name",
+    "private-onboarding-description",
+    "private-onboarding-option",
+    "private-onboarding-prompt",
+    "private-operation-key",
+    "private-role-name",
+  ]
+
+  await store.append(onboardingChange("1", "pending"))
+  await store.append({
+    ...onboardingChange("2", "completed"),
+    auditReason: privateValues[0],
+    channelName: privateValues[1],
+    description: privateValues[2],
+    optionTitle: privateValues[3],
+    promptTitle: privateValues[4],
+    operationKey: privateValues[5],
+    roleName: privateValues[6],
+  } as OnboardingActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...onboardingChange("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "enabled",
+      "error",
+      "guildId",
+      "id",
       "kind",
       "operationKeyHash",
       "planDigest",

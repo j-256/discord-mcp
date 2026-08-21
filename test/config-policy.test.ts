@@ -172,6 +172,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     inviteAuditEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    onboardingAuditEnabled: false,
+    onboardingChangesEnabled: false,
+    onboardingGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -439,6 +442,9 @@ test("configuration and policy require an exact administration guild and protect
     inviteAuditEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    onboardingAuditEnabled: false,
+    onboardingChangesEnabled: false,
+    onboardingGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -627,6 +633,81 @@ test("configuration and policy isolate capability-safe invite audit and revocati
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_INVITE_AUDIT: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
+  )
+})
+
+test("configuration and policy isolate reviewed guild onboarding", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+    DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowOnboardingAudit, true)
+  assert.equal(config.allowOnboardingChanges, true)
+  assert.deepEqual([...config.onboardingGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().onboardingAuditEnabled, true)
+  assert.equal(policy.describe().onboardingChangesEnabled, true)
+  assert.deepEqual(policy.describe().onboardingGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildOnboardingAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildOnboardingChangeable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildOnboardingAuditable(OTHER_GUILD_ID),
+    /outside the onboarding-audit scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildOnboardingAuditable(GUILD_ID),
+    /onboarding audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+    DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildOnboardingAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildOnboardingChangeable(GUILD_ID),
+    /onboarding changes are disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertGuildOnboardingAuditable(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ONBOARDING_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_ONBOARDING_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_ONBOARDING_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "sometimes",
     }, { homeDirectory: "/test/home" }),
     /must be true or false/,
   )
@@ -1083,6 +1164,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     inviteAuditEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    onboardingAuditEnabled: false,
+    onboardingChangesEnabled: false,
+    onboardingGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,

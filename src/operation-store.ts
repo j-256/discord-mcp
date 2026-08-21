@@ -34,6 +34,7 @@ export const OPERATION_KINDS = [
   "invite-deletion",
   "member-role-change",
   "message-pin",
+  "onboarding-change",
   "role-creation",
   "scheduled-event-change",
   "webhook-deletion",

@@ -14,6 +14,7 @@ export type DiscordGuidanceService = Pick<
   | "getGuildMember"
   | "getGuildBan"
   | "getGuildInvite"
+  | "getGuildOnboarding"
   | "getMessage"
   | "getRole"
   | "listActivity"

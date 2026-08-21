@@ -43,6 +43,7 @@ export const MCP_TOOLSET_NAMES = [
   "messages",
   "moderation",
   "observability",
+  "onboarding",
   "permission-overwrites",
   "permissions",
   "pins",
@@ -76,6 +77,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowInviteDeletions: "DISCORD_MCP_ALLOW_INVITE_DELETIONS",
   allowMemberDirectory: "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
   allowMemberRoleChanges: "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
+  allowOnboardingAudit: "DISCORD_MCP_ALLOW_ONBOARDING_AUDIT",
+  allowOnboardingChanges: "DISCORD_MCP_ALLOW_ONBOARDING_CHANGES",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowPermissionOverwrites: "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
@@ -109,6 +112,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   memberRoleGuildIds: "DISCORD_MCP_MEMBER_ROLE_GUILD_IDS",
   memberRoleIds: "DISCORD_MCP_MEMBER_ROLE_IDS",
   observabilityLogs: "DISCORD_MCP_OBSERVABILITY_LOGS",
+  onboardingGuildIds: "DISCORD_MCP_ONBOARDING_GUILD_IDS",
   otelCompression: "OTEL_EXPORTER_OTLP_COMPRESSION",
   otelEndpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",
   otelHeaders: "OTEL_EXPORTER_OTLP_HEADERS",
@@ -265,6 +269,23 @@ export const INVITE_LIMITS = Object.freeze({
 export const INVITE_REFERENCE_PATTERN = /^iref_hmac_sha256_[a-f0-9]{64}$/
 export const INVITE_CURSOR_PATTERN = /^icur_hmac_sha256_[A-Za-z0-9_-]+\.[a-f0-9]{64}$/
 export const DISCORD_INVITE_URL_PATTERN = /(?:discord\.gg\/|discord(?:app)?\.com\/invite\/)/iu
+
+export const ONBOARDING_LIMITS = Object.freeze({
+  auditOptionsPerPrompt: 100,
+  auditPrompts: 32,
+  auditReferencesPerOption: 250,
+  auditTextCharacters: 4_096,
+  auditTotalOptions: 1_000,
+  defaultChannels: 25,
+  enabledDefaultChannels: 7,
+  enabledSendableDefaultChannels: 5,
+  optionDescriptionCharacters: 100,
+  optionReferences: 25,
+  optionTitleCharacters: 100,
+  optionsPerPrompt: 25,
+  promptTitleCharacters: 100,
+  prompts: 5,
+})
 
 export const CONNECTOR_LIMITS = Object.freeze({
   activityEntries: 100,

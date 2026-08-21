@@ -16,6 +16,7 @@ import {
   BAN_AUDIT_LIMITS,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
+  ONBOARDING_LIMITS,
 } from "../src/constants.js"
 import type {
   AttachmentMessagePlan,
@@ -62,6 +63,14 @@ import type {
   MessagePinRequest,
 } from "../src/message-pin-service.js"
 import type {
+  OnboardingAccessEvidence,
+  OnboardingAuditResult,
+  OnboardingChangePlan,
+  OnboardingChangeRequest,
+  OnboardingConfigurationView,
+  OnboardingPrivacyProjection,
+} from "../src/onboarding-service.js"
+import type {
   MemberRoleChangePlan,
   MemberRoleChangeRequest,
 } from "../src/member-role-service.js"
@@ -103,6 +112,8 @@ import {
   MemberRoleExecutionError,
   MemberRoleOperationConflictError,
   MemberRolePlanChangedError,
+  OnboardingExecutionError,
+  OnboardingOperationConflictError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
   ScheduledEventExecutionError,
@@ -169,6 +180,14 @@ const WEBHOOK_ID = "370000000000000001"
 const INVITE_OPERATION_KEY = "invite-delete-attempt-0001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
+const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
+const ONBOARDING_PROMPT_TITLE = "Choose your community path"
+const ONBOARDING_OPTION_TITLE = "Community member"
+const ONBOARDING_OPTION_DESCRIPTION = "Join the community channels"
+const ONBOARDING_DEFAULT_CHANNEL_IDS = Array.from(
+  { length: ONBOARDING_LIMITS.enabledDefaultChannels },
+  (_, index) => `${200000000000000001n + BigInt(index)}`,
+)
 const EMOJI_ID = "380000000000000001"
 const STICKER_ID = "390000000000000001"
 const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
@@ -404,6 +423,226 @@ function inviteAccess(): InviteAccessEvidence {
     manageGuild: true,
     requiredPermission: "MANAGE_GUILD",
     unknownPermissionBits: "0",
+  }
+}
+
+function onboardingRequest(
+  overrides: Partial<OnboardingChangeRequest> = {},
+): OnboardingChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    defaultChannelIds: ONBOARDING_DEFAULT_CHANNEL_IDS,
+    enabled: true,
+    guildId: GUILD_ID,
+    mode: "default",
+    operationKey: ONBOARDING_OPERATION_KEY,
+    prompts: [{
+      inOnboarding: true,
+      options: [{
+        channelIds: [CHANNEL_ID],
+        description: ONBOARDING_OPTION_DESCRIPTION,
+        emoji: null,
+        roleIds: [ROLE_ID],
+        title: ONBOARDING_OPTION_TITLE,
+      }],
+      required: true,
+      singleSelect: true,
+      title: ONBOARDING_PROMPT_TITLE,
+      type: "multiple-choice",
+    }],
+    ...overrides,
+  }
+}
+
+function onboardingAccess(): OnboardingAccessEvidence {
+  return {
+    appliedRoleIds: [GUILD_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD", "MANAGE_ROLES"],
+    effectivePermissions: (
+      DISCORD_PERMISSIONS.MANAGE_GUILD | DISCORD_PERMISSIONS.MANAGE_ROLES
+    ).toString(),
+    highestRoleIds: [ROLE_ID],
+    highestRolePosition: 2,
+    manageGuild: true,
+    manageRoles: true,
+    requiredChangePermissions: ["MANAGE_GUILD", "MANAGE_ROLES"],
+    unknownPermissionBits: "0",
+  }
+}
+
+function onboardingPrivacy(includeText: boolean): OnboardingPrivacyProjection {
+  return {
+    persistence: "none",
+    rawPayloads: "omitted",
+    text: includeText ? "included" : "omitted",
+    unknownFields: "counts-only",
+  }
+}
+
+function onboardingConfiguration(
+  request: OnboardingChangeRequest | null,
+  includeText: boolean,
+): OnboardingConfigurationView {
+  const defaultChannels = (request?.defaultChannelIds ?? []).map((id) => ({
+    direct: true,
+    everyoneCanSend: true,
+    everyoneCanView: true,
+    exists: true,
+    id,
+    type: 0,
+  }))
+  const configured = request !== null
+  return {
+    communityGuild: true,
+    defaultChannels,
+    enabled: request?.enabled ?? false,
+    enablement: {
+      constraintsMet:
+        defaultChannels.length >= ONBOARDING_LIMITS.enabledDefaultChannels,
+      defaultChannelCount: defaultChannels.length,
+      distinctDefaultChannelCount: defaultChannels.length,
+      requiredDefaultChannelCount: ONBOARDING_LIMITS.enabledDefaultChannels,
+      requiredSendableDefaultChannelCount:
+        ONBOARDING_LIMITS.enabledSendableDefaultChannels,
+      sendableDefaultChannelCount: defaultChannels.length,
+      visibleDefaultChannelCount: defaultChannels.length,
+    },
+    issues: [],
+    mode: { name: request?.mode ?? "default", value: 0 },
+    prompts: configured
+      ? request.prompts.map((prompt) => ({
+          id: prompt.promptId ?? null,
+          inOnboarding: prompt.inOnboarding,
+          options: prompt.options.map((option) => ({
+            channelReferences: option.channelIds.map((id) => ({
+              direct: true,
+              everyoneCanSend: true,
+              everyoneCanView: true,
+              exists: true,
+              id,
+              type: 0,
+            })),
+            description: includeText ? option.description : null,
+            descriptionCharacters: option.description === null
+              ? null
+              : [...option.description].length,
+            emoji: {
+              animated: null,
+              guildEmojiId: null,
+              healthy: true,
+              kind: "none",
+              restrictedRoleIds: [],
+              unicode: null,
+            },
+            id: option.optionId ?? null,
+            roleReferences: option.roleIds.map((id) => ({
+              exists: true,
+              id,
+              reasons: [],
+              safeSelfAssignable: true,
+            })),
+            title: includeText ? option.title : null,
+            titleCharacters: [...option.title].length,
+          })),
+          required: prompt.required,
+          singleSelect: prompt.singleSelect,
+          title: includeText ? prompt.title : null,
+          titleCharacters: [...prompt.title].length,
+          type: { name: prompt.type, value: 0 },
+        }))
+      : [],
+    replacementBlockedReasons: [],
+    textIncluded: includeText,
+    unknownEnumCount: 0,
+    unknownFieldCount: 0,
+  }
+}
+
+function onboardingAudit(includeText: boolean): OnboardingAuditResult {
+  return {
+    access: onboardingAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: onboardingConfiguration(onboardingRequest(), includeText),
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    localLimits: {
+      defaultChannels: ONBOARDING_LIMITS.defaultChannels,
+      enabledDefaultChannels: ONBOARDING_LIMITS.enabledDefaultChannels,
+      enabledSendableDefaultChannels:
+        ONBOARDING_LIMITS.enabledSendableDefaultChannels,
+      optionDescriptionCharacters: ONBOARDING_LIMITS.optionDescriptionCharacters,
+      optionReferences: ONBOARDING_LIMITS.optionReferences,
+      optionsPerPrompt: ONBOARDING_LIMITS.optionsPerPrompt,
+      optionTitleCharacters: ONBOARDING_LIMITS.optionTitleCharacters,
+      prompts: ONBOARDING_LIMITS.prompts,
+      promptTitleCharacters: ONBOARDING_LIMITS.promptTitleCharacters,
+    },
+    privacy: onboardingPrivacy(includeText),
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      apiReadback: true,
+      freshNonStaffClientCheckRecommended: true,
+      memberExperienceVerified: false,
+    },
+  }
+}
+
+function onboardingPlan(
+  request: OnboardingChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): OnboardingChangePlan {
+  const desired = onboardingConfiguration(request, true)
+  const current = effect === "none"
+    ? desired
+    : onboardingConfiguration(null, true)
+  const changed = effect === "change"
+  return {
+    access: onboardingAccess(),
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    current,
+    desired,
+    diff: {
+      channelAssignmentsAdded: changed ? 1 : 0,
+      channelAssignmentsRemoved: 0,
+      defaultChannelsAdded: changed ? request.defaultChannelIds.length : 0,
+      defaultChannelsRemoved: 0,
+      emojiChanges: 0,
+      enabledChanged: changed,
+      modeChanged: false,
+      optionsAdded: changed ? 1 : 0,
+      optionsModified: 0,
+      optionsRemoved: 0,
+      optionsRetained: changed ? 0 : 1,
+      promptsAdded: changed ? 1 : 0,
+      promptsModified: 0,
+      promptsRemoved: 0,
+      promptsRetained: changed ? 0 : 1,
+      roleAssignmentsAdded: changed ? 1 : 0,
+      roleAssignmentsRemoved: 0,
+      textChanges: changed ? 3 : 0,
+    },
+    digest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    localLimits: onboardingAudit(true).localLimits,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: onboardingPrivacy(true),
+    risks: changed
+      ? ["fresh-member-client-check-required", "full-replacement"]
+      : [],
+    schemaVersion: 1,
+    status: changed ? "planned" : "already-current",
+    verificationBoundary: onboardingAudit(true).verificationBoundary,
+    warnings: ["Fresh non-staff client verification remains external"],
+    writeRequired: changed,
   }
 }
 
@@ -1559,6 +1798,9 @@ function fixturePolicy(): PolicyDescription {
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
+    onboardingAuditEnabled: false,
+    onboardingChangesEnabled: false,
+    onboardingGuildIds: [],
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
     protectedUserCount: 0,
@@ -1602,6 +1844,9 @@ function serviceFixture(overrides: {
   memberRoleAction?: "add" | "none" | "remove"
   memberRoleError?: Error
   memberRolePlanDigest?: string
+  onboardingEffect?: "change" | "none"
+  onboardingError?: Error
+  onboardingPlanDigest?: string
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
@@ -1657,6 +1902,9 @@ function serviceFixture(overrides: {
     messagePinPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
+    onboardingExecute: 0,
+    onboardingGet: 0,
+    onboardingPlan: 0,
     permissionOverwriteExecute: 0,
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
@@ -1676,6 +1924,36 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeOnboardingChange(request, planDigest) {
+      if (overrides.onboardingError) throw overrides.onboardingError
+      calls.onboardingExecute += 1
+      const planned = onboardingPlan(
+        request,
+        planDigest,
+        overrides.onboardingEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-onboarding" : null,
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
+    async getGuildOnboarding(_guildId, includeText = false) {
+      calls.onboardingGet += 1
+      return onboardingAudit(includeText)
+    },
+    async planOnboardingChange(request) {
+      calls.onboardingPlan += 1
+      return onboardingPlan(
+        request,
+        overrides.onboardingPlanDigest || DIGEST,
+        overrides.onboardingEffect,
+      )
+    },
     async executeInviteDeletion(request, planDigest) {
       if (overrides.inviteDeletionError) throw overrides.inviteDeletionError
       calls.inviteDeletionExecute += 1
@@ -2959,6 +3237,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_ban",
       "list_guild_invites",
       "get_guild_invite",
+      "get_guild_onboarding",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -2992,6 +3271,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_webhook_deletion",
       "plan_invite_deletion",
       "execute_invite_deletion",
+      "plan_onboarding_change",
+      "execute_onboarding_change",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
       "plan_automod_change",
@@ -3022,6 +3303,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
+  const onboarding = result.tools.find((tool) => tool.name === "execute_onboarding_change")
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
@@ -3042,6 +3324,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     messagePin,
     webhookDeletion,
     inviteDeletion,
+    onboarding,
     guildExpression,
     scheduledEvent,
     permissionOverwrite,
@@ -3071,6 +3354,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_channel_webhook",
     "list_guild_invites",
     "get_guild_invite",
+    "get_guild_onboarding",
     "list_guild_emojis",
     "get_guild_emoji",
     "list_guild_stickers",
@@ -3082,6 +3366,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_member_role_change",
     "plan_webhook_deletion",
     "plan_invite_deletion",
+    "plan_onboarding_change",
     "plan_guild_expression_change",
     "plan_scheduled_event_change",
   ]) {
@@ -3605,6 +3890,30 @@ test("progressive discovery enables the complete reviewed invite-deletion workfl
   )
 })
 
+test("progressive discovery enables the complete reviewed onboarding workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_onboarding_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_onboarding_change",
+    "plan_onboarding_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_onboarding_change",
+      "execute_onboarding_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed guild-expression workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -3839,6 +4148,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
+    onboardingExecute: 0,
+    onboardingGet: 0,
+    onboardingPlan: 0,
     permissionOverwriteExecute: 0,
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
@@ -5407,6 +5719,242 @@ test("MCP invite deletion exposes uncertain and one-shot conflict outcomes safel
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(INVITE_OPERATION_KEY))
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(PRIVATE_INVITE_CODE))
+})
+
+test("MCP onboarding audit defaults to text omission and requires explicit opt-in", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const minimized = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_onboarding",
+  })
+  const included = await client.callTool({
+    arguments: { guildId: GUILD_ID, includeText: true },
+    name: "get_guild_onboarding",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "get_guild_onboarding",
+  })
+
+  const minimizedContent = structuredContent(minimized)
+  const includedContent = structuredContent(included)
+  assert.equal(
+    (minimizedContent.privacy as Record<string, unknown>).text,
+    "omitted",
+  )
+  assert.equal(
+    (includedContent.privacy as Record<string, unknown>).text,
+    "included",
+  )
+  assert.doesNotMatch(JSON.stringify(minimized), new RegExp(ONBOARDING_PROMPT_TITLE))
+  assert.match(JSON.stringify(included), new RegExp(ONBOARDING_PROMPT_TITLE))
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.onboardingGet, 2)
+})
+
+test("MCP onboarding plans preserve an exact bounded complete replacement", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const request = onboardingRequest()
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_onboarding_change",
+  })
+  const duplicate = await client.callTool({
+    arguments: {
+      ...request,
+      defaultChannelIds: [CHANNEL_ID, CHANNEL_ID],
+    },
+    name: "plan_onboarding_change",
+  })
+  const extra = await client.callTool({
+    arguments: { ...request, futureField: true },
+    name: "plan_onboarding_change",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal(content.writeRequired, true)
+  assert.equal(content.operationKeyHash, OPERATION_KEY_HASH)
+  assert.match(JSON.stringify(content.desired), new RegExp(ONBOARDING_PROMPT_TITLE))
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(ONBOARDING_OPERATION_KEY))
+  assert.equal(duplicate.isError, true)
+  assert.equal(extra.isError, true)
+  assert.equal(calls.onboardingPlan, 1)
+})
+
+test("MCP onboarding execution binds approval to the complete reviewed state", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const request = onboardingRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_onboarding_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.onboardingPlan, 1)
+  assert.equal(calls.onboardingExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    ROLE_ID,
+    OPERATION_KEY_HASH,
+    ONBOARDING_PROMPT_TITLE,
+    ONBOARDING_OPTION_TITLE,
+    ONBOARDING_OPTION_DESCRIPTION,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /complete Discord onboarding configuration/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(ONBOARDING_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ONBOARDING_OPERATION_KEY),
+  )
+})
+
+test("MCP onboarding execution skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    ...onboardingRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { onboardingEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_onboarding_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.onboardingExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_onboarding_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.onboardingExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { onboardingPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_onboarding_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.onboardingExecute, 0)
+})
+
+test("MCP onboarding execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...onboardingRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      onboardingError: new OnboardingExecutionError(
+        "Discord onboarding outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_onboarding_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PUT",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/onboarding`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      onboardingError: new OnboardingExecutionError(
+        "Discord onboarding replacement was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_onboarding_change",
+  })
+  const limitedStructured = structuredContent(limitedResult)
+  assert.equal(limitedStructured.status, "rate-limited")
+  assert.equal(
+    (limitedStructured.error as Record<string, unknown>).retryAfterMs,
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-onboarding",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      onboardingError: new OnboardingOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_onboarding_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(ONBOARDING_OPERATION_KEY),
+  )
 })
 
 test("MCP guild expression reads expose only bounded privacy-safe evidence", async (context) => {

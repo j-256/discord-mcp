@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 4
+export const OPERATOR_REPORT_SCHEMA_VERSION = 5
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -73,6 +73,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   messageContentIntent: "message-content-intent",
   messagePinPolicy: "message-pin-policy",
   nodeVersion: "node-version",
+  onboardingAuditPolicy: "onboarding-audit-policy",
+  onboardingChangePolicy: "onboarding-change-policy",
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
   roleCreationPolicy: "role-creation-policy",
@@ -271,6 +273,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowInviteDeletions && config.inviteGuildIds.size === 0) {
     warnings.push("The invite-deletion toggle is enabled but deletion remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowOnboardingAudit && config.onboardingGuildIds.size === 0) {
+    warnings.push("The onboarding-audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowOnboardingChanges && config.onboardingGuildIds.size === 0) {
+    warnings.push("The onboarding-change toggle is enabled but replacement remains blocked because an exact guild allowlist is required")
+  }
   if (
     config.allowMemberRoleChanges
     && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
@@ -338,6 +346,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowInviteAudit || config.allowInviteDeletions,
       "invites",
       "Invite audit and reviewed revocation",
+    ],
+    [
+      config.allowOnboardingAudit || config.allowOnboardingChanges,
+      "onboarding",
+      "Onboarding audit and reviewed replacement",
     ],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
@@ -742,6 +755,44 @@ export async function diagnoseConnector(
         `Reviewed invite revocation is constrained to ${config.inviteGuildIds.size} exact guilds with one-shot execution and full-inventory absence readback`,
       ))
     }
+    if (!config.allowOnboardingAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.onboardingAuditPolicy,
+        "pass",
+        "Privacy-safe guild onboarding audit is disabled",
+      ))
+    } else if (config.onboardingGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.onboardingAuditPolicy,
+        "warn",
+        "Onboarding-audit toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.onboardingAuditPolicy,
+        "pass",
+        `Guild onboarding audit is constrained to ${config.onboardingGuildIds.size} exact guilds with default text omission, bounded complete evidence, and future-field counts only`,
+      ))
+    }
+    if (!config.allowOnboardingChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.onboardingChangePolicy,
+        "pass",
+        "Reviewed guild onboarding replacement is disabled",
+      ))
+    } else if (config.onboardingGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.onboardingChangePolicy,
+        "warn",
+        "Onboarding changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.onboardingChangePolicy,
+        "pass",
+        `Reviewed guild onboarding replacement is constrained to ${config.onboardingGuildIds.size} exact guilds with complete-state review, signed approval, one-shot execution, and authoritative response plus API readback`,
+      ))
+    }
     if (!config.allowMemberRoleChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberRolePolicy,
@@ -1118,6 +1169,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowInviteAudit,
     ENVIRONMENT_NAMES.allowInviteDeletions,
     ENVIRONMENT_NAMES.inviteGuildIds,
+    ENVIRONMENT_NAMES.allowOnboardingAudit,
+    ENVIRONMENT_NAMES.allowOnboardingChanges,
+    ENVIRONMENT_NAMES.onboardingGuildIds,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowBanAudit,

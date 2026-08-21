@@ -200,6 +200,7 @@ function serviceFixture(overrides: {
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
+  onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
@@ -347,6 +348,9 @@ function serviceFixture(overrides: {
     async getGuildMember(): Promise<DiscordGuildMember> {
       return { roles: [] }
     },
+    async getGuildOnboarding() {
+      throw new Error("Unexpected onboarding lookup")
+    },
     async getGuildEmoji() {
       return {
         animated: false,
@@ -427,6 +431,9 @@ function serviceFixture(overrides: {
     },
     async listGuildStickers() {
       return []
+    },
+    async modifyGuildOnboarding() {
+      throw new Error("Unexpected onboarding change")
     },
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
@@ -552,6 +559,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.memberRoleOptions
         ? { memberRoleOptions: overrides.memberRoleOptions }
+        : {}),
+      ...(overrides.onboardingOptions
+        ? { onboardingOptions: overrides.onboardingOptions }
         : {}),
       ...(overrides.forumPostOptions
         ? { forumPostOptions: overrides.forumPostOptions }
@@ -825,6 +835,99 @@ test("service pins identity through capability-safe invite audit and revocation"
     JSON.stringify([listed, exact, plan, result, calls.activityEntries, operationStore.receipt]),
     new RegExp(privateCode),
   )
+})
+
+test("service pins identity through privacy-safe reviewed onboarding", async () => {
+  const operationStore = new MemoryOperationStore()
+  let onboardingReads = 0
+  let onboardingWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: ["COMMUNITY"],
+          owner_id: "700000000000000001",
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildOnboarding(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        onboardingReads += 1
+        return {
+          defaultChannelIds: [],
+          enabled: false,
+          guildId,
+          mode: 0,
+          prompts: [],
+          unknownEnumCount: 0,
+          unknownFieldCount: 0,
+        }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD | DISCORD_PERMISSIONS.MANAGE_ROLES,
+          "@everyone",
+        )]
+      },
+      async modifyGuildOnboarding() {
+        onboardingWrites += 1
+        throw new Error("Unexpected onboarding write")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+      DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+      DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+    },
+    onboardingOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(41),
+      randomId: () => "activity-onboarding",
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed disabled onboarding",
+    defaultChannelIds: [],
+    enabled: false,
+    guildId: GUILD_ID,
+    mode: "default" as const,
+    operationKey: "onboarding-service-attempt-0001",
+    prompts: [],
+  }
+
+  await assert.rejects(
+    () => service.getGuildOnboarding("bad"),
+    /onboarding guild ID/,
+  )
+  await assert.rejects(
+    () => service.planOnboardingChange({ ...request, guildId: "bad" }),
+    /onboarding guild ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildOnboarding(GUILD_ID)
+  const plan = await service.planOnboardingChange(request)
+  const result = await service.executeOnboardingChange(request, plan.digest)
+
+  assert.equal(audit.privacy.text, "omitted")
+  assert.equal(audit.configuration.textIncluded, false)
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(onboardingReads, 3)
+  assert.equal(onboardingWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
 })
 
 test("service pins identity through privacy-safe guild expression reads and reviewed changes", async () => {

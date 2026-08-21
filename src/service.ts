@@ -127,6 +127,18 @@ import {
   normalizeInviteDeletionRequest,
 } from "./invite-service.js"
 import type {
+  OnboardingAuditResult,
+  OnboardingChangePlan,
+  OnboardingChangeRequest,
+  OnboardingChangeResult,
+  OnboardingServiceOptions,
+} from "./onboarding-service.js"
+import {
+  assertOnboardingGetInput,
+  normalizeOnboardingChangeRequest,
+  OnboardingService,
+} from "./onboarding-service.js"
+import type {
   MessagePinListResult,
   MessagePinPlan,
   MessagePinRequest,
@@ -239,6 +251,7 @@ export interface DiscordServiceClient {
   getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
+  getGuildOnboarding: DiscordClient["getGuildOnboarding"]
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoles: DiscordClient["getGuildRoles"]
@@ -263,6 +276,7 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
@@ -329,6 +343,7 @@ export interface ConnectorServiceOptions {
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
   >
   inviteOptions?: Pick<InviteServiceOptions, "clock" | "planKey" | "randomId">
+  onboardingOptions?: Pick<OnboardingServiceOptions, "clock" | "planKey" | "randomId">
   messagePinOptions?: Pick<
     MessagePinServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -487,6 +502,7 @@ export class ConnectorService {
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
   readonly #inviteService: InviteService
+  readonly #onboardingService: OnboardingService
   readonly #messagePinService: MessagePinService
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberRoleService: MemberRoleService
@@ -573,6 +589,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.inviteOptions,
+    })
+    this.#onboardingService = new OnboardingService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.onboardingOptions,
     })
     this.#messagePinService = new MessagePinService({
       activityStore: this.#activityStore,
@@ -842,6 +865,22 @@ export class ConnectorService {
       identity.bot.id,
       guildId,
       inviteRef,
+      options,
+    )
+  }
+
+  async getGuildOnboarding(
+    guildId: string,
+    includeText = false,
+    options: RequestOptions = {},
+  ): Promise<OnboardingAuditResult> {
+    assertOnboardingGetInput(guildId, includeText)
+    const identity = await this.#verifyIdentity(options)
+    return this.#onboardingService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      includeText,
       options,
     )
   }
@@ -1382,6 +1421,20 @@ export class ConnectorService {
     )
   }
 
+  async planOnboardingChange(
+    request: OnboardingChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<OnboardingChangePlan> {
+    normalizeOnboardingChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#onboardingService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildExpressionChange(
     request: GuildExpressionChangeRequest,
     options: RequestOptions = {},
@@ -1659,6 +1712,25 @@ export class ConnectorService {
     }
     const identity = await this.#verifyIdentity(options)
     return this.#inviteService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeOnboardingChange(
+    request: OnboardingChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<OnboardingChangeResult> {
+    normalizeOnboardingChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord onboarding plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#onboardingService.execute(
       identity.application.id,
       identity.bot.id,
       request,

@@ -54,6 +54,9 @@ export interface PolicyDescription {
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
+  onboardingAuditEnabled: boolean
+  onboardingChangesEnabled: boolean
+  onboardingGuildIds: string[]
   permissionOverwriteChannelIds: string[]
   permissionOverwritesEnabled: boolean
   protectedUserCount: number
@@ -98,6 +101,8 @@ export class ScopePolicy {
   readonly #allowInviteDeletions: boolean
   readonly #allowMemberDirectory: boolean
   readonly #allowMemberRoleChanges: boolean
+  readonly #allowOnboardingAudit: boolean
+  readonly #allowOnboardingChanges: boolean
   readonly #allowPermissionOverwrites: boolean
   readonly #allowPinManagement: boolean
   readonly #allowGateway: boolean
@@ -133,6 +138,7 @@ export class ScopePolicy {
   readonly #memberRoleIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
+  readonly #onboardingGuildIds: ReadonlySet<string>
   readonly #permissionOverwriteChannelIds: ReadonlySet<string>
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
@@ -168,6 +174,8 @@ export class ScopePolicy {
     | "allowInviteDeletions"
     | "allowMemberDirectory"
     | "allowMemberRoleChanges"
+    | "allowOnboardingAudit"
+    | "allowOnboardingChanges"
     | "allowGuildScaffolds"
     | "allowPermissionOverwrites"
     | "allowPinManagement"
@@ -196,6 +204,7 @@ export class ScopePolicy {
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
+    | "onboardingGuildIds"
     | "permissionOverwriteChannelIds"
     | "pinChannelIds"
     | "roleCreationGuildIds"
@@ -218,6 +227,8 @@ export class ScopePolicy {
     this.#allowInviteDeletions = config.allowInviteDeletions ?? false
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
+    this.#allowOnboardingAudit = config.allowOnboardingAudit ?? false
+    this.#allowOnboardingChanges = config.allowOnboardingChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowGateway = config.allowGateway ?? false
@@ -254,6 +265,7 @@ export class ScopePolicy {
     this.#memberRoleIds = config.memberRoleIds ?? new Set()
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
+    this.#onboardingGuildIds = config.onboardingGuildIds ?? new Set()
     this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
@@ -327,6 +339,12 @@ export class ScopePolicy {
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
+      onboardingAuditEnabled: this.#allowOnboardingAudit
+        && this.#onboardingGuildIds.size > 0,
+      onboardingChangesEnabled: this.#allowOnboardingAudit
+        && this.#allowOnboardingChanges
+        && this.#onboardingGuildIds.size > 0,
+      onboardingGuildIds: [...this.#onboardingGuildIds].sort(),
       permissionOverwriteChannelIds: [...this.#permissionOverwriteChannelIds].sort(),
       permissionOverwritesEnabled: this.#allowPermissionOverwrites
         && this.#permissionOverwriteChannelIds.size > 0,
@@ -422,6 +440,26 @@ export class ScopePolicy {
     this.assertGuildInviteAuditable(guildId)
     if (!this.#allowInviteDeletions) {
       throw new PolicyError("Discord invite deletion is disabled by connector configuration")
+    }
+  }
+
+  assertGuildOnboardingAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowOnboardingAudit) {
+      throw new PolicyError("Discord onboarding audit is disabled by connector configuration")
+    }
+    if (this.#onboardingGuildIds.size === 0) {
+      throw new PolicyError("Discord onboarding audit requires an explicit guild allowlist")
+    }
+    if (!this.#onboardingGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the onboarding-audit scope`)
+    }
+  }
+
+  assertGuildOnboardingChangeable(guildId: string): void {
+    this.assertGuildOnboardingAuditable(guildId)
+    if (!this.#allowOnboardingChanges) {
+      throw new PolicyError("Discord onboarding changes are disabled by connector configuration")
     }
   }
 

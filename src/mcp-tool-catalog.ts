@@ -45,6 +45,7 @@ type McpToolWorkflow =
   | "guild-scaffold"
   | "guild-expression-change"
   | "invite-deletion"
+  | "onboarding-change"
   | "member-moderation"
   | "member-role-change"
   | "message-deletion"
@@ -124,6 +125,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "invites",
     workflow: "invite-deletion",
   },
+  execute_onboarding_change: {
+    keywords: ["configure", "execute", "join", "onboarding", "prompt", "role"],
+    toolset: "onboarding",
+    workflow: "onboarding-change",
+  },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
@@ -173,6 +179,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_invite: {
     keywords: ["audit", "exact", "invite", "lookup", "reference"],
     toolset: "invites",
+  },
+  get_guild_onboarding: {
+    keywords: ["audit", "guild", "join", "onboarding", "prompt", "read"],
+    toolset: "onboarding",
   },
   get_automod_rule: {
     keywords: ["automod", "exact", "moderation", "policy", "rule"],
@@ -339,6 +349,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["delete", "invite", "plan", "review", "revoke"],
     toolset: "invites",
     workflow: "invite-deletion",
+  },
+  plan_onboarding_change: {
+    keywords: ["configure", "join", "onboarding", "plan", "prompt", "review", "role"],
+    toolset: "onboarding",
+    workflow: "onboarding-change",
   },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],

@@ -115,6 +115,9 @@ function status(
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
+      onboardingAuditEnabled: false,
+      onboardingChangesEnabled: false,
+      onboardingGuildIds: [],
       permissionOverwriteChannelIds: [],
       permissionOverwritesEnabled: false,
       protectedUserCount: 0,
@@ -151,6 +154,7 @@ function toolService(): DiscordToolService {
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeInviteDeletion: unexpected,
+    executeOnboardingChange: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
@@ -158,6 +162,7 @@ function toolService(): DiscordToolService {
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
     getGuildInvite: unexpected,
+    getGuildOnboarding: unexpected,
     listChannelWebhooks: unexpected,
     listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
@@ -165,6 +170,7 @@ function toolService(): DiscordToolService {
     listScheduledEvents: unexpected,
     planWebhookDeletion: unexpected,
     planInviteDeletion: unexpected,
+    planOnboardingChange: unexpected,
     planGuildExpressionChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -674,6 +680,66 @@ test("doctor and setup explain capability-safe invite audit and revocation", asy
   assert.match(setup.warnings.join("\n"), /invite-audit toggle/)
   assert.match(setup.warnings.join("\n"), /invite-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /invites toolset/)
+})
+
+test("doctor and setup explain privacy-safe reviewed onboarding", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+    DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.onboardingAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.onboardingChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /default text omission/)
+  assert.match(audit?.summary || "", /future-field counts only/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /complete-state review/)
+  assert.match(change?.summary || "", /signed approval/)
+  assert.match(change?.summary || "", /authoritative response plus API readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.onboardingAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.onboardingChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /onboarding-audit toggle/)
+  assert.match(setup.warnings.join("\n"), /onboarding-change toggle/)
+  assert.match(omitted.warnings.join("\n"), /onboarding toolset/)
 })
 
 test("doctor and setup explain privacy-safe reviewed guild expression scope", async (context) => {
@@ -1373,6 +1439,9 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowInviteAudit), true)
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowInviteDeletions), true)
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.inviteGuildIds), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowOnboardingAudit), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowOnboardingChanges), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.onboardingGuildIds), true)
   assert.deepEqual(
     [...result.environment.forward].sort(),
     Object.values(ENVIRONMENT_NAMES)
@@ -1654,6 +1723,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_member_role_change",
     "review_message_deletion",
     "review_message_pin",
+    "review_onboarding_change",
     "review_role_creation",
     "review_scheduled_event_change",
     "review_webhook_deletion",
@@ -1680,6 +1750,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/invites/{inviteRef}",
     "discord://guilds/{guildId}/members/{userId}",
+    "discord://guilds/{guildId}/onboarding",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
     "discord://guilds/{guildId}/scheduled-events",
@@ -1695,6 +1766,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_member_moderation",
     "execute_member_role_change",
     "execute_message_pin",
+    "execute_onboarding_change",
     "execute_scheduled_event_change",
     "execute_webhook_deletion",
   ])

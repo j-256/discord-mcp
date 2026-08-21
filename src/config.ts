@@ -51,6 +51,8 @@ export interface ConnectorConfig {
   allowInviteDeletions: boolean
   allowMemberDirectory: boolean
   allowMemberRoleChanges: boolean
+  allowOnboardingAudit: boolean
+  allowOnboardingChanges: boolean
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
@@ -85,6 +87,7 @@ export interface ConnectorConfig {
   mcpToolsets: ReadonlySet<McpToolsetName>
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
+  onboardingGuildIds: ReadonlySet<string>
   permissionOverwriteChannelIds: ReadonlySet<string>
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
@@ -342,6 +345,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.inviteGuildIds],
     ENVIRONMENT_NAMES.inviteGuildIds,
   )
+  const onboardingGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.onboardingGuildIds],
+    ENVIRONMENT_NAMES.onboardingGuildIds,
+  )
 
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
@@ -351,6 +358,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
     [ENVIRONMENT_NAMES.inviteGuildIds, inviteGuildIds],
+    [ENVIRONMENT_NAMES.onboardingGuildIds, onboardingGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
@@ -443,6 +451,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowInviteDeletions} requires ${ENVIRONMENT_NAMES.allowInviteAudit}`,
     )
   }
+  const allowOnboardingAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowOnboardingAudit],
+    ENVIRONMENT_NAMES.allowOnboardingAudit,
+  )
+  const allowOnboardingChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowOnboardingChanges],
+    ENVIRONMENT_NAMES.allowOnboardingChanges,
+  )
+  if (allowOnboardingChanges && !allowOnboardingAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowOnboardingChanges} requires ${ENVIRONMENT_NAMES.allowOnboardingAudit}`,
+    )
+  }
   const allowGuildExpressionAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGuildExpressionAudit],
     ENVIRONMENT_NAMES.allowGuildExpressionAudit,
@@ -521,6 +542,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
       ENVIRONMENT_NAMES.allowMemberRoleChanges,
     ),
+    allowOnboardingAudit,
+    allowOnboardingChanges,
     allowPermissionOverwrites: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowPermissionOverwrites],
       ENVIRONMENT_NAMES.allowPermissionOverwrites,
@@ -604,6 +627,7 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.toolSurface,
     ),
     observability: loadObservabilityConfig(environment, [rawToken || "", token]),
+    onboardingGuildIds,
     permissionOverwriteChannelIds,
     protectedUserIds,
     pinChannelIds,
