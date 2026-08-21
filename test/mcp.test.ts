@@ -34,6 +34,13 @@ import type {
   GuildScaffoldRequest,
 } from "../src/guild-scaffold-service.js"
 import type {
+  GuildExpressionChangeRequest,
+  GuildExpressionKind,
+  GuildExpressionPlan,
+  GuildExpressionPrivacyProjection,
+  ProjectedGuildExpression,
+} from "../src/guild-expression-service.js"
+import type {
   MessagePinPlan,
   MessagePinRequest,
 } from "../src/message-pin-service.js"
@@ -54,6 +61,8 @@ import {
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
+  GuildExpressionExecutionError,
+  GuildExpressionOperationConflictError,
   GuildScaffoldExecutionError,
   GuildScaffoldOperationConflictError,
   InteractionExecutionError,
@@ -119,6 +128,10 @@ const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
 const WEBHOOK_ID = "370000000000000001"
+const EMOJI_ID = "380000000000000001"
+const STICKER_ID = "390000000000000001"
+const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
+const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -331,6 +344,140 @@ function webhookDeletionPlan(
     status: "planned",
     target: projectedWebhook(request.channelId),
     warnings: ["One-shot reviewed Incoming webhook deletion"],
+  }
+}
+
+function guildExpressionPrivacy(): GuildExpressionPrivacyProjection {
+  return {
+    omittedFields: [
+      "cdnUrl",
+      "imageBytes",
+      "rawDiscordObject",
+      "uploaderProfile",
+    ],
+    privateFieldsProjectedOut: true,
+  }
+}
+
+function projectedGuildExpression(
+  kind: GuildExpressionKind,
+  expressionId = kind === "emoji" ? EMOJI_ID : STICKER_ID,
+): ProjectedGuildExpression {
+  return kind === "emoji"
+    ? {
+        animated: false,
+        available: true,
+        creatorUserId: BOT_ID,
+        expressionId,
+        kind,
+        managed: false,
+        name: "reviewed_emoji",
+        requiresColons: true,
+        roleIds: [ROLE_ID],
+      }
+    : {
+        available: true,
+        creatorUserId: BOT_ID,
+        description: "Reviewed sticker",
+        expressionId,
+        formatType: 1,
+        guildId: GUILD_ID,
+        kind,
+        name: "Reviewed sticker",
+        tags: "reviewed",
+      }
+}
+
+function guildExpressionPlan(
+  request: GuildExpressionChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): GuildExpressionPlan {
+  const existing = request.action === "create"
+    ? null
+    : projectedGuildExpression(request.kind, request.expressionId)
+  const desired = request.action === "delete"
+    ? null
+    : request.kind === "emoji"
+      ? {
+          animated: existing?.kind === "emoji" ? existing.animated : false,
+          available: existing?.kind === "emoji" ? existing.available : true,
+          creatorUserId: existing?.creatorUserId ?? BOT_ID,
+          expressionId: existing?.expressionId ?? null,
+          kind: "emoji" as const,
+          managed: existing?.kind === "emoji" ? existing.managed : false,
+          name: request.name ?? (existing?.kind === "emoji" ? existing.name : "reviewed_emoji"),
+          requiresColons: existing?.kind === "emoji" ? existing.requiresColons : true,
+          roleIds: request.roleIds === undefined
+            ? existing?.kind === "emoji" ? existing.roleIds : []
+            : [...request.roleIds],
+        }
+      : {
+          available: existing?.kind === "sticker" ? existing.available : true,
+          creatorUserId: existing?.creatorUserId ?? BOT_ID,
+          description: request.description === undefined
+            ? existing?.kind === "sticker" ? existing.description : "Reviewed sticker"
+            : request.description,
+          expressionId: existing?.expressionId ?? null,
+          formatType: existing?.kind === "sticker" ? existing.formatType : 1,
+          guildId: request.guildId,
+          kind: "sticker" as const,
+          name: request.name ?? (existing?.kind === "sticker" ? existing.name : "Reviewed sticker"),
+          tags: request.tags ?? (existing?.kind === "sticker" ? existing.tags : "reviewed"),
+        }
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    desired,
+    digest,
+    effect,
+    existing,
+    file: request.action === "create"
+      ? {
+          contentDigest: `hmac-sha256:${"d".repeat(64)}`,
+          review: {
+            animated: false,
+            canonicalPath: request.filePath,
+            containedByConfiguredRoot: true,
+            durationSeconds: null,
+            format: "png",
+            height: request.kind === "sticker" ? 320 : 64,
+            mediaType: "image/png",
+            ownerMatchesProcess: true,
+            regularFile: true,
+            singleLink: true,
+            sizeBytes: 128,
+            stableRead: true,
+            width: request.kind === "sticker" ? 320 : 64,
+          },
+        }
+      : null,
+    guild: { id: request.guildId, name: "Private guild name" },
+    kind: request.kind,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      createGuildExpressions: true,
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.CREATE_GUILD_EXPRESSIONS
+        | DISCORD_PERMISSIONS.MANAGE_GUILD_EXPRESSIONS
+      ).toString(),
+      guildOwner: false,
+      manageGuildExpressions: true,
+      ownershipRequired: false,
+    },
+    privacy: guildExpressionPrivacy(),
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    visibleInventory: {
+      returned: 1,
+      safetyLimit: request.kind === "emoji" ? 1_000 : 100,
+    },
+    warnings: ["One-shot reviewed guild expression change"],
   }
 }
 
@@ -848,6 +995,11 @@ function fixturePolicy(): PolicyDescription {
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
     guildScaffoldsEnabled: false,
+    guildExpressionAuditEnabled: false,
+    guildExpressionChangesEnabled: false,
+    guildExpressionCreationEnabled: false,
+    guildExpressionGuildIds: [],
+    guildExpressionRootCount: 0,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -884,6 +1036,9 @@ function serviceFixture(overrides: {
   forumPostPlanDigest?: string
   guildScaffoldError?: Error
   guildScaffoldPlanDigest?: string
+  guildExpressionEffect?: "change" | "none"
+  guildExpressionError?: Error
+  guildExpressionPlanDigest?: string
   interactionError?: Error
   messageContent?: string
   messagePinAction?: "change" | "none"
@@ -916,6 +1071,10 @@ function serviceFixture(overrides: {
     forumPostPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
+    guildExpressionExecute: 0,
+    guildExpressionGet: 0,
+    guildExpressionList: 0,
+    guildExpressionPlan: 0,
     explain: 0,
     getRole: 0,
     memberGet: 0,
@@ -940,6 +1099,82 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeGuildExpressionChange(request, planDigest) {
+      if (overrides.guildExpressionError) throw overrides.guildExpressionError
+      calls.guildExpressionExecute += 1
+      const planned = guildExpressionPlan(
+        request,
+        planDigest,
+        overrides.guildExpressionEffect,
+      )
+      const expressionId = request.action === "create"
+        ? request.kind === "emoji" ? EMOJI_ID : STICKER_ID
+        : request.expressionId
+      return {
+        action: request.action,
+        activityId: planned.effect === "none" ? null : "activity-guild-expression",
+        expressionId,
+        guildId: request.guildId,
+        kind: request.kind,
+        observed: request.action === "delete"
+          ? null
+          : { ...planned.desired, expressionId } as ProjectedGuildExpression,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
+    async getGuildExpression(guildId, kind, expressionId) {
+      calls.guildExpressionGet += 1
+      return {
+        expression: projectedGuildExpression(kind, expressionId),
+        guild: { id: guildId, name: "Private guild name" },
+        kind,
+        permission: guildExpressionPlan({
+          action: "delete",
+          auditReason: AUDIT_REASON,
+          expressionId,
+          guildId,
+          kind,
+          operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+        }).permission,
+        privacy: guildExpressionPrivacy(),
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async listGuildExpressions(guildId, kind) {
+      calls.guildExpressionList += 1
+      return {
+        expressions: [projectedGuildExpression(kind)],
+        guild: { id: guildId, name: "Private guild name" },
+        kind,
+        page: {
+          returned: 1,
+          safetyLimit: kind === "emoji" ? 1_000 : 100,
+        },
+        permission: guildExpressionPlan({
+          action: "delete",
+          auditReason: AUDIT_REASON,
+          expressionId: kind === "emoji" ? EMOJI_ID : STICKER_ID,
+          guildId,
+          kind,
+          operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+        }).permission,
+        privacy: guildExpressionPrivacy(),
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async planGuildExpressionChange(request) {
+      calls.guildExpressionPlan += 1
+      return guildExpressionPlan(
+        request,
+        overrides.guildExpressionPlanDigest || DIGEST,
+        overrides.guildExpressionEffect,
+      )
+    },
     async executeWebhookDeletion(request, planDigest) {
       if (overrides.webhookDeletionError) throw overrides.webhookDeletionError
       calls.webhookDeletionExecute += 1
@@ -1829,6 +2064,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_message_pins",
       "list_channel_webhooks",
       "get_channel_webhook",
+      "list_guild_emojis",
+      "get_guild_emoji",
+      "list_guild_stickers",
+      "get_guild_sticker",
       "list_channel_permission_overwrites",
       "send_message",
       "edit_own_message",
@@ -1839,6 +2078,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_message_pin",
       "plan_webhook_deletion",
       "execute_webhook_deletion",
+      "plan_guild_expression_change",
+      "execute_guild_expression_change",
       "plan_channel_permission_overwrite",
       "execute_channel_permission_overwrite",
       "plan_channel_creation",
@@ -1860,6 +2101,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
+  const guildExpression = result.tools.find((tool) => (
+    tool.name === "execute_guild_expression_change"
+  ))
   const permissionOverwrite = result.tools.find((tool) => (
     tool.name === "execute_channel_permission_overwrite"
   ))
@@ -1870,6 +2114,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     deletion,
     messagePin,
     webhookDeletion,
+    guildExpression,
     permissionOverwrite,
     administration,
   ]) {
@@ -1894,9 +2139,14 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_message_pins",
     "list_channel_webhooks",
     "get_channel_webhook",
+    "list_guild_emojis",
+    "get_guild_emoji",
+    "list_guild_stickers",
+    "get_guild_sticker",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
     "plan_webhook_deletion",
+    "plan_guild_expression_change",
   ]) {
     assert.deepEqual(listedTool(result.tools, name).annotations, {
       destructiveHint: false,
@@ -2368,6 +2618,30 @@ test("progressive discovery enables the complete reviewed webhook-deletion workf
   )
 })
 
+test("progressive discovery enables the complete reviewed guild-expression workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_expression_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_expression_change",
+    "plan_guild_expression_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_expression_change",
+      "execute_guild_expression_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed permission-overwrite workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -2506,6 +2780,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     forumPostPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
+    guildExpressionExecute: 0,
+    guildExpressionGet: 0,
+    guildExpressionList: 0,
+    guildExpressionPlan: 0,
     getRole: 0,
     memberGet: 0,
     memberList: 0,
@@ -3762,6 +4040,353 @@ test("MCP webhook deletion exposes uncertain and one-shot conflict outcomes safe
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(WEBHOOK_OPERATION_KEY),
+  )
+})
+
+test("MCP guild expression reads expose only bounded privacy-safe evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const emojis = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_guild_emojis",
+  })
+  const emoji = await client.callTool({
+    arguments: { expressionId: EMOJI_ID, guildId: GUILD_ID },
+    name: "get_guild_emoji",
+  })
+  const stickers = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_guild_stickers",
+  })
+  const sticker = await client.callTool({
+    arguments: { expressionId: STICKER_ID, guildId: GUILD_ID },
+    name: "get_guild_sticker",
+  })
+  const invalid = await client.callTool({
+    arguments: { expressionId: "invalid", guildId: GUILD_ID },
+    name: "get_guild_emoji",
+  })
+
+  const listedEmoji = (
+    structuredContent(emojis).expressions as Array<Record<string, unknown>>
+  )[0]
+  const exactEmoji = structuredContent(emoji).expression as Record<string, unknown>
+  const listedSticker = (
+    structuredContent(stickers).expressions as Array<Record<string, unknown>>
+  )[0]
+  const exactSticker = structuredContent(sticker).expression as Record<string, unknown>
+  assert.deepEqual(Object.keys(listedEmoji || {}).sort(), [
+    "animated",
+    "available",
+    "creatorUserId",
+    "expressionId",
+    "kind",
+    "managed",
+    "name",
+    "requiresColons",
+    "roleIds",
+  ])
+  assert.deepEqual(Object.keys(exactEmoji).sort(), Object.keys(listedEmoji || {}).sort())
+  assert.deepEqual(Object.keys(listedSticker || {}).sort(), [
+    "available",
+    "creatorUserId",
+    "description",
+    "expressionId",
+    "formatType",
+    "guildId",
+    "kind",
+    "name",
+    "tags",
+  ])
+  assert.deepEqual(Object.keys(exactSticker).sort(), Object.keys(listedSticker || {}).sort())
+  assert.equal(listedEmoji?.expressionId, EMOJI_ID)
+  assert.equal(listedSticker?.expressionId, STICKER_ID)
+  assert.equal(
+    (structuredContent(emojis).privacy as Record<string, unknown>)
+      .privateFieldsProjectedOut,
+    true,
+  )
+  for (const value of [emojis, emoji, stickers, sticker]) {
+    const serialized = JSON.stringify(value)
+    assert.doesNotMatch(serialized, /cdn\.discordapp\.com|https?:\/\//)
+  }
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.guildExpressionList, 2)
+  assert.equal(calls.guildExpressionGet, 2)
+})
+
+test("MCP guild expression plans accept every exact action and reject transported bytes", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const validRequests = [
+    {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      filePath: GUILD_EXPRESSION_PATH,
+      guildId: GUILD_ID,
+      kind: "emoji",
+      name: "reviewed_emoji",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+      roleIds: [ROLE_ID],
+    },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      expressionId: EMOJI_ID,
+      guildId: GUILD_ID,
+      kind: "emoji",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+      roleIds: [],
+    },
+    {
+      action: "delete",
+      auditReason: AUDIT_REASON,
+      expressionId: EMOJI_ID,
+      guildId: GUILD_ID,
+      kind: "emoji",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+    },
+    {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      description: "Reviewed sticker",
+      filePath: GUILD_EXPRESSION_PATH,
+      guildId: GUILD_ID,
+      kind: "sticker",
+      name: "Reviewed sticker",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+      tags: "reviewed",
+    },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      description: null,
+      expressionId: STICKER_ID,
+      guildId: GUILD_ID,
+      kind: "sticker",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+    },
+    {
+      action: "delete",
+      auditReason: AUDIT_REASON,
+      expressionId: STICKER_ID,
+      guildId: GUILD_ID,
+      kind: "sticker",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+    },
+  ]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_guild_expression_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(GUILD_EXPRESSION_OPERATION_KEY))
+  }
+
+  const invalidRequests = [
+    {
+      ...validRequests[0],
+      imageUrl: "https://cdn.example/reviewed.png",
+    },
+    {
+      ...validRequests[0],
+      image: "data:image/png;base64,AAAA",
+    },
+    { ...validRequests[0], filePath: "relative/reviewed.png" },
+    { ...validRequests[1], roleIds: [ROLE_ID, ROLE_ID] },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      expressionId: EMOJI_ID,
+      guildId: GUILD_ID,
+      kind: "emoji",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+    },
+    { ...validRequests[2], name: "not-accepted" },
+    { ...validRequests[3], roleIds: [ROLE_ID] },
+    { ...validRequests[3], description: "\ud800x" },
+    { ...validRequests[3], name: "\ud800x" },
+    { ...validRequests[3], tags: "\ud800" },
+    { ...validRequests[4], filePath: GUILD_EXPRESSION_PATH },
+    { ...validRequests[5], operationKey: "short" },
+  ]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_guild_expression_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.guildExpressionPlan, validRequests.length)
+})
+
+test("MCP guild expression execution binds signed approval to exact reviewed evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      filePath: GUILD_EXPRESSION_PATH,
+      guildId: GUILD_ID,
+      kind: "emoji",
+      name: "reviewed_emoji",
+      operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleIds: [ROLE_ID],
+    },
+    name: "execute_guild_expression_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).expressionId, EMOJI_ID)
+  assert.equal(calls.guildExpressionPlan, 1)
+  assert.equal(calls.guildExpressionExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    GUILD_EXPRESSION_PATH,
+    ROLE_ID,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Bot CREATE_GUILD_EXPRESSIONS: true/)
+  assert.match(confirmationMessage, /Bot MANAGE_GUILD_EXPRESSIONS: true/)
+  assert.match(confirmationMessage, /Regular owned single-link file: true/)
+  assert.match(confirmationMessage, /File animated: false/)
+  assert.match(confirmationMessage, /File duration: not applicable/)
+  assert.match(confirmationMessage, /Private fields projected out:/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_EXPRESSION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_EXPRESSION_OPERATION_KEY),
+  )
+})
+
+test("MCP guild expression execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    action: "update",
+    auditReason: AUDIT_REASON,
+    expressionId: EMOJI_ID,
+    guildId: GUILD_ID,
+    kind: "emoji",
+    name: "reviewed_emoji",
+    operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+    planDigest: DIGEST,
+    roleIds: [ROLE_ID],
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildExpressionEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_expression_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.guildExpressionExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_expression_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.guildExpressionExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildExpressionPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_expression_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.guildExpressionExecute, 0)
+})
+
+test("MCP guild expression execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    expressionId: STICKER_ID,
+    guildId: GUILD_ID,
+    kind: "sticker",
+    operationKey: GUILD_EXPRESSION_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildExpressionError: new GuildExpressionExecutionError(
+        "Discord guild expression outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_expression_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-expression",
+    error: null,
+    expressionId: STICKER_ID,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildExpressionError: new GuildExpressionOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_expression_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(GUILD_EXPRESSION_OPERATION_KEY),
   )
 })
 
@@ -5442,7 +6067,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 8)
+  assert.equal(templates.resourceTemplates.length, 10)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

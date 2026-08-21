@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -415,6 +415,34 @@
         {
           "name": "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
           "description": "Exact direct guild-channel IDs eligible for credential-redacted webhook audit and reviewed cleanup",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
+          "description": "Enable privacy-safe emoji and sticker inventory when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
+          "description": "Enable reviewed emoji and sticker creation, update, and deletion; requires expression audit",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
+          "description": "Exact guild IDs eligible for privacy-safe expression inventory and reviewed changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
+          "description": "One absolute canonical directory or JSON array of directories containing eligible owned emoji and sticker files",
           "format": "string"
         },
         {

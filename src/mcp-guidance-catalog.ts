@@ -28,7 +28,9 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   exactMember: "exact_member",
   exactRole: "exact_role",
   guildChannels: "guild_channels",
+  guildEmojis: "guild_emojis",
   guildRoles: "guild_roles",
+  guildStickers: "guild_stickers",
 })
 
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
@@ -39,7 +41,9 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   exactMember: "discord://guilds/{guildId}/members/{userId}",
   exactRole: "discord://guilds/{guildId}/roles/{roleId}",
   guildChannels: "discord://guilds/{guildId}/channels",
+  guildEmojis: "discord://guilds/{guildId}/emojis",
   guildRoles: "discord://guilds/{guildId}/roles",
+  guildStickers: "discord://guilds/{guildId}/stickers",
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
@@ -48,6 +52,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewChannelCreation: "review_channel_creation",
   reviewChannelPermissionOverwrite: "review_channel_permission_overwrite",
   reviewForumPost: "review_forum_post",
+  reviewGuildExpressionChange: "review_guild_expression_change",
   reviewGuildScaffold: "review_guild_scaffold",
   reviewMemberModeration: "review_member_moderation",
   reviewMessageDeletion: "review_message_deletion",
@@ -68,6 +73,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",
   [MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite]: "permission-overwrites",
   [MCP_PROMPT_NAMES.reviewForumPost]: "forum-posts",
+  [MCP_PROMPT_NAMES.reviewGuildExpressionChange]: "guild-expressions",
   [MCP_PROMPT_NAMES.reviewGuildScaffold]: "guild-scaffolds",
   [MCP_PROMPT_NAMES.reviewMemberModeration]: "moderation",
   [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",

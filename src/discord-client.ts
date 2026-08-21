@@ -16,9 +16,14 @@ import {
 import {
   DiscordApiError,
   errorMessage,
+  GuildExpressionEvidenceError,
   redactText,
   WebhookEvidenceError,
 } from "./errors.js"
+import type {
+  EmojiFileFormat,
+  StickerFileFormat,
+} from "./guild-expression-file.js"
 import {
   DISCORD_REST_OPERATIONS,
   type DiscordRestOperation,
@@ -113,6 +118,29 @@ export interface DiscordWebhookSummary {
   type: number
 }
 
+export interface DiscordGuildEmojiSummary {
+  animated: boolean
+  available: boolean
+  creatorUserId: string | null
+  id: string
+  managed: boolean
+  name: string
+  requiresColons: boolean
+  roleIds: string[]
+}
+
+export interface DiscordGuildStickerSummary {
+  available: boolean
+  creatorUserId: string | null
+  description: string | null
+  formatType: number
+  guildId: string
+  id: string
+  name: string
+  tags: string
+  type: number
+}
+
 export type SearchAuthorType =
   | "-bot"
   | "-user"
@@ -186,8 +214,25 @@ const ISO_8601_TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2
 const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const CHANNEL_TOPIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const ROLE_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const EXPRESSION_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const ALLOWED_MENTION_PARSE_KEYS = ["parse", "replied_user"] as const
 const ALLOWED_MENTION_USER_KEYS = ["replied_user", "users"] as const
+const EMOJI_FORMAT_MEDIA_TYPES: Readonly<Record<EmojiFileFormat, string>> = Object.freeze({
+  avif: "image/avif",
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+})
+const STICKER_FORMAT_UPLOADS: Readonly<Record<
+  StickerFileFormat,
+  { extension: string; mediaType: string }
+>> = Object.freeze({
+  apng: { extension: "png", mediaType: "image/png" },
+  gif: { extension: "gif", mediaType: "image/gif" },
+  lottie: { extension: "json", mediaType: "application/json" },
+  png: { extension: "png", mediaType: "image/png" },
+})
 
 export interface GuildMessageSearchOptions extends RequestOptions {
   attachmentExtensions?: readonly string[]
@@ -270,6 +315,32 @@ export interface CreateGuildRoleInput {
   name: string
   permissions: string
   primaryColor: number
+}
+
+export interface CreateGuildEmojiInput {
+  bytes: Uint8Array
+  format: EmojiFileFormat
+  name: string
+  roleIds: readonly string[]
+}
+
+export interface ModifyGuildEmojiInput {
+  name?: string
+  roleIds?: readonly string[]
+}
+
+export interface CreateGuildStickerInput {
+  bytes: Uint8Array
+  description: string
+  format: StickerFileFormat
+  name: string
+  tags: string
+}
+
+export interface ModifyGuildStickerInput {
+  description?: string | null
+  name?: string
+  tags?: string
 }
 
 export interface EditChannelPermissionOverwriteInput {
@@ -378,7 +449,17 @@ type QueryScalar = boolean | number | string
 type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
+  "create_guild_emoji",
+  "create_guild_sticker",
+  "delete_guild_emoji",
+  "delete_guild_sticker",
+  "get_guild_emoji",
+  "get_guild_sticker",
   "list_channel_webhooks",
+  "list_guild_emojis",
+  "list_guild_stickers",
+  "modify_guild_emoji",
+  "modify_guild_sticker",
   "search_guild_members",
   "search_guild_messages",
 ])
@@ -456,6 +537,121 @@ function projectWebhook(value: unknown): DiscordWebhookSummary {
     id: record.id,
     name: record.name,
     type: record.type as number,
+  }
+}
+
+function projectGuildEmoji(value: unknown): DiscordGuildEmojiSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new GuildExpressionEvidenceError("Discord returned an invalid guild emoji object")
+  }
+  const record = value as Record<string, unknown>
+  const roles = record.roles ?? []
+  const user = record.user
+  if (
+    typeof record.id !== "string"
+    || typeof record.name !== "string"
+    || !Array.isArray(roles)
+    || roles.some((roleId) => typeof roleId !== "string")
+    || !(record.animated === undefined || typeof record.animated === "boolean")
+    || !(record.available === undefined || typeof record.available === "boolean")
+    || !(record.managed === undefined || typeof record.managed === "boolean")
+    || !(record.require_colons === undefined || typeof record.require_colons === "boolean")
+    || !(user === undefined || (
+      user !== null
+      && typeof user === "object"
+      && !Array.isArray(user)
+      && typeof (user as Record<string, unknown>).id === "string"
+    ))
+  ) {
+    throw new GuildExpressionEvidenceError("Discord returned an invalid guild emoji object")
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord guild emoji ID")
+    for (const roleId of roles as string[]) {
+      assertPositiveSnowflake(roleId, "Discord guild emoji role ID")
+    }
+    const creatorUserId = user === undefined
+      ? null
+      : (user as Record<string, unknown>).id as string
+    if (creatorUserId !== null) {
+      assertPositiveSnowflake(creatorUserId, "Discord guild emoji creator ID")
+    }
+    return {
+      animated: record.animated === true,
+      available: record.available !== false,
+      creatorUserId,
+      id: record.id,
+      managed: record.managed === true,
+      name: record.name,
+      requiresColons: record.require_colons !== false,
+      roleIds: [...roles as string[]],
+    }
+  } catch (error) {
+    if (error instanceof GuildExpressionEvidenceError) throw error
+    throw new GuildExpressionEvidenceError("Discord returned an invalid guild emoji object", {
+      cause: error,
+    })
+  }
+}
+
+function projectGuildSticker(
+  value: unknown,
+  guildId: string,
+): DiscordGuildStickerSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker object")
+  }
+  const record = value as Record<string, unknown>
+  const user = record.user
+  if (
+    typeof record.id !== "string"
+    || typeof record.name !== "string"
+    || !(record.description === null || typeof record.description === "string")
+    || typeof record.tags !== "string"
+    || !Number.isSafeInteger(record.type)
+    || !Number.isSafeInteger(record.format_type)
+    || !(record.available === undefined || typeof record.available === "boolean")
+    || !(record.guild_id === undefined || typeof record.guild_id === "string")
+    || !(user === undefined || (
+      user !== null
+      && typeof user === "object"
+      && !Array.isArray(user)
+      && typeof (user as Record<string, unknown>).id === "string"
+    ))
+  ) {
+    throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker object")
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord guild sticker ID")
+    assertPositiveSnowflake(guildId, "Discord guild sticker guild ID")
+    if (typeof record.guild_id === "string") {
+      assertPositiveSnowflake(record.guild_id, "Discord guild sticker response guild ID")
+      if (record.guild_id !== guildId) {
+        throw new GuildExpressionEvidenceError("Discord returned a guild sticker for another guild")
+      }
+    }
+    const creatorUserId = user === undefined
+      ? null
+      : (user as Record<string, unknown>).id as string
+    if (creatorUserId !== null) {
+      assertPositiveSnowflake(creatorUserId, "Discord guild sticker creator ID")
+    }
+    return {
+      available: record.available !== false,
+      creatorUserId,
+      description: record.description as string | null,
+      formatType: record.format_type as number,
+      guildId,
+      id: record.id,
+      name: record.name,
+      tags: record.tags,
+      type: record.type as number,
+    }
+  } catch (error) {
+    if (error instanceof GuildExpressionEvidenceError) throw error
+    throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker object", {
+      cause: error,
+    })
   }
 }
 
@@ -796,6 +992,144 @@ function assertCreateGuildRoleInput(input: CreateGuildRoleInput): void {
   if (typeof input.mentionable !== "boolean") {
     throw new RangeError("Discord role mentionable setting must be a boolean")
   }
+}
+
+function assertGuildExpressionName(name: string, kind: "emoji" | "sticker"): void {
+  const maximum = kind === "emoji"
+    ? DISCORD_LIMITS.emojiNameCharacters
+    : DISCORD_LIMITS.stickerNameCharacters
+  const valid = typeof name === "string"
+    && name.length >= 2
+    && name.length <= maximum
+    && name.trim() === name
+    && !EXPRESSION_TEXT_CONTROL_PATTERN.test(name)
+    && (kind !== "emoji" || /^[A-Za-z0-9_]+$/u.test(name))
+  if (!valid) {
+    throw new RangeError(
+      kind === "emoji"
+        ? `Discord emoji name must contain 2-${maximum} ASCII letters, digits, or underscores`
+        : `Discord sticker name must contain 2-${maximum} trimmed characters without controls`,
+    )
+  }
+  assertValidUnicode(name, `Discord ${kind} name`)
+}
+
+function assertGuildEmojiRoleIds(roleIds: readonly string[]): void {
+  if (
+    !Array.isArray(roleIds)
+    || roleIds.length > DISCORD_LIMITS.guildRoles
+    || new Set(roleIds).size !== roleIds.length
+  ) {
+    throw new RangeError("Discord emoji role IDs must be a bounded unique array")
+  }
+  for (const roleId of roleIds) {
+    assertPositiveSnowflake(roleId, "Discord emoji role ID")
+  }
+}
+
+function assertGuildExpressionBytes(
+  bytes: Uint8Array,
+  maximum: number,
+  kind: "emoji" | "sticker",
+): void {
+  if (
+    !(bytes instanceof Uint8Array)
+    || bytes.byteLength < 1
+    || bytes.byteLength > maximum
+  ) {
+    throw new RangeError(
+      `Discord ${kind} bytes must contain between 1 and ${maximum} bytes`,
+    )
+  }
+}
+
+function assertStickerDescription(description: string | null): void {
+  if (description === null) return
+  if (
+    typeof description !== "string"
+    || description.length === 1
+    || description.length > DISCORD_LIMITS.stickerDescriptionCharacters
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(description)
+  ) {
+    throw new RangeError(
+      `Discord sticker description must be empty or contain 2-${DISCORD_LIMITS.stickerDescriptionCharacters} characters without controls`,
+    )
+  }
+  assertValidUnicode(description, "Discord sticker description")
+}
+
+function assertStickerTags(tags: string): void {
+  if (
+    typeof tags !== "string"
+    || tags.length < 1
+    || tags.length > DISCORD_LIMITS.stickerTagCharacters
+    || !tags.trim()
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(tags)
+  ) {
+    throw new RangeError(
+      `Discord sticker tags must contain 1-${DISCORD_LIMITS.stickerTagCharacters} characters without controls`,
+    )
+  }
+  assertValidUnicode(tags, "Discord sticker tags")
+}
+
+function assertCreateGuildEmojiInput(input: CreateGuildEmojiInput): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord emoji creation input must be an object")
+  }
+  assertGuildExpressionName(input.name, "emoji")
+  assertGuildExpressionBytes(input.bytes, DISCORD_LIMITS.emojiBytes, "emoji")
+  if (!Object.hasOwn(EMOJI_FORMAT_MEDIA_TYPES, input.format)) {
+    throw new RangeError("Discord emoji format is unsupported")
+  }
+  assertGuildEmojiRoleIds(input.roleIds)
+}
+
+function assertModifyGuildEmojiInput(input: ModifyGuildEmojiInput): void {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || (input.name === undefined && input.roleIds === undefined)
+  ) {
+    throw new RangeError("Discord emoji update must contain a name or role IDs")
+  }
+  if (input.name !== undefined) assertGuildExpressionName(input.name, "emoji")
+  if (input.roleIds !== undefined) assertGuildEmojiRoleIds(input.roleIds)
+}
+
+function assertCreateGuildStickerInput(input: CreateGuildStickerInput): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord sticker creation input must be an object")
+  }
+  assertGuildExpressionName(input.name, "sticker")
+  if (typeof input.description !== "string") {
+    throw new RangeError("Discord sticker creation description must be a string")
+  }
+  assertStickerDescription(input.description)
+  assertStickerTags(input.tags)
+  assertGuildExpressionBytes(input.bytes, DISCORD_LIMITS.stickerBytes, "sticker")
+  if (!Object.hasOwn(STICKER_FORMAT_UPLOADS, input.format)) {
+    throw new RangeError("Discord sticker format is unsupported")
+  }
+}
+
+function assertModifyGuildStickerInput(input: ModifyGuildStickerInput): void {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || (
+      input.name === undefined
+      && input.description === undefined
+      && input.tags === undefined
+    )
+  ) {
+    throw new RangeError("Discord sticker update must contain a name, description, or tags")
+  }
+  if (input.name !== undefined) assertGuildExpressionName(input.name, "sticker")
+  if (input.description !== undefined) assertStickerDescription(input.description)
+  if (input.tags !== undefined) assertStickerTags(input.tags)
 }
 
 export function encodeDiscordAuditReason(auditReason: string): string {
@@ -1256,6 +1590,223 @@ export class DiscordClient {
       "get_guild_role",
       `/guilds/${guildId}/roles/${roleId}`,
       options,
+    )
+  }
+
+  async listGuildEmojis(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildEmojiSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord guild emoji guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_emojis",
+      `/guilds/${guildId}/emojis`,
+      options,
+    )
+    if (!Array.isArray(response) || response.length > DISCORD_LIMITS.guildEmojis) {
+      throw new GuildExpressionEvidenceError("Discord returned an invalid guild emoji inventory")
+    }
+    return response.map(projectGuildEmoji)
+  }
+
+  async getGuildEmoji(
+    guildId: string,
+    emojiId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildEmojiSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild emoji guild ID")
+    assertPositiveSnowflake(emojiId, "Discord guild emoji ID")
+    const response = await this.#request<unknown>(
+      "get_guild_emoji",
+      `/guilds/${guildId}/emojis/${emojiId}`,
+      options,
+    )
+    return projectGuildEmoji(response)
+  }
+
+  async createGuildEmoji(
+    guildId: string,
+    input: CreateGuildEmojiInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildEmojiSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild emoji guild ID")
+    assertCreateGuildEmojiInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const mediaType = EMOJI_FORMAT_MEDIA_TYPES[input.format]
+    const image = `data:${mediaType};base64,${Buffer.from(input.bytes).toString("base64")}`
+    const response = await this.#request<unknown>(
+      "create_guild_emoji",
+      `/guilds/${guildId}/emojis`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          image,
+          name: input.name,
+          roles: input.roleIds,
+        },
+      },
+    )
+    return projectGuildEmoji(response)
+  }
+
+  async modifyGuildEmoji(
+    guildId: string,
+    emojiId: string,
+    input: ModifyGuildEmojiInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildEmojiSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild emoji guild ID")
+    assertPositiveSnowflake(emojiId, "Discord guild emoji ID")
+    assertModifyGuildEmojiInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_emoji",
+      `/guilds/${guildId}/emojis/${emojiId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.roleIds !== undefined ? { roles: input.roleIds } : {}),
+        },
+      },
+    )
+    return projectGuildEmoji(response)
+  }
+
+  async deleteGuildEmoji(
+    guildId: string,
+    emojiId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord guild emoji guild ID")
+    assertPositiveSnowflake(emojiId, "Discord guild emoji ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_emoji",
+      `/guilds/${guildId}/emojis/${emojiId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async listGuildStickers(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildStickerSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord guild sticker guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_stickers",
+      `/guilds/${guildId}/stickers`,
+      options,
+    )
+    if (!Array.isArray(response) || response.length > DISCORD_LIMITS.guildStickers) {
+      throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker inventory")
+    }
+    return response.map((sticker) => projectGuildSticker(sticker, guildId))
+  }
+
+  async getGuildSticker(
+    guildId: string,
+    stickerId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildStickerSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild sticker guild ID")
+    assertPositiveSnowflake(stickerId, "Discord guild sticker ID")
+    const response = await this.#request<unknown>(
+      "get_guild_sticker",
+      `/guilds/${guildId}/stickers/${stickerId}`,
+      options,
+    )
+    return projectGuildSticker(response, guildId)
+  }
+
+  async createGuildSticker(
+    guildId: string,
+    input: CreateGuildStickerInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildStickerSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild sticker guild ID")
+    assertCreateGuildStickerInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const upload = STICKER_FORMAT_UPLOADS[input.format]
+    const form = new FormData()
+    form.set("name", input.name)
+    form.set("description", input.description)
+    form.set("tags", input.tags)
+    form.set(
+      "file",
+      new Blob([Uint8Array.from(input.bytes)], { type: upload.mediaType }),
+      `sticker.${upload.extension}`,
+    )
+    const response = await this.#request<unknown>(
+      "create_guild_sticker",
+      `/guilds/${guildId}/stickers`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        multipartBody: form,
+      },
+    )
+    return projectGuildSticker(response, guildId)
+  }
+
+  async modifyGuildSticker(
+    guildId: string,
+    stickerId: string,
+    input: ModifyGuildStickerInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildStickerSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild sticker guild ID")
+    assertPositiveSnowflake(stickerId, "Discord guild sticker ID")
+    assertModifyGuildStickerInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_sticker",
+      `/guilds/${guildId}/stickers/${stickerId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        },
+      },
+    )
+    return projectGuildSticker(response, guildId)
+  }
+
+  async deleteGuildSticker(
+    guildId: string,
+    stickerId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord guild sticker guild ID")
+    assertPositiveSnowflake(stickerId, "Discord guild sticker ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_sticker",
+      `/guilds/${guildId}/stickers/${stickerId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
     )
   }
 

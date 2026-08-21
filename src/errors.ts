@@ -222,6 +222,42 @@ export class WebhookEvidenceError extends Error {
   override name = "WebhookEvidenceError"
 }
 
+export class GuildExpressionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild expression snapshot does not match the reviewed plan")
+    this.name = "GuildExpressionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildExpressionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild expression operation key has already been reserved")
+    this.name = "GuildExpressionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildExpressionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildExpressionExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildExpressionEvidenceError extends Error {
+  override name = "GuildExpressionEvidenceError"
+}
+
 export class ChannelPermissionOverwritePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

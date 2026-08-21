@@ -215,6 +215,29 @@ export interface WebhookDeletionActivity {
   webhookId: string
 }
 
+export type GuildExpressionActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildExpressionActivity {
+  action: "create" | "delete" | "update"
+  error: string | null
+  expressionId: string | null
+  expressionKind: "emoji" | "sticker"
+  guildId: string
+  id: string
+  kind: "guild-expression-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: GuildExpressionActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ChannelPermissionOverwriteActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -245,6 +268,7 @@ export type ActivityEntry =
   | ChannelPermissionOverwriteActivity
   | DeletionActivity
   | ForumPostActivity
+  | GuildExpressionActivity
   | InteractionActivity
   | MemberModerationActivity
   | MessagePinActivity
@@ -724,6 +748,80 @@ function parseWebhookDeletionActivity(
   }
 }
 
+function parseGuildExpressionActivity(
+  value: unknown,
+): GuildExpressionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-expression-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["create", "delete", "update"].includes(String(record.action))
+    || !["emoji", "sticker"].includes(String(record.expressionKind))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.expressionId === null || (
+      typeof record.expressionId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.expressionId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.action === "create" ? record.expressionId !== null : record.expressionId === null
+    ))
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (["completed", "completed-with-drift"].includes(String(record.status)) && (
+      record.expressionId === null
+      || record.verification !== (record.status === "completed" ? "match" : "drift")
+    ))
+    || (record.status === "failed" && (
+      record.error === null
+      || record.verification !== null
+      || (record.action === "create" ? record.expressionId !== null : record.expressionId === null)
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as GuildExpressionActivity["action"],
+    error: record.error,
+    expressionId: record.expressionId,
+    expressionKind: record.expressionKind as GuildExpressionActivity["expressionKind"],
+    guildId: record.guildId,
+    id: record.id,
+    kind: "guild-expression-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GuildExpressionActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseAttachmentMessageActivity(
   value: unknown,
 ): AttachmentMessageActivity | undefined {
@@ -884,6 +982,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseChannelCreationActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
+    || parseGuildExpressionActivity(value)
     || parseWebhookDeletionActivity(value)
     || parseRoleCreationActivity(value)
     || parseDeletionActivity(value)

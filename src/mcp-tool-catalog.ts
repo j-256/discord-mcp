@@ -42,6 +42,7 @@ type McpToolWorkflow =
   | "channel-permission-overwrite"
   | "forum-post"
   | "guild-scaffold"
+  | "guild-expression-change"
   | "member-moderation"
   | "message-deletion"
   | "message-pin"
@@ -104,6 +105,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-scaffolds",
     workflow: "guild-scaffold",
   },
+  execute_guild_expression_change: {
+    keywords: ["create", "delete", "emoji", "execute", "expression", "sticker", "update"],
+    toolset: "guild-expressions",
+    workflow: "guild-expression-change",
+  },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
@@ -139,6 +145,14 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_member: {
     keywords: ["directory", "exact", "member", "profile", "user"],
     toolset: "members",
+  },
+  get_guild_emoji: {
+    keywords: ["emoji", "exact", "expression", "guild", "lookup"],
+    toolset: "guild-expressions",
+  },
+  get_guild_sticker: {
+    keywords: ["exact", "expression", "guild", "lookup", "sticker"],
+    toolset: "guild-expressions",
   },
   get_connector_status: {
     keywords: ["application", "bot", "identity", "scope", "status"],
@@ -204,6 +218,14 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["cursor", "directory", "guild", "list", "member", "user"],
     toolset: "members",
   },
+  list_guild_emojis: {
+    keywords: ["emoji", "expression", "guild", "inventory", "list"],
+    toolset: "guild-expressions",
+  },
+  list_guild_stickers: {
+    keywords: ["expression", "guild", "inventory", "list", "sticker"],
+    toolset: "guild-expressions",
+  },
   list_roles: {
     keywords: ["guild", "hierarchy", "list", "permission", "role"],
     toolset: "roles",
@@ -241,6 +263,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["blueprint", "category", "channel", "guild", "plan", "review", "role", "scaffold"],
     toolset: "guild-scaffolds",
     workflow: "guild-scaffold",
+  },
+  plan_guild_expression_change: {
+    keywords: ["create", "delete", "emoji", "expression", "plan", "review", "sticker", "update"],
+    toolset: "guild-expressions",
+    workflow: "guild-expression-change",
   },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],

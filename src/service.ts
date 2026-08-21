@@ -69,6 +69,16 @@ import type {
 } from "./forum-post-service.js"
 import { ForumPostService } from "./forum-post-service.js"
 import type {
+  GuildExpressionChangeRequest,
+  GuildExpressionInventoryResult,
+  GuildExpressionKind,
+  GuildExpressionLookupResult,
+  GuildExpressionPlan,
+  GuildExpressionResult,
+  GuildExpressionServiceOptions,
+} from "./guild-expression-service.js"
+import { GuildExpressionService } from "./guild-expression-service.js"
+import type {
   GuildScaffoldPlan,
   GuildScaffoldRequest,
   GuildScaffoldResult,
@@ -151,12 +161,16 @@ export interface DiscordServiceClient {
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildChannel: DiscordClient["createGuildChannel"]
+  createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
+  createGuildSticker: DiscordClient["createGuildSticker"]
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteMessage: DiscordClient["deleteMessage"]
+  deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
+  deleteGuildSticker: DiscordClient["deleteGuildSticker"]
   deleteWebhook: DiscordClient["deleteWebhook"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
@@ -168,8 +182,10 @@ export interface DiscordServiceClient {
   getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
+  getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoles: DiscordClient["getGuildRoles"]
+  getGuildSticker: DiscordClient["getGuildSticker"]
   getMessage: DiscordClient["getMessage"]
   getThreadMember: DiscordClient["getThreadMember"]
   getUser: DiscordClient["getUser"]
@@ -177,12 +193,16 @@ export interface DiscordServiceClient {
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
+  listGuildEmojis: DiscordClient["listGuildEmojis"]
+  listGuildStickers: DiscordClient["listGuildStickers"]
   listMessagePins: DiscordClient["listMessagePins"]
   listChannelWebhooks: DiscordClient["listChannelWebhooks"]
   listMessages: DiscordClient["listMessages"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
+  modifyGuildSticker: DiscordClient["modifyGuildSticker"]
   pinMessage: DiscordClient["pinMessage"]
   removeGuildBan: DiscordClient["removeGuildBan"]
   removeGuildMember: DiscordClient["removeGuildMember"]
@@ -229,6 +249,10 @@ export interface ConnectorServiceOptions {
   >
   guildScaffoldOptions?: Pick<
     GuildScaffoldServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildExpressionOptions?: Pick<
+    GuildExpressionServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   interactionOptions?: Pick<
@@ -388,6 +412,7 @@ export class ConnectorService {
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
   readonly #guildScaffoldService: GuildScaffoldService
+  readonly #guildExpressionService: GuildExpressionService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
@@ -461,6 +486,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.webhookOptions,
+    })
+    this.#guildExpressionService = new GuildExpressionService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      fileRoots: options.config.guildExpressionRoots,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildExpressionOptions,
     })
     this.#memberDirectoryService = new MemberDirectoryService({
       client: this.#client,
@@ -1065,6 +1098,31 @@ export class ConnectorService {
     return this.#webhookService.list(identity.bot.id, channelId, options)
   }
 
+  async listGuildExpressions(
+    guildId: string,
+    kind: GuildExpressionKind,
+    options: RequestOptions = {},
+  ): Promise<GuildExpressionInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildExpressionService.list(identity.bot.id, guildId, kind, options)
+  }
+
+  async getGuildExpression(
+    guildId: string,
+    kind: GuildExpressionKind,
+    expressionId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildExpressionLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildExpressionService.get(
+      identity.bot.id,
+      guildId,
+      kind,
+      expressionId,
+      options,
+    )
+  }
+
   async getChannelWebhook(
     channelId: string,
     webhookId: string,
@@ -1085,6 +1143,19 @@ export class ConnectorService {
   ): Promise<WebhookDeletionPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildExpressionChange(
+    request: GuildExpressionChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildExpressionPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildExpressionService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -1283,6 +1354,21 @@ export class ConnectorService {
   ): Promise<WebhookDeletionResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeGuildExpressionChange(
+    request: GuildExpressionChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildExpressionResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildExpressionService.execute(
       identity.application.id,
       identity.bot.id,
       request,

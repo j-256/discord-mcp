@@ -183,6 +183,7 @@ function serviceFixture(overrides: {
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
+  guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   operationStore?: OperationStore
@@ -237,9 +238,34 @@ function serviceFixture(overrides: {
       calls.createChannel += 1
       return channel()
     },
+    async createGuildEmoji(_guildId, input) {
+      return {
+        animated: input.format === "gif",
+        available: true,
+        creatorUserId: BOT_ID,
+        id: "910000000000000001",
+        managed: false,
+        name: input.name,
+        requiresColons: true,
+        roleIds: [...input.roleIds],
+      }
+    },
     async createGuildRole() {
       calls.createRole += 1
       return role(CREATED_ROLE_ID, 0n, "created")
+    },
+    async createGuildSticker(_guildId, input) {
+      return {
+        available: true,
+        creatorUserId: BOT_ID,
+        description: input.description,
+        formatType: 1,
+        guildId: GUILD_ID,
+        id: "920000000000000001",
+        name: input.name,
+        tags: input.tags,
+        type: 2,
+      }
     },
     async createMessage(_channelId, input) {
       calls.createMessage += 1
@@ -251,6 +277,8 @@ function serviceFixture(overrides: {
     },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
+    async deleteGuildEmoji() {},
+    async deleteGuildSticker() {},
     async deleteWebhook() {},
     async editChannelPermissionOverwrite() {},
     async editMessage(_channelId, _messageId, input) {
@@ -287,6 +315,18 @@ function serviceFixture(overrides: {
     async getGuildMember(): Promise<DiscordGuildMember> {
       return { roles: [] }
     },
+    async getGuildEmoji() {
+      return {
+        animated: false,
+        available: true,
+        creatorUserId: BOT_ID,
+        id: "910000000000000001",
+        managed: false,
+        name: "wave",
+        requiresColons: true,
+        roleIds: [],
+      }
+    },
     async getGuildRole(_guildId, roleId) {
       calls.getRole += 1
       return role(roleId, 0n, "role")
@@ -297,6 +337,19 @@ function serviceFixture(overrides: {
         DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY,
         "@everyone",
       )]
+    },
+    async getGuildSticker() {
+      return {
+        available: true,
+        creatorUserId: BOT_ID,
+        description: "Friendly wave",
+        formatType: 1,
+        guildId: GUILD_ID,
+        id: "920000000000000001",
+        name: "Wave Sticker",
+        tags: "wave",
+        type: 2,
+      }
     },
     async getMessage() {
       return message()
@@ -320,6 +373,12 @@ function serviceFixture(overrides: {
       return [guild()]
     },
     async listGuildMembers() {
+      return []
+    },
+    async listGuildEmojis() {
+      return []
+    },
+    async listGuildStickers() {
       return []
     },
     async listJoinedPrivateArchivedThreads() {
@@ -346,6 +405,31 @@ function serviceFixture(overrides: {
         communication_disabled_until: input.communicationDisabledUntil,
         roles: [],
         user: { id: userId, username: "target" },
+      }
+    },
+    async modifyGuildEmoji(_guildId, expressionId, input) {
+      return {
+        animated: false,
+        available: true,
+        creatorUserId: BOT_ID,
+        id: expressionId,
+        managed: false,
+        name: input.name || "wave",
+        requiresColons: true,
+        roleIds: input.roleIds ? [...input.roleIds] : [],
+      }
+    },
+    async modifyGuildSticker(_guildId, expressionId, input) {
+      return {
+        available: true,
+        creatorUserId: BOT_ID,
+        description: input.description ?? "Friendly wave",
+        formatType: 1,
+        guildId: GUILD_ID,
+        id: expressionId,
+        name: input.name || "Wave Sticker",
+        tags: input.tags || "wave",
+        type: 2,
       }
     },
     async pinMessage() {},
@@ -409,6 +493,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.guildScaffoldOptions
         ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
+        : {}),
+      ...(overrides.guildExpressionOptions
+        ? { guildExpressionOptions: overrides.guildExpressionOptions }
         : {}),
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
@@ -559,6 +646,93 @@ test("service verifies identity through credential-free webhook audit and cleanu
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "webhook-deletion")
   assert.equal(operationStore.receipt?.resourceId, WEBHOOK_ID)
+})
+
+test("service pins identity through privacy-safe guild expression reads and reviewed changes", async () => {
+  const expressionId = "910000000000000001"
+  const operationStore = new MemoryOperationStore()
+  let inventory = [{
+    animated: false,
+    available: true,
+    creatorUserId: BOT_ID,
+    id: expressionId,
+    managed: false,
+    name: "wave",
+    requiresColons: true,
+    roleIds: [],
+  }]
+  let inventoryCalls = 0
+  let updateCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildEmoji(_guildId, requestedExpressionId) {
+        const found = inventory.find((entry) => entry.id === requestedExpressionId)
+        if (!found) throw new Error("Unexpected missing emoji")
+        return found
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.CREATE_GUILD_EXPRESSIONS, "@everyone")]
+      },
+      async listGuildEmojis(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryCalls += 1
+        return inventory
+      },
+      async modifyGuildEmoji(guildId, requestedExpressionId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(requestedExpressionId, expressionId)
+        assert.equal(auditReason, "Reviewed expression update")
+        updateCalls += 1
+        inventory = inventory.map((entry) => entry.id === requestedExpressionId
+          ? { ...entry, name: input.name ?? entry.name }
+          : entry)
+        return inventory[0]!
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES: "true",
+      DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS: GUILD_ID,
+    },
+    guildExpressionOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(23),
+      randomId: () => "activity-guild-expression-change",
+    },
+    operationStore,
+  })
+  const request = {
+    action: "update" as const,
+    auditReason: "Reviewed expression update",
+    expressionId,
+    guildId: GUILD_ID,
+    kind: "emoji" as const,
+    name: "hello",
+    operationKey: "guild-expression-service-attempt-0001",
+  }
+
+  const listed = await service.listGuildExpressions(GUILD_ID, "emoji")
+  const exact = await service.getGuildExpression(GUILD_ID, "emoji", expressionId)
+  const plan = await service.planGuildExpressionChange(request)
+  const result = await service.executeGuildExpressionChange(request, plan.digest)
+
+  assert.equal(listed.expressions.length, 1)
+  assert.equal(exact.expression.expressionId, expressionId)
+  assert.equal(plan.existing?.expressionId, expressionId)
+  assert.equal(plan.permission.createGuildExpressions, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed?.name, "hello")
+  assert.equal(inventoryCalls, 4)
+  assert.equal(updateCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "guild-expression-change")
+  assert.equal(operationStore.receipt?.resourceId, expressionId)
 })
 
 test("service verifies identity through reviewed channel permission changes", async () => {

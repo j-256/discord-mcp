@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { randomBytes } from "node:crypto"
 import {
   link,
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
@@ -14,6 +15,7 @@ import { join } from "node:path"
 import test from "node:test"
 
 import { readAttachmentFileSnapshot } from "../src/attachment-file.js"
+import { readOwnedLocalFileSnapshot } from "../src/local-file.js"
 
 async function fixture() {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-attachment-"))
@@ -147,5 +149,59 @@ test("attachment snapshot rejects files outside configured roots", async () => {
     )
   } finally {
     await Promise.all([first.cleanup(), second.cleanup()])
+  }
+})
+
+test("owned local snapshots reject invalid context, bounds, roots, and file types", async () => {
+  const { cleanup, root } = await fixture()
+  try {
+    const filePath = join(root, "reviewed.txt")
+    const directoryPath = join(root, "directory")
+    const missingPath = join(root, "missing.txt")
+    await writeFile(filePath, "reviewed")
+    await mkdir(directoryPath)
+    const base = {
+      description: "Reviewed file",
+      digestDomain: "reviewed-file.v1",
+      filePath,
+      maxBytes: 1_024,
+      planKey: randomBytes(32),
+      roots: [root],
+    }
+
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, description: "" }),
+      /context is invalid/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, digestDomain: "Invalid Domain" }),
+      /context is invalid/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, filePath: "relative.txt" }),
+      /one exact absolute path/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, maxBytes: 0 }),
+      /positive safe integer/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, roots: [] }),
+      /roots are not configured/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, roots: ["relative"] }),
+      /roots are not configured/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, filePath: missingPath }),
+      /path does not exist/,
+    )
+    await assert.rejects(
+      readOwnedLocalFileSnapshot({ ...base, filePath: directoryPath }),
+      /must name a regular file/,
+    )
+  } finally {
+    await cleanup()
   }
 })

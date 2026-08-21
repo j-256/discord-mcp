@@ -19,6 +19,7 @@ export type DiscordGuidanceService = Pick<
   | "listChannelPermissionOverwrites"
   | "listChannelWebhooks"
   | "listGuilds"
+  | "listGuildExpressions"
   | "listRoles"
 >
 

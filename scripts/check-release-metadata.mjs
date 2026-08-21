@@ -1,4 +1,9 @@
-import { readFile, readdir } from "node:fs/promises"
+import {
+  lstat,
+  readFile,
+  readlink,
+  readdir,
+} from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -6,6 +11,7 @@ import {
   invariant,
   readJson,
   REPOSITORY_ROOT,
+  run,
   sha256,
 } from "./release-lib.mjs"
 
@@ -14,12 +20,27 @@ const MCP_NAME = "io.github.j-256/discord-mcp"
 const MCP_DESCRIPTION = "Least-privilege Discord reads, credential-safe webhook audit, reviewed changes, and guild scaffolds"
 const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
 const REPOSITORY_ID = "1334461127"
-const ICON_SHA256 = "8208f78c171eba7210b836286c2402054fbef3823c143bbbdfa75febb7d515f0"
+const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2ca15de"
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
 const STABLE_SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
+// Keep blocked names out of the repository bytes that this gate scans
+const SPECIFIC_REFERENCE_CODES = Object.freeze([
+  [99, 111, 100, 101, 120],
+  [111, 112, 101, 110, 97, 105],
+  [99, 104, 97, 116, 103, 112, 116],
+  [99, 108, 97, 117, 100, 101],
+  [97, 110, 116, 104, 114, 111, 112, 105, 99],
+  [103, 101, 109, 105, 110, 105],
+  [99, 111, 112, 105, 108, 111, 116],
+])
+const SPECIFIC_REFERENCES = SPECIFIC_REFERENCE_CODES.map((codes) => (
+  String.fromCharCode(...codes)
+))
+const VERSIONED_MODEL_PREFIX = String.fromCharCode(103, 112, 116)
+const VERSIONED_MODEL_PATTERN = new RegExp(`${VERSIONED_MODEL_PREFIX}[-_ ]?[0-9]`, "u")
 const EXPECTED_DEPENDENCIES = {
   "@modelcontextprotocol/client": "2.0.0",
   "@modelcontextprotocol/server": "2.0.0",
@@ -37,6 +58,33 @@ const EXPECTED_DEV_DEPENDENCIES = {
   "@types/node": "26.2.0",
   tsx: "4.23.12",
   typescript: "7.0.2",
+}
+
+function containsSpecificReference(value) {
+  const normalized = value.toLowerCase()
+  return SPECIFIC_REFERENCES.some((reference) => normalized.includes(reference))
+    || VERSIONED_MODEL_PATTERN.test(normalized)
+}
+
+async function checkNeutrality() {
+  const { stdout } = await run(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    { capture: true },
+  )
+  const paths = stdout.split("\0").filter(Boolean)
+  for (const path of paths) {
+    invariant(!containsSpecificReference(path), `${path} has model- or harness-specific branding`)
+    const absolutePath = join(REPOSITORY_ROOT, path)
+    const metadata = await lstat(absolutePath)
+    const bytes = metadata.isSymbolicLink()
+      ? Buffer.from(await readlink(absolutePath))
+      : await readFile(absolutePath)
+    invariant(
+      !containsSpecificReference(bytes.toString("latin1")),
+      `${path} has model- or harness-specific branding`,
+    )
+  }
 }
 
 const EXPECTED_PACKAGE_FILES = [
@@ -58,6 +106,8 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "DISCORD_MCP_ALLOW_DELETIONS",
   "DISCORD_MCP_ALLOW_FORUM_POSTS",
   "DISCORD_MCP_ALLOW_GATEWAY",
+  "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
+  "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
   "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
   "DISCORD_MCP_ALLOW_INTERACTIONS",
   "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
@@ -77,6 +127,8 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "DISCORD_MCP_DELETE_CHANNEL_IDS",
   "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
   "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
+  "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
+  "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
   "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
   "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
@@ -309,6 +361,8 @@ async function checkRegistryManifest(packageJson) {
     "DISCORD_MCP_ALLOW_DELETIONS",
     "DISCORD_MCP_ALLOW_FORUM_POSTS",
     "DISCORD_MCP_ALLOW_GATEWAY",
+    "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
+    "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
     "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
     "DISCORD_MCP_ALLOW_INTERACTIONS",
     "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
@@ -335,6 +389,8 @@ async function checkRegistryManifest(packageJson) {
     "DISCORD_MCP_BOT_ID",
     "DISCORD_MCP_DELETE_CHANNEL_IDS",
     "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
+    "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
+    "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
     "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
     "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
     "DISCORD_MCP_MENTION_USER_IDS",
@@ -535,6 +591,7 @@ async function checkAutomation() {
 }
 
 const packageJson = await checkPackageAndLock()
+await checkNeutrality()
 await checkSourceIdentity(packageJson)
 await checkDocumentation(packageJson)
 await checkRegistryManifest(packageJson)

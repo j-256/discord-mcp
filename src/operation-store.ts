@@ -27,6 +27,7 @@ export const OPERATION_KINDS = [
   "channel-creation",
   "channel-permission-overwrite",
   "forum-post",
+  "guild-expression-change",
   "guild-scaffold",
   "message-pin",
   "role-creation",

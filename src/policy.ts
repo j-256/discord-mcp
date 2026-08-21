@@ -28,6 +28,11 @@ export interface PolicyDescription {
   gatewayEventBufferSize: number
   guildScaffoldGuildIds: string[]
   guildScaffoldsEnabled: boolean
+  guildExpressionAuditEnabled: boolean
+  guildExpressionChangesEnabled: boolean
+  guildExpressionCreationEnabled: boolean
+  guildExpressionGuildIds: string[]
+  guildExpressionRootCount: number
   interactionChannelIds: string[]
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -73,6 +78,8 @@ export class ScopePolicy {
   readonly #allowPermissionOverwrites: boolean
   readonly #allowPinManagement: boolean
   readonly #allowGateway: boolean
+  readonly #allowGuildExpressionAudit: boolean
+  readonly #allowGuildExpressionChanges: boolean
   readonly #allowGuildScaffolds: boolean
   readonly #allowForumPosts: boolean
   readonly #allowRoleCreation: boolean
@@ -88,6 +95,8 @@ export class ScopePolicy {
   readonly #interactionMinWriteIntervalMs: number
   readonly #gatewayEventBufferSize: number
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
+  readonly #guildExpressionGuildIds: ReadonlySet<string>
+  readonly #guildExpressionRoots: readonly string[]
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
@@ -117,6 +126,8 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowAttachments"
     | "allowGateway"
+    | "allowGuildExpressionAudit"
+    | "allowGuildExpressionChanges"
     | "allowMemberDirectory"
     | "allowGuildScaffolds"
     | "allowPermissionOverwrites"
@@ -132,6 +143,8 @@ export class ScopePolicy {
     | "attachmentRoots"
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
+    | "guildExpressionGuildIds"
+    | "guildExpressionRoots"
     | "memberDirectoryGuildIds"
     | "forumPostChannelIds"
     | "mcpToolsets"
@@ -153,6 +166,8 @@ export class ScopePolicy {
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowGateway = config.allowGateway ?? false
+    this.#allowGuildExpressionAudit = config.allowGuildExpressionAudit ?? false
+    this.#allowGuildExpressionChanges = config.allowGuildExpressionChanges ?? false
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
@@ -169,6 +184,8 @@ export class ScopePolicy {
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
     this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
+    this.#guildExpressionGuildIds = config.guildExpressionGuildIds ?? new Set()
+    this.#guildExpressionRoots = config.guildExpressionRoots ?? []
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
@@ -203,6 +220,17 @@ export class ScopePolicy {
       guildScaffoldGuildIds: [...this.#guildScaffoldGuildIds].sort(),
       guildScaffoldsEnabled: this.#allowGuildScaffolds
         && this.#guildScaffoldGuildIds.size > 0,
+      guildExpressionAuditEnabled: this.#allowGuildExpressionAudit
+        && this.#guildExpressionGuildIds.size > 0,
+      guildExpressionChangesEnabled: this.#allowGuildExpressionAudit
+        && this.#allowGuildExpressionChanges
+        && this.#guildExpressionGuildIds.size > 0,
+      guildExpressionCreationEnabled: this.#allowGuildExpressionAudit
+        && this.#allowGuildExpressionChanges
+        && this.#guildExpressionGuildIds.size > 0
+        && this.#guildExpressionRoots.length > 0,
+      guildExpressionGuildIds: [...this.#guildExpressionGuildIds].sort(),
+      guildExpressionRootCount: this.#guildExpressionRoots.length,
       forumPostChannelIds: [...this.#forumPostChannelIds].sort(),
       forumPostsEnabled: this.#allowForumPosts && this.#forumPostChannelIds.size > 0,
       interactionChannelIds: [...this.#interactionChannelIds].sort(),
@@ -325,6 +353,26 @@ export class ScopePolicy {
     }
     if (!this.#guildScaffoldGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the guild scaffold scope`)
+    }
+  }
+
+  assertGuildExpressionAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowGuildExpressionAudit) {
+      throw new PolicyError("Discord guild expression audit is disabled by connector configuration")
+    }
+    if (this.#guildExpressionGuildIds.size === 0) {
+      throw new PolicyError("Discord guild expression audit requires an explicit guild allowlist")
+    }
+    if (!this.#guildExpressionGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the guild expression scope`)
+    }
+  }
+
+  assertGuildExpressionChangeAllowed(guildId: string): void {
+    this.assertGuildExpressionAuditable(guildId)
+    if (!this.#allowGuildExpressionChanges) {
+      throw new PolicyError("Discord guild expression changes are disabled by connector configuration")
     }
   }
 

@@ -37,6 +37,8 @@ const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
+const EMOJI_ID = "370000000000000001"
+const STICKER_ID = "380000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -128,6 +130,7 @@ interface GuidanceCalls {
   channelAccess: number
   channels: number
   guilds: number
+  guildExpressions: number
   lastChannelId: string | null
   lastGuildId: string | null
   lastMessageId: string | null
@@ -153,6 +156,7 @@ function guidanceService(options: {
     channelAccess: 0,
     channels: 0,
     guilds: 0,
+    guildExpressions: 0,
     lastChannelId: null,
     lastGuildId: null,
     lastMessageId: null,
@@ -171,9 +175,70 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    executeGuildExpressionChange: unexpected,
     executeWebhookDeletion: unexpected,
+    getGuildExpression: unexpected,
     getChannelWebhook: unexpected,
     planWebhookDeletion: unexpected,
+    async listGuildExpressions(guildId, kind) {
+      calls.guildExpressions += 1
+      calls.lastGuildId = guildId
+      return {
+        expressions: kind === "emoji"
+          ? [{
+              animated: false,
+              available: true,
+              creatorUserId: USER_ID,
+              expressionId: EMOJI_ID,
+              kind: "emoji",
+              managed: false,
+              name: "reviewed_emoji",
+              requiresColons: true,
+              roleIds: [ROLE_ID],
+            }]
+          : [{
+              available: true,
+              creatorUserId: USER_ID,
+              description: "Reviewed sticker",
+              expressionId: STICKER_ID,
+              formatType: 1,
+              guildId,
+              kind: "sticker",
+              name: "Reviewed sticker",
+              tags: "reviewed",
+            }],
+        guild: { id: guildId, name: "Private guild name" },
+        kind,
+        page: {
+          returned: 1,
+          safetyLimit: kind === "emoji" ? 1_000 : 100,
+        },
+        permission: {
+          administrator: false,
+          confidence: "complete",
+          createGuildExpressions: true,
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.CREATE_GUILD_EXPRESSIONS
+            | DISCORD_PERMISSIONS.MANAGE_GUILD_EXPRESSIONS
+          ).toString(),
+          guildOwner: false,
+          manageGuildExpressions: true,
+          ownershipRequired: false,
+        },
+        privacy: {
+          omittedFields: [
+            "cdnUrl",
+            "imageBytes",
+            "rawDiscordObject",
+            "uploaderProfile",
+          ],
+          privateFieldsProjectedOut: true,
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    planGuildExpressionChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -196,6 +261,11 @@ function guidanceService(options: {
         gatewayEventBufferSize: 100,
         guildScaffoldGuildIds: [],
         guildScaffoldsEnabled: false,
+        guildExpressionAuditEnabled: false,
+        guildExpressionChangesEnabled: false,
+        guildExpressionCreationEnabled: false,
+        guildExpressionGuildIds: [],
+        guildExpressionRootCount: 0,
         interactionChannelIds: [],
         interactionMaxWritesPerMinute: 10,
         interactionMinWriteIntervalMs: 500,
@@ -497,6 +567,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.channelAccess
     + calls.channels
     + calls.guilds
+    + calls.guildExpressions
     + calls.messages
     + calls.members
     + calls.permissionOverwrites
@@ -590,8 +661,16 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildEmojis,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildEmojis,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildStickers,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildStickers,
       },
     ].sort((a, b) => a.name.localeCompare(b.name)),
   )
@@ -630,6 +709,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /ADMINISTRATOR is forbidden/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
   assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
+  assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
+  assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /Guild audit-log reads are separately selectable/)
   assert.match(safety.text, /include reasons only by explicit opt-in/)
   assert.match(safety.text, /Member-directory reads require a separate feature gate/)
@@ -751,6 +832,51 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     1,
   )
 
+  const emojis = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/emojis`,
+  )
+  const emojiData = emojis.value.data as Record<string, unknown>
+  const emoji = (emojiData.expressions as Array<Record<string, unknown>>)[0]
+  assert.equal(emoji?.expressionId, EMOJI_ID)
+  assert.deepEqual(Object.keys(emoji || {}).sort(), [
+    "animated",
+    "available",
+    "creatorUserId",
+    "expressionId",
+    "kind",
+    "managed",
+    "name",
+    "requiresColons",
+    "roleIds",
+  ])
+
+  const stickers = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/stickers`,
+  )
+  const stickerData = stickers.value.data as Record<string, unknown>
+  const sticker = (stickerData.expressions as Array<Record<string, unknown>>)[0]
+  assert.equal(sticker?.expressionId, STICKER_ID)
+  assert.deepEqual(Object.keys(sticker || {}).sort(), [
+    "available",
+    "creatorUserId",
+    "description",
+    "expressionId",
+    "formatType",
+    "guildId",
+    "kind",
+    "name",
+    "tags",
+  ])
+  assert.equal(
+    (emojiData.privacy as Record<string, unknown>).privateFieldsProjectedOut,
+    true,
+  )
+  assert.doesNotMatch(emojis.text + stickers.text, /cdn\.discordapp\.com/)
+  assert.equal("imageBytes" in (emoji || {}), false)
+  assert.equal("imageBytes" in (sticker || {}), false)
+
   const exactRole = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/roles/${ROLE_ID}`,
@@ -790,6 +916,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.match(exact.text, /hello \[redacted\]/)
 
   assert.equal(calls.guilds, 1)
+  assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.messages, 1)
@@ -1002,6 +1129,62 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(webhookDeletion, /Do not call execute_webhook_deletion/)
   assert.match(webhookDeletion, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
   assert.match(webhookDeletion, /credential and private-field omissions/)
+
+  const guildExpression = promptText(await client.getPrompt({
+    arguments: {
+      action: "update",
+      auditReason: "Reviewed sticker metadata",
+      description: "",
+      expressionId: STICKER_ID,
+      guildId: GUILD_ID,
+      kind: "sticker",
+      name: "Reviewed sticker",
+      operationKey: OPERATION_KEY,
+      tags: "reviewed",
+    },
+    name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+  }))
+  assert.deepEqual(JSON.parse(guildExpression.split("\n")[1] || ""), {
+    action: "update",
+    auditReason: "Reviewed sticker metadata",
+    description: null,
+    expressionId: STICKER_ID,
+    guildId: GUILD_ID,
+    kind: "sticker",
+    name: "Reviewed sticker",
+    operationKey: OPERATION_KEY,
+    tags: "reviewed",
+  })
+  assert.match(guildExpression, /Call only plan_guild_expression_change/)
+  assert.match(guildExpression, /Do not call execute_guild_expression_change/)
+  assert.match(guildExpression, /ownership-aware CREATE_GUILD_EXPRESSIONS/)
+  assert.match(guildExpression, /URL or base64|invalid or changed local file/)
+
+  const stickerCreation = promptText(await client.getPrompt({
+    arguments: {
+      action: "create",
+      auditReason: "Reviewed sticker creation",
+      description: "Reviewed sticker",
+      filePath: "/srv/discord-expressions/reviewed-sticker.png",
+      guildId: GUILD_ID,
+      kind: "sticker",
+      name: "Reviewed sticker",
+      operationKey: OPERATION_KEY,
+      tags: "reviewed",
+    },
+    name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+  }))
+  assert.deepEqual(JSON.parse(stickerCreation.split("\n")[1] || ""), {
+    action: "create",
+    auditReason: "Reviewed sticker creation",
+    description: "Reviewed sticker",
+    filePath: "/srv/discord-expressions/reviewed-sticker.png",
+    guildId: GUILD_ID,
+    kind: "sticker",
+    name: "Reviewed sticker",
+    operationKey: OPERATION_KEY,
+    tags: "reviewed",
+  })
 
   const permissionOverwrite = promptText(await client.getPrompt({
     arguments: {
@@ -1405,6 +1588,72 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         webhookId: WEBHOOK_ID,
       },
       name: MCP_PROMPT_NAMES.reviewWebhookDeletion,
+    },
+    {
+      arguments: {
+        action: "create",
+        auditReason: "Reviewed emoji",
+        filePath: "/srv/discord-expressions/reviewed.png",
+        guildId: GUILD_ID,
+        imageUrl: "https://cdn.example/reviewed.png",
+        kind: "emoji",
+        name: "reviewed_emoji",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+    },
+    {
+      arguments: {
+        action: "update",
+        auditReason: "Reviewed emoji",
+        expressionId: EMOJI_ID,
+        guildId: GUILD_ID,
+        kind: "emoji",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+    },
+    {
+      arguments: {
+        action: "create",
+        auditReason: "Reviewed sticker",
+        description: "Reviewed sticker",
+        filePath: "relative/sticker.png",
+        guildId: GUILD_ID,
+        kind: "sticker",
+        name: "Reviewed sticker",
+        operationKey: OPERATION_KEY,
+        tags: "reviewed",
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+    },
+    {
+      arguments: {
+        action: "create",
+        auditReason: "Reviewed sticker",
+        description: "\ud800x",
+        filePath: "/srv/discord-expressions/reviewed.png",
+        guildId: GUILD_ID,
+        kind: "sticker",
+        name: "Reviewed sticker",
+        operationKey: OPERATION_KEY,
+        tags: "reviewed",
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+    },
+    {
+      arguments: {
+        action: "create",
+        auditReason: "Reviewed sticker",
+        description: "Reviewed sticker",
+        filePath: "/srv/discord-expressions/reviewed.png",
+        guildId: GUILD_ID,
+        kind: "sticker",
+        name: "Reviewed sticker",
+        operationKey: OPERATION_KEY,
+        tags: "\ud800",
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
     },
     {
       arguments: {

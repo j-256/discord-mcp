@@ -1967,3 +1967,316 @@ test("Discord client never retries webhook deletion and validates before fetchin
   )
   assert.equal(requests, 1)
 })
+
+test("Discord client projects bounded guild expression inventories without CDN or profile fields", async () => {
+  const privateProfile = "private-expression-uploader"
+  const privateUrl = "https://cdn.discord.test/private-expression"
+  const requests: string[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.includes("/emojis")) {
+        const emoji = {
+          animated: true,
+          available: false,
+          id: "300",
+          managed: false,
+          name: "wave",
+          require_colons: true,
+          roles: ["400"],
+          unknown_url: privateUrl,
+          user: {
+            avatar: "private-avatar",
+            global_name: privateProfile,
+            id: "500",
+            username: privateProfile,
+          },
+        }
+        return jsonResponse(url.endsWith("/emojis") ? [emoji] : emoji)
+      }
+      if (url.includes("/stickers")) {
+        const sticker = {
+          available: true,
+          description: "Friendly wave",
+          format_type: 1,
+          guild_id: "100",
+          id: "600",
+          name: "Wave",
+          tags: "wave",
+          type: 2,
+          unknown_url: privateUrl,
+          user: {
+            avatar: "private-avatar",
+            global_name: privateProfile,
+            id: "500",
+            username: privateProfile,
+          },
+        }
+        return jsonResponse(url.endsWith("/stickers") ? [sticker] : sticker)
+      }
+      throw new Error(`Unexpected request ${url}`)
+    },
+    token: TOKEN,
+  })
+
+  const emojis = await client.listGuildEmojis("100")
+  const stickers = await client.listGuildStickers("100")
+  const exactEmoji = await client.getGuildEmoji("100", "300")
+  const exactSticker = await client.getGuildSticker("100", "600")
+
+  assert.deepEqual(emojis, [{
+    animated: true,
+    available: false,
+    creatorUserId: "500",
+    id: "300",
+    managed: false,
+    name: "wave",
+    requiresColons: true,
+    roleIds: ["400"],
+  }])
+  assert.deepEqual(stickers, [{
+    available: true,
+    creatorUserId: "500",
+    description: "Friendly wave",
+    formatType: 1,
+    guildId: "100",
+    id: "600",
+    name: "Wave",
+    tags: "wave",
+    type: 2,
+  }])
+  assert.deepEqual(requests, [
+    `${API_BASE_URL}/guilds/100/emojis`,
+    `${API_BASE_URL}/guilds/100/stickers`,
+    `${API_BASE_URL}/guilds/100/emojis/300`,
+    `${API_BASE_URL}/guilds/100/stickers/600`,
+  ])
+  assert.equal(exactEmoji.id, "300")
+  assert.equal(exactSticker.id, "600")
+  const serialized = JSON.stringify({ emojis, exactEmoji, exactSticker, stickers })
+  assert.equal(serialized.includes(privateProfile), false)
+  assert.equal(serialized.includes(privateUrl), false)
+  assert.equal(serialized.includes("private-avatar"), false)
+})
+
+test("Discord client sends exact non-retried guild expression writes", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const stickerFiles: File[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const url = String(input)
+      let body: unknown = null
+      if (typeof init?.body === "string") body = JSON.parse(init.body) as unknown
+      if (init?.body instanceof FormData) {
+        const file = init.body.get("file")
+        assert.ok(file instanceof File)
+        stickerFiles.push(file)
+        body = {
+          description: init.body.get("description"),
+          name: init.body.get("name"),
+          tags: init.body.get("tags"),
+        }
+      }
+      requests.push({
+        body,
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url,
+      })
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      if (url.includes("/emojis")) {
+        const record = body as Record<string, unknown>
+        return jsonResponse({
+          animated: false,
+          available: true,
+          id: "300",
+          managed: false,
+          name: record.name ?? "wave",
+          require_colons: true,
+          roles: record.roles ?? [],
+          user: { id: "500" },
+        })
+      }
+      return jsonResponse({
+        available: true,
+        description: (body as Record<string, unknown>).description ?? "Friendly wave",
+        format_type: 1,
+        guild_id: "100",
+        id: "600",
+        name: (body as Record<string, unknown>).name ?? "Wave",
+        tags: (body as Record<string, unknown>).tags ?? "wave",
+        type: 2,
+        user: { id: "500" },
+      })
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  await client.createGuildEmoji("100", {
+    bytes: new Uint8Array([1, 2, 3]),
+    format: "png",
+    name: "wave",
+    roleIds: ["400"],
+  }, "Reviewed / expression")
+  await client.modifyGuildEmoji("100", "300", {
+    name: "hello",
+    roleIds: [],
+  }, "Reviewed / expression")
+  await client.deleteGuildEmoji("100", "300", "Reviewed / expression")
+  await client.createGuildSticker("100", {
+    bytes: new Uint8Array([4, 5, 6]),
+    description: "Friendly wave",
+    format: "png",
+    name: "Wave",
+    tags: "wave",
+  }, "Reviewed / expression")
+  await client.modifyGuildSticker("100", "600", {
+    description: null,
+    name: "Hello",
+    tags: "hello",
+  }, "Reviewed / expression")
+  await client.deleteGuildSticker("100", "600", "Reviewed / expression")
+
+  assert.deepEqual(requests, [{
+    body: {
+      image: "data:image/png;base64,AQID",
+      name: "wave",
+      roles: ["400"],
+    },
+    method: "POST",
+    reason: "Reviewed%20%2F%20expression",
+    url: `${API_BASE_URL}/guilds/100/emojis`,
+  }, {
+    body: { name: "hello", roles: [] },
+    method: "PATCH",
+    reason: "Reviewed%20%2F%20expression",
+    url: `${API_BASE_URL}/guilds/100/emojis/300`,
+  }, {
+    body: null,
+    method: "DELETE",
+    reason: "Reviewed%20%2F%20expression",
+    url: `${API_BASE_URL}/guilds/100/emojis/300`,
+  }, {
+    body: {
+      description: "Friendly wave",
+      name: "Wave",
+      tags: "wave",
+    },
+    method: "POST",
+    reason: "Reviewed%20%2F%20expression",
+    url: `${API_BASE_URL}/guilds/100/stickers`,
+  }, {
+    body: { description: null, name: "Hello", tags: "hello" },
+    method: "PATCH",
+    reason: "Reviewed%20%2F%20expression",
+    url: `${API_BASE_URL}/guilds/100/stickers/600`,
+  }, {
+    body: null,
+    method: "DELETE",
+    reason: "Reviewed%20%2F%20expression",
+    url: `${API_BASE_URL}/guilds/100/stickers/600`,
+  }])
+  const stickerFile = stickerFiles[0]
+  assert.ok(stickerFile)
+  assert.equal(stickerFile.name, "sticker.png")
+  assert.equal(stickerFile.type, "image/png")
+  assert.deepEqual(new Uint8Array(await stickerFile.arrayBuffer()), new Uint8Array([4, 5, 6]))
+})
+
+test("Discord client validates expression writes before fetching and does not retry them", async () => {
+  let requests = 0
+  let sleeps = 0
+  const privateResponseDetail = "private-expression-response-detail"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: privateResponseDetail, retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createGuildEmoji("100", {
+      bytes: new Uint8Array([1]),
+      format: "png",
+      name: "wave",
+      roleIds: [],
+    }, "Reviewed expression"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && !error.message.includes(privateResponseDetail)
+    ),
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+  await assert.rejects(
+    client.createGuildEmoji("100", {
+      bytes: new Uint8Array(),
+      format: "png",
+      name: "wave",
+      roleIds: [],
+    }, "Reviewed expression"),
+    /emoji bytes/,
+  )
+  await assert.rejects(
+    client.modifyGuildEmoji("100", "300", {}, "Reviewed expression"),
+    /must contain a name or role IDs/,
+  )
+  await assert.rejects(
+    client.createGuildEmoji("100", {
+      bytes: new Uint8Array([1]),
+      format: "png",
+      name: "bad-name",
+      roleIds: [],
+    }, "Reviewed expression"),
+    /ASCII letters/,
+  )
+  await assert.rejects(
+    client.createGuildSticker("100", {
+      bytes: new Uint8Array([1]),
+      description: "x",
+      format: "png",
+      name: "Wave",
+      tags: "wave",
+    }, "Reviewed expression"),
+    /description/,
+  )
+  await assert.rejects(
+    client.createGuildSticker("100", {
+      bytes: new Uint8Array([1]),
+      description: null,
+      format: "png",
+      name: "Wave",
+      tags: "wave",
+    } as unknown as Parameters<DiscordClient["createGuildSticker"]>[1], "Reviewed expression"),
+    /creation description must be a string/,
+  )
+  await assert.rejects(
+    client.createGuildEmoji("100", {
+      bytes: new Uint8Array([1]),
+      format: "toString",
+      name: "wave",
+      roleIds: [],
+    } as unknown as Parameters<DiscordClient["createGuildEmoji"]>[1], "Reviewed expression"),
+    /format is unsupported/,
+  )
+  await assert.rejects(
+    client.modifyGuildSticker("100", "600", {}, "Reviewed expression"),
+    /must contain a name, description, or tags/,
+  )
+  assert.equal(requests, 1)
+})

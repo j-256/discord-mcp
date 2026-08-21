@@ -40,6 +40,8 @@ export interface ConnectorConfig {
   allowDeletions: boolean
   allowForumPosts: boolean
   allowGateway: boolean
+  allowGuildExpressionAudit: boolean
+  allowGuildExpressionChanges: boolean
   allowGuildScaffolds: boolean
   allowInteractions: boolean
   allowMemberDirectory: boolean
@@ -59,6 +61,8 @@ export interface ConnectorConfig {
   forumPostChannelIds: ReadonlySet<string>
   gatewayEventBufferSize: number
   guildScaffoldGuildIds: ReadonlySet<string>
+  guildExpressionGuildIds: ReadonlySet<string>
+  guildExpressionRoots: readonly string[]
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -131,7 +135,7 @@ function parseInteger(
   return result
 }
 
-function parseAttachmentRoots(
+function parseOwnedRoots(
   value: string | undefined,
   name: string,
 ): readonly string[] {
@@ -285,6 +289,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.guildScaffoldGuildIds],
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
   )
+  const guildExpressionGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.guildExpressionGuildIds],
+    ENVIRONMENT_NAMES.guildExpressionGuildIds,
+  )
   const webhookChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.webhookChannelIds],
     ENVIRONMENT_NAMES.webhookChannelIds,
@@ -294,6 +302,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
+    [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
   ] as const) {
@@ -357,6 +366,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowWebhookDeletions} requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
     )
   }
+  const allowGuildExpressionAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGuildExpressionAudit],
+    ENVIRONMENT_NAMES.allowGuildExpressionAudit,
+  )
+  const allowGuildExpressionChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGuildExpressionChanges],
+    ENVIRONMENT_NAMES.allowGuildExpressionChanges,
+  )
+  if (allowGuildExpressionChanges && !allowGuildExpressionAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowGuildExpressionChanges} requires ${ENVIRONMENT_NAMES.allowGuildExpressionAudit}`,
+    )
+  }
 
   return {
     adminGuildIds,
@@ -379,6 +401,8 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.allowDeletions,
     ),
     allowGateway,
+    allowGuildExpressionAudit,
+    allowGuildExpressionChanges,
     allowGuildScaffolds: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowGuildScaffolds],
       ENVIRONMENT_NAMES.allowGuildScaffolds,
@@ -422,7 +446,7 @@ export function loadConnectorConfig(
       1,
       DISCORD_LIMITS.attachmentBytes,
     ),
-    attachmentRoots: parseAttachmentRoots(
+    attachmentRoots: parseOwnedRoots(
       environment[ENVIRONMENT_NAMES.attachmentRoots],
       ENVIRONMENT_NAMES.attachmentRoots,
     ),
@@ -439,6 +463,11 @@ export function loadConnectorConfig(
       CONNECTOR_LIMITS.gatewayEventBufferSize,
     ),
     guildScaffoldGuildIds,
+    guildExpressionGuildIds,
+    guildExpressionRoots: parseOwnedRoots(
+      environment[ENVIRONMENT_NAMES.guildExpressionRoots],
+      ENVIRONMENT_NAMES.guildExpressionRoots,
+    ),
     interactionChannelIds,
     interactionMaxWritesPerMinute: parseInteger(
       environment[ENVIRONMENT_NAMES.interactionMaxWritesPerMinute],

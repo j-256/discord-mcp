@@ -198,6 +198,8 @@ export function registerDiscordResources(
           "",
           "Webhook inventory requires a separate exact direct-channel allowlist and complete VIEW_CHANNEL plus MANAGE_WEBHOOKS evidence. Incoming webhook credentials, complete execution URLs, avatars, creator profiles, source guild and channel objects, unknown raw fields, and unrelated channel metadata are projected out before any result is built and are never persisted. Creation, execution, editing, credential-authenticated tools, and guild-wide inventory are intentionally absent. Deletion requires an additional feature gate and accepts one exact Incoming webhook only after a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried DELETE, and exact channel-inventory absence readback. Discord can move a webhook between the final inventory and ID-only deletion, so every plan exposes the race and the same exact webhook ID serializes across channel claims within one process. An uncertain outcome permanently spends the key and blocks queued same-target deletion in the process.",
           "",
+          "Guild emoji and sticker inventory requires a separate exact guild allowlist and returns bounded stable metadata plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. CDN URLs, image bytes, uploader profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local files from dedicated roots, detects the actual container format and animation state, records dimensions where encoded, enforces byte limits plus sticker dimensions and duration, requires fresh VERIFIED or PARTNERED feature evidence for Lottie, and binds the file snapshot into the digest. Every create, update, or delete requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Name collisions, missing role references, managed emoji mutation, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, retries, rolls back, or persists expression content.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,
@@ -315,6 +317,56 @@ export function registerDiscordResources(
       secrets,
       () => service.listRoles(
         templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildEmojis,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildEmojis, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded privacy-safe emoji inventory and ownership-aware connector permission evidence for one exact separately allowlisted Discord guild. CDN URLs, image bytes, uploader profiles, and unknown raw fields are omitted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord guild emojis",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listGuildExpressions(
+        templateSnowflake(variables, "guildId"),
+        "emoji",
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildStickers,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildStickers, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded privacy-safe sticker inventory and ownership-aware connector permission evidence for one exact separately allowlisted Discord guild. CDN URLs, image bytes, uploader profiles, and unknown raw fields are omitted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord guild stickers",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listGuildExpressions(
+        templateSnowflake(variables, "guildId"),
+        "sticker",
         { signal: context.mcpReq.signal },
       ),
     ),

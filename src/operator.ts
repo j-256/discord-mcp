@@ -58,6 +58,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildAccess: "guild-access",
   guildMembersIntent: "guild-members-intent",
   guildScope: "guild-scope",
+  guildExpressionAuditPolicy: "guild-expression-audit-policy",
+  guildExpressionChangePolicy: "guild-expression-change-policy",
   gatewayPolicy: "gateway-policy",
   guildScaffoldPolicy: "guild-scaffold-policy",
   interactionPolicy: "interaction-policy",
@@ -258,6 +260,19 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowWebhookDeletions && config.webhookChannelIds.size === 0) {
     warnings.push("The webhook-deletion toggle is enabled but deletion remains blocked because an exact channel allowlist is required")
   }
+  if (config.allowGuildExpressionAudit && config.guildExpressionGuildIds.size === 0) {
+    warnings.push("The guild-expression audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowGuildExpressionChanges && config.guildExpressionGuildIds.size === 0) {
+    warnings.push("The guild-expression change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (
+    config.allowGuildExpressionChanges
+    && config.guildExpressionGuildIds.size > 0
+    && config.guildExpressionRoots.length === 0
+  ) {
+    warnings.push("Guild-expression updates and deletions are enabled, but creation remains blocked because no canonical local roots are configured")
+  }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [config.allowAttachments, "attachments", "Attachment messages"],
@@ -266,6 +281,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
+    [
+      config.allowGuildExpressionAudit || config.allowGuildExpressionChanges,
+      "guild-expressions",
+      "Guild expression audit and changes",
+    ],
     [config.allowInteractions, "interactions", "Message interactions"],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowPinManagement, "pins", "Message pin management"],
@@ -644,6 +664,50 @@ export async function diagnoseConnector(
         `Reviewed Incoming-webhook deletion is constrained to ${config.webhookChannelIds.size} exact channels with one-shot execution and absence readback`,
       ))
     }
+    if (!config.allowGuildExpressionAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionAuditPolicy,
+        "pass",
+        "Privacy-safe guild emoji and sticker inventory is disabled",
+      ))
+    } else if (config.guildExpressionGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionAuditPolicy,
+        "warn",
+        "Guild-expression audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionAuditPolicy,
+        "pass",
+        `Privacy-safe guild emoji and sticker inventory is constrained to ${config.guildExpressionGuildIds.size} exact guilds`,
+      ))
+    }
+    if (!config.allowGuildExpressionChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionChangePolicy,
+        "pass",
+        "Reviewed guild emoji and sticker changes are disabled",
+      ))
+    } else if (config.guildExpressionGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionChangePolicy,
+        "warn",
+        "Guild-expression changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else if (config.guildExpressionRoots.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionChangePolicy,
+        "warn",
+        `Reviewed guild-expression updates and deletions are constrained to ${config.guildExpressionGuildIds.size} exact guilds, but creation is blocked because canonical local roots are empty`,
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildExpressionChangePolicy,
+        "pass",
+        `Reviewed guild-expression changes are constrained to ${config.guildExpressionGuildIds.size} exact guilds and ${config.guildExpressionRoots.length} canonical creation roots with one-shot execution and exact metadata or absence readback`,
+      ))
+    }
     checks.push(config.allowGateway
       ? check(
         DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -806,6 +870,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowGuildScaffolds,
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
+    ENVIRONMENT_NAMES.allowGuildExpressionAudit,
+    ENVIRONMENT_NAMES.allowGuildExpressionChanges,
+    ENVIRONMENT_NAMES.guildExpressionGuildIds,
+    ENVIRONMENT_NAMES.guildExpressionRoots,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowPinManagement,

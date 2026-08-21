@@ -17,6 +17,7 @@ import {
   type ChannelPermissionOverwriteActivity,
   type DeletionActivity,
   type ForumPostActivity,
+  type GuildExpressionActivity,
   type InteractionActivity,
   type MemberModerationActivity,
   type MessagePinActivity,
@@ -230,6 +231,36 @@ function webhookDeletion(
         ? "drift"
         : null,
     webhookId: "300",
+  }
+}
+
+function guildExpression(
+  id: string,
+  status: GuildExpressionActivity["status"],
+): GuildExpressionActivity {
+  return {
+    action: "create",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    expressionId: ["completed", "completed-with-drift", "uncertain"]
+      .includes(status)
+      ? "300"
+      : null,
+    expressionKind: "emoji",
+    guildId: "100",
+    id,
+    kind: "guild-expression-change",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
   }
 }
 
@@ -642,6 +673,77 @@ test("JSONL activity log keeps webhook deletion evidence credential-free", async
       "timestamp",
       "verification",
       "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps guild expression evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-description",
+    "private-expression-name",
+    "private-file-path",
+    "private-image-bytes",
+    "private-operation-key",
+    "private-sticker-tags",
+    "private-uploader-profile",
+  ]
+
+  await store.append(guildExpression("1", "pending"))
+  await store.append({
+    ...guildExpression("2", "completed"),
+    auditReason: privateValues[0],
+    description: privateValues[1],
+    name: privateValues[2],
+    filePath: privateValues[3],
+    imageBytes: privateValues[4],
+    operationKey: privateValues[5],
+    tags: privateValues[6],
+    uploaderProfile: privateValues[7],
+  } as GuildExpressionActivity)
+  await store.append({
+    ...guildExpression("4", "completed"),
+    error: "OperationStoreError",
+  })
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildExpression("3", "completed"),
+      expressionId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["4", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.error, "OperationStoreError")
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "error",
+      "expressionId",
+      "expressionKind",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
     ],
   )
   for (const value of privateValues) {
