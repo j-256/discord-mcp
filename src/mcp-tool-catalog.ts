@@ -56,6 +56,7 @@ type McpToolWorkflow =
   | "role-creation"
   | "role-configuration"
   | "scheduled-event-change"
+  | "thread-creation"
   | "webhook-deletion"
 
 interface ToolCatalogMetadata {
@@ -118,6 +119,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "execute", "forum", "post", "thread"],
     toolset: "forum-posts",
     workflow: "forum-post",
+  },
+  execute_thread_creation: {
+    keywords: ["create", "execute", "private", "public", "thread"],
+    toolset: "threads",
+    workflow: "thread-creation",
   },
   execute_guild_scaffold: {
     keywords: ["blueprint", "category", "channel", "create", "guild", "role", "scaffold"],
@@ -375,6 +381,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "forum", "plan", "post", "review", "thread"],
     toolset: "forum-posts",
     workflow: "forum-post",
+  },
+  plan_thread_creation: {
+    keywords: ["create", "plan", "private", "public", "review", "thread"],
+    toolset: "threads",
+    workflow: "thread-creation",
   },
   plan_guild_scaffold: {
     keywords: ["blueprint", "category", "channel", "guild", "plan", "review", "role", "scaffold"],

@@ -22,6 +22,7 @@ import {
 } from "../src/discord-client.js"
 import {
   ConfigurationError,
+  DiscordApiError,
   InteractionRateLimitError,
   PolicyError,
 } from "../src/errors.js"
@@ -208,6 +209,7 @@ function serviceFixture(overrides: {
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
   roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
+  threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
 } = {}) {
   const calls = {
@@ -305,6 +307,12 @@ function serviceFixture(overrides: {
     },
     async createPoll() {
       throw new Error("Unexpected poll creation")
+    },
+    async createThreadFromMessage() {
+      throw new Error("Unexpected anchored thread creation")
+    },
+    async createThreadWithoutMessage() {
+      throw new Error("Unexpected standalone thread creation")
     },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
@@ -610,6 +618,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.scheduledEventOptions
         ? { scheduledEventOptions: overrides.scheduledEventOptions }
+        : {}),
+      ...(overrides.threadCreationOptions
+        ? { threadCreationOptions: overrides.threadCreationOptions }
         : {}),
       ...(overrides.webhookOptions
         ? { webhookOptions: overrides.webhookOptions }
@@ -2083,6 +2094,125 @@ test("service pins identity through reviewed forum creation without persisting i
     FORUM_TAG_ID,
     "Private tag name",
     "Private forum name",
+  ]) {
+    assert.equal(persisted.includes(privateValue), false)
+  }
+})
+
+test("service pins identity through reviewed anchored thread creation", async () => {
+  const operationStore = new MemoryOperationStore()
+  const name = "Private reviewed thread name"
+  const auditReason = "Private reviewed thread reason"
+  const operationKey = "thread-service-attempt-0001"
+  const parent = channel({
+    default_auto_archive_duration: 1_440,
+    default_thread_rate_limit_per_user: 0,
+    name: "Private parent name",
+    permission_overwrites: [],
+  })
+  const createdThread = thread(MESSAGE_ID, CHANNEL_ID, {
+    name,
+    owner_id: BOT_ID,
+    rate_limit_per_user: 30,
+  })
+  const source = message({
+    attachments: [],
+    content: "Private source content",
+    id: MESSAGE_ID,
+  })
+  let created = false
+  let createCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async createThreadFromMessage(channelId, messageId, input, reason) {
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(messageId, MESSAGE_ID)
+        assert.equal(reason, auditReason)
+        assert.deepEqual(input, {
+          autoArchiveDuration: 1_440,
+          name,
+          rateLimitPerUser: 30,
+        })
+        createCalls += 1
+        created = true
+        return createdThread
+      },
+      async getChannel(channelId) {
+        if (channelId === CHANNEL_ID) return parent
+        assert.equal(channelId, MESSAGE_ID)
+        if (created) return createdThread
+        throw new DiscordApiError({
+          message: "Missing channel",
+          method: "GET",
+          route: "/channels/:channel",
+          status: 404,
+        })
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.CREATE_PUBLIC_THREADS,
+          "@everyone",
+        )]
+      },
+      async getMessage(channelId, messageId) {
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(messageId, MESSAGE_ID)
+        return source
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+      DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+    },
+    operationStore,
+    threadCreationOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(29),
+      randomId: () => "activity-thread-create",
+    },
+  })
+  const request = {
+    auditReason,
+    autoArchiveDuration: 1_440,
+    mode: "from-message" as const,
+    name,
+    operationKey,
+    parentChannelId: CHANNEL_ID,
+    rateLimitPerUser: 30,
+    sourceMessageId: MESSAGE_ID,
+  }
+
+  const plan = await service.planThreadCreation(request)
+  const result = await service.executeThreadCreation(request, plan.digest)
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.threadId, MESSAGE_ID)
+  assert.equal(result.verification, "match")
+  assert.equal(createCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "thread-create")
+  assert.equal(operationStore.receipt?.resourceId, MESSAGE_ID)
+  const persisted = JSON.stringify({
+    activity: calls.activityEntries,
+    receipt: operationStore.receipt,
+  })
+  for (const privateValue of [
+    name,
+    auditReason,
+    operationKey,
+    "Private source content",
+    "Private parent name",
   ]) {
     assert.equal(persisted.includes(privateValue), false)
   }

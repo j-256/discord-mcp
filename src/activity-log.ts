@@ -16,9 +16,11 @@ import {
   MEMBER_ROLE_ACTIONS,
   MEMBER_MODERATION_ACTIONS,
   SCHEMA_VERSION,
+  THREAD_CREATION_MODES,
   type ChannelCreationKind,
   type MemberModerationAction,
   type MemberRoleAction,
+  type ThreadCreationMode,
 } from "./constants.js"
 import { AuditLogError, errorMessage } from "./errors.js"
 import { OPERATION_KEY_HASH_PATTERN } from "./operation-store.js"
@@ -282,6 +284,30 @@ export interface ForumPostActivity {
   verification: "drift" | "match" | null
 }
 
+export type ThreadCreationActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ThreadCreationActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "thread-create"
+  mode: ThreadCreationMode
+  operationKeyHash: string
+  parentChannelId: string
+  planDigest: string
+  schemaVersion: number
+  sourceMessageId: string | null
+  status: ThreadCreationActivityStatus
+  threadId: string | null
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type MessagePinActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -482,6 +508,7 @@ export type ActivityEntry =
   | RoleCreationActivity
   | RoleConfigurationActivity
   | ScheduledEventActivity
+  | ThreadCreationActivity
   | WebhookDeletionActivity
 
 export interface ActivityList {
@@ -1748,10 +1775,99 @@ function parseForumPostActivity(value: unknown): ForumPostActivity | undefined {
   }
 }
 
+function parseThreadCreationActivity(
+  value: unknown,
+): ThreadCreationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const mode = record.mode as ThreadCreationMode
+  const sourceMessageIdValid = mode === "from-message"
+    ? typeof record.sourceMessageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.sourceMessageId)
+    : record.sourceMessageId === null
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "thread-create"
+    || !THREAD_CREATION_MODES.includes(mode)
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.parentChannelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.parentChannelId)
+    || !sourceMessageIdValid
+    || !(record.threadId === null || (
+      typeof record.threadId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.threadId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.threadId !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.threadId === null
+      || record.verification !== "match"
+      || record.error !== null
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.threadId === null
+      || record.verification !== "drift"
+      || record.error !== null
+    ))
+    || (record.status === "failed" && (
+      record.threadId !== null
+      || record.error === null
+      || record.verification !== null
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "thread-create",
+    mode,
+    operationKeyHash: record.operationKeyHash,
+    parentChannelId: record.parentChannelId,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    sourceMessageId: record.sourceMessageId as string | null,
+    status: record.status as ThreadCreationActivityStatus,
+    threadId: record.threadId as string | null,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAttachmentMessageActivity(value)
     || parseAutoModerationActivity(value)
     || parseForumPostActivity(value)
+    || parseThreadCreationActivity(value)
     || parseChannelCreationActivity(value)
     || parseChannelMetadataActivity(value)
     || parseChannelPermissionOverwriteActivity(value)

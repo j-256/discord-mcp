@@ -3,6 +3,8 @@ import test from "node:test"
 
 import {
   type CreateForumPostInput,
+  type CreateThreadFromMessageInput,
+  type CreateThreadWithoutMessageInput,
   DiscordClient,
 } from "../src/discord-client.js"
 import {
@@ -1333,6 +1335,136 @@ test("Discord client rejects invalid forum-post inputs before fetching", () => {
     /input must be an object/,
   )
   assert.throws(() => client.createForumPost("200", valid, ""), /must not be blank/)
+  assert.equal(requests, 0)
+})
+
+test("Discord client sends exact non-retried anchored and standalone thread contracts", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({
+        guild_id: "100",
+        id: requests.length === 1 ? "300" : "301",
+        name: requests.length === 1 ? "Anchored" : "Private",
+        owner_id: "400",
+        parent_id: "200",
+        type: requests.length === 1 ? 11 : 12,
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.createThreadFromMessage("200", "300", {
+    autoArchiveDuration: 1_440,
+    name: "Anchored",
+    rateLimitPerUser: 15,
+  }, "Reviewed anchored thread")
+  await client.createThreadWithoutMessage("200", {
+    autoArchiveDuration: 4_320,
+    invitable: false,
+    name: "Private",
+    rateLimitPerUser: 30,
+    type: 12,
+  }, "Reviewed private thread")
+
+  assert.deepEqual(requests, [{
+    body: {
+      auto_archive_duration: 1_440,
+      name: "Anchored",
+      rate_limit_per_user: 15,
+    },
+    method: "POST",
+    reason: "Reviewed%20anchored%20thread",
+    url: `${API_BASE_URL}/channels/200/messages/300/threads`,
+  }, {
+    body: {
+      auto_archive_duration: 4_320,
+      invitable: false,
+      name: "Private",
+      rate_limit_per_user: 30,
+      type: 12,
+    },
+    method: "POST",
+    reason: "Reviewed%20private%20thread",
+    url: `${API_BASE_URL}/channels/200/threads`,
+  }])
+  assert.deepEqual(records.map((record) => record.operation), [
+    "create_thread_from_message",
+    "create_thread_without_message",
+  ])
+  assert.equal(records.every((record) => record.retries === 0), true)
+})
+
+test("Discord client validates exact thread inputs before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const anchored: CreateThreadFromMessageInput = {
+    autoArchiveDuration: 1_440,
+    name: "Reviewed",
+    rateLimitPerUser: 0,
+  }
+  const standalone: CreateThreadWithoutMessageInput = {
+    ...anchored,
+    type: 11,
+  }
+
+  assert.throws(
+    () => client.createThreadFromMessage("bad", "300", anchored, "reviewed"),
+    /parent channel ID/,
+  )
+  assert.throws(
+    () => client.createThreadFromMessage("200", "bad", anchored, "reviewed"),
+    /source message ID/,
+  )
+  assert.throws(
+    () => client.createThreadFromMessage("200", "300", { ...anchored, name: " reviewed" }, "reviewed"),
+    /thread name/,
+  )
+  assert.throws(
+    () => client.createThreadFromMessage("200", "300", { ...anchored, autoArchiveDuration: 30 }, "reviewed"),
+    /auto-archive/,
+  )
+  assert.throws(
+    () => client.createThreadWithoutMessage("200", { ...standalone, type: 10 }, "reviewed"),
+    /type is not supported/,
+  )
+  assert.throws(
+    () => client.createThreadWithoutMessage("200", { ...standalone, invitable: false }, "reviewed"),
+    /public thread creation does not accept invitable/,
+  )
+  assert.throws(
+    () => client.createThreadWithoutMessage("200", { ...standalone, type: 12 }, "reviewed"),
+    /requires explicit invitable/,
+  )
+  assert.throws(
+    () => client.createThreadWithoutMessage(
+      "200",
+      null as unknown as CreateThreadWithoutMessageInput,
+      "reviewed",
+    ),
+    /input must be an object/,
+  )
   assert.equal(requests, 0)
 })
 

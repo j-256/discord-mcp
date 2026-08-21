@@ -355,6 +355,20 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_ALLOW_THREAD_CREATION",
+          "description": "Enable reviewed message-anchored, standalone public, and standalone private thread creation when an exact parent-channel allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_THREAD_PARENT_IDS",
+          "description": "Exact stable text or announcement parent channel IDs eligible for reviewed thread creation",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
           "description": "Enable reviewed resumable additive guild scaffolds when an exact guild allowlist is also set",
           "default": "false",

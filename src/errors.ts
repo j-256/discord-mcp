@@ -234,6 +234,42 @@ export class ForumPostEvidenceError extends Error {
   override name = "ForumPostEvidenceError"
 }
 
+export class ThreadCreationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord thread snapshot does not match the reviewed creation plan")
+    this.name = "ThreadCreationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ThreadCreationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord thread-creation operation key has already been reserved")
+    this.name = "ThreadCreationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ThreadCreationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ThreadCreationExecutionError"
+    this.result = result
+  }
+}
+
+export class ThreadCreationEvidenceError extends Error {
+  override name = "ThreadCreationEvidenceError"
+}
+
 export class GuildScaffoldPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

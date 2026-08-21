@@ -94,6 +94,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowRoleConfiguration: "DISCORD_MCP_ALLOW_ROLE_CONFIGURATION",
   allowScheduledEventAudit: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
   allowScheduledEventChanges: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES",
+  allowThreadCreation: "DISCORD_MCP_ALLOW_THREAD_CREATION",
   allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
   allowWebhookDeletions: "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
@@ -152,6 +153,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   token: "DISCORD_BOT_TOKEN",
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
   toolsets: "DISCORD_MCP_TOOLSETS",
+  threadParentIds: "DISCORD_MCP_THREAD_PARENT_IDS",
   webhookChannelIds: "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
 })
 
@@ -401,6 +403,14 @@ export const CHANNEL_CREATION_KINDS = [
 ] as const
 
 export type ChannelCreationKind = typeof CHANNEL_CREATION_KINDS[number]
+
+export const THREAD_CREATION_MODES = [
+  "from-message",
+  "standalone-private",
+  "standalone-public",
+] as const
+
+export type ThreadCreationMode = typeof THREAD_CREATION_MODES[number]
 
 export const CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS = [
   60,

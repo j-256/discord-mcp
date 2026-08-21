@@ -80,6 +80,8 @@ export interface PolicyDescription {
   scheduledEventCoverChangesEnabled: boolean
   scheduledEventGuildIds: string[]
   scheduledEventRootCount: number
+  threadCreationEnabled: boolean
+  threadParentIds: string[]
   webhookAuditEnabled: boolean
   webhookChannelIds: string[]
   webhookDeletionsEnabled: boolean
@@ -128,6 +130,7 @@ export class ScopePolicy {
   readonly #allowRoleConfiguration: boolean
   readonly #allowScheduledEventAudit: boolean
   readonly #allowScheduledEventChanges: boolean
+  readonly #allowThreadCreation: boolean
   readonly #allowWebhookAudit: boolean
   readonly #allowWebhookDeletions: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
@@ -163,6 +166,7 @@ export class ScopePolicy {
   readonly #roleConfigurationIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
+  readonly #threadParentIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
 
   constructor(config: Pick<
@@ -208,6 +212,7 @@ export class ScopePolicy {
     | "allowRoleConfiguration"
     | "allowScheduledEventAudit"
     | "allowScheduledEventChanges"
+    | "allowThreadCreation"
     | "allowWebhookAudit"
     | "allowWebhookDeletions"
     | "channelCreationGuildIds"
@@ -237,6 +242,7 @@ export class ScopePolicy {
     | "roleConfigurationIds"
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
+    | "threadParentIds"
     | "webhookChannelIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
@@ -272,6 +278,7 @@ export class ScopePolicy {
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
     this.#allowScheduledEventChanges = config.allowScheduledEventChanges ?? false
+    this.#allowThreadCreation = config.allowThreadCreation ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
     this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
     this.#deleteChannelIds = config.deleteChannelIds
@@ -308,6 +315,7 @@ export class ScopePolicy {
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
+    this.#threadParentIds = config.threadParentIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
   }
 
@@ -420,6 +428,9 @@ export class ScopePolicy {
         && this.#scheduledEventRoots.length > 0,
       scheduledEventGuildIds: [...this.#scheduledEventGuildIds].sort(),
       scheduledEventRootCount: this.#scheduledEventRoots.length,
+      threadCreationEnabled: this.#allowThreadCreation
+        && this.#threadParentIds.size > 0,
+      threadParentIds: [...this.#threadParentIds].sort(),
       webhookAuditEnabled: this.#allowWebhookAudit
         && this.#webhookChannelIds.size > 0,
       webhookChannelIds: [...this.#webhookChannelIds].sort(),
@@ -886,6 +897,20 @@ export class ScopePolicy {
     }
     if (!this.#forumPostChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the forum-post scope`)
+    }
+    return guildId
+  }
+
+  assertThreadCreatable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowThreadCreation) {
+      throw new PolicyError("Discord thread creation is disabled by connector configuration")
+    }
+    if (this.#threadParentIds.size === 0) {
+      throw new PolicyError("Discord thread creation requires an explicit parent-channel allowlist")
+    }
+    if (!this.#threadParentIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the thread-creation scope`)
     }
     return guildId
   }

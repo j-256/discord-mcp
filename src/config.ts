@@ -64,6 +64,7 @@ export interface ConnectorConfig {
   allowRoleConfiguration: boolean
   allowScheduledEventAudit: boolean
   allowScheduledEventChanges: boolean
+  allowThreadCreation: boolean
   allowWebhookAudit: boolean
   allowWebhookDeletions: boolean
   auditFile: string
@@ -104,6 +105,7 @@ export interface ConnectorConfig {
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
   token: string
+  threadParentIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
 }
 
@@ -315,6 +317,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.forumPostChannelIds],
     ENVIRONMENT_NAMES.forumPostChannelIds,
   )
+  const threadParentIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.threadParentIds],
+    ENVIRONMENT_NAMES.threadParentIds,
+  )
   const mentionUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.mentionUserIds],
     ENVIRONMENT_NAMES.mentionUserIds,
@@ -404,6 +410,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
+    [ENVIRONMENT_NAMES.threadParentIds, threadParentIds],
     [ENVIRONMENT_NAMES.webhookChannelIds, webhookChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
@@ -615,6 +622,10 @@ export function loadConnectorConfig(
     ),
     allowScheduledEventAudit,
     allowScheduledEventChanges,
+    allowThreadCreation: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowThreadCreation],
+      ENVIRONMENT_NAMES.allowThreadCreation,
+    ),
     allowWebhookAudit,
     allowWebhookDeletions,
     auditFile: auditFile(
@@ -698,6 +709,7 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.scheduledEventRoots,
     ),
     token,
+    threadParentIds,
     webhookChannelIds,
   }
 }

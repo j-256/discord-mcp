@@ -141,6 +141,8 @@ import {
   RoleConfigurationOperationConflictError,
   ScheduledEventExecutionError,
   ScheduledEventOperationConflictError,
+  ThreadCreationExecutionError,
+  ThreadCreationOperationConflictError,
   WebhookDeletionExecutionError,
   WebhookDeletionOperationConflictError,
 } from "../src/errors.js"
@@ -169,6 +171,10 @@ import {
 import type { PolicyDescription } from "../src/policy.js"
 import type { DiscordChannel, DiscordMessage } from "../src/types.js"
 import type {
+  ThreadCreationPlan,
+  ThreadCreationRequest,
+} from "../src/thread-creation-service.js"
+import type {
   ProjectedWebhook,
   WebhookDeletionPlan,
   WebhookDeletionRequest,
@@ -195,6 +201,7 @@ const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
+const THREAD_CREATION_OPERATION_KEY = "thread-create-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
@@ -1797,6 +1804,103 @@ function forumPostPlan(
   }
 }
 
+function threadCreationPlan(
+  request: ThreadCreationRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): ThreadCreationPlan {
+  const sourceMessageId = request.mode === "from-message"
+    ? request.sourceMessageId as string
+    : null
+  const threadType = request.mode === "standalone-private" ? 12 : 11
+  const requiredPermission = request.mode === "standalone-private"
+    ? "CREATE_PRIVATE_THREADS" as const
+    : "CREATE_PUBLIC_THREADS" as const
+  const requiredPermissionNames = [
+    "VIEW_CHANNEL" as const,
+    ...(request.mode === "from-message" ? ["READ_MESSAGE_HISTORY" as const] : []),
+    requiredPermission,
+  ]
+  const permissionBits = requiredPermissionNames.reduce(
+    (bits, name) => bits | DISCORD_PERMISSIONS[name],
+    0n,
+  )
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    digest,
+    existingThread: writeRequired ? null : {
+      archived: false,
+      autoArchiveDuration: 1_440,
+      id: sourceMessageId as string,
+      invitable: null,
+      locked: false,
+      name: "Existing thread",
+      ownerId: USER_ID,
+      rateLimitPerUser: 0,
+      type: threadType,
+      url: `https://discord.com/channels/${GUILD_ID}/${sourceMessageId}`,
+    },
+    guild: { id: GUILD_ID, name: "Guild", ownerId: USER_ID },
+    operationKeyHash: OPERATION_KEY_HASH,
+    parent: {
+      defaultAutoArchiveDuration: 1_440,
+      defaultThreadRateLimitPerUser: 0,
+      guildId: GUILD_ID,
+      id: request.parentChannelId,
+      name: "support",
+      type: 0,
+    },
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: requiredPermissionNames,
+      effectivePermissions: permissionBits.toString(),
+      requiredPermissionNames,
+    },
+    privacy: {
+      durableRecords: "content-free-only",
+      sourceMessage: sourceMessageId ? "transient-review-only" : "not-fetched",
+    },
+    risks: writeRequired
+      ? ["The creation POST is not automatically retried"]
+      : ["The source already owns a thread"],
+    schemaVersion: 1,
+    sourceMessage: sourceMessageId ? {
+      attachmentFilenames: ["private.txt"],
+      author: {
+        bot: false,
+        globalName: null,
+        id: USER_ID,
+        username: "private-author",
+      },
+      contentLength: 22,
+      contentPreview: "Private source content",
+      editedTimestamp: null,
+      id: sourceMessageId,
+      timestamp: "2026-08-21T00:00:00.000Z",
+      truncated: false,
+    } : null,
+    status: writeRequired ? "planned" : "source-already-threaded",
+    target: {
+      auditReason: request.auditReason,
+      autoArchiveDuration: request.autoArchiveDuration ?? 1_440,
+      invitable: request.mode === "standalone-private"
+        ? request.invitable ?? false
+        : null,
+      mode: request.mode,
+      name: request.name,
+      parentChannelId: request.parentChannelId,
+      rateLimitPerUser: request.rateLimitPerUser ?? 0,
+      sourceMessageId,
+      threadType,
+    },
+    warnings: ["One-shot reviewed thread creation"],
+    writeRequired,
+  }
+}
+
 function normalizedCreatedRole(
   request: RoleCreationRequest,
 ): NormalizedDiscordRole {
@@ -2316,6 +2420,8 @@ function fixturePolicy(): PolicyDescription {
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
     readGuildScope: "all-visible",
+    threadCreationEnabled: false,
+    threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
@@ -2374,6 +2480,9 @@ function serviceFixture(overrides: {
   scheduledEventEffect?: "change" | "none"
   scheduledEventError?: Error
   scheduledEventPlanDigest?: string
+  threadCreationError?: Error
+  threadCreationPlanDigest?: string
+  threadCreationWriteRequired?: boolean
   webhookDeletionError?: Error
   webhookDeletionPlanDigest?: string
 } = {}) {
@@ -2446,6 +2555,8 @@ function serviceFixture(overrides: {
     scheduledEventPlan: 0,
     search: 0,
     send: 0,
+    threadCreationExecute: 0,
+    threadCreationPlan: 0,
     webhookDeletionExecute: 0,
     webhookDeletionGet: 0,
     webhookDeletionList: 0,
@@ -3012,6 +3123,35 @@ function serviceFixture(overrides: {
         threadId: MESSAGE_ID,
         url: `https://discord.com/channels/${GUILD_ID}/${MESSAGE_ID}/${MESSAGE_ID}`,
         verification: "match",
+      }
+    },
+    async executeThreadCreation(request, planDigest) {
+      if (overrides.threadCreationError) throw overrides.threadCreationError
+      calls.threadCreationExecute += 1
+      const planned = threadCreationPlan(
+        request,
+        planDigest,
+        overrides.threadCreationWriteRequired ?? true,
+      )
+      const threadId = request.sourceMessageId ?? MESSAGE_ID
+      return {
+        activityId: planned.writeRequired ? "activity-thread-create" : null,
+        driftFields: [],
+        guildId: GUILD_ID,
+        mode: request.mode,
+        operationKeyHash: OPERATION_KEY_HASH,
+        parentChannelId: request.parentChannelId,
+        planDigest,
+        readbackMatched: true,
+        recoveredFromAmbiguousResponse: false,
+        responseMatched: planned.writeRequired ? true : null,
+        schemaVersion: 1,
+        sourceMessageId: request.sourceMessageId ?? null,
+        status: planned.writeRequired ? "completed" : "source-already-threaded",
+        threadId,
+        url: `https://discord.com/channels/${GUILD_ID}/${threadId}`,
+        verification: planned.writeRequired ? "match" : "not-required",
+        writeRequired: planned.writeRequired,
       }
     },
     async executeGuildScaffold(request, planDigest) {
@@ -3678,6 +3818,14 @@ function serviceFixture(overrides: {
         overrides.forumPostPlanDigest || DIGEST,
       )
     },
+    async planThreadCreation(request) {
+      calls.threadCreationPlan += 1
+      return threadCreationPlan(
+        request,
+        overrides.threadCreationPlanDigest || DIGEST,
+        overrides.threadCreationWriteRequired ?? true,
+      )
+    },
     async planGuildScaffold(request) {
       calls.guildScaffoldPlan += 1
       return guildScaffoldPlan(
@@ -3969,6 +4117,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_channel_creation",
       "plan_forum_post",
       "execute_forum_post",
+      "plan_thread_creation",
+      "execute_thread_creation",
       "plan_attachment_message",
       "execute_attachment_message",
       "plan_guild_scaffold",
@@ -4065,6 +4215,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_message_pin",
     "plan_poll_creation",
     "plan_poll_end",
+    "plan_thread_creation",
     "plan_member_role_change",
     "plan_webhook_deletion",
     "plan_invite_deletion",
@@ -4111,6 +4262,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     tool.name === "execute_forum_post"
   ))
   assert.deepEqual(forumPost?.annotations, {
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const threadCreation = result.tools.find((tool) => (
+    tool.name === "execute_thread_creation"
+  ))
+  assert.deepEqual(threadCreation?.annotations, {
     destructiveHint: false,
     idempotentHint: false,
     openWorldHint: true,
@@ -4429,6 +4589,30 @@ test("progressive discovery enables the complete reviewed forum-post workflow", 
     [
       "plan_forum_post",
       "execute_forum_post",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed thread-creation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_thread_creation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_thread_creation",
+    "plan_thread_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_thread_creation",
+      "execute_thread_creation",
       "discover_discord_tools",
     ],
   )
@@ -4959,6 +5143,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     scheduledEventPlan: 0,
     search: 0,
     send: 0,
+    threadCreationExecute: 0,
+    threadCreationPlan: 0,
     webhookDeletionExecute: 0,
     webhookDeletionGet: 0,
     webhookDeletionList: 0,
@@ -8966,6 +9152,241 @@ test("MCP forum posts expose uncertain and one-shot conflict outcomes safely", a
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(FORUM_POST_OPERATION_KEY),
+  )
+})
+
+test("MCP thread creation validates exact mode-specific requests", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const anchored = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "from-message",
+      name: "Reviewed source thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+    },
+    name: "plan_thread_creation",
+  })
+  const privateThread = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "standalone-private",
+      name: "Reviewed private thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+    },
+    name: "plan_thread_creation",
+  })
+  const invalidSource = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "standalone-public",
+      name: "Invalid public thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+    },
+    name: "plan_thread_creation",
+  })
+  const invalidInvitable = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      invitable: true,
+      mode: "from-message",
+      name: "Invalid anchored thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+    },
+    name: "plan_thread_creation",
+  })
+
+  assert.equal(structuredContent(anchored).status, "planned")
+  assert.equal(
+    (structuredContent(privateThread).target as Record<string, unknown>).invitable,
+    false,
+  )
+  assert.equal(invalidSource.isError, true)
+  assert.equal(invalidInvitable.isError, true)
+  assert.equal(calls.threadCreationPlan, 2)
+})
+
+test("MCP thread creation binds signed approval to source, settings, and digest", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      autoArchiveDuration: 4_320,
+      mode: "from-message",
+      name: "Reviewed source thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      planDigest: DIGEST,
+      rateLimitPerUser: 30,
+      sourceMessageId: MESSAGE_ID,
+    },
+    name: "execute_thread_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.threadCreationPlan, 1)
+  assert.equal(calls.threadCreationExecute, 1)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Private source content/)
+  assert.match(confirmationMessage, /Reviewed source thread/)
+  assert.match(confirmationMessage, /Auto-archive minutes: 4320/)
+  assert.match(confirmationMessage, /Thread slowmode seconds: 30/)
+  assert.match(confirmationMessage, /Required bot permissions/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(THREAD_CREATION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(THREAD_CREATION_OPERATION_KEY),
+  )
+})
+
+test("MCP existing source threads skip approval while refusal and plan drift stop writes", async (context) => {
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { threadCreationWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "from-message",
+      name: "Ignored settings",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      planDigest: DIGEST,
+      sourceMessageId: MESSAGE_ID,
+    },
+    name: "execute_thread_creation",
+  })
+  assert.equal(structuredContent(noOpResult).status, "source-already-threaded")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.threadCreationExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "standalone-public",
+      name: "Declined thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      planDigest: DIGEST,
+    },
+    name: "execute_thread_creation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.threadCreationExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { threadCreationPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "standalone-private",
+      name: "Changed thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      planDigest: DIGEST,
+    },
+    name: "execute_thread_creation",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.threadCreationExecute, 0)
+})
+
+test("MCP thread creation exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      threadCreationError: new ThreadCreationExecutionError(
+        "Discord thread-creation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "standalone-private",
+      name: "Uncertain thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      planDigest: DIGEST,
+    },
+    name: "execute_thread_creation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-thread-create",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    threadId: MESSAGE_ID,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      threadCreationError: new ThreadCreationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      mode: "standalone-public",
+      name: "Conflict thread",
+      operationKey: THREAD_CREATION_OPERATION_KEY,
+      parentChannelId: CHANNEL_ID,
+      planDigest: DIGEST,
+    },
+    name: "execute_thread_creation",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(THREAD_CREATION_OPERATION_KEY),
   )
 })
 

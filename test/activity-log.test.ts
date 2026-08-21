@@ -30,6 +30,7 @@ import {
   type RoleCreationActivity,
   type RoleConfigurationActivity,
   type ScheduledEventActivity,
+  type ThreadCreationActivity,
   type WebhookDeletionActivity,
 } from "../src/activity-log.js"
 
@@ -292,6 +293,36 @@ function forumPost(
     schemaVersion: 1,
     status,
     threadId: hasThread ? "300" : null,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function threadCreation(
+  id: string,
+  status: ThreadCreationActivity["status"],
+): ThreadCreationActivity {
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "thread-create",
+    mode: "from-message",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    parentChannelId: "200",
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    sourceMessageId: "300",
+    status,
+    threadId: ["completed", "completed-with-drift", "uncertain"].includes(status)
+      ? "300"
+      : null,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -912,6 +943,45 @@ test("JSONL activity log strips forum-post intent and rejects mismatched starter
   assert.doesNotMatch(
     JSON.stringify(result),
     /private-tag|private audit|private starter|private forum|private user|private-operation/,
+  )
+})
+
+test("JSONL activity log keeps thread-creation evidence content-free and mode exact", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...threadCreation("1", "pending"),
+    auditReason: "must never reach disk",
+    name: "must-not-persist",
+    sourceContent: "must-not-persist",
+  } as ThreadCreationActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...threadCreation("2", "completed-with-drift"),
+      auditReason: "private reason",
+      name: "private thread name",
+      operationKey: "private-operation-key",
+      sourceProfile: "private profile",
+    })}\n${JSON.stringify({
+      ...threadCreation("3", "completed"),
+      mode: "standalone-public",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "thread-create")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private reason|private thread|private-operation|private profile/,
   )
 })
 

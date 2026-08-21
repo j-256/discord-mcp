@@ -797,6 +797,17 @@ export interface CreateForumPostInput {
   rateLimitPerUser?: number
 }
 
+export interface CreateThreadFromMessageInput {
+  autoArchiveDuration: number
+  name: string
+  rateLimitPerUser: number
+}
+
+export interface CreateThreadWithoutMessageInput extends CreateThreadFromMessageInput {
+  invitable?: boolean
+  type: number
+}
+
 export interface EditMessageInput {
   allowedMentions: DiscordAllowedMentions
   content: string
@@ -3270,6 +3281,59 @@ function assertCreateForumPostInput(input: CreateForumPostInput): void {
   assertAllowedMentions(input.allowedMentions)
 }
 
+function assertCreateThreadFromMessageInput(
+  input: CreateThreadFromMessageInput,
+): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord anchored thread input must be an object")
+  }
+  if (
+    typeof input.name !== "string"
+    || input.name.length < 1
+    || input.name.length > DISCORD_LIMITS.channelNameCharacters
+    || input.name.trim() !== input.name
+    || CHANNEL_NAME_CONTROL_PATTERN.test(input.name)
+  ) {
+    throw new RangeError(
+      `Discord thread name must contain 1-${DISCORD_LIMITS.channelNameCharacters} characters without surrounding whitespace or controls`,
+    )
+  }
+  assertValidUnicode(input.name, "Discord thread name")
+  if (
+    !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[])
+      .includes(input.autoArchiveDuration)
+  ) {
+    throw new RangeError("Discord thread auto-archive duration is not supported")
+  }
+  assertIntegerRange(
+    input.rateLimitPerUser,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+    "Discord thread slowmode seconds",
+  )
+}
+
+function assertCreateThreadWithoutMessageInput(
+  input: CreateThreadWithoutMessageInput,
+): void {
+  assertCreateThreadFromMessageInput(input)
+  if (
+    input.type !== DISCORD_CHANNEL_TYPES.publicThread
+    && input.type !== DISCORD_CHANNEL_TYPES.privateThread
+  ) {
+    throw new RangeError("Discord standalone thread type is not supported")
+  }
+  if (input.type === DISCORD_CHANNEL_TYPES.publicThread) {
+    if (input.invitable !== undefined) {
+      throw new RangeError("Discord public thread creation does not accept invitable")
+    }
+    return
+  }
+  if (typeof input.invitable !== "boolean") {
+    throw new RangeError("Discord private thread creation requires explicit invitable state")
+  }
+}
+
 function assertCreateGuildRoleInput(input: CreateGuildRoleInput): void {
   if (
     typeof input.name !== "string"
@@ -4656,6 +4720,62 @@ export class DiscordClient {
         ...(input.rateLimitPerUser !== undefined
           ? { rate_limit_per_user: input.rateLimitPerUser }
           : {}),
+      },
+    })
+  }
+
+  createThreadFromMessage(
+    channelId: string,
+    messageId: string,
+    input: CreateThreadFromMessageInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannel> {
+    assertPositiveSnowflake(channelId, "Discord anchored thread parent channel ID")
+    assertPositiveSnowflake(messageId, "Discord anchored thread source message ID")
+    assertCreateThreadFromMessageInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord thread creation audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request(
+      "create_thread_from_message",
+      `/channels/${channelId}/messages/${messageId}/threads`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          auto_archive_duration: input.autoArchiveDuration,
+          name: input.name,
+          rate_limit_per_user: input.rateLimitPerUser,
+        },
+      },
+    )
+  }
+
+  createThreadWithoutMessage(
+    channelId: string,
+    input: CreateThreadWithoutMessageInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannel> {
+    assertPositiveSnowflake(channelId, "Discord standalone thread parent channel ID")
+    assertCreateThreadWithoutMessageInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord thread creation audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("create_thread_without_message", `/channels/${channelId}/threads`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      body: {
+        auto_archive_duration: input.autoArchiveDuration,
+        ...(input.invitable !== undefined ? { invitable: input.invitable } : {}),
+        name: input.name,
+        rate_limit_per_user: input.rateLimitPerUser,
+        type: input.type,
       },
     })
   }

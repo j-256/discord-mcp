@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 5
+export const OPERATOR_REPORT_SCHEMA_VERSION = 6
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -88,6 +88,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   scheduledEventChangePolicy: "scheduled-event-change-policy",
   token: "token",
   toolSurface: "tool-surface",
+  threadCreationPolicy: "thread-creation-policy",
   webhookAuditPolicy: "webhook-audit-policy",
   webhookDeletionPolicy: "webhook-deletion-policy",
 })
@@ -258,6 +259,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowForumPosts && config.forumPostChannelIds.size === 0) {
     warnings.push("The forum-post toggle is enabled but forum-post creation remains blocked because no forum-channel allowlist is configured")
   }
+  if (config.allowThreadCreation && config.threadParentIds.size === 0) {
+    warnings.push("The thread-creation toggle is enabled but creation remains blocked because no exact parent-channel allowlist is configured")
+  }
   if (
     config.allowAttachments
     && (config.attachmentChannelIds.size === 0 || config.attachmentRoots.length === 0)
@@ -359,6 +363,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowChannelMetadataChanges, "channel-metadata", "Channel metadata changes"],
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
+    [config.allowThreadCreation, "threads", "Reviewed thread creation"],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
     [
@@ -635,6 +640,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.forumPostPolicy,
         "pass",
         `Reviewed forum-post creation is constrained to ${config.forumPostChannelIds.size} exact channels with one-shot execution and exact readback`,
+      ))
+    }
+    if (!config.allowThreadCreation) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadCreationPolicy,
+        "pass",
+        "Reviewed thread creation is disabled",
+      ))
+    } else if (config.threadParentIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadCreationPolicy,
+        "warn",
+        "Thread-creation toggle is enabled, but the required exact parent-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadCreationPolicy,
+        "pass",
+        `Reviewed thread creation is constrained to ${config.threadParentIds.size} exact parents with signed approval, one-shot execution, anchored recovery, and exact readback`,
       ))
     }
     if (!config.allowPinManagement) {
@@ -1318,6 +1342,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
     ENVIRONMENT_NAMES.allowForumPosts,
     ENVIRONMENT_NAMES.forumPostChannelIds,
+    ENVIRONMENT_NAMES.allowThreadCreation,
+    ENVIRONMENT_NAMES.threadParentIds,
     ENVIRONMENT_NAMES.allowInteractions,
     ENVIRONMENT_NAMES.interactionChannelIds,
     ENVIRONMENT_NAMES.mentionUserIds,
@@ -1680,6 +1706,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error("MCP smoke check found invalid execute_forum_post annotations")
+      }
+    }
+    if (selectedToolNames.includes("execute_thread_creation")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_thread_creation"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== false
+        || tool.annotations.idempotentHint !== false
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_thread_creation annotations")
       }
     }
     if (selectedToolNames.includes("execute_poll_creation")) {

@@ -136,6 +136,8 @@ function status(
       roleCreationGuildIds: [],
       roleConfigurationEnabled: false,
       roleConfigurationIds: [],
+      threadCreationEnabled: false,
+      threadParentIds: [],
       webhookAuditEnabled: false,
       webhookChannelIds: [],
       webhookDeletionsEnabled: false,
@@ -198,6 +200,7 @@ function toolService(): DiscordToolService {
     executeChannelMetadataChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
+    executeThreadCreation: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
     executeMessagePin: unexpected,
@@ -235,6 +238,7 @@ function toolService(): DiscordToolService {
     planChannelMetadataChange: unexpected,
     planChannelPermissionOverwrite: unexpected,
     planForumPost: unexpected,
+    planThreadCreation: unexpected,
     planGuildScaffold: unexpected,
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
@@ -538,6 +542,50 @@ test("doctor and setup explain reviewed forum-post scope without Discord writes"
   )
   assert.match(setup.warnings.join("\n"), /forum-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /forum-posts toolset/)
+})
+
+test("doctor and setup explain reviewed thread-creation scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
+      DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
+      DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const threadCreation = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.threadCreationPolicy,
+  )
+  assert.equal(threadCreation?.status, "pass")
+  assert.match(threadCreation?.summary || "", /1 exact parents/)
+  assert.match(threadCreation?.summary || "", /anchored recovery/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.threadCreationPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /parent-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /threads toolset/)
 })
 
 test("doctor and setup explain reviewed message-pin scope without Discord writes", async () => {

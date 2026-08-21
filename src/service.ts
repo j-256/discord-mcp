@@ -232,6 +232,16 @@ import type {
 } from "./scheduled-event-service.js"
 import { ScheduledEventService } from "./scheduled-event-service.js"
 import type {
+  ThreadCreationPlan,
+  ThreadCreationRequest,
+  ThreadCreationResult,
+  ThreadCreationServiceOptions,
+} from "./thread-creation-service.js"
+import {
+  normalizeThreadCreationRequest,
+  ThreadCreationService,
+} from "./thread-creation-service.js"
+import type {
   WebhookDeletionPlan,
   WebhookDeletionRequest,
   WebhookDeletionResult,
@@ -271,6 +281,8 @@ export interface DiscordServiceClient {
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
   createPoll: DiscordClient["createPoll"]
+  createThreadFromMessage: DiscordClient["createThreadFromMessage"]
+  createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
@@ -419,6 +431,10 @@ export interface ConnectorServiceOptions {
   >
   scheduledEventOptions?: Pick<
     ScheduledEventServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  threadCreationOptions?: Pick<
+    ThreadCreationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
@@ -572,6 +588,7 @@ export class ConnectorService {
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
   readonly #scheduledEventService: ScheduledEventService
+  readonly #threadCreationService: ThreadCreationService
   readonly #webhookService: WebhookService
 
   constructor(options: ConnectorServiceOptions) {
@@ -724,6 +741,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.pollOptions,
+    })
+    this.#threadCreationService = new ThreadCreationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.threadCreationOptions,
     })
     this.#guildAuditLogService = new GuildAuditLogService({
       client: this.#client,
@@ -1669,6 +1694,20 @@ export class ConnectorService {
     return this.#forumPostService.plan(identity.bot.id, request, options)
   }
 
+  async planThreadCreation(
+    request: ThreadCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<ThreadCreationPlan> {
+    normalizeThreadCreationRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#threadCreationService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async getPoll(
     channelId: string,
     messageId: string,
@@ -1832,6 +1871,25 @@ export class ConnectorService {
   ): Promise<ForumPostResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#forumPostService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeThreadCreation(
+    request: ThreadCreationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ThreadCreationResult> {
+    normalizeThreadCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord thread-creation plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#threadCreationService.execute(
+      identity.application.id,
       identity.bot.id,
       request,
       planDigest,

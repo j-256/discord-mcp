@@ -202,6 +202,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    threadCreationEnabled: false,
+    threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
@@ -481,6 +483,8 @@ test("configuration and policy require an exact administration guild and protect
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    threadCreationEnabled: false,
+    threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
@@ -1077,6 +1081,44 @@ test("configuration and policy isolate forum posts to exact readable channels", 
   assert.deepEqual(enabled.describe().forumPostChannelIds, [CHANNEL_ID])
 })
 
+test("configuration and policy isolate thread creation to exact readable parents", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_THREAD_PARENT_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_THREAD_PARENT_IDS must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertThreadCreatable(channel()),
+    /thread creation is disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
+    DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabledConfig.allowThreadCreation, true)
+  assert.deepEqual([...enabledConfig.threadParentIds], [CHANNEL_ID])
+  assert.equal(enabled.assertThreadCreatable(channel()), GUILD_ID)
+  assert.throws(
+    () => enabled.assertThreadCreatable(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the thread-creation scope/,
+  )
+  assert.equal(enabled.describe().threadCreationEnabled, true)
+  assert.deepEqual(enabled.describe().threadParentIds, [CHANNEL_ID])
+})
+
 test("configuration and policy isolate pin management to exact readable channels", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1393,6 +1435,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    threadCreationEnabled: false,
+    threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
