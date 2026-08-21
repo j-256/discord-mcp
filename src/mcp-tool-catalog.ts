@@ -39,6 +39,7 @@ type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
 type McpToolWorkflow =
   | "attachment-message"
   | "channel-creation"
+  | "channel-permission-overwrite"
   | "forum-post"
   | "guild-scaffold"
   | "member-moderation"
@@ -86,6 +87,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  execute_channel_permission_overwrite: {
+    keywords: ["access", "channel", "execute", "member", "overwrite", "permission", "role"],
+    toolset: "permission-overwrites",
+    workflow: "channel-permission-overwrite",
   },
   execute_forum_post: {
     keywords: ["create", "execute", "forum", "post", "thread"],
@@ -164,6 +170,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "guild", "list", "server"],
     toolset: "guilds",
   },
+  list_channel_permission_overwrites: {
+    keywords: ["access", "allow", "channel", "deny", "inherit", "list", "overwrite", "permission"],
+    toolset: "permission-overwrites",
+  },
   list_guilds: {
     keywords: ["guild", "list", "server"],
     toolset: "guilds",
@@ -194,6 +204,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  plan_channel_permission_overwrite: {
+    keywords: ["access", "channel", "member", "overwrite", "permission", "plan", "review", "role"],
+    toolset: "permission-overwrites",
+    workflow: "channel-permission-overwrite",
   },
   plan_forum_post: {
     keywords: ["create", "forum", "plan", "post", "review", "thread"],

@@ -42,6 +42,7 @@ export interface ConnectorConfig {
   allowGateway: boolean
   allowGuildScaffolds: boolean
   allowInteractions: boolean
+  allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
   auditFile: string
@@ -62,6 +63,7 @@ export interface ConnectorConfig {
   mcpToolsets: ReadonlySet<McpToolsetName>
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
+  permissionOverwriteChannelIds: ReadonlySet<string>
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
@@ -248,6 +250,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.pinChannelIds],
     ENVIRONMENT_NAMES.pinChannelIds,
   )
+  const permissionOverwriteChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.permissionOverwriteChannelIds],
+    ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
+  )
   const forumPostChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.forumPostChannelIds],
     ENVIRONMENT_NAMES.forumPostChannelIds,
@@ -290,6 +296,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
+    [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
@@ -356,6 +363,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
     ),
+    allowPermissionOverwrites: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowPermissionOverwrites],
+      ENVIRONMENT_NAMES.allowPermissionOverwrites,
+    ),
     allowPinManagement: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowPinManagement],
       ENVIRONMENT_NAMES.allowPinManagement,
@@ -419,6 +430,7 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.toolSurface,
     ),
     observability: loadObservabilityConfig(environment, [rawToken || "", token]),
+    permissionOverwriteChannelIds,
     protectedUserIds,
     pinChannelIds,
     roleCreationGuildIds,

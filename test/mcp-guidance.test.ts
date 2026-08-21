@@ -121,6 +121,7 @@ interface GuidanceCalls {
   lastMessageId: string | null
   lastRoleId: string | null
   messages: number
+  permissionOverwrites: number
   roles: number
   unexpected: number
 }
@@ -142,6 +143,7 @@ function guidanceService(options: {
     lastMessageId: null,
     lastRoleId: null,
     messages: 0,
+    permissionOverwrites: 0,
     roles: 0,
     unexpected: 0,
   }
@@ -180,6 +182,8 @@ function guidanceService(options: {
         mentionUserCount: 0,
         mcpToolsets: [...MCP_TOOLSET_NAMES],
         mcpToolSurface: "full",
+        permissionOverwriteChannelIds: [],
+        permissionOverwritesEnabled: false,
         protectedUserCount: 0,
         pinChannelIds: [],
         pinManagementEnabled: false,
@@ -192,6 +196,7 @@ function guidanceService(options: {
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
@@ -289,6 +294,35 @@ function guidanceService(options: {
         status: "ok",
       }
     },
+    async listChannelPermissionOverwrites(channelId) {
+      calls.permissionOverwrites += 1
+      calls.lastChannelId = channelId
+      const channel = normalizeChannel(rawChannel({ id: channelId }))
+      return {
+        inherited: false,
+        overwrites: [{
+          allow: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+          allowPermissions: ["VIEW_CHANNEL"],
+          deny: "0",
+          denyPermissions: [],
+          targetId: ROLE_ID,
+          targetType: "role" as const,
+          unknownAllow: "0",
+          unknownDeny: "0",
+        }],
+        page: {
+          hasMore: false,
+          nextAfterTargetId: null,
+          requestedLimit: 50,
+          returned: 1,
+          total: 1,
+        },
+        requestedChannel: channel,
+        schemaVersion: 1,
+        sourceChannel: channel,
+        status: "ok" as const,
+      }
+    },
     async listGuilds() {
       calls.guilds += 1
       return {
@@ -323,6 +357,7 @@ function guidanceService(options: {
       }
     },
     planChannelCreation: unexpected,
+    planChannelPermissionOverwrite: unexpected,
     planMemberModeration: unexpected,
     planMessageDeletion: unexpected,
     planMessagePin: unexpected,
@@ -370,6 +405,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.channels
     + calls.guilds
     + calls.messages
+    + calls.permissionOverwrites
     + calls.roles
     + calls.unexpected
 }
@@ -435,6 +471,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAccess,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelPermissionOverwrites,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelPermissionOverwrites,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.exactMessage,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactMessage,
       },
@@ -476,6 +516,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Forum-post creation requires a separate exact forum-channel/)
   assert.match(safety.text, /exact thread plus starter-message readback/)
+  assert.match(safety.text, /permission-overwrite inventory is read-only/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
   assert.match(safety.text, /survive process restarts/)
   assert.match(safety.text, /Message pin listing uses Discord's current timestamp-paginated endpoint/)
@@ -563,6 +604,15 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     "600000000000000001",
   )
 
+  const permissionOverwrites = await readJsonResource(
+    client,
+    `discord://channels/${CHANNEL_ID}/permission-overwrites`,
+  )
+  assert.equal(
+    ((permissionOverwrites.value.data as Record<string, unknown>).overwrites as unknown[]).length,
+    1,
+  )
+
   const roles = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/roles`,
@@ -603,6 +653,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.messages, 1)
+  assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.roles, 2)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
@@ -759,6 +810,34 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(messagePin, /Call only plan_message_pin/)
   assert.match(messagePin, /Do not call execute_message_pin/)
   assert.match(messagePin, /PIN_MESSAGES/)
+
+  const permissionOverwrite = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed private channel",
+      changes: "VIEW_CHANNEL:allow,SEND_MESSAGES:deny",
+      channelId: CHANNEL_ID,
+      mode: "update",
+      operationKey: OPERATION_KEY,
+      targetId: ROLE_ID,
+      targetType: "role",
+    },
+    name: MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
+  }))
+  assert.deepEqual(JSON.parse(permissionOverwrite.split("\n")[1] || ""), {
+    auditReason: "Reviewed private channel",
+    changes: [
+      { permission: "VIEW_CHANNEL", state: "allow" },
+      { permission: "SEND_MESSAGES", state: "deny" },
+    ],
+    channelId: CHANNEL_ID,
+    mode: "update",
+    operationKey: OPERATION_KEY,
+    targetId: ROLE_ID,
+    targetType: "role",
+  })
+  assert.match(permissionOverwrite, /Call only plan_channel_permission_overwrite/)
+  assert.match(permissionOverwrite, /Do not call execute_channel_permission_overwrite/)
+  assert.match(permissionOverwrite, /connector VIEW_CHANNEL and MANAGE_ROLES retention/)
 
   const channelCreation = promptText(await client.getPrompt({
     arguments: {
@@ -1009,6 +1088,41 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         topic: "not accepted",
       },
       name: MCP_PROMPT_NAMES.reviewChannelCreation,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed permission change",
+        channelId: CHANNEL_ID,
+        mode: "update",
+        operationKey: OPERATION_KEY,
+        targetId: ROLE_ID,
+        targetType: "role",
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed permission deletion",
+        changes: "VIEW_CHANNEL:inherit",
+        channelId: CHANNEL_ID,
+        mode: "delete",
+        operationKey: OPERATION_KEY,
+        targetId: ROLE_ID,
+        targetType: "role",
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed permission change",
+        changes: "ADMINISTRATOR:allow",
+        channelId: CHANNEL_ID,
+        mode: "update",
+        operationKey: OPERATION_KEY,
+        targetId: ROLE_ID,
+        targetType: "role",
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
     },
     {
       arguments: {

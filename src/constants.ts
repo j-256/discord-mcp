@@ -37,6 +37,7 @@ export const MCP_TOOLSET_NAMES = [
   "messages",
   "moderation",
   "observability",
+  "permission-overwrites",
   "permissions",
   "pins",
   "role-creation",
@@ -60,6 +61,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
+  allowPermissionOverwrites: "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
   allowRoleCreation: "DISCORD_MCP_ALLOW_ROLE_CREATION",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
   attachmentChannelIds: "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
@@ -97,6 +99,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   otelTracesSamplerArg: "OTEL_TRACES_SAMPLER_ARG",
   protectedUserIds: "DISCORD_MCP_PROTECTED_USER_IDS",
   pinChannelIds: "DISCORD_MCP_PIN_CHANNEL_IDS",
+  permissionOverwriteChannelIds: "DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS",
   roleCreationGuildIds: "DISCORD_MCP_ROLE_CREATION_GUILD_IDS",
   token: "DISCORD_BOT_TOKEN",
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
@@ -150,6 +153,8 @@ export const PERMISSION_LIMITS = Object.freeze({
   auditActions: 5,
   auditRolePage: 100,
   auditRolePageDefault: 50,
+  overwritePage: 100,
+  overwritePageDefault: 50,
 })
 
 export const AUDIT_LOG_LIMITS = Object.freeze({

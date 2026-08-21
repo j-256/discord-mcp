@@ -708,6 +708,110 @@ test("Discord client validates pin mutations and never retries their rate limits
   assert.equal(sleeps, 0)
 })
 
+test("Discord client sends exact permission-overwrite routes and encoded reasons", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+
+  await client.editChannelPermissionOverwrite(
+    "200",
+    "300",
+    { allow: "1024", deny: "2048", type: 0 },
+    "Review / case 42",
+  )
+  await client.deleteChannelPermissionOverwrite("200", "300", "Review / case 42")
+
+  assert.deepEqual(requests, [
+    {
+      body: { allow: "1024", deny: "2048", type: 0 },
+      method: "PUT",
+      reason: "Review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/channels/200/permissions/300`,
+    },
+    {
+      body: null,
+      method: "DELETE",
+      reason: "Review%20%2F%20case%2042",
+      url: `${API_BASE_URL}/channels/200/permissions/300`,
+    },
+  ])
+})
+
+test("Discord client validates overwrite mutations and never retries their rate limits", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.editChannelPermissionOverwrite(
+      "200",
+      "300",
+      { allow: "1024", deny: "0", type: 1 },
+      "reviewed",
+    ),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  await assert.rejects(
+    () => client.deleteChannelPermissionOverwrite("bad", "300", "reviewed"),
+    /channel ID/,
+  )
+  await assert.rejects(
+    () => client.editChannelPermissionOverwrite(
+      "200",
+      "bad",
+      { allow: "0", deny: "0", type: 0 },
+      "reviewed",
+    ),
+    /target ID/,
+  )
+  await assert.rejects(
+    () => client.editChannelPermissionOverwrite(
+      "200",
+      "300",
+      { allow: "01", deny: "0", type: 0 },
+      "reviewed",
+    ),
+    /allow field/,
+  )
+  await assert.rejects(
+    () => client.editChannelPermissionOverwrite(
+      "200",
+      "300",
+      { allow: "1024", deny: "1024", type: 0 },
+      "reviewed",
+    ),
+    /must not overlap/,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client sends exact member moderation routes, bodies, and encoded reasons", async () => {
   const requests: Array<{
     body: unknown

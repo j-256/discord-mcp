@@ -246,6 +246,12 @@ export interface CreateGuildRoleInput {
   primaryColor: number
 }
 
+export interface EditChannelPermissionOverwriteInput {
+  allow: string
+  deny: string
+  type: 0 | 1
+}
+
 export interface CreateForumPostInput {
   allowedMentions: DiscordAllowedMentions
   appliedTagIds?: readonly string[]
@@ -446,6 +452,13 @@ function assertSearchSnowflakes(
   if (values?.some((value) => !DISCORD_SNOWFLAKE_PATTERN.test(value))) {
     throw new RangeError(`${name} values must be Discord snowflakes`)
   }
+}
+
+function assertPermissionBitfield(value: string, name: string): bigint {
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new RangeError(`${name} must be a canonical unsigned decimal bitfield`)
+  }
+  return BigInt(value)
 }
 
 function assertIsoTimestamp(value: string | undefined, name: string): void {
@@ -1174,6 +1187,66 @@ export class DiscordClient {
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {
     return this.#request("get_channel", `/channels/${channelId}`, options)
+  }
+
+  async editChannelPermissionOverwrite(
+    channelId: string,
+    overwriteId: string,
+    input: EditChannelPermissionOverwriteInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(channelId, "Discord permission-overwrite channel ID")
+    assertSearchSnowflake(overwriteId, "Discord permission-overwrite target ID")
+    if (input.type !== 0 && input.type !== 1) {
+      throw new RangeError("Discord permission-overwrite target type must be 0 or 1")
+    }
+    const allow = assertPermissionBitfield(
+      input.allow,
+      "Discord permission-overwrite allow field",
+    )
+    const deny = assertPermissionBitfield(
+      input.deny,
+      "Discord permission-overwrite deny field",
+    )
+    if ((allow & deny) !== 0n) {
+      throw new RangeError("Discord permission-overwrite allow and deny fields must not overlap")
+    }
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "edit_channel_permission_overwrite",
+      `/channels/${channelId}/permissions/${overwriteId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          allow: input.allow,
+          deny: input.deny,
+          type: input.type,
+        },
+      },
+    )
+  }
+
+  async deleteChannelPermissionOverwrite(
+    channelId: string,
+    overwriteId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(channelId, "Discord permission-overwrite channel ID")
+    assertSearchSnowflake(overwriteId, "Discord permission-overwrite target ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_channel_permission_overwrite",
+      `/channels/${channelId}/permissions/${overwriteId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
   }
 
   getThreadMember(

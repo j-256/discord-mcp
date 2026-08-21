@@ -186,6 +186,38 @@ export class MessagePinExecutionError extends Error {
   }
 }
 
+export class ChannelPermissionOverwritePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord channel permission snapshot does not match the reviewed plan")
+    this.name = "ChannelPermissionOverwritePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelPermissionOverwriteOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord channel permission operation key has already been reserved")
+    this.name = "ChannelPermissionOverwriteOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelPermissionOverwriteExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelPermissionOverwriteExecutionError"
+    this.result = result
+  }
+}
+
 export class RoleCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -14,6 +14,7 @@ import {
   JsonlActivityLog,
   type AttachmentMessageActivity,
   type ChannelCreationActivity,
+  type ChannelPermissionOverwriteActivity,
   type DeletionActivity,
   type ForumPostActivity,
   type InteractionActivity,
@@ -196,6 +197,34 @@ function messagePin(
     planDigest: `hmac-sha256:${"4".repeat(64)}`,
     schemaVersion: 1,
     status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function channelPermissionOverwrite(
+  id: string,
+  status: ChannelPermissionOverwriteActivity["status"],
+): ChannelPermissionOverwriteActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "channel-permission-overwrite",
+    mode: "update",
+    operationKeyHash: `sha256:${"5".repeat(64)}`,
+    planDigest: `hmac-sha256:${"6".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    targetId: "300",
+    targetType: "role",
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -476,6 +505,46 @@ test("JSONL activity log keeps message pin evidence content-free", async (contex
   assert.doesNotMatch(
     JSON.stringify(result),
     /private audit|private author|private channel|private message|private-operation/,
+  )
+})
+
+test("JSONL activity log keeps permission-overwrite evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...channelPermissionOverwrite("1", "pending"),
+    auditReason: "must never reach disk",
+    permission: "SEND_MESSAGES",
+    rawOperationKey: "must-not-persist",
+  } as ChannelPermissionOverwriteActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...channelPermissionOverwrite("2", "completed-with-drift"),
+      allow: "private bitfield",
+      auditReason: "private audit reason",
+      channelName: "private channel",
+      permissionName: "private permission",
+      roleName: "private role",
+    })}\n${JSON.stringify({
+      ...channelPermissionOverwrite("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "channel-permission-overwrite")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private audit|private bitfield|private channel|private permission|private role/,
   )
 })
 

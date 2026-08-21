@@ -34,6 +34,8 @@ export interface PolicyDescription {
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
+  permissionOverwriteChannelIds: string[]
+  permissionOverwritesEnabled: boolean
   protectedUserCount: number
   pinChannelIds: string[]
   pinManagementEnabled: boolean
@@ -52,6 +54,7 @@ export class ScopePolicy {
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
+  readonly #allowPermissionOverwrites: boolean
   readonly #allowPinManagement: boolean
   readonly #allowGateway: boolean
   readonly #allowGuildScaffolds: boolean
@@ -71,6 +74,7 @@ export class ScopePolicy {
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
+  readonly #permissionOverwriteChannelIds: ReadonlySet<string>
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
@@ -94,6 +98,7 @@ export class ScopePolicy {
     | "allowAttachments"
     | "allowGateway"
     | "allowGuildScaffolds"
+    | "allowPermissionOverwrites"
     | "allowPinManagement"
     | "allowForumPosts"
     | "allowChannelCreation"
@@ -107,6 +112,7 @@ export class ScopePolicy {
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
+    | "permissionOverwriteChannelIds"
     | "pinChannelIds"
     | "roleCreationGuildIds"
   >>) {
@@ -118,6 +124,7 @@ export class ScopePolicy {
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
+    this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowGateway = config.allowGateway ?? false
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
@@ -138,6 +145,7 @@ export class ScopePolicy {
     this.#mentionUserIds = config.mentionUserIds
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
+    this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
@@ -174,6 +182,9 @@ export class ScopePolicy {
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
+      permissionOverwriteChannelIds: [...this.#permissionOverwriteChannelIds].sort(),
+      permissionOverwritesEnabled: this.#allowPermissionOverwrites
+        && this.#permissionOverwriteChannelIds.size > 0,
       protectedUserCount: this.#protectedUserIds.size,
       pinChannelIds: [...this.#pinChannelIds].sort(),
       pinManagementEnabled: this.#allowPinManagement && this.#pinChannelIds.size > 0,
@@ -217,6 +228,10 @@ export class ScopePolicy {
     if (!this.#adminGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the administration scope`)
     }
+    this.assertUserNotProtected(userId)
+  }
+
+  assertUserNotProtected(userId: string): void {
     if (this.#protectedUserIds.has(userId)) {
       throw new PolicyError(`Discord user ${userId} is protected from administration`)
     }
@@ -356,6 +371,20 @@ export class ScopePolicy {
     }
     if (!this.#pinChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the pin-management scope`)
+    }
+    return guildId
+  }
+
+  assertChannelPermissionOverwriteAllowed(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowPermissionOverwrites) {
+      throw new PolicyError("Discord permission-overwrite changes are disabled by connector configuration")
+    }
+    if (this.#permissionOverwriteChannelIds.size === 0) {
+      throw new PolicyError("Discord permission-overwrite changes require an explicit channel allowlist")
+    }
+    if (!this.#permissionOverwriteChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the permission-overwrite scope`)
     }
     return guildId
   }

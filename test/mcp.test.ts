@@ -22,6 +22,10 @@ import type {
 } from "../src/attachment-message-service.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
 import type {
+  ChannelPermissionOverwritePlan,
+  ChannelPermissionOverwriteRequest,
+} from "../src/channel-permission-overwrite-service.js"
+import type {
   ForumPostPlan,
   ForumPostRequest,
 } from "../src/forum-post-service.js"
@@ -45,6 +49,8 @@ import {
   AttachmentMessageOperationConflictError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
+  ChannelPermissionOverwriteExecutionError,
+  ChannelPermissionOverwriteOperationConflictError,
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
@@ -101,6 +107,7 @@ const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
+const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -237,6 +244,107 @@ function messagePinPlan(
       pinned: desiredPinned,
     },
     warnings: ["One-shot reviewed message pin change"],
+  }
+}
+
+function permissionOverwritePlan(
+  request: ChannelPermissionOverwriteRequest,
+  digest = DIGEST,
+  action: "delete" | "none" | "put" = request.mode === "delete" ? "delete" : "put",
+): ChannelPermissionOverwritePlan {
+  const changes = request.mode === "update" ? [...request.changes] : []
+  const changedPermissions = changes.map(({ permission }) => permission)
+  const desiredAllowPermissions = changes
+    .filter(({ state }) => state === "allow")
+    .map(({ permission }) => permission)
+  const desiredDenyPermissions = changes
+    .filter(({ state }) => state === "deny")
+    .map(({ permission }) => permission)
+  const current = request.mode === "delete" || action === "none"
+    ? {
+        allow: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+        allowPermissions: ["VIEW_CHANNEL" as const],
+        deny: "0",
+        denyPermissions: [],
+        targetId: request.targetId,
+        targetType: request.targetType,
+        unknownAllow: "0",
+        unknownDeny: "0",
+      }
+    : null
+  const desired = action === "put"
+    ? {
+        allow: discordPermissionBitfield(desiredAllowPermissions).toString(),
+        allowPermissions: desiredAllowPermissions,
+        deny: discordPermissionBitfield(desiredDenyPermissions).toString(),
+        denyPermissions: desiredDenyPermissions,
+        targetId: request.targetId,
+        targetType: request.targetType,
+        unknownAllow: "0",
+        unknownDeny: "0",
+      }
+    : action === "none"
+      ? current
+      : null
+  const botPermissions = (
+    DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  ).toString()
+  return {
+    action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    botPermission: {
+      afterEffectivePermissions: botPermissions,
+      beforeEffectivePermissions: botPermissions,
+      confidence: "complete",
+      manageRolesAfter: true,
+      manageRolesBefore: true,
+      viewChannelAfter: true,
+      viewChannelBefore: true,
+    },
+    changes,
+    channel: normalizeChannel(rawChannel({ id: request.channelId })),
+    createdAt: "2026-08-21T00:00:00.000Z",
+    currentOverwrite: current,
+    desiredOverwrite: desired,
+    digest,
+    evaluatedPermissions: changedPermissions.length > 0
+      ? changedPermissions
+      : ["VIEW_CHANNEL"],
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    parentSync: {
+      after: null,
+      before: null,
+      parentChannelId: null,
+    },
+    requestedMode: request.mode,
+    schemaVersion: 1,
+    status: action === "none" ? "already-current" : "planned",
+    target: {
+      id: request.targetId,
+      name: "Private target name",
+      type: request.targetType,
+    },
+    targetAccess: {
+      basis: request.targetType === "role"
+        ? "standalone-role-baseline"
+        : "member-effective",
+      impacts: (changedPermissions.length > 0
+        ? changedPermissions
+        : ["VIEW_CHANNEL" as const]
+      ).map((permission) => ({
+        after: changes.find((change) => (
+          change.permission === permission && change.state === "deny"
+        )) ? "denied" as const : "allowed" as const,
+        before: "allowed" as const,
+        permission,
+      })),
+    },
+    warnings: ["One-shot reviewed channel permission change"],
   }
 }
 
@@ -660,6 +768,8 @@ function fixturePolicy(): PolicyDescription {
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
+    permissionOverwriteChannelIds: [],
+    permissionOverwritesEnabled: false,
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,
@@ -687,6 +797,9 @@ function serviceFixture(overrides: {
   messagePinAction?: "change" | "none"
   messagePinError?: Error
   messagePinPlanDigest?: string
+  permissionOverwriteAction?: "delete" | "none" | "put"
+  permissionOverwriteError?: Error
+  permissionOverwritePlanDigest?: string
   planDigest?: string
   roleCreationAction?: "create" | "none"
   roleCreationError?: Error
@@ -715,6 +828,9 @@ function serviceFixture(overrides: {
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    permissionOverwriteExecute: 0,
+    permissionOverwriteList: 0,
+    permissionOverwritePlan: 0,
     plan: 0,
     principalExplain: 0,
     roleCreationExecute: 0,
@@ -831,6 +947,29 @@ function serviceFixture(overrides: {
         planDigest,
         schemaVersion: 1,
         status: planned.action === "none" ? "already-current" : "completed",
+      }
+    },
+    async executeChannelPermissionOverwrite(request, planDigest) {
+      if (overrides.permissionOverwriteError) throw overrides.permissionOverwriteError
+      calls.permissionOverwriteExecute += 1
+      const planned = permissionOverwritePlan(
+        request,
+        planDigest,
+        overrides.permissionOverwriteAction,
+      )
+      return {
+        activityId: planned.action === "none" ? null : "activity-permission-overwrite",
+        channelId: request.channelId,
+        guildId: GUILD_ID,
+        observedOverwrite: planned.desiredOverwrite,
+        operationKeyHash: planned.operationKeyHash,
+        overwriteSetMatched: true,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-current" : "completed",
+        targetId: request.targetId,
+        targetMatched: true,
+        targetType: request.targetType,
       }
     },
     async executeForumPost(request, planDigest) {
@@ -1146,6 +1285,33 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listChannelPermissionOverwrites(channelId, options) {
+      calls.permissionOverwriteList += 1
+      return {
+        inherited: false,
+        overwrites: [{
+          allow: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+          allowPermissions: ["VIEW_CHANNEL"],
+          deny: "0",
+          denyPermissions: [],
+          targetId: ROLE_ID,
+          targetType: "role",
+          unknownAllow: "0",
+          unknownDeny: "0",
+        }],
+        page: {
+          hasMore: false,
+          nextAfterTargetId: null,
+          requestedLimit: options?.limit ?? 50,
+          returned: 1,
+          total: 1,
+        },
+        requestedChannel: normalizeChannel(rawChannel({ id: channelId })),
+        schemaVersion: 1,
+        sourceChannel: normalizeChannel(rawChannel({ id: channelId })),
+        status: "ok",
+      }
+    },
     async listGuilds() {
       return {
         guilds: [],
@@ -1250,6 +1416,14 @@ function serviceFixture(overrides: {
         request,
         overrides.channelCreationPlanDigest || DIGEST,
         overrides.channelCreationAction,
+      )
+    },
+    async planChannelPermissionOverwrite(request) {
+      calls.permissionOverwritePlan += 1
+      return permissionOverwritePlan(
+        request,
+        overrides.permissionOverwritePlanDigest || DIGEST,
+        overrides.permissionOverwriteAction,
       )
     },
     async planForumPost(request) {
@@ -1452,6 +1626,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "search_messages",
       "get_message",
       "list_message_pins",
+      "list_channel_permission_overwrites",
       "send_message",
       "edit_own_message",
       "add_reaction",
@@ -1459,6 +1634,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "delete_messages",
       "plan_message_pin",
       "execute_message_pin",
+      "plan_channel_permission_overwrite",
+      "execute_channel_permission_overwrite",
       "plan_channel_creation",
       "execute_channel_creation",
       "plan_forum_post",
@@ -1477,10 +1654,13 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
+  const permissionOverwrite = result.tools.find((tool) => (
+    tool.name === "execute_channel_permission_overwrite"
+  ))
   const administration = result.tools.find((tool) => (
     tool.name === "execute_member_moderation"
   ))
-  for (const tool of [deletion, messagePin, administration]) {
+  for (const tool of [deletion, messagePin, permissionOverwrite, administration]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
       idempotentHint: true,
@@ -1497,7 +1677,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: true,
   })
-  for (const name of ["list_message_pins", "plan_message_pin"]) {
+  for (const name of [
+    "list_channel_permission_overwrites",
+    "list_message_pins",
+    "plan_channel_permission_overwrite",
+    "plan_message_pin",
+  ]) {
     assert.deepEqual(listedTool(result.tools, name).annotations, {
       destructiveHint: false,
       idempotentHint: true,
@@ -1944,6 +2129,30 @@ test("progressive discovery enables the complete reviewed message-pin workflow",
   )
 })
 
+test("progressive discovery enables the complete reviewed permission-overwrite workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_channel_permission_overwrite" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_channel_permission_overwrite",
+    "plan_channel_permission_overwrite",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_channel_permission_overwrite",
+      "execute_channel_permission_overwrite",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOLSETS: "messages,connector" },
@@ -2063,6 +2272,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    permissionOverwriteExecute: 0,
+    permissionOverwriteList: 0,
+    permissionOverwritePlan: 0,
     plan: 0,
     principalExplain: 0,
     roleCreationExecute: 0,
@@ -3035,6 +3247,241 @@ test("MCP message pins expose uncertain and one-shot conflict outcomes safely", 
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(MESSAGE_PIN_OPERATION_KEY),
+  )
+})
+
+test("MCP channel permission overwrites expose bounded read inventory", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: {
+      afterTargetId: ROLE_ID,
+      channelId: CHANNEL_ID,
+      limit: 25,
+    },
+    name: "list_channel_permission_overwrites",
+  })
+  const invalidLimit = await client.callTool({
+    arguments: { channelId: CHANNEL_ID, limit: 101 },
+    name: "list_channel_permission_overwrites",
+  })
+
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal(
+    (structuredContent(listed).page as Record<string, unknown>).requestedLimit,
+    25,
+  )
+  assert.equal((structuredContent(listed).overwrites as unknown[]).length, 1)
+  assert.equal(invalidLimit.isError, true)
+  assert.equal(calls.permissionOverwriteList, 1)
+})
+
+test("MCP channel permission plans accept named exact deltas or explicit deletion only", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      changes: [{ permission: "SEND_MESSAGES", state: "deny" }],
+      channelId: CHANNEL_ID,
+      mode: "update",
+      operationKey: PERMISSION_OVERWRITE_OPERATION_KEY,
+      targetId: ROLE_ID,
+      targetType: "role",
+    },
+    name: "plan_channel_permission_overwrite",
+  })
+  const missingChanges = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      mode: "update",
+      operationKey: PERMISSION_OVERWRITE_OPERATION_KEY,
+      targetId: ROLE_ID,
+      targetType: "role",
+    },
+    name: "plan_channel_permission_overwrite",
+  })
+  const deleteWithChanges = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      changes: [{ permission: "VIEW_CHANNEL", state: "inherit" }],
+      channelId: CHANNEL_ID,
+      mode: "delete",
+      operationKey: PERMISSION_OVERWRITE_OPERATION_KEY,
+      targetId: USER_ID,
+      targetType: "member",
+    },
+    name: "plan_channel_permission_overwrite",
+  })
+  const rawBitfield = await client.callTool({
+    arguments: {
+      allow: "1024",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      mode: "update",
+      operationKey: PERMISSION_OVERWRITE_OPERATION_KEY,
+      targetId: ROLE_ID,
+      targetType: "role",
+    },
+    name: "plan_channel_permission_overwrite",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(missingChanges.isError, true)
+  assert.equal(deleteWithChanges.isError, true)
+  assert.equal(rawBitfield.isError, true)
+  assert.equal(calls.permissionOverwritePlan, 1)
+})
+
+test("MCP channel permission changes bind signed approval to the exact transition", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      changes: [{ permission: "SEND_MESSAGES", state: "deny" }],
+      channelId: CHANNEL_ID,
+      mode: "update",
+      operationKey: PERMISSION_OVERWRITE_OPERATION_KEY,
+      planDigest: DIGEST,
+      targetId: ROLE_ID,
+      targetType: "role",
+    },
+    name: "execute_channel_permission_overwrite",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.permissionOverwritePlan, 1)
+  assert.equal(calls.permissionOverwriteExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(ROLE_ID))
+  assert.match(confirmationMessage, /SEND_MESSAGES/)
+  assert.match(confirmationMessage, /Connector retains VIEW_CHANNEL: true/)
+  assert.match(confirmationMessage, /Connector retains MANAGE_ROLES: true/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(PERMISSION_OVERWRITE_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(PERMISSION_OVERWRITE_OPERATION_KEY),
+  )
+})
+
+test("MCP channel permission changes stop on no-op, refusal, drift, uncertainty, and conflicts", async (context) => {
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { permissionOverwriteAction: "none" },
+  })
+  const argumentsValue = {
+    auditReason: AUDIT_REASON,
+    changes: [{ permission: "SEND_MESSAGES", state: "deny" }],
+    channelId: CHANNEL_ID,
+    mode: "update",
+    operationKey: PERMISSION_OVERWRITE_OPERATION_KEY,
+    planDigest: DIGEST,
+    targetId: ROLE_ID,
+    targetType: "role",
+  }
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_overwrite",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.permissionOverwriteExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_overwrite",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.permissionOverwriteExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { permissionOverwritePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_overwrite",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      permissionOverwriteError: new ChannelPermissionOverwriteExecutionError(
+        "Discord channel permission outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_overwrite",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-permission-overwrite",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    targetId: ROLE_ID,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      permissionOverwriteError: new ChannelPermissionOverwriteOperationConflictError(
+        receipt,
+      ),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_overwrite",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(PERMISSION_OVERWRITE_OPERATION_KEY),
   )
 })
 
@@ -4480,7 +4927,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 5)
+  assert.equal(templates.resourceTemplates.length, 6)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

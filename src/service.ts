@@ -29,6 +29,15 @@ import type {
   ChannelCreationResult,
 } from "./channel-administration-service.js"
 import { ChannelAdministrationService } from "./channel-administration-service.js"
+import type {
+  ChannelPermissionOverwriteListOptions,
+  ChannelPermissionOverwriteListResult,
+  ChannelPermissionOverwritePlan,
+  ChannelPermissionOverwriteRequest,
+  ChannelPermissionOverwriteResult,
+  ChannelPermissionOverwriteServiceOptions,
+} from "./channel-permission-overwrite-service.js"
+import { ChannelPermissionOverwriteService } from "./channel-permission-overwrite-service.js"
 import type { ConnectorConfig } from "./config.js"
 import {
   CONNECTOR_LIMITS,
@@ -132,7 +141,9 @@ export interface DiscordServiceClient {
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
+  deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteMessage: DiscordClient["deleteMessage"]
+  editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
@@ -208,6 +219,10 @@ export interface ConnectorServiceOptions {
   >
   messagePinOptions?: Pick<
     MessagePinServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  permissionOverwriteOptions?: Pick<
+    ChannelPermissionOverwriteServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   operationStore?: OperationStore
@@ -327,6 +342,7 @@ export class ConnectorService {
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
   readonly #messagePinService: MessagePinService
+  readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
   readonly #guildScaffoldService: GuildScaffoldService
@@ -395,6 +411,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.messagePinOptions,
+    })
+    this.#permissionOverwriteService = new ChannelPermissionOverwriteService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.permissionOverwriteOptions,
     })
     this.#forumPostService = new ForumPostService({
       activityStore: this.#activityStore,
@@ -954,6 +977,27 @@ export class ConnectorService {
     )
   }
 
+  async listChannelPermissionOverwrites(
+    channelId: string,
+    options: ChannelPermissionOverwriteListOptions = {},
+  ): Promise<ChannelPermissionOverwriteListResult> {
+    await this.#verifyIdentity(options)
+    return this.#permissionOverwriteService.list(channelId, options)
+  }
+
+  async planChannelPermissionOverwrite(
+    request: ChannelPermissionOverwriteRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionOverwritePlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#permissionOverwriteService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberModeration(
     request: MemberModerationRequest,
     options: RequestOptions = {},
@@ -1109,6 +1153,21 @@ export class ConnectorService {
   ): Promise<MessagePinResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#messagePinService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeChannelPermissionOverwrite(
+    request: ChannelPermissionOverwriteRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionOverwriteResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#permissionOverwriteService.execute(
       identity.application.id,
       identity.bot.id,
       request,

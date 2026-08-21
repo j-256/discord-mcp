@@ -128,6 +128,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const store = new FileOperationStore(join(root, "receipts"))
   const channel = receipt()
   const attachment = { ...receipt(), kind: "attachment-message" as const }
+  const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }
   const scaffold = { ...receipt(), kind: "guild-scaffold" as const }
   const pin = { ...receipt(), kind: "message-pin" as const }
@@ -135,6 +136,7 @@ test("file operation store isolates every durable write operation-key domain", a
 
   assert.equal((await store.reserve(channel)).created, true)
   assert.equal((await store.reserve(attachment)).created, true)
+  assert.equal((await store.reserve(overwrite)).created, true)
   assert.equal((await store.reserve(forum)).created, true)
   assert.equal((await store.reserve(scaffold)).created, true)
   assert.equal((await store.reserve(pin)).created, true)
@@ -146,6 +148,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("channel-creation", channel.operationKeyHash),
     channel,
+  )
+  assert.deepEqual(
+    await store.get("channel-permission-overwrite", overwrite.operationKeyHash),
+    overwrite,
   )
   assert.deepEqual(
     await store.get("forum-post", forum.operationKeyHash),

@@ -192,6 +192,8 @@ export function registerDiscordResources(
           "",
           "Message pin listing uses Discord's current timestamp-paginated endpoint and persists nothing. Pin and unpin both require a separate exact channel allowlist and a review-first workflow that binds verified application and bot identity, exact message state, thread membership, complete message-read and PIN_MESSAGES permission evidence, audit reason, and one-shot key hash into a keyed plan. Execution requires fresh matching evidence, signed approval, durable reservation, pending content-free activity, one non-retried mutation, and exact state plus review-snapshot readback. An uncertain outcome permanently spends the key and blocks queued same-target changes in the process; overlapping scope across connector processes remains unsafe.",
           "",
+          "Channel permission-overwrite inventory is read-only, bounded, thread-inheritance aware, and persists nothing. Changes require a separate exact direct-channel allowlist and accept one exact role or member target with named allow, deny, or inherit deltas, or an explicit whole-overwrite delete. Planning preserves unspecified known channel bits, blocks unknown-bit or non-channel-bit updates, verifies the connector holds every outgoing permission, prevents loss of VIEW_CHANNEL or MANAGE_ROLES, and reports target effective-access plus parent synchronization impact. Execution requires a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried PUT or DELETE, and complete overwrite-set readback. Raw bitfields, bulk reset, copy, sync, thread mutation, retry, and rollback are unsupported.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,
@@ -357,6 +359,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.explainChannelAccess(
+        templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelPermissionOverwrites,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelPermissionOverwrites, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One bounded deterministic page of role and member permission overwrites for an exact readable Discord channel. Threads identify and return their inherited parent overwrite source. Known names and arbitrary-width unknown bits are explicit.",
+      mimeType: "application/json",
+      title: "Discord channel permission overwrites",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listChannelPermissionOverwrites(
         templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),

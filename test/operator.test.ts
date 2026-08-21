@@ -88,6 +88,8 @@ function status(
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
+      permissionOverwriteChannelIds: [],
+      permissionOverwritesEnabled: false,
       protectedUserCount: 0,
       pinChannelIds: [],
       pinManagementEnabled: false,
@@ -123,6 +125,7 @@ function toolService(): DiscordToolService {
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
@@ -140,6 +143,7 @@ function toolService(): DiscordToolService {
     listActiveThreads: unexpected,
     listArchivedThreads: unexpected,
     listChannels: unexpected,
+    listChannelPermissionOverwrites: unexpected,
     listGuilds: unexpected,
     listGuildAuditEntries: unexpected,
     listMessagePins: unexpected,
@@ -148,6 +152,7 @@ function toolService(): DiscordToolService {
     planMessagePin: unexpected,
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
+    planChannelPermissionOverwrite: unexpected,
     planForumPost: unexpected,
     planGuildScaffold: unexpected,
     planMemberModeration: unexpected,
@@ -494,6 +499,50 @@ test("doctor and setup explain reviewed message-pin scope without Discord writes
   )
   assert.match(setup.warnings.join("\n"), /pin-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /pins toolset/)
+})
+
+test("doctor and setup explain reviewed permission-overwrite scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
+      DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
+      DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const overwrite = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.permissionOverwritePolicy,
+  )
+  assert.equal(overwrite?.status, "pass")
+  assert.match(overwrite?.summary || "", /1 exact channels/)
+  assert.match(overwrite?.summary || "", /named deltas/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.permissionOverwritePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /exact channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /permission-overwrites toolset/)
 })
 
 test("doctor and setup explain reviewed role-creation scope without Discord writes", async () => {
@@ -1031,6 +1080,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.promptNames, [
     "review_attachment_message",
     "review_channel_creation",
+    "review_channel_permission_overwrite",
     "review_forum_post",
     "review_guild_scaffold",
     "review_member_moderation",
@@ -1052,6 +1102,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://channels/{channelId}/access",
     "discord://channels/{channelId}/messages/{messageId}",
+    "discord://channels/{channelId}/permission-overwrites",
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
@@ -1059,6 +1110,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
     "edit_own_message",
+    "execute_channel_permission_overwrite",
     "execute_member_moderation",
     "execute_message_pin",
   ])

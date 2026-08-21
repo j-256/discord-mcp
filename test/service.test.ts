@@ -184,6 +184,7 @@ function serviceFixture(overrides: {
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   operationStore?: OperationStore
+  permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
 } = {}) {
   const calls = {
@@ -245,7 +246,9 @@ function serviceFixture(overrides: {
         nonce: input.nonce,
       })
     },
+    async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
+    async editChannelPermissionOverwrite() {},
     async editMessage(_channelId, _messageId, input) {
       calls.editMessage += 1
       return message({
@@ -382,6 +385,9 @@ function serviceFixture(overrides: {
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
         : {}),
       ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
+      ...(overrides.permissionOverwriteOptions
+        ? { permissionOverwriteOptions: overrides.permissionOverwriteOptions }
+        : {}),
       ...(overrides.interactionOptions
         ? { interactionOptions: overrides.interactionOptions }
         : {}),
@@ -461,6 +467,87 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.user, 1)
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 1)
+})
+
+test("service verifies identity through reviewed channel permission changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  const targetRoleId = CREATED_ROLE_ID
+  let currentChannel = channel()
+  let overwriteWrites = 0
+  const botPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  const { calls, service } = serviceFixture({
+    client: {
+      async editChannelPermissionOverwrite(channelId, targetId, input) {
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(targetId, targetRoleId)
+        overwriteWrites += 1
+        currentChannel = channel({
+          permission_overwrites: [{
+            allow: input.allow,
+            deny: input.deny,
+            id: targetId,
+            type: input.type,
+          }],
+        })
+      },
+      async getChannel() {
+        return currentChannel
+      },
+      async getGuild() {
+        return {
+          ...guild(),
+          owner_id: "900000000000000001",
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, botPermissions, "@everyone"),
+          role(targetRoleId, DISCORD_PERMISSIONS.VIEW_CHANNEL, "reviewers"),
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
+      DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
+    },
+    operationStore,
+    permissionOverwriteOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(17),
+      randomId: () => "activity-permission-overwrite",
+    },
+  })
+  const request = {
+    auditReason: "Reviewed private-channel access",
+    changes: [{ permission: "SEND_MESSAGES" as const, state: "deny" as const }],
+    channelId: CHANNEL_ID,
+    mode: "update" as const,
+    operationKey: "permission-overwrite-service-attempt-0001",
+    targetId: targetRoleId,
+    targetType: "role" as const,
+  }
+
+  const inventory = await service.listChannelPermissionOverwrites(CHANNEL_ID)
+  const plan = await service.planChannelPermissionOverwrite(request)
+  const result = await service.executeChannelPermissionOverwrite(request, plan.digest)
+
+  assert.equal(inventory.overwrites.length, 0)
+  assert.equal(plan.action, "put")
+  assert.equal(result.status, "completed")
+  assert.equal(result.targetMatched, true)
+  assert.equal(overwriteWrites, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "channel-permission-overwrite")
+  assert.equal(operationStore.receipt?.resourceId, targetRoleId)
 })
 
 test("service verifies identity before reviewed local-file attachment execution", async (context) => {
