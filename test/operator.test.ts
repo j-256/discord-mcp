@@ -46,9 +46,11 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 function status(
   inScope = 1,
   messageContentIntent: "disabled" | "enabled" | "unknown" = "enabled",
+  guildMembersIntent: "disabled" | "enabled" | "unknown" = "enabled",
 ): Awaited<ReturnType<ConnectorService["getStatus"]>> {
   return {
     application: {
+      guildMembersIntent,
       id: APPLICATION_ID,
       messageContentIntent,
       name: "Connector",
@@ -85,6 +87,8 @@ function status(
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 500,
       interactionsEnabled: false,
+      memberDirectoryEnabled: false,
+      memberDirectoryGuildIds: [],
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
@@ -134,6 +138,7 @@ function toolService(): DiscordToolService {
     explainChannelAccess: unexpected,
     explainPrincipalPermissions: unexpected,
     getGuildAuditEntry: unexpected,
+    getGuildMember: unexpected,
     getMessage: unexpected,
     getRole: unexpected,
     async getStatus() {
@@ -146,6 +151,7 @@ function toolService(): DiscordToolService {
     listChannelPermissionOverwrites: unexpected,
     listGuilds: unexpected,
     listGuildAuditEntries: unexpected,
+    listGuildMembers: unexpected,
     listMessagePins: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
@@ -159,6 +165,7 @@ function toolService(): DiscordToolService {
     planRoleCreation: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
+    searchGuildMembers: unexpected,
     sendMessage: unexpected,
   }
 }
@@ -765,6 +772,83 @@ test("doctor and setup report Message Content intent needed by native search", a
   assert.match(setup.warnings.join("\n"), /Message Content intent/)
 })
 
+test("doctor and setup diagnose the separately gated Guild Members intent", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+    DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+  })
+  const offline = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const empty = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const disabledIntent = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "enabled", "disabled")
+      },
+    },
+  })
+  const unknownIntentSetup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: {
+      async getStatus() {
+        return status(1, "enabled", "unknown")
+      },
+    },
+  })
+  const disabledDirectory = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "enabled", "disabled")
+      },
+    },
+  })
+  const omittedToolset = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  assert.equal(
+    offline.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.memberDirectoryPolicy)?.status,
+    "pass",
+  )
+  assert.match(
+    offline.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.memberDirectoryPolicy)?.summary || "",
+    /privacy-minimized pages/,
+  )
+  assert.equal(
+    empty.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.memberDirectoryPolicy)?.status,
+    "warn",
+  )
+  assert.equal(
+    disabledIntent.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.guildMembersIntent)?.status,
+    "fail",
+  )
+  assert.equal(disabledIntent.status, "error")
+  assert.match(unknownIntentSetup.warnings.join("\n"), /Guild Members intent/)
+  assert.equal(
+    disabledDirectory.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.guildMembersIntent)?.status,
+    "pass",
+  )
+  assert.match(omittedToolset.warnings.join("\n"), /members toolset/)
+})
+
 test("doctor fails online verification when local scope contains no accessible guild", async () => {
   const report = await diagnoseConnector({
     environment: environment(),
@@ -811,6 +895,8 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
     transport: "stdio",
   })
   assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowMemberDirectory), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.memberDirectoryGuildIds), true)
   assert.deepEqual(
     [...result.environment.forward].sort(),
     Object.values(ENVIRONMENT_NAMES)
@@ -1078,6 +1164,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
+    "find_guild_members",
     "review_attachment_message",
     "review_channel_creation",
     "review_channel_permission_overwrite",
@@ -1104,6 +1191,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/messages/{messageId}",
     "discord://channels/{channelId}/permission-overwrites",
     "discord://guilds/{guildId}/channels",
+    "discord://guilds/{guildId}/members/{userId}",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
   ])

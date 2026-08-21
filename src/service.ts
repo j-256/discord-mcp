@@ -91,6 +91,11 @@ import type {
   MessagePinServiceOptions,
 } from "./message-pin-service.js"
 import { MessagePinService } from "./message-pin-service.js"
+import type {
+  MemberDirectoryListOptions,
+  MemberDirectorySearchOptions,
+} from "./member-directory-service.js"
+import { MemberDirectoryService } from "./member-directory-service.js"
 import {
   normalizeChannel,
   normalizeGuild,
@@ -161,6 +166,7 @@ export interface DiscordServiceClient {
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
+  listGuildMembers: DiscordClient["listGuildMembers"]
   listMessagePins: DiscordClient["listMessagePins"]
   listMessages: DiscordClient["listMessages"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
@@ -170,6 +176,7 @@ export interface DiscordServiceClient {
   removeGuildBan: DiscordClient["removeGuildBan"]
   removeGuildMember: DiscordClient["removeGuildMember"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
+  searchGuildMembers: DiscordClient["searchGuildMembers"]
   unpinMessage: DiscordClient["unpinMessage"]
 }
 
@@ -239,9 +246,12 @@ interface VerifiedIdentity {
   bot: DiscordUser
 }
 
-function applicationMessageContentIntent(
+type PrivilegedIntentStatus = "disabled" | "enabled" | "unknown"
+
+function applicationPrivilegedIntent(
   application: DiscordApplication,
-): "disabled" | "enabled" | "unknown" {
+  intentFlags: bigint,
+): PrivilegedIntentStatus {
   let flags: bigint
   try {
     if (application.flags_new !== undefined) flags = BigInt(application.flags_new)
@@ -250,9 +260,28 @@ function applicationMessageContentIntent(
   } catch {
     return "unknown"
   }
-  const intentFlags = DISCORD_APPLICATION_FLAGS.gatewayMessageContent
-    | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited
+  if (flags < 0n) return "unknown"
   return (flags & intentFlags) !== 0n ? "enabled" : "disabled"
+}
+
+function applicationGuildMembersIntent(
+  application: DiscordApplication,
+): PrivilegedIntentStatus {
+  return applicationPrivilegedIntent(
+    application,
+    DISCORD_APPLICATION_FLAGS.gatewayGuildMembers
+      | DISCORD_APPLICATION_FLAGS.gatewayGuildMembersLimited,
+  )
+}
+
+function applicationMessageContentIntent(
+  application: DiscordApplication,
+): PrivilegedIntentStatus {
+  return applicationPrivilegedIntent(
+    application,
+    DISCORD_APPLICATION_FLAGS.gatewayMessageContent
+      | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited,
+  )
 }
 
 function assertConnectorLimit(
@@ -342,6 +371,7 @@ export class ConnectorService {
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
   readonly #messagePinService: MessagePinService
+  readonly #memberDirectoryService: MemberDirectoryService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
@@ -411,6 +441,10 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.messagePinOptions,
+    })
+    this.#memberDirectoryService = new MemberDirectoryService({
+      client: this.#client,
+      policy: this.#policy,
     })
     this.#permissionOverwriteService = new ChannelPermissionOverwriteService({
       activityStore: this.#activityStore,
@@ -498,6 +532,7 @@ export class ConnectorService {
     const scopedGuilds = this.#policy.filterGuilds(guilds)
     return {
       application: {
+        guildMembersIntent: applicationGuildMembersIntent(identity.application),
         id: identity.application.id,
         messageContentIntent: applicationMessageContentIntent(identity.application),
         name: identity.application.name,
@@ -571,6 +606,31 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async getGuildMember(
+    guildId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#memberDirectoryService.get(guildId, userId, options)
+  }
+
+  async listGuildMembers(
+    guildId: string,
+    options: MemberDirectoryListOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#memberDirectoryService.list(guildId, options)
+  }
+
+  async searchGuildMembers(
+    guildId: string,
+    options: MemberDirectorySearchOptions,
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#memberDirectoryService.search(guildId, options)
   }
 
   async getRole(

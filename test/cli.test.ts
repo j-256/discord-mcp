@@ -7,10 +7,11 @@ import {
   type CliDependencies,
 } from "../src/cli.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
-import type {
-  DoctorReport,
-  SetupReport,
-  SmokeReport,
+import {
+  OPERATOR_REPORT_SCHEMA_VERSION,
+  type DoctorReport,
+  type SetupReport,
+  type SmokeReport,
 } from "../src/operator.js"
 import {
   createConnectorProfile,
@@ -48,7 +49,7 @@ function doctorReport(status: DoctorReport["status"] = "ok"): DoctorReport {
     }],
     identity: null,
     online: false,
-    schemaVersion: 3,
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     status,
   }
 }
@@ -82,7 +83,7 @@ function setupReport(): SetupReport {
       transport: "stdio",
     },
     profile: null,
-    schemaVersion: 3,
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName: "discord",
     status: "ok",
     toolsets: ["connector", "messages"],
@@ -102,7 +103,7 @@ function smokeReport(): SmokeReport {
     readOnlyTools: ["get_connector_status"],
     resourceTemplateUris: ["discord://channels/{channelId}/access"],
     resourceUris: ["discord://connector/safety"],
-    schemaVersion: 3,
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     status: "ok",
     toolCount: 12,
     toolsets: ["connector", "messages"],
@@ -624,7 +625,7 @@ test("CLI profile lifecycle is credential-free, recoverable, and exactly confirm
     profiles: Array<{ credentialVariable: string; name: string }>
     schemaVersion: number
   }
-  assert.equal(listReport.schemaVersion, 3)
+  assert.equal(listReport.schemaVersion, OPERATOR_REPORT_SCHEMA_VERSION)
   assert.deepEqual(listReport.profiles.map((profile) => profile.name), ["support-bot"])
   assert.equal(listReport.profiles[0]?.credentialVariable, TOKEN_ALIAS)
   assert.match(showOutput.value(), /Discord MCP profile: support-bot/)
@@ -634,7 +635,7 @@ test("CLI profile lifecycle is credential-free, recoverable, and exactly confirm
     action: "restore",
     credentialUnaffected: true,
     name: "support-bot",
-    schemaVersion: 3,
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     status: "ok",
   })
   assert.equal(activations, 0)

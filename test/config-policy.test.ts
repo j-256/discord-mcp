@@ -18,6 +18,7 @@ import type { DiscordChannel } from "../src/types.js"
 
 const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
+const OTHER_GUILD_ID = "100000000000000002"
 const CHANNEL_ID = "200000000000000001"
 const OTHER_CHANNEL_ID = "200000000000000002"
 const USER_ID = "400000000000000001"
@@ -51,6 +52,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
     DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
     DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
     DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
@@ -60,6 +62,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
     DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "750",
     DISCORD_MCP_MENTION_USER_IDS: USER_ID,
+    DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
@@ -83,6 +86,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.forumPostChannelIds], [])
   assert.equal(config.allowGateway, false)
   assert.equal(config.allowInteractions, true)
+  assert.equal(config.allowMemberDirectory, true)
+  assert.deepEqual([...config.memberDirectoryGuildIds], [GUILD_ID])
   assert.equal(config.allowPermissionOverwrites, true)
   assert.deepEqual([...config.permissionOverwriteChannelIds], [CHANNEL_ID])
   assert.equal(config.allowPinManagement, true)
@@ -136,6 +141,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    memberDirectoryEnabled: false,
+    memberDirectoryGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
@@ -284,6 +291,8 @@ test("configuration and policy require an exact administration guild and protect
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    memberDirectoryEnabled: false,
+    memberDirectoryGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -297,6 +306,50 @@ test("configuration and policy require an exact administration guild and protect
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
   })
+})
+
+test("configuration and policy require an opt-in exact member-directory guild scope", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+    DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(policy.describe().memberDirectoryEnabled, true)
+  assert.deepEqual(policy.describe().memberDirectoryGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertMemberDirectoryAllowed(GUILD_ID))
+  assert.throws(
+    () => policy.assertMemberDirectoryAllowed(OTHER_GUILD_ID),
+    /outside the member-directory scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertMemberDirectoryAllowed(GUILD_ID),
+    /member directory is disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertMemberDirectoryAllowed(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS must be a subset/,
+  )
 })
 
 test("configuration and policy isolate exact channel creation authority", () => {
@@ -650,6 +703,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    memberDirectoryEnabled: false,
+    memberDirectoryGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",

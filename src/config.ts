@@ -42,6 +42,7 @@ export interface ConnectorConfig {
   allowGateway: boolean
   allowGuildScaffolds: boolean
   allowInteractions: boolean
+  allowMemberDirectory: boolean
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
@@ -60,6 +61,7 @@ export interface ConnectorConfig {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   mentionUserIds: ReadonlySet<string>
+  memberDirectoryGuildIds: ReadonlySet<string>
   mcpToolsets: ReadonlySet<McpToolsetName>
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
@@ -263,6 +265,10 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.mentionUserIds,
     CONNECTOR_LIMITS.mentionUserAllowlist,
   )
+  const memberDirectoryGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.memberDirectoryGuildIds],
+    ENVIRONMENT_NAMES.memberDirectoryGuildIds,
+  )
   const protectedUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.protectedUserIds],
     ENVIRONMENT_NAMES.protectedUserIds,
@@ -281,6 +287,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
+    [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
@@ -363,6 +370,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
     ),
+    allowMemberDirectory: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowMemberDirectory],
+      ENVIRONMENT_NAMES.allowMemberDirectory,
+    ),
     allowPermissionOverwrites: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowPermissionOverwrites],
       ENVIRONMENT_NAMES.allowPermissionOverwrites,
@@ -421,6 +432,7 @@ export function loadConnectorConfig(
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
     ),
     mentionUserIds,
+    memberDirectoryGuildIds,
     mcpToolsets: parseMcpToolsets(
       environment[ENVIRONMENT_NAMES.toolsets],
       ENVIRONMENT_NAMES.toolsets,

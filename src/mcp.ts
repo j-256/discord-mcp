@@ -69,6 +69,7 @@ import {
   GATEWAY_DEFAULTS,
   IDEMPOTENCY_KEY_PATTERN,
   MCP_DISCOVERY_TOOL_NAME,
+  MEMBER_DIRECTORY_LIMITS,
   MEMBER_MODERATION_ACTIONS,
   PERMISSION_LIMITS,
   SCHEMA_VERSION,
@@ -224,6 +225,32 @@ const guildInputSchema = z.strictObject({
 const roleInputSchema = z.strictObject({
   guildId: snowflakeSchema,
   roleId: snowflakeSchema,
+})
+const guildMemberInputSchema = z.strictObject({
+  guildId: snowflakeSchema,
+  userId: snowflakeSchema,
+})
+const guildMemberListInputSchema = z.strictObject({
+  afterUserId: snowflakeSchema.optional()
+    .describe("Optional exact user ID cursor from nextAfterUserId"),
+  guildId: snowflakeSchema,
+  limit: z.number().int().min(1).max(MEMBER_DIRECTORY_LIMITS.listPage)
+    .default(MEMBER_DIRECTORY_LIMITS.listPageDefault),
+})
+const guildMemberSearchInputSchema = z.strictObject({
+  guildId: snowflakeSchema,
+  limit: z.number().int().min(1).max(MEMBER_DIRECTORY_LIMITS.searchPage)
+    .default(MEMBER_DIRECTORY_LIMITS.searchPageDefault),
+  query: z.string()
+    .min(MEMBER_DIRECTORY_LIMITS.queryMinimumCharacters)
+    .max(MEMBER_DIRECTORY_LIMITS.queryCharacters)
+    .refine((value) => value.trim() === value, {
+      message: "query must not have surrounding whitespace",
+    })
+    .refine((value) => !/[\u0000-\u001F\u007F]/u.test(value), {
+      message: "query must not contain controls",
+    })
+    .describe("Literal username or nickname prefix"),
 })
 const guildAuditListInputSchema = z.strictObject({
   actionType: z.number()
@@ -1549,6 +1576,7 @@ export interface DiscordToolService {
   explainPrincipalPermissions: ConnectorService["explainPrincipalPermissions"]
   getMessage: ConnectorService["getMessage"]
   getGuildAuditEntry: ConnectorService["getGuildAuditEntry"]
+  getGuildMember: ConnectorService["getGuildMember"]
   getRole: ConnectorService["getRole"]
   getStatus: ConnectorService["getStatus"]
   listActivity: ConnectorService["listActivity"]
@@ -1558,6 +1586,7 @@ export interface DiscordToolService {
   listChannelPermissionOverwrites: ConnectorService["listChannelPermissionOverwrites"]
   listGuilds: ConnectorService["listGuilds"]
   listGuildAuditEntries: ConnectorService["listGuildAuditEntries"]
+  listGuildMembers: ConnectorService["listGuildMembers"]
   listMessagePins: ConnectorService["listMessagePins"]
   listRoles: ConnectorService["listRoles"]
   planMessageDeletion: ConnectorService["planMessageDeletion"]
@@ -1571,6 +1600,7 @@ export interface DiscordToolService {
   planRoleCreation: ConnectorService["planRoleCreation"]
   readMessages: ConnectorService["readMessages"]
   searchMessages: ConnectorService["searchMessages"]
+  searchGuildMembers: ConnectorService["searchGuildMembers"]
   sendMessage: ConnectorService["sendMessage"]
 }
 
@@ -2847,6 +2877,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "The optional Gateway feed requests no privileged intents, retains only scoped identifiers and fixed event kinds, and reports cursor discontinuities explicitly.",
       "Observability is process-local unless separately enabled for privacy-safe OTLP export, and status surfaces expose only fixed operation aggregates and exporter health.",
       "Guild audit-log reads omit embedded Discord objects plus all change and option values, redact non-snowflake targets, persist nothing, and include reasons only by explicit opt-in.",
+      "Member-directory reads require a separate exact guild allowlist, and member listing additionally requires the Guild Members privileged intent. They return bounded privacy-minimized records, persist nothing, and never turn a display name into a write target.",
       "Prompts render validated read-only or plan-only workflows and never perform service calls themselves.",
       "Native search requires a substantive filter and may report that Discord is still indexing.",
       "Forum posts are public threads and retain applied tag IDs.",
@@ -3059,6 +3090,79 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord role ${input.roleId} belongs to in-scope guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("get_guild_member", server.registerTool(
+    "get_guild_member",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Fetch one exact Discord guild member by guild and user snowflake through the separately gated member directory. The privacy-minimized result omits avatars, presence, voice state, boost state, permissions, flags, and raw payloads.",
+      inputSchema: guildMemberInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Get exact Discord guild member",
+    },
+    safeToolHandler("get_guild_member", async (
+      input: z.infer<typeof guildMemberInputSchema>,
+      context,
+    ) => {
+      const result = await service.getGuildMember(input.guildId, input.userId, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord member ${input.userId} belongs to member-directory guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_guild_members", server.registerTool(
+    "list_guild_members",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "List one bounded ascending page of privacy-minimized members from a separately gated Discord guild. Continue only with the returned nextAfterUserId cursor; a full page does not prove that another page exists.",
+      inputSchema: guildMemberListInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List privacy-safe Discord guild members",
+    },
+    safeToolHandler("list_guild_members", async (
+      input: z.infer<typeof guildMemberListInputSchema>,
+      context,
+    ) => {
+      const result = await service.listGuildMembers(input.guildId, {
+        ...(input.afterUserId ? { afterUserId: input.afterUserId } : {}),
+        limit: input.limit,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord returned ${result.members.length} privacy-minimized members from guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("search_guild_members", server.registerTool(
+    "search_guild_members",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Run one bounded Discord username-or-nickname prefix search inside a separately gated guild. Results are privacy-minimized, are not fuzzy or exhaustive, and must not be treated as write targets without exact-ID review.",
+      inputSchema: guildMemberSearchInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Search privacy-safe Discord guild members",
+    },
+    safeToolHandler("search_guild_members", async (
+      input: z.infer<typeof guildMemberSearchInputSchema>,
+      context,
+    ) => {
+      const result = await service.searchGuildMembers(input.guildId, {
+        limit: input.limit,
+        query: input.query,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord returned ${result.members.length} privacy-minimized member-prefix matches from guild ${input.guildId}`,
       )
     }, secrets, observability),
   ))

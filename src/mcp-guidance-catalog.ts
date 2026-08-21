@@ -24,6 +24,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelAccess: "channel_access",
   channelPermissionOverwrites: "channel_permission_overwrites",
   exactMessage: "exact_message",
+  exactMember: "exact_member",
   exactRole: "exact_role",
   guildChannels: "guild_channels",
   guildRoles: "guild_roles",
@@ -33,12 +34,14 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelAccess: "discord://channels/{channelId}/access",
   channelPermissionOverwrites: "discord://channels/{channelId}/permission-overwrites",
   exactMessage: "discord://channels/{channelId}/messages/{messageId}",
+  exactMember: "discord://guilds/{guildId}/members/{userId}",
   exactRole: "discord://guilds/{guildId}/roles/{roleId}",
   guildChannels: "discord://guilds/{guildId}/channels",
   guildRoles: "discord://guilds/{guildId}/roles",
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
+  findGuildMembers: "find_guild_members",
   reviewAttachmentMessage: "review_attachment_message",
   reviewChannelCreation: "review_channel_creation",
   reviewChannelPermissionOverwrite: "review_channel_permission_overwrite",
@@ -57,6 +60,7 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
 ]
 
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
+  [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.reviewAttachmentMessage]: "attachments",
   [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",
   [MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite]: "permission-overwrites",

@@ -178,6 +178,8 @@ export function registerDiscordResources(
           "",
           "Guild audit-log reads are separately selectable, exact-guild scoped, bounded, and read-only. They validate remote ordering, cursors, filters, and identifiers; omit embedded Discord objects plus change and option values; redact non-snowflake targets; include reasons only by explicit opt-in; and persist nothing.",
           "",
+          "Member-directory reads require a separate feature gate and exact guild allowlist; member listing additionally requires Discord's Guild Members privileged intent. Exact lookup, ascending cursor pages, and username-or-nickname prefix search return only user IDs, bounded names, bot state, role IDs, join and screening state, and timeout expiry. They omit avatars, presence, voice state, boost state, permissions, flags, and raw payloads; persist and cache nothing; and never convert a name into a write target.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Attachment messages require separate exact channel and canonical local-directory scopes. Planning performs a bounded stable read of one owned regular file and binds its bytes, path, exact message fields, reply, notifications, and complete permissions into a keyed plan. Execution requires fresh byte-matching plans, signed approval, a unique one-shot operation key, the shared anti-spam guard, pending content-free records, one non-retried multipart request, and exact message readback. It never accepts URLs or base64, persists file or message content, returns an attachment URL, retries, or rolls back.",
@@ -336,6 +338,31 @@ export function registerDiscordResources(
       () => service.getRole(
         templateSnowflake(variables, "guildId"),
         templateSnowflake(variables, "roleId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.exactMember,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.exactMember, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact privacy-minimized Discord guild member from the separately gated member directory. The result persists nothing and omits avatars, presence, voice, boost, permissions, flags, and raw payloads.",
+      mimeType: "application/json",
+      title: "Exact privacy-safe Discord guild member",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildMember(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "userId"),
         { signal: context.mcpReq.signal },
       ),
     ),

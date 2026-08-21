@@ -765,6 +765,8 @@ function fixturePolicy(): PolicyDescription {
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    memberDirectoryEnabled: true,
+    memberDirectoryGuildIds: [GUILD_ID],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -824,6 +826,9 @@ function serviceFixture(overrides: {
     guildScaffoldPlan: 0,
     explain: 0,
     getRole: 0,
+    memberGet: 0,
+    memberList: 0,
+    memberSearch: 0,
     listRoles: 0,
     messagePinExecute: 0,
     messagePinList: 0,
@@ -1206,6 +1211,25 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async getGuildMember(guildId, userId) {
+      calls.memberGet += 1
+      return {
+        guildId,
+        member: {
+          bot: false,
+          globalName: "Member",
+          joinedAt: "2026-08-20T00:00:00.000Z",
+          nickname: "reviewer",
+          pending: false,
+          roleIds: [ROLE_ID],
+          timeoutUntil: null,
+          userId,
+          username: "member",
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async getRole(guildId) {
       calls.getRole += 1
       return {
@@ -1224,6 +1248,7 @@ function serviceFixture(overrides: {
     async getStatus() {
       return {
         application: {
+          guildMembersIntent: "enabled" as const,
           id: "500000000000000001",
           messageContentIntent: "enabled" as const,
           name: "Connector",
@@ -1364,6 +1389,22 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listGuildMembers(guildId, options) {
+      calls.memberList += 1
+      return {
+        guildId,
+        members: [],
+        page: {
+          afterUserId: options?.afterUserId ?? null,
+          exhausted: true,
+          nextAfterUserId: null,
+          requestedLimit: options?.limit ?? 25,
+          returned: 0,
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async listMessagePins(channelId, options) {
       calls.messagePinList += 1
       return {
@@ -1495,6 +1536,20 @@ function serviceFixture(overrides: {
         threads: [],
       }
     },
+    async searchGuildMembers(guildId, options) {
+      calls.memberSearch += 1
+      return {
+        guildId,
+        match: "username-or-nickname-prefix",
+        members: [],
+        page: {
+          requestedLimit: options.limit ?? 10,
+          returned: 0,
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async sendMessage(input) {
       if (overrides.interactionError) throw overrides.interactionError
       calls.send += 1
@@ -1615,6 +1670,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_channels",
       "list_roles",
       "get_role",
+      "get_guild_member",
+      "list_guild_members",
+      "search_guild_members",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -2268,6 +2326,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     getRole: 0,
+    memberGet: 0,
+    memberList: 0,
+    memberSearch: 0,
     listRoles: 0,
     messagePinExecute: 0,
     messagePinList: 0,
@@ -2393,6 +2454,51 @@ test("MCP role reads expose complete inventory and exact lookup with snowflake v
   assert.equal(invalid.isError, true)
   assert.equal(calls.listRoles, 1)
   assert.equal(calls.getRole, 1)
+})
+
+test("MCP member directory exposes bounded privacy-minimized exact, cursor, and prefix reads", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const tools = (await client.listTools()).tools
+  const listTool = listedTool(tools, "list_guild_members")
+  const searchTool = listedTool(tools, "search_guild_members")
+
+  assert.equal(
+    (listTool.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .limit?.maximum,
+    100,
+  )
+  assert.equal(
+    (searchTool.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .limit?.maximum,
+    25,
+  )
+  const exact = await client.callTool({
+    arguments: { guildId: GUILD_ID, userId: USER_ID },
+    name: "get_guild_member",
+  })
+  const listed = await client.callTool({
+    arguments: { afterUserId: USER_ID, guildId: GUILD_ID, limit: 9 },
+    name: "list_guild_members",
+  })
+  const searched = await client.callTool({
+    arguments: { guildId: GUILD_ID, limit: 7, query: "rev" },
+    name: "search_guild_members",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: GUILD_ID, query: "r" },
+    name: "search_guild_members",
+  })
+
+  const member = structuredContent(exact).member as Record<string, unknown>
+  assert.equal(member.userId, USER_ID)
+  assert.equal("avatar" in member, false)
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal(structuredContent(searched).status, "ok")
+  assert.equal(invalid.isError, true)
+  assert.doesNotMatch(JSON.stringify(searched.content), /rev|reviewer/i)
+  assert.equal(calls.memberGet, 1)
+  assert.equal(calls.memberList, 1)
+  assert.equal(calls.memberSearch, 1)
 })
 
 test("MCP guild audit-log tools enforce bounded privacy tiers and exact IDs", async (context) => {
@@ -4927,7 +5033,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 6)
+  assert.equal(templates.resourceTemplates.length, 7)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

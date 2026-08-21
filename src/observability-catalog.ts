@@ -17,6 +17,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   get_connector_status: "discord-read",
   get_gateway_events: "local-read",
   get_gateway_status: "local-read",
+  get_guild_member: "discord-read",
   get_message: "discord-read",
   get_observability_status: "local-read",
   get_role: "discord-read",
@@ -27,6 +28,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   list_channel_permission_overwrites: "discord-read",
   list_guilds: "discord-read",
   list_guild_audit_entries: "discord-read",
+  list_guild_members: "discord-read",
   list_roles: "discord-read",
   plan_member_moderation: "discord-read",
   plan_attachment_message: "discord-read",
@@ -41,6 +43,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   list_message_pins: "discord-read",
   execute_message_pin: "destructive-write",
   search_messages: "discord-read",
+  search_guild_members: "discord-read",
   send_message: "interaction-write",
 })
 
@@ -75,6 +78,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   get_user: "GET",
   list_active_guild_threads: "GET",
   list_current_user_guilds: "GET",
+  list_guild_members: "GET",
   list_joined_private_archived_threads: "GET",
   list_messages: "GET",
   list_message_pins: "GET",
@@ -85,6 +89,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   remove_guild_ban: "DELETE",
   remove_guild_member: "DELETE",
   search_guild_messages: "GET",
+  search_guild_members: "GET",
   unpin_message: "DELETE",
 })
 

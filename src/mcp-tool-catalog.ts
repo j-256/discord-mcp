@@ -130,6 +130,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "entry", "exact", "guild", "history", "moderation"],
     toolset: "audit-logs",
   },
+  get_guild_member: {
+    keywords: ["directory", "exact", "member", "profile", "user"],
+    toolset: "members",
+  },
   get_connector_status: {
     keywords: ["application", "bot", "identity", "scope", "status"],
     toolset: "connector",
@@ -185,6 +189,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_guild_audit_entries: {
     keywords: ["action", "actor", "audit", "guild", "history", "moderation"],
     toolset: "audit-logs",
+  },
+  list_guild_members: {
+    keywords: ["cursor", "directory", "guild", "list", "member", "user"],
+    toolset: "members",
   },
   list_roles: {
     keywords: ["guild", "hierarchy", "list", "permission", "role"],
@@ -242,6 +250,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   search_messages: {
     keywords: ["author", "content", "filter", "guild", "message", "search"],
     toolset: "messages",
+  },
+  search_guild_members: {
+    keywords: ["directory", "member", "nickname", "prefix", "search", "username"],
+    toolset: "members",
   },
   send_message: {
     keywords: ["create", "message", "reply", "send", "write"],

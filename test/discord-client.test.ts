@@ -179,6 +179,109 @@ test("Discord client encodes bounded guild audit-log filters and cursors", async
   assert.equal(JSON.stringify(records).includes("100"), false)
 })
 
+test("Discord client uses documented bounded member-directory routes", async () => {
+  const requests: Array<{ method: string | undefined; url: string }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method, url: String(input) })
+      return jsonResponse([])
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.listGuildMembers("100", { after: "200", limit: 25 })
+  await client.searchGuildMembers("100", { limit: 10, query: "alpha beta" })
+
+  assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: `${API_BASE_URL}/guilds/100/members?after=200&limit=25`,
+    },
+    {
+      method: "GET",
+      url: `${API_BASE_URL}/guilds/100/members/search?limit=10&query=alpha+beta`,
+    },
+  ])
+  assert.deepEqual(records.map(({ operation }) => operation), [
+    "list_guild_members",
+    "search_guild_members",
+  ])
+})
+
+test("Discord client validates member-directory requests before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse([])
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(() => client.getGuildMember("invalid", "200"), /guild ID/)
+  assert.throws(() => client.getGuildMember("100", "0"), /user ID/)
+  assert.throws(() => client.listGuildMembers("100", { after: "0" }), /after cursor/)
+  assert.throws(() => client.listGuildMembers("100", { limit: 101 }), /between 1 and 100/)
+  assert.throws(
+    () => client.searchGuildMembers("100", { query: "x" }),
+    /2-100/,
+  )
+  assert.throws(
+    () => client.searchGuildMembers("100", { query: " alpha " }),
+    /trimmed characters/,
+  )
+  assert.throws(
+    () => client.searchGuildMembers("100", { query: "alpha\n" }),
+    /trimmed characters/,
+  )
+  assert.throws(
+    () => client.searchGuildMembers("100", { limit: 26, query: "alpha" }),
+    /between 1 and 25/,
+  )
+  assert.equal(requests, 0)
+})
+
+test("Discord client keeps member and message search queries out of failures", async () => {
+  const privateQuery = "private-member-query"
+  const apiClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      message: `Rejected ${privateQuery}`,
+    }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => apiClient.searchGuildMembers("100", { query: privateQuery }),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.equal(error.route, "/guilds/100/members/search")
+      assert.doesNotMatch(error.message, new RegExp(privateQuery))
+      assert.doesNotMatch(error.route, /\?/)
+      return true
+    },
+  )
+
+  const networkClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(`Failed URL containing ${privateQuery}`)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => networkClient.searchGuildMessages("100", { content: privateQuery }),
+    (error: unknown) => {
+      assert.doesNotMatch(String(error), new RegExp(privateQuery))
+      assert.doesNotMatch(String(error), /\?/)
+      return true
+    },
+  )
+})
+
 test("Discord client rejects invalid guild audit-log inputs before fetching", () => {
   let requests = 0
   const client = new DiscordClient({

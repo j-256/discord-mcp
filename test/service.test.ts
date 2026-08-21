@@ -49,6 +49,7 @@ const MESSAGE_ID = "500000000000000001"
 const CREATED_CHANNEL_ID = "400000000000000005"
 const CREATED_ROLE_ID = "700000000000000001"
 const FORUM_TAG_ID = "800000000000000001"
+const MEMBER_USER_ID = "600000000000000001"
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -315,6 +316,9 @@ function serviceFixture(overrides: {
       calls.guilds += 1
       return [guild()]
     },
+    async listGuildMembers() {
+      return []
+    },
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
     },
@@ -349,6 +353,9 @@ function serviceFixture(overrides: {
         messages: [],
         total_results: 0,
       }
+    },
+    async searchGuildMembers() {
+      return []
     },
     async unpinMessage() {},
   }
@@ -1189,6 +1196,7 @@ test("service verifies identity once and reports scope without message reads", a
   const guilds = await service.listGuilds({ limit: 10 })
 
   assert.equal(status.application.id, APPLICATION_ID)
+  assert.equal(status.application.guildMembersIntent, "disabled")
   assert.equal(status.application.messageContentIntent, "enabled")
   assert.equal(status.bot.id, BOT_ID)
   assert.equal(status.guildPage.accessible, 1)
@@ -1217,6 +1225,87 @@ test("service diagnoses Message Content intent from arbitrary-width application 
     (await unknownService.getStatus()).application.messageContentIntent,
     "unknown",
   )
+})
+
+test("service diagnoses Guild Members intent from normal and limited application flags", async () => {
+  const normal = application()
+  normal.flags = Number(1n << 14n)
+  const limited = application()
+  limited.flags = 0
+  limited.flags_new = (1n << 15n).toString()
+  const invalid = application()
+  invalid.flags = -1
+
+  assert.equal(
+    (await serviceFixture({ application: normal }).service.getStatus())
+      .application.guildMembersIntent,
+    "enabled",
+  )
+  assert.equal(
+    (await serviceFixture({ application: limited }).service.getStatus())
+      .application.guildMembersIntent,
+    "enabled",
+  )
+  assert.equal(
+    (await serviceFixture({ application: invalid }).service.getStatus())
+      .application.guildMembersIntent,
+    "unknown",
+  )
+})
+
+test("service exposes an opt-in minimized member directory through exact REST calls", async () => {
+  const remoteMember = (userId: string): DiscordGuildMember => ({
+    joined_at: "2026-08-01T00:00:00.000Z",
+    nick: "Member",
+    pending: false,
+    roles: [],
+    user: {
+      avatar: "private-avatar",
+      id: userId,
+      username: "member_name",
+    },
+  })
+  let exactCalls = 0
+  let listCalls = 0
+  let searchCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember(_guildId, userId) {
+        exactCalls += 1
+        return remoteMember(userId)
+      },
+      async listGuildMembers() {
+        listCalls += 1
+        return [remoteMember(MEMBER_USER_ID)]
+      },
+      async searchGuildMembers(_guildId, options) {
+        searchCalls += 1
+        assert.equal(options.query, "member")
+        return [remoteMember(MEMBER_USER_ID)]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+    },
+  })
+
+  const exact = await service.getGuildMember(GUILD_ID, MEMBER_USER_ID)
+  const listed = await service.listGuildMembers(GUILD_ID, { limit: 2 })
+  const searched = await service.searchGuildMembers(GUILD_ID, {
+    query: " member ",
+  })
+
+  assert.equal(exact.member.userId, MEMBER_USER_ID)
+  assert.equal(listed.members[0]?.userId, MEMBER_USER_ID)
+  assert.equal(searched.members[0]?.userId, MEMBER_USER_ID)
+  assert.equal(JSON.stringify([exact, listed, searched]).includes("private-avatar"), false)
+  assert.equal(exactCalls, 1)
+  assert.equal(listCalls, 1)
+  assert.equal(searchCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
 })
 
 test("service normalizes channel messages after enforcing guild scope", async () => {

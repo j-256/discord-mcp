@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 3
+export const OPERATOR_REPORT_SCHEMA_VERSION = 4
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -56,10 +56,12 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   deletionPolicy: "deletion-policy",
   forumPostPolicy: "forum-post-policy",
   guildAccess: "guild-access",
+  guildMembersIntent: "guild-members-intent",
   guildScope: "guild-scope",
   gatewayPolicy: "gateway-policy",
   guildScaffoldPolicy: "guild-scaffold-policy",
   interactionPolicy: "interaction-policy",
+  memberDirectoryPolicy: "member-directory-policy",
   messageContentIntent: "message-content-intent",
   messagePinPolicy: "message-pin-policy",
   nodeVersion: "node-version",
@@ -245,6 +247,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
+  if (config.allowMemberDirectory && config.memberDirectoryGuildIds.size === 0) {
+    warnings.push("The member-directory toggle is enabled but member lookup remains blocked because an exact guild allowlist is required")
+  }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [config.allowAttachments, "attachments", "Attachment messages"],
@@ -254,6 +259,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
     [config.allowInteractions, "interactions", "Message interactions"],
+    [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
@@ -568,6 +574,25 @@ export async function diagnoseConnector(
         `Message interactions are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a ${config.interactionMaxWritesPerMinute}-write rolling budget`,
       ))
     }
+    if (!config.allowMemberDirectory) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberDirectoryPolicy,
+        "pass",
+        "Member-directory reads are disabled",
+      ))
+    } else if (config.memberDirectoryGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberDirectoryPolicy,
+        "warn",
+        "Member-directory toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberDirectoryPolicy,
+        "pass",
+        `Member-directory reads are constrained to ${config.memberDirectoryGuildIds.size} exact guilds with bounded privacy-minimized pages`,
+      ))
+    }
     checks.push(config.allowGateway
       ? check(
         DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -623,6 +648,27 @@ export async function diagnoseConnector(
               ? "Discord application does not advertise Message Content intent; native message search may be unavailable"
               : "Discord application did not expose enough flags to diagnose Message Content intent",
           ))
+        if (!config.allowMemberDirectory || config.memberDirectoryGuildIds.size === 0) {
+          checks.push(check(
+            DOCTOR_CHECK_IDS.guildMembersIntent,
+            "pass",
+            "Member directory is disabled, so Guild Members privileged intent is not required for it",
+          ))
+        } else if (status.application.guildMembersIntent === "enabled") {
+          checks.push(check(
+            DOCTOR_CHECK_IDS.guildMembersIntent,
+            "pass",
+            "Discord application advertises Guild Members intent required for member-directory listing",
+          ))
+        } else {
+          checks.push(check(
+            DOCTOR_CHECK_IDS.guildMembersIntent,
+            status.application.guildMembersIntent === "disabled" ? "fail" : "warn",
+            status.application.guildMembersIntent === "disabled"
+              ? "Discord application does not advertise Guild Members intent; configured member listing will fail"
+              : "Discord application did not expose enough flags to diagnose Guild Members intent",
+          ))
+        }
       } catch (error) {
         checks.push(check(
           DOCTOR_CHECK_IDS.guildAccess,
@@ -722,6 +768,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.mentionUserIds,
     ENVIRONMENT_NAMES.interactionMaxWritesPerMinute,
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
+    ENVIRONMENT_NAMES.allowMemberDirectory,
+    ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowGateway,
     ENVIRONMENT_NAMES.gatewayEventBufferSize,
     ENVIRONMENT_NAMES.allowObservabilityExport,
@@ -866,6 +914,11 @@ export async function prepareSetup(
       ...(status.application.messageContentIntent === "enabled"
         ? []
         : ["Discord application does not advertise confirmed Message Content intent, so native search may be unavailable"]),
+      ...(config.allowMemberDirectory
+        && config.memberDirectoryGuildIds.size > 0
+        && status.application.guildMembersIntent !== "enabled"
+        ? ["Discord application does not advertise confirmed Guild Members intent, so configured member listing may be unavailable"]
+        : []),
     ],
   }
 }

@@ -7,6 +7,7 @@ import {
   DISCORD_API_BASE_URL,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
+  MEMBER_DIRECTORY_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -76,6 +77,16 @@ export interface GuildAuditLogPageOptions extends RequestOptions {
   after?: string
   before?: string
   limit?: number
+}
+
+export interface GuildMemberPageOptions extends RequestOptions {
+  after?: string
+  limit?: number
+}
+
+export interface GuildMemberSearchOptions extends RequestOptions {
+  limit?: number
+  query: string
 }
 
 export interface MessagePageOptions extends MessageCursor, RequestOptions {
@@ -351,6 +362,11 @@ function retryAfterMilliseconds(
 type QueryScalar = boolean | number | string
 type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
+const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
+  "search_guild_members",
+  "search_guild_messages",
+])
+
 function queryString(values: Record<string, QueryValue>): string {
   const parameters = new URLSearchParams()
   for (const [name, value] of Object.entries(values)) {
@@ -442,6 +458,17 @@ function assertAllowedValues(
 function assertSearchSnowflake(value: string | undefined, name: string): void {
   if (value !== undefined && !DISCORD_SNOWFLAKE_PATTERN.test(value)) {
     throw new RangeError(`${name} must be a Discord snowflake`)
+  }
+}
+
+function assertPositiveSnowflake(value: string, name: string): void {
+  if (
+    typeof value !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(value)
+    || BigInt(value) < 1n
+    || BigInt(value) > DISCORD_SNOWFLAKE_MAX
+  ) {
+    throw new RangeError(`${name} must be a positive Discord snowflake`)
   }
 }
 
@@ -771,6 +798,8 @@ export class DiscordClient {
   ): Promise<T> {
     const method = DISCORD_REST_OPERATIONS[operation]
     const url = new URL(`${this.#apiBaseUrl}${route}`)
+    const diagnosticRoute = route.replace(/\?.*$/u, "")
+    const contentSensitive = CONTENT_SENSITIVE_REST_OPERATIONS.has(operation)
     const headers = new Headers({
       Accept: "application/json",
       Authorization: `Bot ${this.#token}`,
@@ -816,9 +845,11 @@ export class DiscordClient {
             : parameters.signal?.aborted
               ? "cancelled"
               : "network-error"
-          const message = redactText(errorMessage(error), [this.#token])
+          const message = contentSensitive
+            ? "request failed"
+            : redactText(errorMessage(error), [this.#token])
           throw new DiscordTransportError(
-            `Discord API ${method} ${route} failed: ${message}`,
+            `Discord API ${method} ${diagnosticRoute} failed: ${message}`,
             category,
             { cause: error },
           )
@@ -846,16 +877,18 @@ export class DiscordClient {
         }
 
         if (!response.ok) {
-          const detail = discordError?.message || response.statusText || "request failed"
+          const detail = contentSensitive
+            ? "request failed"
+            : discordError?.message || response.statusText || "request failed"
           throw new DiscordApiError({
             ...(discordError?.code !== undefined ? { code: discordError.code } : {}),
             message: redactText(
-              `Discord API ${method} ${route} returned ${response.status}: ${detail}`,
+              `Discord API ${method} ${diagnosticRoute} returned ${response.status}: ${detail}`,
               [this.#token],
             ),
             method,
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-            route,
+            route: diagnosticRoute,
             status: response.status,
           })
         }
@@ -863,7 +896,7 @@ export class DiscordClient {
         return parsedBody as T
       }
       throw new DiscordTransportError(
-        `Discord API ${method} ${route} exhausted retries`,
+        `Discord API ${method} ${diagnosticRoute} exhausted retries`,
         "network-error",
       )
     }
@@ -1054,7 +1087,62 @@ export class DiscordClient {
     userId: string,
     options: RequestOptions = {},
   ): Promise<DiscordGuildMember> {
+    assertPositiveSnowflake(guildId, "Discord guild member guild ID")
+    assertPositiveSnowflake(userId, "Discord guild member user ID")
     return this.#request("get_guild_member", `/guilds/${guildId}/members/${userId}`, options)
+  }
+
+  listGuildMembers(
+    guildId: string,
+    options: GuildMemberPageOptions = {},
+  ): Promise<DiscordGuildMember[]> {
+    assertPositiveSnowflake(guildId, "Discord member-directory guild ID")
+    if (options.after !== undefined) {
+      assertPositiveSnowflake(options.after, "Discord member-directory after cursor")
+    }
+    assertBoundedLimit(
+      options.limit,
+      MEMBER_DIRECTORY_LIMITS.listPage,
+      "Discord member-directory list limit",
+    )
+    const route = `/guilds/${guildId}/members${queryString({
+      after: options.after,
+      limit: options.limit,
+    })}`
+    return this.#request("list_guild_members", route, options)
+  }
+
+  searchGuildMembers(
+    guildId: string,
+    options: GuildMemberSearchOptions,
+  ): Promise<DiscordGuildMember[]> {
+    assertPositiveSnowflake(guildId, "Discord member-directory guild ID")
+    if (
+      typeof options.query !== "string"
+      || options.query.trim() !== options.query
+      || options.query.length < MEMBER_DIRECTORY_LIMITS.queryMinimumCharacters
+      || options.query.length > MEMBER_DIRECTORY_LIMITS.queryCharacters
+      || /[\u0000-\u001F\u007F]/u.test(options.query)
+    ) {
+      throw new RangeError(
+        `Discord member-directory query must contain ${MEMBER_DIRECTORY_LIMITS.queryMinimumCharacters}-${MEMBER_DIRECTORY_LIMITS.queryCharacters} trimmed characters without controls`,
+      )
+    }
+    try {
+      encodeURIComponent(options.query)
+    } catch {
+      throw new RangeError("Discord member-directory query must contain valid Unicode")
+    }
+    assertBoundedLimit(
+      options.limit,
+      MEMBER_DIRECTORY_LIMITS.searchPage,
+      "Discord member-directory search limit",
+    )
+    const route = `/guilds/${guildId}/members/search${queryString({
+      limit: options.limit,
+      query: options.query,
+    })}`
+    return this.#request("search_guild_members", route, options)
   }
 
   getGuildRoles(guildId: string, options: RequestOptions = {}): Promise<DiscordRole[]> {

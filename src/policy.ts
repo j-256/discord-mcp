@@ -31,6 +31,8 @@ export interface PolicyDescription {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   interactionsEnabled: boolean
+  memberDirectoryEnabled: boolean
+  memberDirectoryGuildIds: string[]
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
@@ -54,6 +56,7 @@ export class ScopePolicy {
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
+  readonly #allowMemberDirectory: boolean
   readonly #allowPermissionOverwrites: boolean
   readonly #allowPinManagement: boolean
   readonly #allowGateway: boolean
@@ -72,6 +75,7 @@ export class ScopePolicy {
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
+  readonly #memberDirectoryGuildIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
   readonly #permissionOverwriteChannelIds: ReadonlySet<string>
@@ -97,6 +101,7 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowAttachments"
     | "allowGateway"
+    | "allowMemberDirectory"
     | "allowGuildScaffolds"
     | "allowPermissionOverwrites"
     | "allowPinManagement"
@@ -109,6 +114,7 @@ export class ScopePolicy {
     | "attachmentRoots"
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
+    | "memberDirectoryGuildIds"
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -124,6 +130,7 @@ export class ScopePolicy {
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
+    this.#allowMemberDirectory = config.allowMemberDirectory ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowGateway = config.allowGateway ?? false
@@ -143,6 +150,7 @@ export class ScopePolicy {
     this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
+    this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
@@ -179,6 +187,9 @@ export class ScopePolicy {
       interactionMaxWritesPerMinute: this.#interactionMaxWritesPerMinute,
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
       interactionsEnabled: this.#allowInteractions && this.#interactionChannelIds.size > 0,
+      memberDirectoryEnabled: this.#allowMemberDirectory
+        && this.#memberDirectoryGuildIds.size > 0,
+      memberDirectoryGuildIds: [...this.#memberDirectoryGuildIds].sort(),
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
@@ -214,6 +225,19 @@ export class ScopePolicy {
   assertGuildAllowed(guildId: string): void {
     if (!this.guildAllowed(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the configured read scope`)
+    }
+  }
+
+  assertMemberDirectoryAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowMemberDirectory) {
+      throw new PolicyError("Discord member directory is disabled by connector configuration")
+    }
+    if (this.#memberDirectoryGuildIds.size === 0) {
+      throw new PolicyError("Discord member directory requires an explicit guild allowlist")
+    }
+    if (!this.#memberDirectoryGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the member-directory scope`)
     }
   }
 

@@ -34,6 +34,7 @@ export const MCP_TOOLSET_NAMES = [
   "guild-scaffolds",
   "guilds",
   "interactions",
+  "members",
   "messages",
   "moderation",
   "observability",
@@ -59,6 +60,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
+  allowMemberDirectory: "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowPermissionOverwrites: "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
@@ -78,6 +80,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
   mentionUserIds: "DISCORD_MCP_MENTION_USER_IDS",
+  memberDirectoryGuildIds: "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
   observabilityLogs: "DISCORD_MCP_OBSERVABILITY_LOGS",
   otelCompression: "OTEL_EXPORTER_OTLP_COMPRESSION",
   otelEndpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -155,6 +158,16 @@ export const PERMISSION_LIMITS = Object.freeze({
   auditRolePageDefault: 50,
   overwritePage: 100,
   overwritePageDefault: 50,
+})
+
+export const MEMBER_DIRECTORY_LIMITS = Object.freeze({
+  listPage: 100,
+  listPageDefault: 25,
+  nameCharacters: 100,
+  queryCharacters: 100,
+  queryMinimumCharacters: 2,
+  searchPage: 25,
+  searchPageDefault: 10,
 })
 
 export const AUDIT_LOG_LIMITS = Object.freeze({
@@ -279,6 +292,8 @@ export const INTERACTION_DEFAULTS = Object.freeze({
 })
 
 export const DISCORD_APPLICATION_FLAGS = Object.freeze({
+  gatewayGuildMembers: 1n << 14n,
+  gatewayGuildMembersLimited: 1n << 15n,
   gatewayMessageContent: 1n << 18n,
   gatewayMessageContentLimited: 1n << 19n,
 })
