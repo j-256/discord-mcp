@@ -27,6 +27,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   exactMessage: "exact_message",
   exactMember: "exact_member",
   exactRole: "exact_role",
+  guildAutomodRules: "guild_automod_rules",
   guildChannels: "guild_channels",
   guildEmojis: "guild_emojis",
   guildRoles: "guild_roles",
@@ -41,6 +42,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   exactMessage: "discord://channels/{channelId}/messages/{messageId}",
   exactMember: "discord://guilds/{guildId}/members/{userId}",
   exactRole: "discord://guilds/{guildId}/roles/{roleId}",
+  guildAutomodRules: "discord://guilds/{guildId}/automod-rules",
   guildChannels: "discord://guilds/{guildId}/channels",
   guildEmojis: "discord://guilds/{guildId}/emojis",
   guildRoles: "discord://guilds/{guildId}/roles",
@@ -51,6 +53,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 export const MCP_PROMPT_NAMES = Object.freeze({
   findGuildMembers: "find_guild_members",
   reviewAttachmentMessage: "review_attachment_message",
+  reviewAutomodChange: "review_automod_change",
   reviewChannelCreation: "review_channel_creation",
   reviewChannelPermissionOverwrite: "review_channel_permission_overwrite",
   reviewForumPost: "review_forum_post",
@@ -73,6 +76,7 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.reviewAttachmentMessage]: "attachments",
+  [MCP_PROMPT_NAMES.reviewAutomodChange]: "automod",
   [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",
   [MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite]: "permission-overwrites",
   [MCP_PROMPT_NAMES.reviewForumPost]: "forum-posts",

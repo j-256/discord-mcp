@@ -14,6 +14,7 @@ import {
   DISCORD_USER_AGENT,
 } from "./constants.js"
 import {
+  AutoModerationEvidenceError,
   DiscordApiError,
   errorMessage,
   GuildExpressionEvidenceError,
@@ -118,6 +119,119 @@ export interface DiscordWebhookSummary {
   id: string
   name: string | null
   type: number
+}
+
+export const DISCORD_AUTO_MODERATION_EVENT_TYPES = Object.freeze({
+  memberUpdate: 2,
+  messageSend: 1,
+} as const)
+
+export const DISCORD_AUTO_MODERATION_TRIGGER_TYPES = Object.freeze({
+  keyword: 1,
+  keywordPreset: 4,
+  memberProfile: 6,
+  mentionSpam: 5,
+  spam: 3,
+} as const)
+
+export const DISCORD_AUTO_MODERATION_ACTION_TYPES = Object.freeze({
+  blockMemberInteraction: 4,
+  blockMessage: 1,
+  sendAlertMessage: 2,
+  timeout: 3,
+} as const)
+
+export const DISCORD_AUTO_MODERATION_KEYWORD_PRESETS = Object.freeze({
+  profanity: 1,
+  sexualContent: 2,
+  slurs: 3,
+} as const)
+
+export type DiscordAutoModerationEventType =
+  typeof DISCORD_AUTO_MODERATION_EVENT_TYPES[
+    keyof typeof DISCORD_AUTO_MODERATION_EVENT_TYPES
+  ]
+export type DiscordAutoModerationTriggerType =
+  typeof DISCORD_AUTO_MODERATION_TRIGGER_TYPES[
+    keyof typeof DISCORD_AUTO_MODERATION_TRIGGER_TYPES
+  ]
+export type DiscordAutoModerationKeywordPreset =
+  typeof DISCORD_AUTO_MODERATION_KEYWORD_PRESETS[
+    keyof typeof DISCORD_AUTO_MODERATION_KEYWORD_PRESETS
+  ]
+
+export type DiscordAutoModerationTrigger =
+  | {
+      allowList: string[]
+      keywordFilter: string[]
+      regexPatterns: string[]
+      type: 1
+    }
+  | {
+      allowList: string[]
+      keywordFilter: string[]
+      regexPatterns: string[]
+      type: 6
+    }
+  | {
+      type: 3
+    }
+  | {
+      allowList: string[]
+      presets: DiscordAutoModerationKeywordPreset[]
+      type: 4
+    }
+  | {
+      mentionRaidProtectionEnabled: boolean
+      mentionTotalLimit: number
+      type: 5
+    }
+
+export type DiscordAutoModerationAction =
+  | {
+      customMessage: string | null
+      type: 1
+    }
+  | {
+      channelId: string
+      type: 2
+    }
+  | {
+      durationSeconds: number
+      type: 3
+    }
+  | {
+      type: 4
+    }
+
+export interface DiscordAutoModerationRuleSummary {
+  actions: DiscordAutoModerationAction[]
+  creatorUserId: string
+  enabled: boolean
+  eventType: DiscordAutoModerationEventType
+  exemptChannelIds: string[]
+  exemptRoleIds: string[]
+  guildId: string
+  id: string
+  name: string
+  trigger: DiscordAutoModerationTrigger
+}
+
+export interface CreateGuildAutoModerationRuleInput {
+  actions: DiscordAutoModerationAction[]
+  exemptChannelIds: string[]
+  exemptRoleIds: string[]
+  name: string
+  trigger: DiscordAutoModerationTrigger
+}
+
+export interface ModifyGuildAutoModerationRuleInput {
+  actions?: DiscordAutoModerationAction[]
+  enabled?: boolean
+  exemptChannelIds?: string[]
+  exemptRoleIds?: string[]
+  name?: string
+  trigger?: DiscordAutoModerationTrigger
 }
 
 export interface DiscordGuildEmojiSummary {
@@ -345,6 +459,18 @@ const STICKER_FORMAT_UPLOADS: Readonly<Record<
   lottie: { extension: "json", mediaType: "application/json" },
   png: { extension: "png", mediaType: "image/png" },
 })
+const AUTO_MODERATION_EVENT_TYPE_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_AUTO_MODERATION_EVENT_TYPES),
+)
+const AUTO_MODERATION_TRIGGER_TYPE_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_AUTO_MODERATION_TRIGGER_TYPES),
+)
+const AUTO_MODERATION_ACTION_TYPE_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_AUTO_MODERATION_ACTION_TYPES),
+)
+const AUTO_MODERATION_PRESET_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_AUTO_MODERATION_KEYWORD_PRESETS),
+)
 const SCHEDULED_EVENT_COVER_MEDIA_TYPES: Readonly<Record<
   ScheduledEventCoverFormat,
   "image/jpeg" | "image/png"
@@ -585,16 +711,21 @@ type QueryScalar = boolean | number | string
 type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
+  "create_guild_auto_moderation_rule",
   "create_guild_emoji",
   "create_guild_sticker",
+  "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
   "delete_guild_sticker",
+  "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_sticker",
   "list_channel_webhooks",
+  "list_guild_auto_moderation_rules",
   "list_guild_emojis",
   "list_guild_stickers",
   "modify_guild_emoji",
+  "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
   "search_guild_members",
   "search_guild_messages",
@@ -788,6 +919,449 @@ function projectGuildSticker(
     throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker object", {
       cause: error,
     })
+  }
+}
+
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  const keys = Object.keys(value)
+  return keys.every((key) => allowed.includes(key))
+}
+
+function autoModerationReturnedText(
+  value: unknown,
+  maximum: number,
+  description: string,
+): string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || [...value].length > maximum
+    || value.trim() !== value
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new AutoModerationEvidenceError(
+      `Discord returned invalid AutoMod ${description}`,
+    )
+  }
+  try {
+    assertValidUnicode(value, `Discord AutoMod ${description}`)
+  } catch (error) {
+    throw new AutoModerationEvidenceError(
+      `Discord returned invalid AutoMod ${description}`,
+      { cause: error },
+    )
+  }
+  return value
+}
+
+function autoModerationReturnedStrings(
+  value: unknown,
+  maximumEntries: number,
+  maximumCharacters: number,
+  description: string,
+): string[] {
+  if (!Array.isArray(value) || value.length > maximumEntries) {
+    throw new AutoModerationEvidenceError(
+      `Discord returned invalid AutoMod ${description}`,
+    )
+  }
+  const result = value.map((entry) => autoModerationReturnedText(
+    entry,
+    maximumCharacters,
+    description,
+  )).sort()
+  if (new Set(result).size !== result.length) {
+    throw new AutoModerationEvidenceError(
+      `Discord returned duplicate AutoMod ${description}`,
+    )
+  }
+  return result
+}
+
+function autoModerationReturnedSnowflakes(
+  value: unknown,
+  maximum: number,
+  description: string,
+): string[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new AutoModerationEvidenceError(
+      `Discord returned invalid AutoMod ${description}`,
+    )
+  }
+  const result: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new AutoModerationEvidenceError(
+        `Discord returned invalid AutoMod ${description}`,
+      )
+    }
+    try {
+      assertPositiveSnowflake(entry, `Discord AutoMod ${description}`)
+    } catch (error) {
+      throw new AutoModerationEvidenceError(
+        `Discord returned invalid AutoMod ${description}`,
+        { cause: error },
+      )
+    }
+    result.push(entry)
+  }
+  if (new Set(result).size !== result.length) {
+    throw new AutoModerationEvidenceError(
+      `Discord returned duplicate AutoMod ${description}`,
+    )
+  }
+  return result.sort((left, right) => {
+    const leftId = BigInt(left)
+    const rightId = BigInt(right)
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+  })
+}
+
+function projectAutoModerationTrigger(
+  triggerType: number,
+  value: unknown,
+): DiscordAutoModerationTrigger {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AutoModerationEvidenceError(
+      "Discord returned invalid AutoMod trigger metadata",
+    )
+  }
+  const metadata = value as Record<string, unknown>
+  if (
+    triggerType === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword
+    || triggerType === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+  ) {
+    if (!hasOnlyKeys(metadata, ["allow_list", "keyword_filter", "regex_patterns"])) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned unsupported AutoMod keyword metadata",
+      )
+    }
+    const keywordFilter = autoModerationReturnedStrings(
+      metadata.keyword_filter ?? [],
+      DISCORD_LIMITS.autoModerationKeywordEntries,
+      DISCORD_LIMITS.autoModerationKeywordCharacters,
+      "keyword filter",
+    )
+    const regexPatterns = autoModerationReturnedStrings(
+      metadata.regex_patterns ?? [],
+      DISCORD_LIMITS.autoModerationRegexPatterns,
+      DISCORD_LIMITS.autoModerationRegexCharacters,
+      "regex patterns",
+    )
+    if (keywordFilter.length === 0 && regexPatterns.length === 0) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned an empty AutoMod keyword trigger",
+      )
+    }
+    return {
+      allowList: autoModerationReturnedStrings(
+        metadata.allow_list ?? [],
+        DISCORD_LIMITS.autoModerationAllowListKeywords,
+        DISCORD_LIMITS.autoModerationKeywordCharacters,
+        "allow list",
+      ),
+      keywordFilter,
+      regexPatterns,
+      type: triggerType,
+    }
+  }
+  if (triggerType === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.spam) {
+    if (Object.keys(metadata).length !== 0) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned unsupported AutoMod spam metadata",
+      )
+    }
+    return { type: DISCORD_AUTO_MODERATION_TRIGGER_TYPES.spam }
+  }
+  if (triggerType === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keywordPreset) {
+    if (!hasOnlyKeys(metadata, ["allow_list", "presets"])) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned unsupported AutoMod preset metadata",
+      )
+    }
+    if (!Array.isArray(metadata.presets) || metadata.presets.length < 1) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned invalid AutoMod keyword presets",
+      )
+    }
+    const presets = metadata.presets.map((entry) => {
+      if (!Number.isSafeInteger(entry) || !AUTO_MODERATION_PRESET_VALUES.has(entry as number)) {
+        throw new AutoModerationEvidenceError(
+          "Discord returned unsupported AutoMod keyword presets",
+        )
+      }
+      return entry as DiscordAutoModerationKeywordPreset
+    }).sort((left, right) => left - right)
+    if (new Set(presets).size !== presets.length) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned duplicate AutoMod keyword presets",
+      )
+    }
+    return {
+      allowList: autoModerationReturnedStrings(
+        metadata.allow_list ?? [],
+        DISCORD_LIMITS.autoModerationAllowListPresetKeywords,
+        DISCORD_LIMITS.autoModerationKeywordCharacters,
+        "preset allow list",
+      ),
+      presets,
+      type: DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keywordPreset,
+    }
+  }
+  if (triggerType === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.mentionSpam) {
+    if (!hasOnlyKeys(metadata, [
+      "mention_raid_protection_enabled",
+      "mention_total_limit",
+    ])) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned unsupported AutoMod mention metadata",
+      )
+    }
+    if (
+      !Number.isSafeInteger(metadata.mention_total_limit)
+      || (metadata.mention_total_limit as number) < 1
+      || (metadata.mention_total_limit as number) > DISCORD_LIMITS.autoModerationMentionLimit
+      || !(
+        metadata.mention_raid_protection_enabled === undefined
+        || typeof metadata.mention_raid_protection_enabled === "boolean"
+      )
+    ) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned invalid AutoMod mention metadata",
+      )
+    }
+    return {
+      mentionRaidProtectionEnabled: metadata.mention_raid_protection_enabled === true,
+      mentionTotalLimit: metadata.mention_total_limit as number,
+      type: DISCORD_AUTO_MODERATION_TRIGGER_TYPES.mentionSpam,
+    }
+  }
+  throw new AutoModerationEvidenceError(
+    "Discord returned an unsupported AutoMod trigger type",
+  )
+}
+
+function projectAutoModerationActions(
+  value: unknown,
+): DiscordAutoModerationAction[] {
+  if (
+    !Array.isArray(value)
+    || value.length < 1
+    || value.length > DISCORD_LIMITS.autoModerationActions
+  ) {
+    throw new AutoModerationEvidenceError("Discord returned invalid AutoMod actions")
+  }
+  const actions = value.map((entry): DiscordAutoModerationAction => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new AutoModerationEvidenceError("Discord returned invalid AutoMod action")
+    }
+    const action = entry as Record<string, unknown>
+    if (
+      !Number.isSafeInteger(action.type)
+      || !AUTO_MODERATION_ACTION_TYPE_VALUES.has(action.type as number)
+      || !hasOnlyKeys(action, ["metadata", "type"])
+    ) {
+      throw new AutoModerationEvidenceError("Discord returned invalid AutoMod action")
+    }
+    const metadata = action.metadata === undefined
+      ? {}
+      : action.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned invalid AutoMod action metadata",
+      )
+    }
+    const record = metadata as Record<string, unknown>
+    if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage) {
+      if (!hasOnlyKeys(record, ["custom_message"])) {
+        throw new AutoModerationEvidenceError(
+          "Discord returned unsupported AutoMod block-message metadata",
+        )
+      }
+      return {
+        customMessage: record.custom_message === undefined
+          ? null
+          : autoModerationReturnedText(
+              record.custom_message,
+              DISCORD_LIMITS.autoModerationCustomMessageCharacters,
+              "custom block message",
+            ),
+        type: DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage,
+      }
+    }
+    if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.sendAlertMessage) {
+      if (
+        !hasOnlyKeys(record, ["channel_id"])
+        || typeof record.channel_id !== "string"
+      ) {
+        throw new AutoModerationEvidenceError(
+          "Discord returned invalid AutoMod alert metadata",
+        )
+      }
+      try {
+        assertPositiveSnowflake(record.channel_id, "Discord AutoMod alert channel ID")
+      } catch (error) {
+        throw new AutoModerationEvidenceError(
+          "Discord returned invalid AutoMod alert metadata",
+          { cause: error },
+        )
+      }
+      return {
+        channelId: record.channel_id,
+        type: DISCORD_AUTO_MODERATION_ACTION_TYPES.sendAlertMessage,
+      }
+    }
+    if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.timeout) {
+      if (
+        !hasOnlyKeys(record, ["duration_seconds"])
+        || !Number.isSafeInteger(record.duration_seconds)
+        || (record.duration_seconds as number) < 1
+        || (record.duration_seconds as number) > DISCORD_LIMITS.autoModerationTimeoutSeconds
+      ) {
+        throw new AutoModerationEvidenceError(
+          "Discord returned invalid AutoMod timeout metadata",
+        )
+      }
+      return {
+        durationSeconds: record.duration_seconds as number,
+        type: DISCORD_AUTO_MODERATION_ACTION_TYPES.timeout,
+      }
+    }
+    if (Object.keys(record).length !== 0) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned unsupported AutoMod interaction-block metadata",
+      )
+    }
+    return { type: DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMemberInteraction }
+  }).sort((left, right) => left.type - right.type)
+  if (new Set(actions.map((action) => action.type)).size !== actions.length) {
+    throw new AutoModerationEvidenceError("Discord returned duplicate AutoMod action types")
+  }
+  return actions
+}
+
+function assertAutoModerationCompatibility(
+  eventType: number,
+  trigger: DiscordAutoModerationTrigger,
+  actions: readonly DiscordAutoModerationAction[],
+): void {
+  const profile = trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+  const expectedEventType = profile
+    ? DISCORD_AUTO_MODERATION_EVENT_TYPES.memberUpdate
+    : DISCORD_AUTO_MODERATION_EVENT_TYPES.messageSend
+  if (eventType !== expectedEventType) {
+    throw new AutoModerationEvidenceError(
+      "Discord returned an incompatible AutoMod event and trigger",
+    )
+  }
+  if (profile) {
+    if (
+      actions.length !== 1
+      || actions[0]?.type !== DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMemberInteraction
+    ) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned incompatible member-profile AutoMod actions",
+      )
+    }
+    return
+  }
+  if (actions.some((action) => (
+    action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMemberInteraction
+  ))) {
+    throw new AutoModerationEvidenceError(
+      "Discord returned a profile-only action for a message AutoMod rule",
+    )
+  }
+  if (
+    actions.some((action) => action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.timeout)
+    && trigger.type !== DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword
+    && trigger.type !== DISCORD_AUTO_MODERATION_TRIGGER_TYPES.mentionSpam
+  ) {
+    throw new AutoModerationEvidenceError(
+      "Discord returned a timeout action for an incompatible AutoMod trigger",
+    )
+  }
+}
+
+function projectGuildAutoModerationRule(
+  value: unknown,
+  guildId: string,
+): DiscordAutoModerationRuleSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AutoModerationEvidenceError("Discord returned an invalid AutoMod rule")
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== "string"
+    || typeof record.guild_id !== "string"
+    || typeof record.creator_id !== "string"
+    || typeof record.name !== "string"
+    || !Number.isSafeInteger(record.event_type)
+    || !AUTO_MODERATION_EVENT_TYPE_VALUES.has(record.event_type as number)
+    || !Number.isSafeInteger(record.trigger_type)
+    || !AUTO_MODERATION_TRIGGER_TYPE_VALUES.has(record.trigger_type as number)
+    || typeof record.enabled !== "boolean"
+  ) {
+    throw new AutoModerationEvidenceError("Discord returned an invalid AutoMod rule")
+  }
+  try {
+    assertPositiveSnowflake(guildId, "Discord AutoMod guild ID")
+    assertPositiveSnowflake(record.id, "Discord AutoMod rule ID")
+    assertPositiveSnowflake(record.guild_id, "Discord AutoMod response guild ID")
+    assertPositiveSnowflake(record.creator_id, "Discord AutoMod creator ID")
+    if (record.guild_id !== guildId) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned an AutoMod rule for another guild",
+      )
+    }
+    const trigger = projectAutoModerationTrigger(
+      record.trigger_type as number,
+      record.trigger_metadata,
+    )
+    const actions = projectAutoModerationActions(record.actions)
+    assertAutoModerationCompatibility(record.event_type as number, trigger, actions)
+    const exemptChannelIds = autoModerationReturnedSnowflakes(
+      record.exempt_channels,
+      DISCORD_LIMITS.autoModerationExemptChannels,
+      "exempt channel IDs",
+    )
+    if (
+      trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+      && exemptChannelIds.length > 0
+    ) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned channel exemptions for a member-profile AutoMod rule",
+      )
+    }
+    return {
+      actions,
+      creatorUserId: record.creator_id,
+      enabled: record.enabled,
+      eventType: record.event_type as DiscordAutoModerationEventType,
+      exemptChannelIds,
+      exemptRoleIds: autoModerationReturnedSnowflakes(
+        record.exempt_roles,
+        DISCORD_LIMITS.autoModerationExemptRoles,
+        "exempt role IDs",
+      ),
+      guildId,
+      id: record.id,
+      name: autoModerationReturnedText(
+        record.name,
+        DISCORD_LIMITS.autoModerationRuleNameCharacters,
+        "rule name",
+      ),
+      trigger,
+    }
+  } catch (error) {
+    if (error instanceof AutoModerationEvidenceError) throw error
+    throw new AutoModerationEvidenceError(
+      "Discord returned an invalid AutoMod rule",
+      { cause: error },
+    )
   }
 }
 
@@ -1663,6 +2237,388 @@ function assertModifyGuildStickerInput(input: ModifyGuildStickerInput): void {
   if (input.name !== undefined) assertGuildExpressionName(input.name, "sticker")
   if (input.description !== undefined) assertStickerDescription(input.description)
   if (input.tags !== undefined) assertStickerTags(input.tags)
+}
+
+function assertAutoModerationInputText(
+  value: unknown,
+  maximum: number,
+  description: string,
+): asserts value is string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || [...value].length > maximum
+    || value.trim() !== value
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(`Discord AutoMod ${description} is invalid`)
+  }
+  assertValidUnicode(value, `Discord AutoMod ${description}`)
+}
+
+function assertAutoModerationInputStrings(
+  value: unknown,
+  maximumEntries: number,
+  maximumCharacters: number,
+  description: string,
+): asserts value is string[] {
+  if (!Array.isArray(value) || value.length > maximumEntries) {
+    throw new RangeError(`Discord AutoMod ${description} are invalid`)
+  }
+  for (const entry of value) {
+    assertAutoModerationInputText(entry, maximumCharacters, description)
+  }
+  if (new Set(value).size !== value.length) {
+    throw new RangeError(`Discord AutoMod ${description} contain duplicates`)
+  }
+}
+
+function assertAutoModerationInputSnowflakes(
+  value: unknown,
+  maximum: number,
+  description: string,
+): asserts value is string[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new RangeError(`Discord AutoMod ${description} are invalid`)
+  }
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new RangeError(`Discord AutoMod ${description} are invalid`)
+    }
+    assertPositiveSnowflake(entry, `Discord AutoMod ${description}`)
+  }
+  if (new Set(value).size !== value.length) {
+    throw new RangeError(`Discord AutoMod ${description} contain duplicates`)
+  }
+}
+
+function assertAutoModerationTriggerInput(
+  value: unknown,
+): asserts value is DiscordAutoModerationTrigger {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord AutoMod trigger must be an object")
+  }
+  const trigger = value as Record<string, unknown>
+  if (
+    !Number.isSafeInteger(trigger.type)
+    || !AUTO_MODERATION_TRIGGER_TYPE_VALUES.has(trigger.type as number)
+  ) {
+    throw new RangeError("Discord AutoMod trigger type is unsupported")
+  }
+  if (
+    trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword
+    || trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+  ) {
+    if (!hasOnlyKeys(trigger, ["allowList", "keywordFilter", "regexPatterns", "type"])) {
+      throw new RangeError("Discord AutoMod keyword trigger fields are invalid")
+    }
+    assertAutoModerationInputStrings(
+      trigger.keywordFilter,
+      DISCORD_LIMITS.autoModerationKeywordEntries,
+      DISCORD_LIMITS.autoModerationKeywordCharacters,
+      "keyword filter",
+    )
+    assertAutoModerationInputStrings(
+      trigger.regexPatterns,
+      DISCORD_LIMITS.autoModerationRegexPatterns,
+      DISCORD_LIMITS.autoModerationRegexCharacters,
+      "regex patterns",
+    )
+    assertAutoModerationInputStrings(
+      trigger.allowList,
+      DISCORD_LIMITS.autoModerationAllowListKeywords,
+      DISCORD_LIMITS.autoModerationKeywordCharacters,
+      "allow list",
+    )
+    if (trigger.keywordFilter.length === 0 && trigger.regexPatterns.length === 0) {
+      throw new RangeError("Discord AutoMod keyword trigger must contain a keyword or regex")
+    }
+    return
+  }
+  if (trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.spam) {
+    if (!hasOnlyKeys(trigger, ["type"])) {
+      throw new RangeError("Discord AutoMod spam trigger fields are invalid")
+    }
+    return
+  }
+  if (trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keywordPreset) {
+    if (!hasOnlyKeys(trigger, ["allowList", "presets", "type"])) {
+      throw new RangeError("Discord AutoMod preset trigger fields are invalid")
+    }
+    if (
+      !Array.isArray(trigger.presets)
+      || trigger.presets.length < 1
+      || trigger.presets.some((preset) => (
+        !Number.isSafeInteger(preset)
+        || !AUTO_MODERATION_PRESET_VALUES.has(preset as number)
+      ))
+      || new Set(trigger.presets).size !== trigger.presets.length
+    ) {
+      throw new RangeError("Discord AutoMod keyword presets are invalid")
+    }
+    assertAutoModerationInputStrings(
+      trigger.allowList,
+      DISCORD_LIMITS.autoModerationAllowListPresetKeywords,
+      DISCORD_LIMITS.autoModerationKeywordCharacters,
+      "preset allow list",
+    )
+    return
+  }
+  if (!hasOnlyKeys(trigger, [
+    "mentionRaidProtectionEnabled",
+    "mentionTotalLimit",
+    "type",
+  ])) {
+    throw new RangeError("Discord AutoMod mention trigger fields are invalid")
+  }
+  if (
+    !Number.isSafeInteger(trigger.mentionTotalLimit)
+    || (trigger.mentionTotalLimit as number) < 1
+    || (trigger.mentionTotalLimit as number) > DISCORD_LIMITS.autoModerationMentionLimit
+    || typeof trigger.mentionRaidProtectionEnabled !== "boolean"
+  ) {
+    throw new RangeError("Discord AutoMod mention trigger metadata is invalid")
+  }
+}
+
+function assertAutoModerationActionsInput(
+  value: unknown,
+): asserts value is DiscordAutoModerationAction[] {
+  if (
+    !Array.isArray(value)
+    || value.length < 1
+    || value.length > DISCORD_LIMITS.autoModerationActions
+  ) {
+    throw new RangeError("Discord AutoMod actions are invalid")
+  }
+  const types = new Set<number>()
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new RangeError("Discord AutoMod action must be an object")
+    }
+    const action = entry as Record<string, unknown>
+    if (
+      !Number.isSafeInteger(action.type)
+      || !AUTO_MODERATION_ACTION_TYPE_VALUES.has(action.type as number)
+      || types.has(action.type as number)
+    ) {
+      throw new RangeError("Discord AutoMod action type is invalid or duplicated")
+    }
+    types.add(action.type as number)
+    if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage) {
+      if (
+        !hasOnlyKeys(action, ["customMessage", "type"])
+        || !(action.customMessage === null || typeof action.customMessage === "string")
+      ) {
+        throw new RangeError("Discord AutoMod block-message action is invalid")
+      }
+      if (typeof action.customMessage === "string") {
+        assertAutoModerationInputText(
+          action.customMessage,
+          DISCORD_LIMITS.autoModerationCustomMessageCharacters,
+          "custom block message",
+        )
+      }
+    } else if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.sendAlertMessage) {
+      if (
+        !hasOnlyKeys(action, ["channelId", "type"])
+        || typeof action.channelId !== "string"
+      ) {
+        throw new RangeError("Discord AutoMod alert action is invalid")
+      }
+      assertPositiveSnowflake(action.channelId, "Discord AutoMod alert channel ID")
+    } else if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.timeout) {
+      if (
+        !hasOnlyKeys(action, ["durationSeconds", "type"])
+        || !Number.isSafeInteger(action.durationSeconds)
+        || (action.durationSeconds as number) < 1
+        || (action.durationSeconds as number) > DISCORD_LIMITS.autoModerationTimeoutSeconds
+      ) {
+        throw new RangeError("Discord AutoMod timeout action is invalid")
+      }
+    } else if (!hasOnlyKeys(action, ["type"])) {
+      throw new RangeError("Discord AutoMod interaction-block action is invalid")
+    }
+  }
+}
+
+function assertAutoModerationInputCompatibility(
+  trigger: DiscordAutoModerationTrigger,
+  actions: readonly DiscordAutoModerationAction[],
+  exemptChannelIds: readonly string[],
+): void {
+  const profile = trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+  if (profile) {
+    if (
+      actions.length !== 1
+      || actions[0]?.type !== DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMemberInteraction
+      || exemptChannelIds.length > 0
+    ) {
+      throw new RangeError(
+        "Discord member-profile AutoMod rules require only interaction blocking and no channel exemptions",
+      )
+    }
+    return
+  }
+  if (actions.some((action) => (
+    action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMemberInteraction
+  ))) {
+    throw new RangeError("Discord interaction blocking is limited to member-profile AutoMod rules")
+  }
+  if (
+    actions.some((action) => action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.timeout)
+    && trigger.type !== DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword
+    && trigger.type !== DISCORD_AUTO_MODERATION_TRIGGER_TYPES.mentionSpam
+  ) {
+    throw new RangeError("Discord AutoMod timeout is incompatible with this trigger")
+  }
+}
+
+function assertCreateGuildAutoModerationRuleInput(
+  value: unknown,
+): asserts value is CreateGuildAutoModerationRuleInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord AutoMod creation input must be an object")
+  }
+  const input = value as Record<string, unknown>
+  if (!hasOnlyKeys(input, [
+    "actions",
+    "exemptChannelIds",
+    "exemptRoleIds",
+    "name",
+    "trigger",
+  ])) {
+    throw new RangeError("Discord AutoMod creation fields are invalid")
+  }
+  assertAutoModerationInputText(
+    input.name,
+    DISCORD_LIMITS.autoModerationRuleNameCharacters,
+    "rule name",
+  )
+  assertAutoModerationTriggerInput(input.trigger)
+  assertAutoModerationActionsInput(input.actions)
+  assertAutoModerationInputSnowflakes(
+    input.exemptRoleIds,
+    DISCORD_LIMITS.autoModerationExemptRoles,
+    "exempt role IDs",
+  )
+  assertAutoModerationInputSnowflakes(
+    input.exemptChannelIds,
+    DISCORD_LIMITS.autoModerationExemptChannels,
+    "exempt channel IDs",
+  )
+  assertAutoModerationInputCompatibility(
+    input.trigger,
+    input.actions,
+    input.exemptChannelIds,
+  )
+}
+
+function assertModifyGuildAutoModerationRuleInput(
+  value: unknown,
+): asserts value is ModifyGuildAutoModerationRuleInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord AutoMod update input must be an object")
+  }
+  const input = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(input, [
+      "actions",
+      "enabled",
+      "exemptChannelIds",
+      "exemptRoleIds",
+      "name",
+      "trigger",
+    ])
+    || Object.keys(input).length === 0
+    || !(input.enabled === undefined || typeof input.enabled === "boolean")
+  ) {
+    throw new RangeError("Discord AutoMod update fields are invalid")
+  }
+  if (input.name !== undefined) {
+    assertAutoModerationInputText(
+      input.name,
+      DISCORD_LIMITS.autoModerationRuleNameCharacters,
+      "rule name",
+    )
+  }
+  if (input.trigger !== undefined) assertAutoModerationTriggerInput(input.trigger)
+  if (input.actions !== undefined) assertAutoModerationActionsInput(input.actions)
+  if (input.exemptRoleIds !== undefined) {
+    assertAutoModerationInputSnowflakes(
+      input.exemptRoleIds,
+      DISCORD_LIMITS.autoModerationExemptRoles,
+      "exempt role IDs",
+    )
+  }
+  if (input.exemptChannelIds !== undefined) {
+    assertAutoModerationInputSnowflakes(
+      input.exemptChannelIds,
+      DISCORD_LIMITS.autoModerationExemptChannels,
+      "exempt channel IDs",
+    )
+  }
+  if (input.trigger !== undefined && input.actions !== undefined) {
+    assertAutoModerationInputCompatibility(
+      input.trigger,
+      input.actions,
+      input.exemptChannelIds ?? [],
+    )
+  }
+}
+
+function autoModerationTriggerMetadataBody(
+  trigger: DiscordAutoModerationTrigger,
+): Record<string, unknown> {
+  if (
+    trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword
+    || trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+  ) {
+    return {
+      allow_list: trigger.allowList,
+      keyword_filter: trigger.keywordFilter,
+      regex_patterns: trigger.regexPatterns,
+    }
+  }
+  if (trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.spam) return {}
+  if (trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keywordPreset) {
+    return {
+      allow_list: trigger.allowList,
+      presets: trigger.presets,
+    }
+  }
+  return {
+    mention_raid_protection_enabled: trigger.mentionRaidProtectionEnabled,
+    mention_total_limit: trigger.mentionTotalLimit,
+  }
+}
+
+function autoModerationActionBody(
+  action: DiscordAutoModerationAction,
+): Record<string, unknown> {
+  if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage) {
+    return {
+      type: action.type,
+      ...(action.customMessage === null
+        ? {}
+        : { metadata: { custom_message: action.customMessage } }),
+    }
+  }
+  if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.sendAlertMessage) {
+    return { metadata: { channel_id: action.channelId }, type: action.type }
+  }
+  if (action.type === DISCORD_AUTO_MODERATION_ACTION_TYPES.timeout) {
+    return { metadata: { duration_seconds: action.durationSeconds }, type: action.type }
+  }
+  return { type: action.type }
+}
+
+function autoModerationEventType(
+  trigger: DiscordAutoModerationTrigger,
+): DiscordAutoModerationEventType {
+  return trigger.type === DISCORD_AUTO_MODERATION_TRIGGER_TYPES.memberProfile
+    ? DISCORD_AUTO_MODERATION_EVENT_TYPES.memberUpdate
+    : DISCORD_AUTO_MODERATION_EVENT_TYPES.messageSend
 }
 
 function assertScheduledEventInputText(
@@ -2705,6 +3661,154 @@ export class DiscordClient {
     await this.#request<void>(
       "delete_guild_sticker",
       `/guilds/${guildId}/stickers/${stickerId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async listGuildAutoModerationRules(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordAutoModerationRuleSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord AutoMod guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_auto_moderation_rules",
+      `/guilds/${guildId}/auto-moderation/rules`,
+      options,
+    )
+    if (
+      !Array.isArray(response)
+      || response.length > DISCORD_LIMITS.autoModerationRules
+    ) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned an invalid AutoMod rule inventory",
+      )
+    }
+    const rules = response.map((rule) => projectGuildAutoModerationRule(rule, guildId))
+    if (new Set(rules.map((rule) => rule.id)).size !== rules.length) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned duplicate AutoMod rule IDs",
+      )
+    }
+    return rules.sort((left, right) => {
+      const leftId = BigInt(left.id)
+      const rightId = BigInt(right.id)
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+    })
+  }
+
+  async getGuildAutoModerationRule(
+    guildId: string,
+    ruleId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordAutoModerationRuleSummary> {
+    assertPositiveSnowflake(guildId, "Discord AutoMod guild ID")
+    assertPositiveSnowflake(ruleId, "Discord AutoMod rule ID")
+    const response = await this.#request<unknown>(
+      "get_guild_auto_moderation_rule",
+      `/guilds/${guildId}/auto-moderation/rules/${ruleId}`,
+      options,
+    )
+    const rule = projectGuildAutoModerationRule(response, guildId)
+    if (rule.id !== ruleId) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned another AutoMod rule for an exact lookup",
+      )
+    }
+    return rule
+  }
+
+  async createGuildAutoModerationRule(
+    guildId: string,
+    input: CreateGuildAutoModerationRuleInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordAutoModerationRuleSummary> {
+    assertPositiveSnowflake(guildId, "Discord AutoMod guild ID")
+    assertCreateGuildAutoModerationRuleInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "create_guild_auto_moderation_rule",
+      `/guilds/${guildId}/auto-moderation/rules`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          actions: input.actions.map(autoModerationActionBody),
+          enabled: false,
+          event_type: autoModerationEventType(input.trigger),
+          exempt_channels: input.exemptChannelIds,
+          exempt_roles: input.exemptRoleIds,
+          name: input.name,
+          trigger_metadata: autoModerationTriggerMetadataBody(input.trigger),
+          trigger_type: input.trigger.type,
+        },
+      },
+    )
+    return projectGuildAutoModerationRule(response, guildId)
+  }
+
+  async modifyGuildAutoModerationRule(
+    guildId: string,
+    ruleId: string,
+    input: ModifyGuildAutoModerationRuleInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordAutoModerationRuleSummary> {
+    assertPositiveSnowflake(guildId, "Discord AutoMod guild ID")
+    assertPositiveSnowflake(ruleId, "Discord AutoMod rule ID")
+    assertModifyGuildAutoModerationRuleInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_auto_moderation_rule",
+      `/guilds/${guildId}/auto-moderation/rules/${ruleId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          ...(input.actions !== undefined
+            ? { actions: input.actions.map(autoModerationActionBody) }
+            : {}),
+          ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+          ...(input.exemptChannelIds !== undefined
+            ? { exempt_channels: input.exemptChannelIds }
+            : {}),
+          ...(input.exemptRoleIds !== undefined
+            ? { exempt_roles: input.exemptRoleIds }
+            : {}),
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.trigger !== undefined
+            ? { trigger_metadata: autoModerationTriggerMetadataBody(input.trigger) }
+            : {}),
+        },
+      },
+    )
+    const rule = projectGuildAutoModerationRule(response, guildId)
+    if (rule.id !== ruleId) {
+      throw new AutoModerationEvidenceError(
+        "Discord returned another AutoMod rule after an exact update",
+      )
+    }
+    return rule
+  }
+
+  async deleteGuildAutoModerationRule(
+    guildId: string,
+    ruleId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord AutoMod guild ID")
+    assertPositiveSnowflake(ruleId, "Discord AutoMod rule ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_auto_moderation_rule",
+      `/guilds/${guildId}/auto-moderation/rules/${ruleId}`,
       {
         ...options,
         auditReason,

@@ -36,6 +36,8 @@ export interface ConnectorConfig {
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
   allowAttachments: boolean
+  allowAutomodAudit: boolean
+  allowAutomodChanges: boolean
   allowChannelCreation: boolean
   allowDeletions: boolean
   allowForumPosts: boolean
@@ -56,6 +58,8 @@ export interface ConnectorConfig {
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
   attachmentRoots: readonly string[]
+  automodAlertChannelIds: ReadonlySet<string>
+  automodGuildIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
@@ -239,6 +243,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowedGuildIds],
     ENVIRONMENT_NAMES.allowedGuildIds,
   )
+  const automodGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.automodGuildIds],
+    ENVIRONMENT_NAMES.automodGuildIds,
+  )
   const adminGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.adminGuildIds],
     ENVIRONMENT_NAMES.adminGuildIds,
@@ -250,6 +258,10 @@ export function loadConnectorConfig(
   const attachmentChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.attachmentChannelIds],
     ENVIRONMENT_NAMES.attachmentChannelIds,
+  )
+  const automodAlertChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.automodAlertChannelIds],
+    ENVIRONMENT_NAMES.automodAlertChannelIds,
   )
   const deleteChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.deleteChannelIds],
@@ -308,6 +320,7 @@ export function loadConnectorConfig(
 
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
+    [ENVIRONMENT_NAMES.automodGuildIds, automodGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
@@ -325,6 +338,7 @@ export function loadConnectorConfig(
 
   for (const [name, channelIds] of [
     [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
+    [ENVIRONMENT_NAMES.automodAlertChannelIds, automodAlertChannelIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
@@ -360,6 +374,19 @@ export function loadConnectorConfig(
   if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGateway} requires an exact guild or channel read allowlist`,
+    )
+  }
+  const allowAutomodAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowAutomodAudit],
+    ENVIRONMENT_NAMES.allowAutomodAudit,
+  )
+  const allowAutomodChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowAutomodChanges],
+    ENVIRONMENT_NAMES.allowAutomodChanges,
+  )
+  if (allowAutomodChanges && !allowAutomodAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowAutomodChanges} requires ${ENVIRONMENT_NAMES.allowAutomodAudit}`,
     )
   }
   const allowWebhookAudit = parseBoolean(
@@ -414,6 +441,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowAttachments],
       ENVIRONMENT_NAMES.allowAttachments,
     ),
+    allowAutomodAudit,
+    allowAutomodChanges,
     allowChannelCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowChannelCreation],
       ENVIRONMENT_NAMES.allowChannelCreation,
@@ -474,6 +503,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.attachmentRoots],
       ENVIRONMENT_NAMES.attachmentRoots,
     ),
+    automodAlertChannelIds,
+    automodGuildIds,
     channelCreationGuildIds,
     deleteChannelIds,
     expectedApplicationId,

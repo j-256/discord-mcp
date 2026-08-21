@@ -13,6 +13,7 @@ import test from "node:test"
 import {
   JsonlActivityLog,
   type AttachmentMessageActivity,
+  type AutoModerationActivity,
   type ChannelCreationActivity,
   type ChannelPermissionOverwriteActivity,
   type DeletionActivity,
@@ -285,6 +286,34 @@ function scheduledEvent(
     status,
     targetStatus: "active",
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function autoModeration(
+  id: string,
+  status: AutoModerationActivity["status"],
+): AutoModerationActivity {
+  return {
+    action: "set-enabled",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "automod-change",
+    operationKeyHash: `sha256:${"d".repeat(64)}`,
+    planDigest: `hmac-sha256:${"e".repeat(64)}`,
+    ruleId: "300",
+    schemaVersion: 1,
+    status,
+    targetEnabled: true,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    triggerType: "keyword",
     verification: status === "completed"
       ? "match"
       : status === "completed-with-drift"
@@ -772,6 +801,84 @@ test("JSONL activity log keeps guild expression evidence content-free", async (c
       "schemaVersion",
       "status",
       "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps AutoMod evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-action-content",
+    "private-alert-channel-name",
+    "private-audit-reason",
+    "private-custom-message",
+    "private-keyword",
+    "private-operation-key",
+    "private-regex",
+    "private-role-name",
+    "private-rule-name",
+  ]
+
+  await store.append(autoModeration("1", "pending"))
+  await store.append({
+    ...autoModeration("2", "completed"),
+    actionExecutionContent: privateValues[0],
+    alertChannelName: privateValues[1],
+    auditReason: privateValues[2],
+    customMessage: privateValues[3],
+    keywordFilter: [privateValues[4]],
+    operationKey: privateValues[5],
+    regexPatterns: [privateValues[6]],
+    roleName: privateValues[7],
+    ruleName: privateValues[8],
+  } as AutoModerationActivity)
+  await store.append({
+    ...autoModeration("4", "uncertain"),
+    error: "OperationStoreError",
+  })
+  await store.append({
+    ...autoModeration("5", "completed"),
+    error: "OperationStoreError",
+  })
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...autoModeration("3", "completed"),
+      targetEnabled: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["5", "4", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.error, "OperationStoreError")
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "ruleId",
+      "schemaVersion",
+      "status",
+      "targetEnabled",
+      "timestamp",
+      "triggerType",
       "verification",
     ],
   )

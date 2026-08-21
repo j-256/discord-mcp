@@ -73,6 +73,10 @@ function status(
       attachmentMaxBytes: 0,
       attachmentRootCount: 0,
       attachmentsEnabled: false,
+      automodAlertChannelIds: [],
+      automodAuditEnabled: false,
+      automodChangesEnabled: false,
+      automodGuildIds: [],
       channelCreationEnabled: false,
       channelCreationGuildIds: [],
       deleteChannelIds: [],
@@ -134,17 +138,21 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
+    getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
     listChannelWebhooks: unexpected,
     listGuildExpressions: unexpected,
+    listAutoModerationRules: unexpected,
     listScheduledEvents: unexpected,
     planWebhookDeletion: unexpected,
     planGuildExpressionChange: unexpected,
+    planAutoModerationChange: unexpected,
     planScheduledEventChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
@@ -744,6 +752,66 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   )
   assert.match(setup.warnings.join("\n"), /cover updates remain blocked/)
   assert.match(omitted.warnings.join("\n"), /scheduled-events toolset/)
+})
+
+test("doctor and setup explain privacy-safe reviewed AutoMod scope", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
+    DISCORD_MCP_AUTOMOD_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const missingGuildEnvironment = environment({
+    DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
+  })
+  const missingGuild = await diagnoseConnector({
+    environment: missingGuildEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: missingGuildEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.automodAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.automodChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /privacy-safe AutoMod inventory/i)
+  assert.match(audit?.summary || "", /1 exact guilds/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /1 exact alert channels/)
+  assert.match(changes?.summary || "", /exact state or absence readback/)
+  assert.equal(
+    missingGuild.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.automodAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    missingGuild.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.automodChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /AutoMod audit toggle/)
+  assert.match(setup.warnings.join("\n"), /AutoMod change toggle/)
+  assert.match(omitted.warnings.join("\n"), /automod toolset/)
 })
 
 test("doctor and setup explain reviewed permission-overwrite scope without Discord writes", async () => {
@@ -1404,6 +1472,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.promptNames, [
     "find_guild_members",
     "review_attachment_message",
+    "review_automod_change",
     "review_channel_creation",
     "review_channel_permission_overwrite",
     "review_forum_post",
@@ -1432,6 +1501,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/messages/{messageId}",
     "discord://channels/{channelId}/permission-overwrites",
     "discord://channels/{channelId}/webhooks",
+    "discord://guilds/{guildId}/automod-rules",
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/members/{userId}",
@@ -1443,6 +1513,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
     "edit_own_message",
+    "execute_automod_change",
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
     "execute_member_moderation",

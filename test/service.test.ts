@@ -12,8 +12,12 @@ import test from "node:test"
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
 import {
+  DISCORD_AUTO_MODERATION_ACTION_TYPES,
+  DISCORD_AUTO_MODERATION_EVENT_TYPES,
+  DISCORD_AUTO_MODERATION_TRIGGER_TYPES,
   DISCORD_SCHEDULED_EVENT_ENTITY_TYPES,
   DISCORD_SCHEDULED_EVENT_STATUSES,
+  type DiscordAutoModerationRuleSummary,
   type DiscordScheduledEventSummary,
 } from "../src/discord-client.js"
 import {
@@ -56,6 +60,7 @@ const CREATED_ROLE_ID = "700000000000000001"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
+const AUTOMOD_RULE_ID = "910000000000000001"
 const SCHEDULED_EVENT_ID = "930000000000000001"
 
 class MemoryOperationStore implements OperationStore {
@@ -184,6 +189,7 @@ function role(
 function serviceFixture(overrides: {
   application?: DiscordApplication
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
+  automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
@@ -245,6 +251,9 @@ function serviceFixture(overrides: {
       calls.createChannel += 1
       return channel()
     },
+    async createGuildAutoModerationRule() {
+      throw new Error("Unexpected AutoMod rule creation")
+    },
     async createGuildEmoji(_guildId, input) {
       return {
         animated: input.format === "gif",
@@ -288,6 +297,7 @@ function serviceFixture(overrides: {
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
     async deleteGuildEmoji() {},
+    async deleteGuildAutoModerationRule() {},
     async deleteGuildScheduledEvent() {},
     async deleteGuildSticker() {},
     async deleteWebhook() {},
@@ -316,6 +326,9 @@ function serviceFixture(overrides: {
     async getGuildAuditLog() {
       calls.guildAuditLog += 1
       return { audit_log_entries: [] }
+    },
+    async getGuildAutoModerationRule() {
+      throw new Error("Unexpected AutoMod rule lookup")
     },
     async getGuildBan(_guildId, userId) {
       return { user: { id: userId, username: "target" } }
@@ -389,6 +402,9 @@ function serviceFixture(overrides: {
     async listGuildMembers() {
       return []
     },
+    async listGuildAutoModerationRules() {
+      return []
+    },
     async listGuildScheduledEvents() {
       return []
     },
@@ -435,6 +451,9 @@ function serviceFixture(overrides: {
         requiresColons: true,
         roleIds: input.roleIds ? [...input.roleIds] : [],
       }
+    },
+    async modifyGuildAutoModerationRule() {
+      throw new Error("Unexpected AutoMod rule modification")
     },
     async modifyGuildScheduledEvent() {
       throw new Error("Unexpected scheduled-event modification")
@@ -500,6 +519,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.attachmentMessageOptions
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
+        : {}),
+      ...(overrides.automodOptions
+        ? { automodOptions: overrides.automodOptions }
         : {}),
       ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
       ...(overrides.permissionOverwriteOptions
@@ -756,6 +778,109 @@ test("service pins identity through privacy-safe guild expression reads and revi
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "guild-expression-change")
   assert.equal(operationStore.receipt?.resourceId, expressionId)
+})
+
+test("service pins identity through privacy-safe AutoMod reads and reviewed changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  let rule: DiscordAutoModerationRuleSummary = {
+    actions: [{
+      customMessage: null,
+      type: DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage,
+    }],
+    creatorUserId: BOT_ID,
+    enabled: false,
+    eventType: DISCORD_AUTO_MODERATION_EVENT_TYPES.messageSend,
+    exemptChannelIds: [],
+    exemptRoleIds: [],
+    guildId: GUILD_ID,
+    id: AUTOMOD_RULE_ID,
+    name: "Private keyword policy",
+    trigger: {
+      allowList: [],
+      keywordFilter: ["private blocked phrase"],
+      regexPatterns: [],
+      type: DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword,
+    },
+  }
+  let exactReads = 0
+  let inventoryReads = 0
+  let updateCalls = 0
+  const { calls, service } = serviceFixture({
+    automodOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(31),
+      randomId: () => "activity-automod-change",
+    },
+    client: {
+      async getGuildAutoModerationRule(guildId, ruleId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(ruleId, AUTOMOD_RULE_ID)
+        exactReads += 1
+        return rule
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, "@everyone")]
+      },
+      async listGuildAutoModerationRules(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryReads += 1
+        return [rule]
+      },
+      async modifyGuildAutoModerationRule(guildId, ruleId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(ruleId, AUTOMOD_RULE_ID)
+        assert.equal(auditReason, "Reviewed AutoMod update")
+        updateCalls += 1
+        rule = {
+          ...rule,
+          name: input.name ?? rule.name,
+        }
+        return rule
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
+      DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
+      DISCORD_MCP_AUTOMOD_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+  })
+  const request = {
+    action: "update" as const,
+    auditReason: "Reviewed AutoMod update",
+    guildId: GUILD_ID,
+    name: "Updated keyword policy",
+    operationKey: "automod-service-attempt-0001",
+    ruleId: AUTOMOD_RULE_ID,
+  }
+
+  const listed = await service.listAutoModerationRules(GUILD_ID)
+  const exact = await service.getAutoModerationRule(GUILD_ID, AUTOMOD_RULE_ID)
+  const plan = await service.planAutoModerationChange(request)
+  const result = await service.executeAutoModerationChange(request, plan.digest)
+
+  assert.equal(listed.rules.length, 1)
+  assert.equal(JSON.stringify(listed).includes("private blocked phrase"), false)
+  assert.equal(JSON.stringify(exact).includes("private blocked phrase"), true)
+  assert.equal(plan.existing?.ruleId, AUTOMOD_RULE_ID)
+  assert.deepEqual(plan.permission.requiredPermissions, ["MANAGE_GUILD"])
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed?.name, "Updated keyword policy")
+  assert.equal(inventoryReads, 1)
+  assert.equal(exactReads, 4)
+  assert.equal(updateCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(calls.activityEntries.map((entry) => entry.status), [
+    "pending",
+    "completed",
+  ])
+  assert.equal(operationStore.receipt?.kind, "automod-change")
+  assert.equal(operationStore.receipt?.resourceId, AUTOMOD_RULE_ID)
 })
 
 test("service pins identity through privacy-safe scheduled event reads and reviewed changes", async () => {

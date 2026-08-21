@@ -38,6 +38,7 @@ const MCP_DISCOVERY_DETAILS = [
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
 type McpToolWorkflow =
   | "attachment-message"
+  | "automod-change"
   | "channel-creation"
   | "channel-permission-overwrite"
   | "forum-post"
@@ -85,6 +86,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["attachment", "execute", "file", "message", "send", "upload"],
     toolset: "attachments",
     workflow: "attachment-message",
+  },
+  execute_automod_change: {
+    keywords: ["automod", "create", "delete", "disable", "enable", "execute", "moderation", "policy", "rule", "update"],
+    toolset: "automod",
+    workflow: "automod-change",
   },
   execute_channel_creation: {
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
@@ -148,6 +154,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "entry", "exact", "guild", "history", "moderation"],
     toolset: "audit-logs",
   },
+  get_automod_rule: {
+    keywords: ["automod", "exact", "moderation", "policy", "rule"],
+    toolset: "automod",
+  },
   get_guild_member: {
     keywords: ["directory", "exact", "member", "profile", "user"],
     toolset: "members",
@@ -195,6 +205,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_active_threads: {
     keywords: ["active", "forum", "list", "thread"],
     toolset: "threads",
+  },
+  list_automod_rules: {
+    keywords: ["automod", "inventory", "list", "moderation", "policy", "rule"],
+    toolset: "automod",
   },
   list_activity: {
     keywords: ["activity", "audit", "history", "outcome", "write"],
@@ -252,6 +266,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  plan_automod_change: {
+    keywords: ["automod", "create", "delete", "disable", "enable", "moderation", "plan", "policy", "review", "rule", "update"],
+    toolset: "automod",
+    workflow: "automod-change",
   },
   plan_attachment_message: {
     keywords: ["attachment", "file", "message", "plan", "review", "upload"],

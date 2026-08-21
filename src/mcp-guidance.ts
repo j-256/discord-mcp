@@ -15,6 +15,7 @@ export type DiscordGuidanceService = Pick<
   | "getMessage"
   | "getRole"
   | "listActivity"
+  | "listAutoModerationRules"
   | "listChannels"
   | "listChannelPermissionOverwrites"
   | "listChannelWebhooks"

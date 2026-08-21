@@ -20,6 +20,14 @@ import type {
   AttachmentMessagePlan,
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
+import {
+  normalizeAutoModerationChangeRequest,
+  type AutoModerationChangeRequest,
+  type AutoModerationPlan,
+  type AutoModerationPrivacyProjection,
+  type AutoModerationReferenceEvidence,
+  type ProjectedAutoModerationRule,
+} from "../src/automod-service.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
 import type {
   ChannelPermissionOverwritePlan,
@@ -60,6 +68,8 @@ import {
   AdministrationExecutionError,
   AttachmentMessageExecutionError,
   AttachmentMessageOperationConflictError,
+  AutoModerationExecutionError,
+  AutoModerationOperationConflictError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
   ChannelPermissionOverwriteExecutionError,
@@ -140,6 +150,8 @@ const EMOJI_ID = "380000000000000001"
 const STICKER_ID = "390000000000000001"
 const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
 const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
+const AUTOMOD_RULE_ID = "392000000000000001"
+const AUTOMOD_OPERATION_KEY = "automod-attempt-0001"
 const SCHEDULED_EVENT_ID = "395000000000000001"
 const SCHEDULED_EVENT_OPERATION_KEY = "scheduled-event-attempt-0001"
 const SCHEDULED_EVENT_COVER_PATH = "/test/discord-mcp/reviewed-event-cover.png"
@@ -489,6 +501,130 @@ function guildExpressionPlan(
       safetyLimit: request.kind === "emoji" ? 1_000 : 100,
     },
     warnings: ["One-shot reviewed guild expression change"],
+  }
+}
+
+function autoModerationPrivacy(): AutoModerationPrivacyProjection {
+  return {
+    actionExecutionEventsExposed: false,
+    omittedFields: [
+      "actionExecutionContent",
+      "matchedContent",
+      "matchedKeyword",
+      "rawDiscordObject",
+    ],
+    policyContentPersisted: false,
+  }
+}
+
+function autoModerationReferences(): AutoModerationReferenceEvidence {
+  return {
+    alertChannels: [],
+    exemptChannels: [],
+    exemptRoles: [],
+    healthy: true,
+  }
+}
+
+function projectedAutoModerationRule(
+  ruleId = AUTOMOD_RULE_ID,
+): ProjectedAutoModerationRule {
+  return {
+    actions: [{ customMessage: "Review this message", type: "block-message" }],
+    creatorUserId: BOT_ID,
+    enabled: false,
+    eventType: "message-send",
+    exemptChannelIds: [],
+    exemptRoleIds: [],
+    guildId: GUILD_ID,
+    name: "Reviewed keyword policy",
+    ruleId,
+    trigger: {
+      allowList: [],
+      keywordFilter: ["reviewed-keyword"],
+      regexPatterns: [],
+      type: "keyword",
+    },
+  }
+}
+
+function autoModerationPlan(
+  request: AutoModerationChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): AutoModerationPlan {
+  const normalized = normalizeAutoModerationChangeRequest(request)
+  const existing = normalized.action === "create"
+    ? null
+    : projectedAutoModerationRule(normalized.ruleId)
+  const desired = normalized.action === "delete"
+    ? null
+    : normalized.action === "create"
+      ? {
+          actions: [...normalized.actions],
+          creatorUserId: BOT_ID,
+          enabled: false,
+          eventType: normalized.trigger.type === "member-profile"
+            ? "member-update" as const
+            : "message-send" as const,
+          exemptChannelIds: [...normalized.exemptChannelIds],
+          exemptRoleIds: [...normalized.exemptRoleIds],
+          guildId: normalized.guildId,
+          name: normalized.name,
+          ruleId: null,
+          trigger: normalized.trigger,
+        }
+      : normalized.action === "set-enabled"
+        ? { ...existing!, enabled: normalized.enabled }
+        : {
+            ...existing!,
+            ...(normalized.actions === undefined ? {} : { actions: [...normalized.actions] }),
+            ...(normalized.exemptChannelIds === undefined
+              ? {}
+              : { exemptChannelIds: [...normalized.exemptChannelIds] }),
+            ...(normalized.exemptRoleIds === undefined
+              ? {}
+              : { exemptRoleIds: [...normalized.exemptRoleIds] }),
+            ...(normalized.name === undefined ? {} : { name: normalized.name }),
+            ...(normalized.trigger === undefined ? {} : { trigger: normalized.trigger }),
+          }
+  return {
+    action: normalized.action,
+    applicationId: APPLICATION_ID,
+    auditReason: normalized.auditReason,
+    botId: BOT_ID,
+    capacity: normalized.action === "create"
+      ? {
+          inventoryDigest: `hmac-sha256:${"d".repeat(64)}`,
+          limitForTrigger: normalized.trigger.type === "keyword" ? 6 : 1,
+          observedForTrigger: 0,
+          safetyLimit: 10,
+          visibleRules: 1,
+        }
+      : null,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    desired,
+    digest,
+    effect: effect === "none" ? "none" : normalized.action,
+    existing,
+    guild: { id: normalized.guildId, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+      guildOwner: false,
+      missingPermissions: [],
+      requiredPermissions: ["MANAGE_GUILD"],
+    },
+    privacy: autoModerationPrivacy(),
+    references: {
+      desired: desired === null ? null : autoModerationReferences(),
+      existing: existing === null ? null : autoModerationReferences(),
+    },
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    warnings: ["One-shot reviewed AutoMod rule change"],
   }
 }
 
@@ -1167,6 +1303,10 @@ function fixturePolicy(): PolicyDescription {
     attachmentMaxBytes: 0,
     attachmentRootCount: 0,
     attachmentsEnabled: false,
+    automodAlertChannelIds: [],
+    automodAuditEnabled: false,
+    automodChangesEnabled: false,
+    automodGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -1216,6 +1356,9 @@ function serviceFixture(overrides: {
   activityError?: Error
   attachmentError?: Error
   attachmentPlanDigest?: string
+  autoModerationEffect?: "change" | "none"
+  autoModerationError?: Error
+  autoModerationPlanDigest?: string
   channelCreationAction?: "create" | "none"
   channelCreationError?: Error
   channelCreationPlanDigest?: string
@@ -1253,6 +1396,10 @@ function serviceFixture(overrides: {
     administrationPlan: 0,
     attachmentExecute: 0,
     attachmentPlan: 0,
+    autoModerationExecute: 0,
+    autoModerationGet: 0,
+    autoModerationList: 0,
+    autoModerationPlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     delete: 0,
@@ -1293,6 +1440,101 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeAutoModerationChange(request, planDigest) {
+      if (overrides.autoModerationError) throw overrides.autoModerationError
+      calls.autoModerationExecute += 1
+      const planned = autoModerationPlan(
+        request,
+        planDigest,
+        overrides.autoModerationEffect,
+      )
+      const ruleId = request.action === "create"
+        ? AUTOMOD_RULE_ID
+        : request.ruleId
+      return {
+        action: request.action,
+        activityId: planned.effect === "none" ? null : "activity-automod",
+        guildId: request.guildId,
+        observed: request.action === "delete"
+          ? null
+          : { ...planned.desired, ruleId } as ProjectedAutoModerationRule,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        ruleId,
+        schemaVersion: 1,
+        status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
+    async getAutoModerationRule(guildId, ruleId) {
+      calls.autoModerationGet += 1
+      const rule = projectedAutoModerationRule(ruleId)
+      return {
+        guild: { id: guildId, name: "Private guild name" },
+        permission: {
+          administrator: false,
+          confidence: "complete",
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          guildOwner: false,
+          missingPermissions: [],
+          requiredPermissions: ["MANAGE_GUILD"],
+        },
+        privacy: autoModerationPrivacy(),
+        references: autoModerationReferences(),
+        rule,
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async listAutoModerationRules(guildId) {
+      calls.autoModerationList += 1
+      const rule = projectedAutoModerationRule()
+      return {
+        guild: { id: guildId, name: "Private guild name" },
+        page: {
+          returned: 1,
+          safetyLimit: 10,
+          visibility: "connector-visible",
+        },
+        permission: {
+          administrator: false,
+          confidence: "complete",
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          guildOwner: false,
+          missingPermissions: [],
+          requiredPermissions: ["MANAGE_GUILD"],
+        },
+        privacy: autoModerationPrivacy(),
+        rules: [{
+          actionTypes: rule.actions.map(({ type }) => type),
+          creatorUserId: rule.creatorUserId,
+          enabled: rule.enabled,
+          eventType: rule.eventType,
+          exemptChannelCount: rule.exemptChannelIds.length,
+          exemptRoleCount: rule.exemptRoleIds.length,
+          guildId,
+          name: rule.name,
+          policyEntryCounts: {
+            allowList: 0,
+            keywordFilter: 1,
+            presets: 0,
+            regexPatterns: 0,
+          },
+          references: { healthy: true },
+          ruleId: rule.ruleId,
+          triggerType: rule.trigger.type,
+        }],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async planAutoModerationChange(request) {
+      calls.autoModerationPlan += 1
+      return autoModerationPlan(
+        request,
+        overrides.autoModerationPlanDigest || DIGEST,
+        overrides.autoModerationEffect,
+      )
+    },
     async executeScheduledEventChange(request, planDigest) {
       if (overrides.scheduledEventError) throw overrides.scheduledEventError
       calls.scheduledEventExecute += 1
@@ -2334,6 +2576,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_emoji",
       "list_guild_stickers",
       "get_guild_sticker",
+      "list_automod_rules",
+      "get_automod_rule",
       "list_scheduled_events",
       "get_scheduled_event",
       "list_channel_permission_overwrites",
@@ -2348,6 +2592,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_webhook_deletion",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
+      "plan_automod_change",
+      "execute_automod_change",
       "plan_scheduled_event_change",
       "execute_scheduled_event_change",
       "plan_channel_permission_overwrite",
@@ -2919,6 +3165,30 @@ test("progressive discovery enables the complete reviewed guild-expression workf
   )
 })
 
+test("progressive discovery enables the complete reviewed AutoMod workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_automod_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_automod_change",
+    "plan_automod_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_automod_change",
+      "execute_automod_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed scheduled-event workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -3072,6 +3342,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
+    autoModerationExecute: 0,
+    autoModerationGet: 0,
+    autoModerationList: 0,
+    autoModerationPlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     delete: 0,
@@ -4693,6 +4967,263 @@ test("MCP guild expression execution exposes uncertain and one-shot conflict out
     JSON.stringify(conflictResult),
     new RegExp(GUILD_EXPRESSION_OPERATION_KEY),
   )
+})
+
+test("MCP AutoMod reads separate summary inventory from exact transient policy", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_automod_rules",
+  })
+  const exact = await client.callTool({
+    arguments: { guildId: GUILD_ID, ruleId: AUTOMOD_RULE_ID },
+    name: "get_automod_rule",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: GUILD_ID, ruleId: "invalid" },
+    name: "get_automod_rule",
+  })
+
+  const listedContent = structuredContent(listed)
+  const exactContent = structuredContent(exact)
+  assert.equal(listedContent.status, "ok")
+  assert.equal(exactContent.status, "ok")
+  assert.equal(JSON.stringify(listedContent).includes("reviewed-keyword"), false)
+  assert.equal(JSON.stringify(exactContent).includes("reviewed-keyword"), true)
+  assert.equal(
+    (exactContent.privacy as Record<string, unknown>).actionExecutionEventsExposed,
+    false,
+  )
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.autoModerationList, 1)
+  assert.equal(calls.autoModerationGet, 1)
+})
+
+test("MCP AutoMod plans accept exact lifecycle unions and reject unsafe policy shapes", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const validRequests = [{
+    action: "create",
+    actions: [{ customMessage: "Review this message", type: "block-message" }],
+    auditReason: AUDIT_REASON,
+    exemptChannelIds: [],
+    exemptRoleIds: [],
+    guildId: GUILD_ID,
+    name: "Reviewed keyword policy",
+    operationKey: AUTOMOD_OPERATION_KEY,
+    trigger: {
+      keywordFilter: ["reviewed-keyword"],
+      type: "keyword",
+    },
+  }, {
+    action: "update",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    name: "Updated reviewed policy",
+    operationKey: AUTOMOD_OPERATION_KEY,
+    ruleId: AUTOMOD_RULE_ID,
+  }, {
+    action: "set-enabled",
+    auditReason: AUDIT_REASON,
+    enabled: true,
+    guildId: GUILD_ID,
+    operationKey: AUTOMOD_OPERATION_KEY,
+    ruleId: AUTOMOD_RULE_ID,
+  }, {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: AUTOMOD_OPERATION_KEY,
+    ruleId: AUTOMOD_RULE_ID,
+  }]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_automod_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(AUTOMOD_OPERATION_KEY))
+  }
+
+  const invalidRequests = [{
+    ...validRequests[0],
+    enabled: true,
+  }, {
+    ...validRequests[0],
+    actions: [{ durationSeconds: 60, type: "timeout" }],
+    trigger: { type: "spam" },
+  }, {
+    ...validRequests[0],
+    actions: [{ type: "block-member-interaction" }],
+    exemptChannelIds: [CHANNEL_ID],
+    trigger: {
+      keywordFilter: ["unsafe-profile"],
+      type: "member-profile",
+    },
+  }, {
+    ...validRequests[1],
+    name: undefined,
+  }, {
+    ...validRequests[2],
+    actions: [{ type: "block-message" }],
+  }, {
+    ...validRequests[3],
+    planDigest: DIGEST,
+  }]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_automod_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.autoModerationPlan, validRequests.length)
+})
+
+test("MCP AutoMod execution binds signed approval to the complete reviewed policy", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const argumentsValue = {
+    action: "create",
+    actions: [{ customMessage: "Review this message", type: "block-message" }],
+    auditReason: AUDIT_REASON,
+    exemptChannelIds: [],
+    exemptRoleIds: [],
+    guildId: GUILD_ID,
+    name: "Reviewed keyword policy",
+    operationKey: AUTOMOD_OPERATION_KEY,
+    planDigest: DIGEST,
+    trigger: {
+      keywordFilter: ["reviewed-keyword"],
+      type: "keyword",
+    },
+  }
+
+  const result = await client.callTool({
+    arguments: argumentsValue,
+    name: "execute_automod_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).ruleId, AUTOMOD_RULE_ID)
+  assert.equal(calls.autoModerationPlan, 1)
+  assert.equal(calls.autoModerationExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    "Reviewed keyword policy",
+    "reviewed-keyword",
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Guild permission evidence:/)
+  assert.match(confirmationMessage, /Privacy projection:/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(AUTOMOD_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(AUTOMOD_OPERATION_KEY))
+})
+
+test("MCP AutoMod execution handles no-op, refusal, drift, uncertainty, and conflicts safely", async (context) => {
+  const argumentsValue = {
+    action: "set-enabled",
+    auditReason: AUDIT_REASON,
+    enabled: true,
+    guildId: GUILD_ID,
+    operationKey: AUTOMOD_OPERATION_KEY,
+    planDigest: DIGEST,
+    ruleId: AUTOMOD_RULE_ID,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { autoModerationEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_automod_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.autoModerationExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_automod_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.autoModerationExecute, 0)
+
+  const changed = await connectedFixture(context, {
+    serviceOverrides: { autoModerationPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_automod_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changed.calls.autoModerationExecute, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      autoModerationError: new AutoModerationExecutionError(
+        "Discord AutoMod outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_automod_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-automod",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    ruleId: AUTOMOD_RULE_ID,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      autoModerationError: new AutoModerationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_automod_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(AUTOMOD_OPERATION_KEY))
 })
 
 test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in counts", async (context) => {
@@ -6706,7 +7237,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 11)
+  assert.equal(templates.resourceTemplates.length, 12)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

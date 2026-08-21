@@ -14,6 +14,42 @@ export class AuditLogError extends Error {
   override name = "AuditLogError"
 }
 
+export class AutoModerationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord AutoMod snapshot does not match the reviewed plan")
+    this.name = "AutoModerationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class AutoModerationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord AutoMod operation key has already been reserved")
+    this.name = "AutoModerationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class AutoModerationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AutoModerationExecutionError"
+    this.result = result
+  }
+}
+
+export class AutoModerationEvidenceError extends Error {
+  override name = "AutoModerationEvidenceError"
+}
+
 export class OperationStoreError extends Error {
   override name = "OperationStoreError"
 }

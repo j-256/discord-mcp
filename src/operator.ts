@@ -49,6 +49,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
   applicationIdentity: "application-identity",
   attachmentPolicy: "attachment-policy",
+  automodAuditPolicy: "automod-audit-policy",
+  automodChangePolicy: "automod-change-policy",
   botIdentity: "bot-identity",
   channelCreationPolicy: "channel-creation-policy",
   channelScope: "channel-scope",
@@ -256,6 +258,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowMemberDirectory && config.memberDirectoryGuildIds.size === 0) {
     warnings.push("The member-directory toggle is enabled but member lookup remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowAutomodAudit && config.automodGuildIds.size === 0) {
+    warnings.push("The AutoMod audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowAutomodChanges && config.automodGuildIds.size === 0) {
+    warnings.push("The AutoMod change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
   if (config.allowWebhookAudit && config.webhookChannelIds.size === 0) {
     warnings.push("The webhook-audit toggle is enabled but inventory remains blocked because an exact channel allowlist is required")
   }
@@ -291,6 +299,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [config.allowAttachments, "attachments", "Attachment messages"],
+    [
+      config.allowAutomodAudit || config.allowAutomodChanges,
+      "automod",
+      "AutoMod audit and changes",
+    ],
     [config.allowChannelCreation, "channel-creation", "Channel creation"],
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
@@ -728,6 +741,44 @@ export async function diagnoseConnector(
         `Reviewed guild-expression changes are constrained to ${config.guildExpressionGuildIds.size} exact guilds and ${config.guildExpressionRoots.length} canonical creation roots with one-shot execution and exact metadata or absence readback`,
       ))
     }
+    if (!config.allowAutomodAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.automodAuditPolicy,
+        "pass",
+        "Privacy-safe AutoMod inventory is disabled",
+      ))
+    } else if (config.automodGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.automodAuditPolicy,
+        "warn",
+        "AutoMod audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.automodAuditPolicy,
+        "pass",
+        `Privacy-safe AutoMod inventory is constrained to ${config.automodGuildIds.size} exact guilds`,
+      ))
+    }
+    if (!config.allowAutomodChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.automodChangePolicy,
+        "pass",
+        "Reviewed AutoMod rule changes are disabled",
+      ))
+    } else if (config.automodGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.automodChangePolicy,
+        "warn",
+        "AutoMod changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.automodChangePolicy,
+        "pass",
+        `Reviewed AutoMod changes are constrained to ${config.automodGuildIds.size} exact guilds and ${config.automodAlertChannelIds.size} exact alert channels with one-shot execution and exact state or absence readback`,
+      ))
+    }
     if (!config.allowScheduledEventAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.scheduledEventAuditPolicy,
@@ -925,6 +976,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.attachmentChannelIds,
     ENVIRONMENT_NAMES.attachmentMaxBytes,
     ENVIRONMENT_NAMES.attachmentRoots,
+    ENVIRONMENT_NAMES.allowAutomodAudit,
+    ENVIRONMENT_NAMES.allowAutomodChanges,
+    ENVIRONMENT_NAMES.automodGuildIds,
+    ENVIRONMENT_NAMES.automodAlertChannelIds,
     ENVIRONMENT_NAMES.allowAdministration,
     ENVIRONMENT_NAMES.adminGuildIds,
     ENVIRONMENT_NAMES.protectedUserIds,

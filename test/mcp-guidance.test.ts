@@ -39,6 +39,7 @@ const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
+const AUTOMOD_RULE_ID = "385000000000000001"
 const SCHEDULED_EVENT_ID = "390000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
@@ -128,6 +129,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 
 interface GuidanceCalls {
   activity: number
+  automod: number
   channelAccess: number
   channels: number
   guilds: number
@@ -155,6 +157,7 @@ function guidanceService(options: {
 } {
   const calls: GuidanceCalls = {
     activity: 0,
+    automod: 0,
     channelAccess: 0,
     channels: 0,
     guilds: 0,
@@ -178,14 +181,68 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
+    getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
     planWebhookDeletion: unexpected,
+    planAutoModerationChange: unexpected,
     planScheduledEventChange: unexpected,
+    async listAutoModerationRules(guildId) {
+      calls.automod += 1
+      calls.lastGuildId = guildId
+      return {
+        guild: { id: guildId, name: "Private guild name" },
+        page: {
+          returned: 1,
+          safetyLimit: 10,
+          visibility: "connector-visible",
+        },
+        permission: {
+          administrator: false,
+          confidence: "complete",
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          guildOwner: false,
+          missingPermissions: [],
+          requiredPermissions: ["MANAGE_GUILD"],
+        },
+        privacy: {
+          actionExecutionEventsExposed: false,
+          omittedFields: [
+            "actionExecutionContent",
+            "matchedContent",
+            "matchedKeyword",
+            "rawDiscordObject",
+          ],
+          policyContentPersisted: false,
+        },
+        rules: [{
+          actionTypes: ["block-message"],
+          creatorUserId: USER_ID,
+          enabled: false,
+          eventType: "message-send",
+          exemptChannelCount: 0,
+          exemptRoleCount: 0,
+          guildId,
+          name: "Reviewed keyword policy",
+          policyEntryCounts: {
+            allowList: 0,
+            keywordFilter: 1,
+            presets: 0,
+            regexPatterns: 0,
+          },
+          references: { healthy: true },
+          ruleId: AUTOMOD_RULE_ID,
+          triggerType: "keyword",
+        }],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async listScheduledEvents(guildId) {
       calls.scheduledEvents += 1
       calls.lastGuildId = guildId
@@ -314,6 +371,10 @@ function guidanceService(options: {
         attachmentMaxBytes: 0,
         attachmentRootCount: 0,
         attachmentsEnabled: false,
+        automodAlertChannelIds: [],
+        automodAuditEnabled: false,
+        automodChangesEnabled: false,
+        automodGuildIds: [],
         channelCreationEnabled: false,
         channelCreationGuildIds: [],
         deleteChannelIds: [],
@@ -725,6 +786,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactRole,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildAutomodRules,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildAutomodRules,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildChannels,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
       },
@@ -783,6 +848,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
+  assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
+  assert.match(safety.text, /New rules are always disabled/)
   assert.match(safety.text, /Scheduled-event inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /Subscriber counts are aggregate and opt-in/)
   assert.match(safety.text, /Guild audit-log reads are separately selectable/)
@@ -951,6 +1018,25 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("imageBytes" in (emoji || {}), false)
   assert.equal("imageBytes" in (sticker || {}), false)
 
+  const automodRules = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/automod-rules`,
+  )
+  const automodData = automodRules.value.data as Record<string, unknown>
+  const automodRule = (automodData.rules as Array<Record<string, unknown>>)[0]
+  assert.equal(automodRule?.ruleId, AUTOMOD_RULE_ID)
+  assert.deepEqual(automodRule?.policyEntryCounts, {
+    allowList: 0,
+    keywordFilter: 1,
+    presets: 0,
+    regexPatterns: 0,
+  })
+  assert.equal(JSON.stringify(automodData).includes("reviewed-keyword"), false)
+  assert.equal(
+    (automodData.privacy as Record<string, unknown>).policyContentPersisted,
+    false,
+  )
+
   const scheduledEvents = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/scheduled-events`,
@@ -1011,6 +1097,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
 
   assert.equal(calls.guilds, 1)
   assert.equal(calls.guildExpressions, 2)
+  assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.messages, 1)
@@ -1280,6 +1367,27 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     operationKey: OPERATION_KEY,
     tags: "reviewed",
   })
+
+  const automodRequest = {
+    action: "create",
+    actions: [{ customMessage: "Review this message", type: "block-message" }],
+    auditReason: "Reviewed AutoMod policy",
+    exemptChannelIds: [],
+    exemptRoleIds: [],
+    guildId: GUILD_ID,
+    name: "Reviewed keyword policy",
+    operationKey: OPERATION_KEY,
+    trigger: { keywordFilter: ["reviewed-keyword"], type: "keyword" },
+  }
+  const automod = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(automodRequest) },
+    name: MCP_PROMPT_NAMES.reviewAutomodChange,
+  }))
+  assert.deepEqual(JSON.parse(automod.split("\n")[1] || ""), automodRequest)
+  assert.match(automod, /Call only plan_automod_change/)
+  assert.match(automod, /Do not call execute_automod_change/)
+  assert.match(automod, /conditional MODERATE_MEMBERS evidence/)
+  assert.match(automod, /action-execution or matched content/)
 
   const scheduledEvent = promptText(await client.getPrompt({
     arguments: {
@@ -1792,6 +1900,24 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         tags: "\ud800",
       },
       name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          action: "create",
+          actions: [{ durationSeconds: 60, type: "timeout" }],
+          auditReason: "Reviewed AutoMod policy",
+          guildId: GUILD_ID,
+          name: "Invalid spam timeout",
+          operationKey: OPERATION_KEY,
+          trigger: { type: "spam" },
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewAutomodChange,
+    },
+    {
+      arguments: { requestJson: "not-json" },
+      name: MCP_PROMPT_NAMES.reviewAutomodChange,
     },
     {
       arguments: {

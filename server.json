@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -443,6 +443,34 @@
         {
           "name": "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
           "description": "One absolute canonical directory or JSON array of directories containing eligible owned emoji and sticker files",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_AUTOMOD_AUDIT",
+          "description": "Enable privacy-safe AutoMod inventory when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_AUTOMOD_CHANGES",
+          "description": "Enable reviewed AutoMod changes when privacy-safe audit scope is also enabled",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_AUTOMOD_GUILD_IDS",
+          "description": "Exact guild IDs eligible for privacy-safe AutoMod inventory and reviewed changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS",
+          "description": "Exact readable text or announcement channel IDs eligible for AutoMod alert actions",
           "format": "string"
         },
         {

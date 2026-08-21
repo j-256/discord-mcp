@@ -18,6 +18,10 @@ export interface PolicyDescription {
   attachmentMaxBytes: number
   attachmentRootCount: number
   attachmentsEnabled: boolean
+  automodAlertChannelIds: string[]
+  automodAuditEnabled: boolean
+  automodChangesEnabled: boolean
+  automodGuildIds: string[]
   channelCreationEnabled: boolean
   channelCreationGuildIds: string[]
   deleteChannelIds: string[]
@@ -76,6 +80,8 @@ export class ScopePolicy {
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
   readonly #allowAttachments: boolean
+  readonly #allowAutomodAudit: boolean
+  readonly #allowAutomodChanges: boolean
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
@@ -96,6 +102,8 @@ export class ScopePolicy {
   readonly #attachmentChannelIds: ReadonlySet<string>
   readonly #attachmentMaxBytes: number
   readonly #attachmentRoots: readonly string[]
+  readonly #automodAlertChannelIds: ReadonlySet<string>
+  readonly #automodGuildIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
@@ -134,6 +142,8 @@ export class ScopePolicy {
   > & Partial<Pick<
     ConnectorConfig,
     | "allowAttachments"
+    | "allowAutomodAudit"
+    | "allowAutomodChanges"
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
@@ -152,6 +162,8 @@ export class ScopePolicy {
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
     | "attachmentRoots"
+    | "automodAlertChannelIds"
+    | "automodGuildIds"
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
     | "guildExpressionGuildIds"
@@ -172,6 +184,8 @@ export class ScopePolicy {
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
     this.#allowAttachments = config.allowAttachments ?? false
+    this.#allowAutomodAudit = config.allowAutomodAudit ?? false
+    this.#allowAutomodChanges = config.allowAutomodChanges ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
@@ -192,6 +206,8 @@ export class ScopePolicy {
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
     this.#attachmentRoots = config.attachmentRoots ?? []
+    this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
+    this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
@@ -227,6 +243,13 @@ export class ScopePolicy {
       attachmentsEnabled: this.#allowAttachments
         && this.#attachmentChannelIds.size > 0
         && this.#attachmentRoots.length > 0,
+      automodAlertChannelIds: [...this.#automodAlertChannelIds].sort(),
+      automodAuditEnabled: this.#allowAutomodAudit
+        && this.#automodGuildIds.size > 0,
+      automodChangesEnabled: this.#allowAutomodAudit
+        && this.#allowAutomodChanges
+        && this.#automodGuildIds.size > 0,
+      automodGuildIds: [...this.#automodGuildIds].sort(),
       channelCreationEnabled: this.#allowChannelCreation
         && this.#channelCreationGuildIds.size > 0,
       channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
@@ -401,6 +424,40 @@ export class ScopePolicy {
     this.assertGuildExpressionAuditable(guildId)
     if (!this.#allowGuildExpressionChanges) {
       throw new PolicyError("Discord guild expression changes are disabled by connector configuration")
+    }
+  }
+
+  assertAutomodAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowAutomodAudit) {
+      throw new PolicyError("Discord AutoMod audit is disabled by connector configuration")
+    }
+    if (this.#automodGuildIds.size === 0) {
+      throw new PolicyError("Discord AutoMod audit requires an explicit guild allowlist")
+    }
+    if (!this.#automodGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the AutoMod scope`)
+    }
+  }
+
+  assertAutomodChangeAllowed(guildId: string): void {
+    this.assertAutomodAuditable(guildId)
+    if (!this.#allowAutomodChanges) {
+      throw new PolicyError("Discord AutoMod changes are disabled by connector configuration")
+    }
+  }
+
+  automodAlertChannelAllowed(channelId: string): boolean {
+    return this.channelIdReadable(channelId)
+      && this.#automodAlertChannelIds.has(channelId)
+  }
+
+  assertAutomodAlertChannelAllowed(channelId: string): void {
+    if (this.#automodAlertChannelIds.size === 0) {
+      throw new PolicyError("Discord AutoMod alerts require an explicit channel allowlist")
+    }
+    if (!this.automodAlertChannelAllowed(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the AutoMod alert scope`)
     }
   }
 

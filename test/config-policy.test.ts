@@ -130,6 +130,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     attachmentMaxBytes: 10 * 1_024 * 1_024,
     attachmentRootCount: 0,
     attachmentsEnabled: false,
+    automodAlertChannelIds: [],
+    automodAuditEnabled: false,
+    automodChangesEnabled: false,
+    automodGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -385,6 +389,10 @@ test("configuration and policy require an exact administration guild and protect
     attachmentMaxBytes: 10 * 1_024 * 1_024,
     attachmentRootCount: 0,
     attachmentsEnabled: false,
+    automodAlertChannelIds: [],
+    automodAuditEnabled: false,
+    automodChangesEnabled: false,
+    automodGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [],
@@ -810,6 +818,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     attachmentMaxBytes: 10 * 1_024 * 1_024,
     attachmentRootCount: 0,
     attachmentsEnabled: false,
+    automodAlertChannelIds: [],
+    automodAuditEnabled: false,
+    automodChangesEnabled: false,
+    automodGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
@@ -852,6 +864,66 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
   })
+})
+
+test("configuration and policy isolate AutoMod audit, changes, and alert channels", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
+    DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_AUTOMOD_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const scoped = new ScopePolicy(config)
+
+  assert.equal(config.allowAutomodAudit, true)
+  assert.equal(config.allowAutomodChanges, true)
+  assert.deepEqual([...config.automodGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.automodAlertChannelIds], [CHANNEL_ID])
+  scoped.assertAutomodAuditable(GUILD_ID)
+  scoped.assertAutomodChangeAllowed(GUILD_ID)
+  scoped.assertAutomodAlertChannelAllowed(CHANNEL_ID)
+  assert.equal(scoped.automodAlertChannelAllowed(CHANNEL_ID), true)
+  assert.equal(scoped.automodAlertChannelAllowed(OTHER_CHANNEL_ID), false)
+  assert.throws(
+    () => scoped.assertAutomodAuditable(OTHER_GUILD_ID),
+    /configured read scope/,
+  )
+  assert.throws(
+    () => scoped.assertAutomodAlertChannelAllowed(OTHER_CHANNEL_ID),
+    /outside the AutoMod alert scope/,
+  )
+  const description = scoped.describe()
+  assert.equal(description.automodAuditEnabled, true)
+  assert.equal(description.automodChangesEnabled, true)
+  assert.deepEqual(description.automodGuildIds, [GUILD_ID])
+  assert.deepEqual(description.automodAlertChannelIds, [CHANNEL_ID])
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_AUTOMOD_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_AUTOMOD_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
 })
 
 test("configuration and policy isolate guild expression audit, changes, and local creation roots", async () => {

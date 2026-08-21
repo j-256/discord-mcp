@@ -128,6 +128,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const store = new FileOperationStore(join(root, "receipts"))
   const channel = receipt()
   const attachment = { ...receipt(), kind: "attachment-message" as const }
+  const automod = { ...receipt(), kind: "automod-change" as const }
   const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }
   const expression = { ...receipt(), kind: "guild-expression-change" as const }
@@ -139,6 +140,7 @@ test("file operation store isolates every durable write operation-key domain", a
 
   assert.equal((await store.reserve(channel)).created, true)
   assert.equal((await store.reserve(attachment)).created, true)
+  assert.equal((await store.reserve(automod)).created, true)
   assert.equal((await store.reserve(overwrite)).created, true)
   assert.equal((await store.reserve(forum)).created, true)
   assert.equal((await store.reserve(expression)).created, true)
@@ -150,6 +152,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("attachment-message", attachment.operationKeyHash),
     attachment,
+  )
+  assert.deepEqual(
+    await store.get("automod-change", automod.operationKeyHash),
+    automod,
   )
   assert.deepEqual(
     await store.get("channel-creation", channel.operationKeyHash),

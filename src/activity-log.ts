@@ -147,6 +147,30 @@ export interface AttachmentMessageActivity {
   verification: "match" | null
 }
 
+export type AutoModerationActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface AutoModerationActivity {
+  action: "create" | "delete" | "set-enabled" | "update"
+  error: string | null
+  guildId: string
+  id: string
+  kind: "automod-change"
+  operationKeyHash: string
+  planDigest: string
+  ruleId: string | null
+  schemaVersion: number
+  status: AutoModerationActivityStatus
+  targetEnabled: boolean | null
+  timestamp: string
+  triggerType: "keyword" | "keyword-preset" | "member-profile" | "mention-spam" | "spam"
+  verification: "drift" | "match" | null
+}
+
 export type ForumPostActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -288,6 +312,7 @@ export interface ChannelPermissionOverwriteActivity {
 
 export type ActivityEntry =
   | AttachmentMessageActivity
+  | AutoModerationActivity
   | ChannelCreationActivity
   | ChannelPermissionOverwriteActivity
   | DeletionActivity
@@ -931,6 +956,93 @@ function parseScheduledEventActivity(
   }
 }
 
+function parseAutoModerationActivity(
+  value: unknown,
+): AutoModerationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "automod-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["create", "delete", "set-enabled", "update"].includes(String(record.action))
+    || ![
+      "keyword",
+      "keyword-preset",
+      "member-profile",
+      "mention-spam",
+      "spam",
+    ].includes(String(record.triggerType))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.ruleId === null || (
+      typeof record.ruleId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.ruleId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || !(record.targetEnabled === null || typeof record.targetEnabled === "boolean")
+    || (
+      record.action === "set-enabled"
+        ? typeof record.targetEnabled !== "boolean"
+        : record.targetEnabled !== null
+    )
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.action === "create" ? record.ruleId !== null : record.ruleId === null
+    ))
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (["completed", "completed-with-drift"].includes(String(record.status)) && (
+      record.ruleId === null
+      || record.verification !== (record.status === "completed" ? "match" : "drift")
+    ))
+    || (record.status === "failed" && (
+      record.error === null
+      || record.verification !== null
+      || (record.action === "create" ? record.ruleId !== null : record.ruleId === null)
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as AutoModerationActivity["action"],
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "automod-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    ruleId: record.ruleId,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as AutoModerationActivityStatus,
+    targetEnabled: record.targetEnabled as boolean | null,
+    timestamp: record.timestamp,
+    triggerType: record.triggerType as AutoModerationActivity["triggerType"],
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseAttachmentMessageActivity(
   value: unknown,
 ): AttachmentMessageActivity | undefined {
@@ -1087,6 +1199,7 @@ function parseForumPostActivity(value: unknown): ForumPostActivity | undefined {
 
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAttachmentMessageActivity(value)
+    || parseAutoModerationActivity(value)
     || parseForumPostActivity(value)
     || parseChannelCreationActivity(value)
     || parseChannelPermissionOverwriteActivity(value)

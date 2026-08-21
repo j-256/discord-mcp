@@ -16,6 +16,15 @@ import type {
 } from "./attachment-message-service.js"
 import { AttachmentMessageService } from "./attachment-message-service.js"
 import type {
+  AutoModerationChangeRequest,
+  AutoModerationInventoryResult,
+  AutoModerationLookupResult,
+  AutoModerationPlan,
+  AutoModerationResult,
+  AutoModerationServiceOptions,
+} from "./automod-service.js"
+import { AutoModerationService } from "./automod-service.js"
+import type {
   AdministrationServiceOptions,
   MemberModerationPlan,
   MemberModerationRequest,
@@ -169,6 +178,7 @@ export interface DiscordServiceClient {
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   createGuildBan: DiscordClient["createGuildBan"]
+  createGuildAutoModerationRule: DiscordClient["createGuildAutoModerationRule"]
   createGuildChannel: DiscordClient["createGuildChannel"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
@@ -178,6 +188,7 @@ export interface DiscordServiceClient {
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
+  deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
   deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
@@ -189,6 +200,7 @@ export interface DiscordServiceClient {
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
+  getGuildAutoModerationRule: DiscordClient["getGuildAutoModerationRule"]
   getGuildAuditLog: DiscordClient["getGuildAuditLog"]
   getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
@@ -203,6 +215,7 @@ export interface DiscordServiceClient {
   getUser: DiscordClient["getUser"]
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
+  listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
@@ -214,6 +227,7 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
@@ -247,6 +261,10 @@ export interface ConnectorServiceOptions {
   activityStore?: ActivityStore
   attachmentMessageOptions?: Pick<
     AttachmentMessageServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  automodOptions?: Pick<
+    AutoModerationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   channelAdministrationOptions?: Pick<
@@ -418,6 +436,7 @@ export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
   readonly #attachmentMessageService: AttachmentMessageService
+  readonly #automodService: AutoModerationService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
@@ -482,6 +501,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.attachmentMessageOptions,
+    })
+    this.#automodService = new AutoModerationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.automodOptions,
     })
     this.#interactionService = new InteractionService({
       activityStore: this.#activityStore,
@@ -1134,6 +1160,23 @@ export class ConnectorService {
     return this.#guildExpressionService.list(identity.bot.id, guildId, kind, options)
   }
 
+  async listAutoModerationRules(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<AutoModerationInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#automodService.list(identity.bot.id, guildId, options)
+  }
+
+  async getAutoModerationRule(
+    guildId: string,
+    ruleId: string,
+    options: RequestOptions = {},
+  ): Promise<AutoModerationLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#automodService.get(identity.bot.id, guildId, ruleId, options)
+  }
+
   async getGuildExpression(
     guildId: string,
     kind: GuildExpressionKind,
@@ -1221,6 +1264,19 @@ export class ConnectorService {
   ): Promise<ScheduledEventPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#scheduledEventService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planAutoModerationChange(
+    request: AutoModerationChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<AutoModerationPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#automodService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -1449,6 +1505,21 @@ export class ConnectorService {
   ): Promise<ScheduledEventResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#scheduledEventService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeAutoModerationChange(
+    request: AutoModerationChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<AutoModerationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#automodService.execute(
       identity.application.id,
       identity.bot.id,
       request,
