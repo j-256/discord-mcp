@@ -37,6 +37,7 @@ export const MCP_TOOLSET_NAMES = [
   "guild-scaffolds",
   "guilds",
   "interactions",
+  "invites",
   "member-roles",
   "members",
   "messages",
@@ -71,6 +72,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowGuildExpressionChanges: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
   allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
+  allowInviteAudit: "DISCORD_MCP_ALLOW_INVITE_AUDIT",
+  allowInviteDeletions: "DISCORD_MCP_ALLOW_INVITE_DELETIONS",
   allowMemberDirectory: "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
   allowMemberRoleChanges: "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
@@ -100,6 +103,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   interactionChannelIds: "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
+  inviteGuildIds: "DISCORD_MCP_INVITE_GUILD_IDS",
   mentionUserIds: "DISCORD_MCP_MENTION_USER_IDS",
   memberDirectoryGuildIds: "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
   memberRoleGuildIds: "DISCORD_MCP_MEMBER_ROLE_GUILD_IDS",
@@ -246,6 +250,21 @@ export const BAN_AUDIT_LIMITS = Object.freeze({
   responseEntries: 101,
   userTextCharacters: 100,
 })
+
+export const INVITE_LIMITS = Object.freeze({
+  codeCharacters: 256,
+  cursorCharacters: 512,
+  inventory: 1_000,
+  listPage: 100,
+  listPageDefault: 25,
+  maxAgeSeconds: 604_800,
+  maxUses: 100,
+  roleIds: 250,
+})
+
+export const INVITE_REFERENCE_PATTERN = /^iref_hmac_sha256_[a-f0-9]{64}$/
+export const INVITE_CURSOR_PATTERN = /^icur_hmac_sha256_[A-Za-z0-9_-]+\.[a-f0-9]{64}$/
+export const DISCORD_INVITE_URL_PATTERN = /(?:discord\.gg\/|discord(?:app)?\.com\/invite\/)/iu
 
 export const CONNECTOR_LIMITS = Object.freeze({
   activityEntries: 100,

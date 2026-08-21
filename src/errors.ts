@@ -10,6 +10,42 @@ export class BanAuditEvidenceError extends ConfigurationError {
   override name = "BanAuditEvidenceError"
 }
 
+export class InviteEvidenceError extends Error {
+  override name = "InviteEvidenceError"
+}
+
+export class InviteDeletionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord invite snapshot does not match the reviewed deletion plan")
+    this.name = "InviteDeletionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class InviteDeletionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord invite deletion operation key has already been reserved")
+    this.name = "InviteDeletionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class InviteDeletionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "InviteDeletionExecutionError"
+    this.result = result
+  }
+}
+
 export class PolicyError extends Error {
   override name = "PolicyError"
 }

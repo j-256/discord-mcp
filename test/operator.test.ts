@@ -104,6 +104,9 @@ function status(
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 500,
       interactionsEnabled: false,
+      inviteAuditEnabled: false,
+      inviteDeletionsEnabled: false,
+      inviteGuildIds: [],
       memberDirectoryEnabled: false,
       memberDirectoryGuildIds: [],
       memberRoleChangesEnabled: false,
@@ -147,17 +150,21 @@ function toolService(): DiscordToolService {
     executeMemberRoleChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeInviteDeletion: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
+    getGuildInvite: unexpected,
     listChannelWebhooks: unexpected,
+    listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
     listAutoModerationRules: unexpected,
     listScheduledEvents: unexpected,
     planWebhookDeletion: unexpected,
+    planInviteDeletion: unexpected,
     planGuildExpressionChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -608,6 +615,65 @@ test("doctor and setup explain credential-redacted webhook audit and cleanup", a
   assert.match(setup.warnings.join("\n"), /webhook-audit toggle/)
   assert.match(setup.warnings.join("\n"), /webhook-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /webhooks toolset/)
+})
+
+test("doctor and setup explain capability-safe invite audit and revocation", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
+    DISCORD_MCP_INVITE_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.inviteAuditPolicy,
+  )
+  const deletion = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.inviteDeletionPolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /opaque references/)
+  assert.match(audit?.summary || "", /MANAGE_GUILD/)
+  assert.equal(deletion?.status, "pass")
+  assert.match(deletion?.summary || "", /one-shot execution/)
+  assert.match(deletion?.summary || "", /full-inventory absence readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.inviteAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.inviteDeletionPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /invite-audit toggle/)
+  assert.match(setup.warnings.join("\n"), /invite-deletion toggle/)
+  assert.match(omitted.warnings.join("\n"), /invites toolset/)
 })
 
 test("doctor and setup explain privacy-safe reviewed guild expression scope", async (context) => {
@@ -1304,6 +1370,9 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.memberDirectoryGuildIds), true)
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowBanAudit), true)
   assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.banAuditGuildIds), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowInviteAudit), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowInviteDeletions), true)
+  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.inviteGuildIds), true)
   assert.deepEqual(
     [...result.environment.forward].sort(),
     Object.values(ENVIRONMENT_NAMES)
@@ -1580,6 +1649,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_forum_post",
     "review_guild_expression_change",
     "review_guild_scaffold",
+    "review_invite_deletion",
     "review_member_moderation",
     "review_member_role_change",
     "review_message_deletion",
@@ -1608,6 +1678,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/bans/{userId}",
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/emojis",
+    "discord://guilds/{guildId}/invites/{inviteRef}",
     "discord://guilds/{guildId}/members/{userId}",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
@@ -1620,6 +1691,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_automod_change",
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
+    "execute_invite_deletion",
     "execute_member_moderation",
     "execute_member_role_change",
     "execute_message_pin",

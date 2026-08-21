@@ -169,6 +169,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    inviteAuditEnabled: false,
+    inviteDeletionsEnabled: false,
+    inviteGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -433,6 +436,9 @@ test("configuration and policy require an exact administration guild and protect
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    inviteAuditEnabled: false,
+    inviteDeletionsEnabled: false,
+    inviteGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -546,6 +552,81 @@ test("configuration and policy require an opt-in exact ban-audit guild scope", (
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_BAN_AUDIT: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
+  )
+})
+
+test("configuration and policy isolate capability-safe invite audit and revocation", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
+    DISCORD_MCP_INVITE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowInviteAudit, true)
+  assert.equal(config.allowInviteDeletions, true)
+  assert.deepEqual([...config.inviteGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().inviteAuditEnabled, true)
+  assert.equal(policy.describe().inviteDeletionsEnabled, true)
+  assert.deepEqual(policy.describe().inviteGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildInviteAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildInviteDeletable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildInviteAuditable(OTHER_GUILD_ID),
+    /outside the invite-audit scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildInviteAuditable(GUILD_ID),
+    /invite audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
+    DISCORD_MCP_INVITE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildInviteAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildInviteDeletable(GUILD_ID),
+    /invite deletion is disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertGuildInviteAuditable(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_INVITE_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_INVITE_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_INVITE_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_INVITE_AUDIT: "sometimes",
     }, { homeDirectory: "/test/home" }),
     /must be true or false/,
   )
@@ -999,6 +1080,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
+    inviteAuditEnabled: false,
+    inviteDeletionsEnabled: false,
+    inviteGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,

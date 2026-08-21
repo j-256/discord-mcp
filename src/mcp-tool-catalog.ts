@@ -44,6 +44,7 @@ type McpToolWorkflow =
   | "forum-post"
   | "guild-scaffold"
   | "guild-expression-change"
+  | "invite-deletion"
   | "member-moderation"
   | "member-role-change"
   | "message-deletion"
@@ -118,6 +119,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-expressions",
     workflow: "guild-expression-change",
   },
+  execute_invite_deletion: {
+    keywords: ["delete", "execute", "invite", "revoke"],
+    toolset: "invites",
+    workflow: "invite-deletion",
+  },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
@@ -163,6 +169,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_ban: {
     keywords: ["audit", "ban", "exact", "guild", "moderation", "user"],
     toolset: "bans",
+  },
+  get_guild_invite: {
+    keywords: ["audit", "exact", "invite", "lookup", "reference"],
+    toolset: "invites",
   },
   get_automod_rule: {
     keywords: ["automod", "exact", "moderation", "policy", "rule"],
@@ -252,6 +262,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "ban", "cursor", "guild", "list", "moderation"],
     toolset: "bans",
   },
+  list_guild_invites: {
+    keywords: ["audit", "credential", "guild", "inventory", "invite", "list"],
+    toolset: "invites",
+  },
   list_guild_members: {
     keywords: ["cursor", "directory", "guild", "list", "member", "user"],
     toolset: "members",
@@ -320,6 +334,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "delete", "emoji", "expression", "plan", "review", "sticker", "update"],
     toolset: "guild-expressions",
     workflow: "guild-expression-change",
+  },
+  plan_invite_deletion: {
+    keywords: ["delete", "invite", "plan", "review", "revoke"],
+    toolset: "invites",
+    workflow: "invite-deletion",
   },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],

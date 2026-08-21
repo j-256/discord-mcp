@@ -11,6 +11,7 @@ import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
+  INVITE_REFERENCE_PATTERN,
   SCHEMA_VERSION,
 } from "./constants.js"
 import {
@@ -68,6 +69,17 @@ function templateSnowflake(variables: Variables, name: string): string {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
       `${name} must be a Discord snowflake ID`,
+    )
+  }
+  return value
+}
+
+function templateInviteReference(variables: Variables): string {
+  const value = variables.inviteRef
+  if (typeof value !== "string" || !INVITE_REFERENCE_PATTERN.test(value)) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "inviteRef must be an opaque process-local Discord invite reference",
     )
   }
   return value
@@ -187,6 +199,8 @@ export function registerDiscordResources(
           "Member-directory reads require a separate feature gate and exact guild allowlist; member listing additionally requires Discord's Guild Members privileged intent. Exact lookup, ascending cursor pages, and username-or-nickname prefix search return only user IDs, bounded names, bot state, role IDs, join and screening state, and timeout expiry. They omit avatars, presence, voice state, boost state, permissions, flags, and raw payloads; persist and cache nothing; and never convert a name into a write target.",
           "",
           "Guild ban audit requires a separate feature gate, exact guild allowlist, verified connector identity, and complete BAN_MEMBERS evidence. Bounded ascending pages use private lookahead, exact lookup requires a user ID, and both return minimized profiles without avatars or raw payloads. Reasons require explicit tool opt-in, are always omitted from the exact resource, and are never cached, persisted, or exported.",
+          "",
+          "Guild invite audit requires separate audit and exact-guild scope, verified connector identity, a complete bounded guild role and channel snapshot, and complete MANAGE_GUILD evidence. Raw invite codes and URLs are bearer capabilities, so the connector replaces them with process-keyed opaque references before building any MCP result. Authenticated cursors bind a local page to the complete fresh projected inventory and fail when it changes. Reviewed revocation requires an additional toggle, fresh keyed plan, signed approval, one-shot reservation, pending content-free activity, one non-retried secret-route DELETE, returned-identity validation, and full-inventory absence readback. Codes, URLs, profiles, role names, audit reasons, raw keys, and raw payloads are never persisted or emitted through diagnostics.",
           "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
@@ -505,6 +519,31 @@ export function registerDiscordResources(
       () => service.getGuildBan(
         templateSnowflake(variables, "guildId"),
         templateSnowflake(variables, "userId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.exactGuildInvite,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.exactGuildInvite, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact capability-safe Discord guild invite resolved from a process-local opaque reference through a fresh complete inventory. Codes, URLs, profiles, role names, raw objects, and persistent state are omitted.",
+      mimeType: "application/json",
+      title: "Exact capability-safe Discord guild invite",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildInvite(
+        templateSnowflake(variables, "guildId"),
+        templateInviteReference(variables),
         { signal: context.mcpReq.signal },
       ),
     ),

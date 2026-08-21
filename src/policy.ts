@@ -43,6 +43,9 @@ export interface PolicyDescription {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   interactionsEnabled: boolean
+  inviteAuditEnabled: boolean
+  inviteDeletionsEnabled: boolean
+  inviteGuildIds: string[]
   memberDirectoryEnabled: boolean
   memberDirectoryGuildIds: string[]
   memberRoleChangesEnabled: boolean
@@ -91,6 +94,8 @@ export class ScopePolicy {
   readonly #allowChannelCreation: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
+  readonly #allowInviteAudit: boolean
+  readonly #allowInviteDeletions: boolean
   readonly #allowMemberDirectory: boolean
   readonly #allowMemberRoleChanges: boolean
   readonly #allowPermissionOverwrites: boolean
@@ -116,6 +121,7 @@ export class ScopePolicy {
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
+  readonly #inviteGuildIds: ReadonlySet<string>
   readonly #gatewayEventBufferSize: number
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
   readonly #guildExpressionGuildIds: ReadonlySet<string>
@@ -158,6 +164,8 @@ export class ScopePolicy {
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
+    | "allowInviteAudit"
+    | "allowInviteDeletions"
     | "allowMemberDirectory"
     | "allowMemberRoleChanges"
     | "allowGuildScaffolds"
@@ -181,6 +189,7 @@ export class ScopePolicy {
     | "guildScaffoldGuildIds"
     | "guildExpressionGuildIds"
     | "guildExpressionRoots"
+    | "inviteGuildIds"
     | "memberDirectoryGuildIds"
     | "memberRoleGuildIds"
     | "memberRoleIds"
@@ -205,6 +214,8 @@ export class ScopePolicy {
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
+    this.#allowInviteAudit = config.allowInviteAudit ?? false
+    this.#allowInviteDeletions = config.allowInviteDeletions ?? false
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
@@ -230,6 +241,7 @@ export class ScopePolicy {
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
+    this.#inviteGuildIds = config.inviteGuildIds ?? new Set()
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
     this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
@@ -299,6 +311,11 @@ export class ScopePolicy {
       interactionMaxWritesPerMinute: this.#interactionMaxWritesPerMinute,
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
       interactionsEnabled: this.#allowInteractions && this.#interactionChannelIds.size > 0,
+      inviteAuditEnabled: this.#allowInviteAudit && this.#inviteGuildIds.size > 0,
+      inviteDeletionsEnabled: this.#allowInviteAudit
+        && this.#allowInviteDeletions
+        && this.#inviteGuildIds.size > 0,
+      inviteGuildIds: [...this.#inviteGuildIds].sort(),
       memberDirectoryEnabled: this.#allowMemberDirectory
         && this.#memberDirectoryGuildIds.size > 0,
       memberDirectoryGuildIds: [...this.#memberDirectoryGuildIds].sort(),
@@ -385,6 +402,26 @@ export class ScopePolicy {
     }
     if (!this.#banAuditGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the ban-audit scope`)
+    }
+  }
+
+  assertGuildInviteAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowInviteAudit) {
+      throw new PolicyError("Discord invite audit is disabled by connector configuration")
+    }
+    if (this.#inviteGuildIds.size === 0) {
+      throw new PolicyError("Discord invite audit requires an explicit guild allowlist")
+    }
+    if (!this.#inviteGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the invite-audit scope`)
+    }
+  }
+
+  assertGuildInviteDeletable(guildId: string): void {
+    this.assertGuildInviteAuditable(guildId)
+    if (!this.#allowInviteDeletions) {
+      throw new PolicyError("Discord invite deletion is disabled by connector configuration")
     }
   }
 

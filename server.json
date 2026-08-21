@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, member-roles, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -448,6 +448,29 @@
         {
           "name": "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
           "description": "Exact direct guild-channel IDs eligible for credential-redacted webhook audit and reviewed cleanup",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_INVITE_AUDIT",
+          "description": "Enable capability-safe guild invite inventory when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_INVITE_DELETIONS",
+          "description": "Enable reviewed invite revocation; requires capability-safe invite audit and its exact guild allowlist",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_INVITE_GUILD_IDS",
+          "description": "Exact guild IDs eligible for capability-safe invite inventory and reviewed revocation",
           "format": "string"
         },
         {

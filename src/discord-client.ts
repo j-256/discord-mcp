@@ -8,6 +8,7 @@ import {
   DISCORD_API_BASE_URL,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
+  INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_MAX,
@@ -19,6 +20,7 @@ import {
   DiscordApiError,
   errorMessage,
   GuildExpressionEvidenceError,
+  InviteEvidenceError,
   redactText,
   ScheduledEventEvidenceError,
   WebhookEvidenceError,
@@ -124,6 +126,32 @@ export interface DiscordWebhookSummary {
   guildId: string | null
   id: string
   name: string | null
+  type: number
+}
+
+export interface DiscordInviteSummary {
+  channelId: string | null
+  code: string
+  createdAt: string
+  expiresAt: string | null
+  flags: number
+  guildId: string | null
+  inviterUserId: string | null
+  maxAge: number
+  maxUses: number
+  roleIds: string[]
+  targetApplicationId: string | null
+  targetType: number | null
+  targetUserId: string | null
+  temporary: boolean
+  type: number
+  uses: number
+}
+
+export interface DiscordDeletedInviteSummary {
+  channelId: string | null
+  code: string
+  guildId: string | null
   type: number
 }
 
@@ -501,6 +529,7 @@ const SCHEDULED_EVENT_DAILY_WEEKDAY_SETS: ReadonlySet<string> = new Set([
   "6,0",
   "6,0,1,2,3",
 ])
+const URL_DOT_PATH_SEGMENTS: ReadonlySet<string> = new Set([".", ".."])
 
 export interface GuildMessageSearchOptions extends RequestOptions {
   attachmentExtensions?: readonly string[]
@@ -639,7 +668,9 @@ interface RequestParameters extends RequestOptions {
   auditReason?: string
   automaticRateLimitRetry?: boolean
   body?: unknown
+  diagnosticRoute?: string
   multipartBody?: FormData
+  suppressFailureCause?: boolean
 }
 
 class DiscordTransportError extends Error {
@@ -726,6 +757,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_sticker",
+  "list_guild_invites",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_guild_emojis",
@@ -733,9 +765,130 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_emoji",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
+  "delete_invite",
   "search_guild_members",
   "search_guild_messages",
 ])
+
+function inviteEvidenceError(): InviteEvidenceError {
+  return new InviteEvidenceError("Discord returned an invalid guild invite inventory")
+}
+
+function projectedInviteId(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  const id = typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>).id
+    : undefined
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || typeof id !== "string"
+  ) {
+    throw inviteEvidenceError()
+  }
+  try {
+    assertPositiveSnowflake(id, "Discord invite projected ID")
+  } catch {
+    throw inviteEvidenceError()
+  }
+  return id
+}
+
+function inviteTimestamp(value: unknown, nullable: boolean): string | null {
+  if (nullable && value === null) return null
+  if (
+    typeof value !== "string"
+    || !ISO_8601_TIMESTAMP_PATTERN.test(value)
+    || Number.isNaN(Date.parse(value))
+  ) {
+    throw inviteEvidenceError()
+  }
+  return new Date(value).toISOString()
+}
+
+function inviteInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {
+  if (
+    !Number.isSafeInteger(value)
+    || (value as number) < 0
+    || (value as number) > maximum
+  ) {
+    throw inviteEvidenceError()
+  }
+  return value as number
+}
+
+function inviteCode(record: Record<string, unknown>): string {
+  if (
+    typeof record.code !== "string"
+    || record.code.length < 1
+    || record.code.length > INVITE_LIMITS.codeCharacters
+    || URL_DOT_PATH_SEGMENTS.has(record.code)
+    || /[\u0000-\u001F\u007F]/u.test(record.code)
+  ) {
+    throw inviteEvidenceError()
+  }
+  try {
+    encodeURIComponent(record.code)
+  } catch {
+    throw inviteEvidenceError()
+  }
+  return record.code
+}
+
+function projectDeletedInvite(value: unknown): DiscordDeletedInviteSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw inviteEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  return {
+    channelId: projectedInviteId(record.channel),
+    code: inviteCode(record),
+    guildId: projectedInviteId(record.guild),
+    type: inviteInteger(record.type),
+  }
+}
+
+function projectInvite(value: unknown): DiscordInviteSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw inviteEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.temporary !== "boolean"
+  ) {
+    throw inviteEvidenceError()
+  }
+  const roles = record.roles ?? []
+  if (!Array.isArray(roles) || roles.length > INVITE_LIMITS.roleIds) {
+    throw inviteEvidenceError()
+  }
+  const roleIds = roles.map(projectedInviteId)
+  if (roleIds.some((roleId) => roleId === null)) throw inviteEvidenceError()
+  const exactRoleIds = roleIds as string[]
+  if (new Set(exactRoleIds).size !== exactRoleIds.length) throw inviteEvidenceError()
+  const targetType = record.target_type === undefined || record.target_type === null
+    ? null
+    : inviteInteger(record.target_type)
+  return {
+    channelId: projectedInviteId(record.channel),
+    code: inviteCode(record),
+    createdAt: inviteTimestamp(record.created_at, false) as string,
+    expiresAt: inviteTimestamp(record.expires_at, true),
+    flags: record.flags === undefined ? 0 : inviteInteger(record.flags),
+    guildId: projectedInviteId(record.guild),
+    inviterUserId: projectedInviteId(record.inviter),
+    maxAge: inviteInteger(record.max_age, INVITE_LIMITS.maxAgeSeconds),
+    maxUses: inviteInteger(record.max_uses, INVITE_LIMITS.maxUses),
+    roleIds: exactRoleIds,
+    targetApplicationId: projectedInviteId(record.target_application),
+    targetType,
+    targetUserId: projectedInviteId(record.target_user),
+    temporary: record.temporary,
+    type: inviteInteger(record.type),
+    uses: inviteInteger(record.uses),
+  }
+}
 
 function projectWebhook(value: unknown): DiscordWebhookSummary {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -3089,7 +3242,7 @@ export class DiscordClient {
   ): Promise<T> {
     const method = DISCORD_REST_OPERATIONS[operation]
     const url = new URL(`${this.#apiBaseUrl}${route}`)
-    const diagnosticRoute = route.replace(/\?.*$/u, "")
+    const diagnosticRoute = parameters.diagnosticRoute ?? route.replace(/\?.*$/u, "")
     const contentSensitive = CONTENT_SENSITIVE_REST_OPERATIONS.has(operation)
     const headers = new Headers({
       Accept: "application/json",
@@ -3120,6 +3273,23 @@ export class DiscordClient {
         const signal = parameters.signal
           ? AbortSignal.any([parameters.signal, timeoutSignal])
           : timeoutSignal
+        const transportFailure = (error: unknown): DiscordTransportError => {
+          const category = timeoutSignal.aborted && !parameters.signal?.aborted
+            ? "timeout"
+            : parameters.signal?.aborted
+              ? "cancelled"
+              : "network-error"
+          const message = contentSensitive
+            ? "request failed"
+            : redactText(errorMessage(error), [this.#token])
+          return new DiscordTransportError(
+            `Discord API ${method} ${diagnosticRoute} failed: ${message}`,
+            category,
+            parameters.suppressFailureCause || contentSensitive
+              ? undefined
+              : { cause: error },
+          )
+        }
         let response: Response
         try {
           const requestInit: RequestInit = {
@@ -3131,22 +3301,15 @@ export class DiscordClient {
           if (body !== undefined) requestInit.body = body
           response = await this.#fetch(url, requestInit)
         } catch (error) {
-          const category = timeoutSignal.aborted && !parameters.signal?.aborted
-            ? "timeout"
-            : parameters.signal?.aborted
-              ? "cancelled"
-              : "network-error"
-          const message = contentSensitive
-            ? "request failed"
-            : redactText(errorMessage(error), [this.#token])
-          throw new DiscordTransportError(
-            `Discord API ${method} ${diagnosticRoute} failed: ${message}`,
-            category,
-            { cause: error },
-          )
+          throw transportFailure(error)
         }
 
-        const responseText = await response.text()
+        let responseText: string
+        try {
+          responseText = await response.text()
+        } catch (error) {
+          throw transportFailure(error)
+        }
         const parsedBody = parseJson(responseText)
         const discordError = errorBody(parsedBody)
         const retryAfterMs = response.status === 429
@@ -4137,6 +4300,57 @@ export class DiscordClient {
       limit: options.limit,
     })}`
     return this.#request("list_guild_bans", route, options)
+  }
+
+  async listGuildInvites(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordInviteSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord invite-audit guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_invites",
+      `/guilds/${guildId}/invites`,
+      { ...options, suppressFailureCause: true },
+    )
+    if (!Array.isArray(response) || response.length > INVITE_LIMITS.inventory) {
+      throw inviteEvidenceError()
+    }
+    return response.map(projectInvite)
+  }
+
+  async deleteInvite(
+    code: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordDeletedInviteSummary> {
+    if (
+      typeof code !== "string"
+      || code.length < 1
+      || code.length > INVITE_LIMITS.codeCharacters
+      || URL_DOT_PATH_SEGMENTS.has(code)
+      || /[\u0000-\u001F\u007F]/u.test(code)
+    ) {
+      throw new RangeError("Discord invite deletion code is invalid")
+    }
+    let encodedCode: string
+    try {
+      encodedCode = encodeURIComponent(code)
+    } catch {
+      throw new RangeError("Discord invite deletion code is invalid")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "delete_invite",
+      `/invites/${encodedCode}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/invites/{invite.code}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectDeletedInvite(response)
   }
 
   modifyGuildMemberTimeout(

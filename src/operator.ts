@@ -66,6 +66,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   gatewayPolicy: "gateway-policy",
   guildScaffoldPolicy: "guild-scaffold-policy",
   interactionPolicy: "interaction-policy",
+  inviteAuditPolicy: "invite-audit-policy",
+  inviteDeletionPolicy: "invite-deletion-policy",
   memberDirectoryPolicy: "member-directory-policy",
   memberRolePolicy: "member-role-policy",
   messageContentIntent: "message-content-intent",
@@ -263,6 +265,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowBanAudit && config.banAuditGuildIds.size === 0) {
     warnings.push("The ban-audit toggle is enabled but ban inspection remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowInviteAudit && config.inviteGuildIds.size === 0) {
+    warnings.push("The invite-audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowInviteDeletions && config.inviteGuildIds.size === 0) {
+    warnings.push("The invite-deletion toggle is enabled but deletion remains blocked because an exact guild allowlist is required")
+  }
   if (
     config.allowMemberRoleChanges
     && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
@@ -326,6 +334,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Guild expression audit and changes",
     ],
     [config.allowInteractions, "interactions", "Message interactions"],
+    [
+      config.allowInviteAudit || config.allowInviteDeletions,
+      "invites",
+      "Invite audit and reviewed revocation",
+    ],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
     [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
@@ -689,6 +702,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.banAuditPolicy,
         "pass",
         `Guild ban audit is constrained to ${config.banAuditGuildIds.size} exact guilds with minimized profiles, default-redacted reasons, and complete BAN_MEMBERS evidence`,
+      ))
+    }
+    if (!config.allowInviteAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteAuditPolicy,
+        "pass",
+        "Capability-safe guild invite audit is disabled",
+      ))
+    } else if (config.inviteGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteAuditPolicy,
+        "warn",
+        "Invite-audit toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteAuditPolicy,
+        "pass",
+        `Guild invite audit is constrained to ${config.inviteGuildIds.size} exact guilds with opaque references, capability-redacted inventory, and complete MANAGE_GUILD evidence`,
+      ))
+    }
+    if (!config.allowInviteDeletions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteDeletionPolicy,
+        "pass",
+        "Reviewed invite revocation is disabled",
+      ))
+    } else if (config.inviteGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteDeletionPolicy,
+        "warn",
+        "Invite-deletion toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteDeletionPolicy,
+        "pass",
+        `Reviewed invite revocation is constrained to ${config.inviteGuildIds.size} exact guilds with one-shot execution and full-inventory absence readback`,
       ))
     }
     if (!config.allowMemberRoleChanges) {
@@ -1064,6 +1115,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.mentionUserIds,
     ENVIRONMENT_NAMES.interactionMaxWritesPerMinute,
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
+    ENVIRONMENT_NAMES.allowInviteAudit,
+    ENVIRONMENT_NAMES.allowInviteDeletions,
+    ENVIRONMENT_NAMES.inviteGuildIds,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowBanAudit,

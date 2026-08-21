@@ -112,6 +112,21 @@ import type {
 import { InteractionService } from "./interaction-service.js"
 import { InteractionLimiter } from "./interaction-limiter.js"
 import type {
+  InviteDeletionPlan,
+  InviteDeletionRequest,
+  InviteDeletionResult,
+  InviteInventoryResult,
+  InviteListOptions,
+  InviteLookupResult,
+  InviteServiceOptions,
+} from "./invite-service.js"
+import {
+  assertInviteGetInput,
+  assertInviteListInput,
+  InviteService,
+  normalizeInviteDeletionRequest,
+} from "./invite-service.js"
+import type {
   MessagePinListResult,
   MessagePinPlan,
   MessagePinRequest,
@@ -145,6 +160,7 @@ import type {
 } from "./permission-service.js"
 import { PermissionService } from "./permission-service.js"
 import { ScopePolicy } from "./policy.js"
+import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 import type {
   RoleAdministrationServiceOptions,
   RoleCreationPlan,
@@ -210,6 +226,7 @@ export interface DiscordServiceClient {
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
   deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
+  deleteInvite: DiscordClient["deleteInvite"]
   deleteWebhook: DiscordClient["deleteWebhook"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
@@ -234,6 +251,7 @@ export interface DiscordServiceClient {
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildBans: DiscordClient["listGuildBans"]
+  listGuildInvites: DiscordClient["listGuildInvites"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
@@ -310,6 +328,7 @@ export interface ConnectorServiceOptions {
     InteractionServiceOptions,
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
   >
+  inviteOptions?: Pick<InviteServiceOptions, "clock" | "planKey" | "randomId">
   messagePinOptions?: Pick<
     MessagePinServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -467,6 +486,7 @@ export class ConnectorService {
   readonly #deletionService: DeletionService
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
+  readonly #inviteService: InviteService
   readonly #messagePinService: MessagePinService
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberRoleService: MemberRoleService
@@ -546,6 +566,13 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.interactionOptions,
       limiter: interactionLimiter,
+    })
+    this.#inviteService = new InviteService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.inviteOptions,
     })
     this.#messagePinService = new MessagePinService({
       activityStore: this.#activityStore,
@@ -785,6 +812,36 @@ export class ConnectorService {
       identity.bot.id,
       guildId,
       userId,
+      options,
+    )
+  }
+
+  async listGuildInvites(
+    guildId: string,
+    options: InviteListOptions = {},
+  ): Promise<InviteInventoryResult> {
+    assertInviteListInput(guildId, options)
+    const identity = await this.#verifyIdentity(options)
+    return this.#inviteService.list(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async getGuildInvite(
+    guildId: string,
+    inviteRef: string,
+    options: RequestOptions = {},
+  ): Promise<InviteLookupResult> {
+    assertInviteGetInput(guildId, inviteRef)
+    const identity = await this.#verifyIdentity(options)
+    return this.#inviteService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      inviteRef,
       options,
     )
   }
@@ -1311,6 +1368,20 @@ export class ConnectorService {
     )
   }
 
+  async planInviteDeletion(
+    request: InviteDeletionRequest,
+    options: RequestOptions = {},
+  ): Promise<InviteDeletionPlan> {
+    normalizeInviteDeletionRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#inviteService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildExpressionChange(
     request: GuildExpressionChangeRequest,
     options: RequestOptions = {},
@@ -1569,6 +1640,25 @@ export class ConnectorService {
   ): Promise<WebhookDeletionResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeInviteDeletion(
+    request: InviteDeletionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<InviteDeletionResult> {
+    normalizeInviteDeletionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord invite deletion plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#inviteService.execute(
       identity.application.id,
       identity.bot.id,
       request,

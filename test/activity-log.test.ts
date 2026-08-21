@@ -20,6 +20,7 @@ import {
   type ForumPostActivity,
   type GuildExpressionActivity,
   type InteractionActivity,
+  type InviteDeletionActivity,
   type MemberModerationActivity,
   type MemberRoleActivity,
   type MessagePinActivity,
@@ -261,6 +262,32 @@ function webhookDeletion(
         ? "drift"
         : null,
     webhookId: "300",
+  }
+}
+
+function inviteDeletion(
+  id: string,
+  status: InviteDeletionActivity["status"],
+): InviteDeletionActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    inviteRef: `iref_hmac_sha256_${"6".repeat(64)}`,
+    kind: "invite-deletion",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
   }
 }
 
@@ -799,6 +826,65 @@ test("JSONL activity log keeps webhook deletion evidence credential-free", async
       "timestamp",
       "verification",
       "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps invite deletion evidence capability-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-invite-code",
+    "private-invite-url",
+    "private-inviter-profile",
+    "private-operation-key",
+  ]
+
+  await store.append(inviteDeletion("1", "pending"))
+  await store.append({
+    ...inviteDeletion("2", "completed"),
+    auditReason: privateValues[0],
+    code: privateValues[1],
+    url: privateValues[2],
+    inviterProfile: privateValues[3],
+    operationKey: privateValues[4],
+  } as InviteDeletionActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...inviteDeletion("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "inviteRef",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
     ],
   )
   for (const value of privateValues) {

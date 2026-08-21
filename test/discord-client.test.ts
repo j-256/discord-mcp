@@ -277,6 +277,7 @@ test("Discord client keeps member and message search queries out of failures", a
     (error: unknown) => {
       assert.doesNotMatch(String(error), new RegExp(privateQuery))
       assert.doesNotMatch(String(error), /\?/)
+      assert.equal((error as Error & { cause?: unknown }).cause, undefined)
       return true
     },
   )

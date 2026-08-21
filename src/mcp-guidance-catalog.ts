@@ -25,6 +25,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelPermissionOverwrites: "channel_permission_overwrites",
   channelWebhooks: "channel_webhooks",
   exactGuildBan: "exact_guild_ban",
+  exactGuildInvite: "exact_guild_invite",
   exactMember: "exact_member",
   exactMessage: "exact_message",
   exactRole: "exact_role",
@@ -41,6 +42,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelPermissionOverwrites: "discord://channels/{channelId}/permission-overwrites",
   channelWebhooks: "discord://channels/{channelId}/webhooks",
   exactGuildBan: "discord://guilds/{guildId}/bans/{userId}",
+  exactGuildInvite: "discord://guilds/{guildId}/invites/{inviteRef}",
   exactMember: "discord://guilds/{guildId}/members/{userId}",
   exactMessage: "discord://channels/{channelId}/messages/{messageId}",
   exactRole: "discord://guilds/{guildId}/roles/{roleId}",
@@ -55,6 +57,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 export const MCP_PROMPT_NAMES = Object.freeze({
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
+  reviewInviteDeletion: "review_invite_deletion",
   reviewAttachmentMessage: "review_attachment_message",
   reviewAutomodChange: "review_automod_change",
   reviewChannelCreation: "review_channel_creation",
@@ -80,6 +83,7 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.inspectGuildBan]: "bans",
+  [MCP_PROMPT_NAMES.reviewInviteDeletion]: "invites",
   [MCP_PROMPT_NAMES.reviewAttachmentMessage]: "attachments",
   [MCP_PROMPT_NAMES.reviewAutomodChange]: "automod",
   [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",

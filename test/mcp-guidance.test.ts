@@ -37,6 +37,8 @@ const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
+const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
+const PRIVATE_INVITE_CODE = "private-invite-capability"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
@@ -135,6 +137,7 @@ interface GuidanceCalls {
   channels: number
   guilds: number
   guildExpressions: number
+  invites: number
   lastChannelId: string | null
   lastGuildId: string | null
   lastMessageId: string | null
@@ -164,6 +167,7 @@ function guidanceService(options: {
     channels: 0,
     guilds: 0,
     guildExpressions: 0,
+    invites: 0,
     lastChannelId: null,
     lastGuildId: null,
     lastMessageId: null,
@@ -186,13 +190,72 @@ function guidanceService(options: {
     executeMemberRoleChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeInviteDeletion: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
+    async getGuildInvite(guildId, inviteRef) {
+      calls.invites += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD"],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredPermission: "MANAGE_GUILD",
+          unknownPermissionBits: "0",
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guild: { id: guildId, name: "Private guild name" },
+        invite: {
+          channel: { id: CHANNEL_ID, name: "Private invite channel", type: 0 },
+          createdAt: "2026-08-20T00:00:00.000Z",
+          expiresAt: "2026-08-20T01:00:00.000Z",
+          flags: { guest: false, raw: 0, unknownBits: "0" },
+          inviteRef,
+          inviterUserId: USER_ID,
+          maxAgeSeconds: 3_600,
+          maxUses: 5,
+          riskFlags: ["already-used"],
+          roles: [],
+          target: null,
+          temporaryMembership: false,
+          uses: 1,
+        },
+        privacy: {
+          capabilitiesProjectedOut: true,
+          omittedFields: [
+            "approximateCounts",
+            "code",
+            "guildObject",
+            "guildScheduledEvent",
+            "inviterProfile",
+            "rawDiscordObject",
+            "roleNames",
+            "roleVisuals",
+            "stageInstance",
+            "targetApplicationMetadata",
+            "targetUserProfile",
+            "url",
+          ],
+          persistence: "none",
+          rawPayloads: "omitted",
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     planWebhookDeletion: unexpected,
+    listGuildInvites: unexpected,
+    planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
     planScheduledEventChange: unexpected,
@@ -405,6 +468,9 @@ function guidanceService(options: {
         interactionMaxWritesPerMinute: 10,
         interactionMinWriteIntervalMs: 500,
         interactionsEnabled: false,
+        inviteAuditEnabled: false,
+        inviteDeletionsEnabled: false,
+        inviteGuildIds: [],
         memberDirectoryEnabled: true,
         memberDirectoryGuildIds: [GUILD_ID],
         memberRoleChangesEnabled: false,
@@ -823,6 +889,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactGuildBan,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.exactGuildInvite,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactGuildInvite,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.exactMessage,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactMessage,
       },
@@ -895,6 +965,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /ADMINISTRATOR is forbidden/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
   assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
+  assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
+  assert.match(safety.text, /Raw invite codes and URLs are bearer capabilities/)
+  assert.match(safety.text, /full-inventory absence readback/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
@@ -1141,6 +1214,22 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   )
   assert.doesNotMatch(exactBan.text, /Private reason|avatar|discriminator/)
 
+  const exactInvite = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/invites/${INVITE_REF}`,
+  )
+  const inviteData = exactInvite.value.data as Record<string, unknown>
+  const invite = inviteData.invite as Record<string, unknown>
+  assert.equal(invite.inviteRef, INVITE_REF)
+  assert.equal((invite.channel as Record<string, unknown>).id, CHANNEL_ID)
+  assert.equal(
+    (inviteData.privacy as Record<string, unknown>).capabilitiesProjectedOut,
+    true,
+  )
+  assert.equal("code" in invite, false)
+  assert.equal("url" in invite, false)
+  assert.doesNotMatch(exactInvite.text, new RegExp(PRIVATE_INVITE_CODE))
+
   const exact = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
@@ -1161,6 +1250,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
 
   assert.equal(calls.guilds, 1)
   assert.equal(calls.guildExpressions, 2)
+  assert.equal(calls.invites, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
@@ -1205,6 +1295,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
       uri: `discord://guilds/${GUILD_ID}/bans/0`,
     }),
     /userId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: `discord://guilds/${GUILD_ID}/invites/${PRIVATE_INVITE_CODE}`,
+    }),
+    /inviteRef must be an opaque process-local Discord invite reference/,
   )
   await assert.rejects(
     () => malformed.client.readResource({
@@ -1399,6 +1495,27 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(webhookDeletion, /Do not call execute_webhook_deletion/)
   assert.match(webhookDeletion, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
   assert.match(webhookDeletion, /credential and private-field omissions/)
+
+  const inviteDeletion = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed invite revocation",
+      guildId: GUILD_ID,
+      inviteRef: INVITE_REF,
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewInviteDeletion,
+  }))
+  assert.deepEqual(JSON.parse(inviteDeletion.split("\n")[1] || ""), {
+    auditReason: "Reviewed invite revocation",
+    guildId: GUILD_ID,
+    inviteRef: INVITE_REF,
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(inviteDeletion, /Call only plan_invite_deletion/)
+  assert.match(inviteDeletion, /Do not call execute_invite_deletion/)
+  assert.match(inviteDeletion, /complete MANAGE_GUILD evidence/)
+  assert.match(inviteDeletion, /exposed invite code or URL/)
+  assert.doesNotMatch(inviteDeletion, new RegExp(PRIVATE_INVITE_CODE))
 
   const guildExpression = promptText(await client.getPrompt({
     arguments: {
@@ -1798,6 +1915,24 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         userId: USER_ID,
       },
       name: MCP_PROMPT_NAMES.reviewMemberRoleChange,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed invite revocation",
+        guildId: GUILD_ID,
+        inviteRef: PRIVATE_INVITE_CODE,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewInviteDeletion,
+    },
+    {
+      arguments: {
+        auditReason: "Revoke https://discord.gg/private-capability",
+        guildId: GUILD_ID,
+        inviteRef: INVITE_REF,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewInviteDeletion,
     },
     {
       arguments: {

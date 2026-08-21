@@ -167,6 +167,7 @@ const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
 assert.equal(typeof connector.AutoModerationService, "function")
+assert.equal(typeof connector.InviteService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",

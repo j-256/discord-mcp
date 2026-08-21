@@ -16,6 +16,7 @@ import {
   CONTENT_FREE_IDENTIFIER_PATTERN,
   DISCORD_SNOWFLAKE_PATTERN,
   IDEMPOTENCY_KEY_PATTERN,
+  INVITE_REFERENCE_PATTERN,
 } from "./constants.js"
 import { OperationStoreError } from "./errors.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
@@ -30,6 +31,7 @@ export const OPERATION_KINDS = [
   "forum-post",
   "guild-expression-change",
   "guild-scaffold",
+  "invite-deletion",
   "member-role-change",
   "message-pin",
   "role-creation",
@@ -111,7 +113,11 @@ function parseReceipt(value: unknown): OperationReceipt {
     || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
     || !(record.resourceId === null || (
       typeof record.resourceId === "string"
-      && DISCORD_SNOWFLAKE_PATTERN.test(record.resourceId)
+      && (
+        record.kind === "invite-deletion"
+          ? INVITE_REFERENCE_PATTERN.test(record.resourceId)
+          : DISCORD_SNOWFLAKE_PATTERN.test(record.resourceId)
+      )
     ))
     || !(record.error === null || (
       typeof record.error === "string"

@@ -47,6 +47,8 @@ export interface ConnectorConfig {
   allowGuildExpressionChanges: boolean
   allowGuildScaffolds: boolean
   allowInteractions: boolean
+  allowInviteAudit: boolean
+  allowInviteDeletions: boolean
   allowMemberDirectory: boolean
   allowMemberRoleChanges: boolean
   allowPermissionOverwrites: boolean
@@ -75,6 +77,7 @@ export interface ConnectorConfig {
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
+  inviteGuildIds: ReadonlySet<string>
   mentionUserIds: ReadonlySet<string>
   memberDirectoryGuildIds: ReadonlySet<string>
   memberRoleGuildIds: ReadonlySet<string>
@@ -335,6 +338,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.webhookChannelIds],
     ENVIRONMENT_NAMES.webhookChannelIds,
   )
+  const inviteGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.inviteGuildIds],
+    ENVIRONMENT_NAMES.inviteGuildIds,
+  )
 
   for (const [name, guildIds] of [
     [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
@@ -343,6 +350,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
+    [ENVIRONMENT_NAMES.inviteGuildIds, inviteGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
@@ -422,6 +430,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowWebhookDeletions} requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
     )
   }
+  const allowInviteAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowInviteAudit],
+    ENVIRONMENT_NAMES.allowInviteAudit,
+  )
+  const allowInviteDeletions = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowInviteDeletions],
+    ENVIRONMENT_NAMES.allowInviteDeletions,
+  )
+  if (allowInviteDeletions && !allowInviteAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowInviteDeletions} requires ${ENVIRONMENT_NAMES.allowInviteAudit}`,
+    )
+  }
   const allowGuildExpressionAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGuildExpressionAudit],
     ENVIRONMENT_NAMES.allowGuildExpressionAudit,
@@ -490,6 +511,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
     ),
+    allowInviteAudit,
+    allowInviteDeletions,
     allowMemberDirectory: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowMemberDirectory],
       ENVIRONMENT_NAMES.allowMemberDirectory,
@@ -567,6 +590,7 @@ export function loadConnectorConfig(
       0,
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
     ),
+    inviteGuildIds,
     mentionUserIds,
     memberDirectoryGuildIds,
     memberRoleGuildIds,

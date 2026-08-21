@@ -198,6 +198,7 @@ function serviceFixture(overrides: {
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
+  inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
@@ -304,6 +305,9 @@ function serviceFixture(overrides: {
     async deleteGuildAutoModerationRule() {},
     async deleteGuildScheduledEvent() {},
     async deleteGuildSticker() {},
+    async deleteInvite() {
+      throw new Error("Unexpected invite deletion")
+    },
     async deleteWebhook() {},
     async editChannelPermissionOverwrite() {},
     async editMessage(_channelId, _messageId, input) {
@@ -410,6 +414,9 @@ function serviceFixture(overrides: {
       return []
     },
     async listGuildBans() {
+      return []
+    },
+    async listGuildInvites() {
       return []
     },
     async listGuildScheduledEvents() {
@@ -539,6 +546,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.interactionOptions
         ? { interactionOptions: overrides.interactionOptions }
+        : {}),
+      ...(overrides.inviteOptions
+        ? { inviteOptions: overrides.inviteOptions }
         : {}),
       ...(overrides.memberRoleOptions
         ? { memberRoleOptions: overrides.memberRoleOptions }
@@ -704,6 +714,117 @@ test("service verifies identity through credential-free webhook audit and cleanu
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "webhook-deletion")
   assert.equal(operationStore.receipt?.resourceId, WEBHOOK_ID)
+})
+
+test("service pins identity through capability-safe invite audit and revocation", async () => {
+  const privateCode = "private-invite-capability"
+  const operationStore = new MemoryOperationStore()
+  let inventory = [{
+    channelId: CHANNEL_ID,
+    code: privateCode,
+    createdAt: "2026-08-20T00:00:00.000Z",
+    expiresAt: "2026-08-20T01:00:00.000Z",
+    flags: 0,
+    guildId: GUILD_ID,
+    inviterUserId: MEMBER_USER_ID,
+    maxAge: 3_600,
+    maxUses: 5,
+    roleIds: [],
+    targetApplicationId: null,
+    targetType: null,
+    targetUserId: null,
+    temporary: false,
+    type: 0,
+    uses: 1,
+  }]
+  let deleteCalls = 0
+  let inventoryCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async deleteInvite(code, auditReason) {
+        assert.equal(code, privateCode)
+        assert.equal(auditReason, "Reviewed invite revocation")
+        deleteCalls += 1
+        inventory = inventory.filter((entry) => entry.code !== code)
+        return {
+          channelId: CHANNEL_ID,
+          code,
+          guildId: GUILD_ID,
+          type: 0,
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, "@everyone")]
+      },
+      async listGuildInvites(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryCalls += 1
+        return inventory
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
+      DISCORD_MCP_INVITE_GUILD_IDS: GUILD_ID,
+    },
+    inviteOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(29),
+      randomId: () => "activity-invite-deletion",
+    },
+    operationStore,
+  })
+
+  await assert.rejects(() => service.listGuildInvites("bad"), /guild ID/)
+  await assert.rejects(
+    () => service.getGuildInvite(GUILD_ID, "private-invite-capability"),
+    /invite reference/,
+  )
+  await assert.rejects(
+    () => service.planInviteDeletion({
+      auditReason: "Reviewed invite revocation",
+      guildId: GUILD_ID,
+      inviteRef: "private-invite-capability",
+      operationKey: "invite-service-attempt-0001",
+    }),
+    /invite reference/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const listed = await service.listGuildInvites(GUILD_ID)
+  const inviteRef = listed.invites[0]?.inviteRef
+  assert.ok(inviteRef)
+  const exact = await service.getGuildInvite(GUILD_ID, inviteRef)
+  const request = {
+    auditReason: "Reviewed invite revocation",
+    guildId: GUILD_ID,
+    inviteRef,
+    operationKey: "invite-service-attempt-0001",
+  }
+  const plan = await service.planInviteDeletion(request)
+  const result = await service.executeInviteDeletion(request, plan.digest)
+
+  assert.equal(exact.invite.inviteRef, inviteRef)
+  assert.equal(plan.target.inviteRef, inviteRef)
+  assert.equal(plan.privacy.capabilitiesProjectedOut, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.verifiedAbsent, true)
+  assert.equal(deleteCalls, 1)
+  assert.equal(inventoryCalls, 5)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "invite-deletion")
+  assert.equal(operationStore.receipt?.resourceId, inviteRef)
+  assert.doesNotMatch(
+    JSON.stringify([listed, exact, plan, result, calls.activityEntries, operationStore.receipt]),
+    new RegExp(privateCode),
+  )
 })
 
 test("service pins identity through privacy-safe guild expression reads and reviewed changes", async () => {
