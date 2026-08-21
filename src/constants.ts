@@ -36,6 +36,7 @@ export const MCP_TOOLSET_NAMES = [
   "guild-scaffolds",
   "guilds",
   "interactions",
+  "member-roles",
   "members",
   "messages",
   "moderation",
@@ -69,6 +70,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   allowMemberDirectory: "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
+  allowMemberRoleChanges: "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowPermissionOverwrites: "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
@@ -97,6 +99,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
   mentionUserIds: "DISCORD_MCP_MENTION_USER_IDS",
   memberDirectoryGuildIds: "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
+  memberRoleGuildIds: "DISCORD_MCP_MEMBER_ROLE_GUILD_IDS",
+  memberRoleIds: "DISCORD_MCP_MEMBER_ROLE_IDS",
   observabilityLogs: "DISCORD_MCP_OBSERVABILITY_LOGS",
   otelCompression: "OTEL_EXPORTER_OTLP_COMPRESSION",
   otelEndpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -250,6 +254,8 @@ export const CONNECTOR_LIMITS = Object.freeze({
   interactionMaxWritesPerMinute: 60,
   interactionMinWriteIntervalMs: 60_000,
   interactionNotificationUsers: 10,
+  memberRoleAllowlist: 100,
+  memberRoleImpactChannels: 50,
   mentionUserAllowlist: 100,
   messagePageDefault: 50,
   toolDiscoveryMatches: 8,
@@ -337,6 +343,13 @@ export const MEMBER_MODERATION_ACTIONS = [
 ] as const
 
 export type MemberModerationAction = typeof MEMBER_MODERATION_ACTIONS[number]
+
+export const MEMBER_ROLE_ACTIONS = [
+  "add",
+  "remove",
+] as const
+
+export type MemberRoleAction = typeof MEMBER_ROLE_ACTIONS[number]
 
 export const INTERACTION_DEFAULTS = Object.freeze({
   maxWritesPerMinute: 10,

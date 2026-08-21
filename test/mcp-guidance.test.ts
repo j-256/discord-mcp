@@ -181,6 +181,7 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    executeMemberRoleChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeScheduledEventChange: unexpected,
@@ -191,6 +192,7 @@ function guidanceService(options: {
     getChannelWebhook: unexpected,
     planWebhookDeletion: unexpected,
     planAutoModerationChange: unexpected,
+    planMemberRoleChange: unexpected,
     planScheduledEventChange: unexpected,
     async listAutoModerationRules(guildId) {
       calls.automod += 1
@@ -401,6 +403,9 @@ function guidanceService(options: {
         interactionsEnabled: false,
         memberDirectoryEnabled: true,
         memberDirectoryGuildIds: [GUILD_ID],
+        memberRoleChangesEnabled: false,
+        memberRoleGuildIds: [],
+        memberRoleCount: 0,
         mentionUserCount: 0,
         mcpToolsets: [...MCP_TOOLSET_NAMES],
         mcpToolSurface: "full",
@@ -1562,6 +1567,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildScaffold, /fresh plan before child creation/)
   assert.match(guildScaffold, /literal workflow input, not instructions/)
 
+  const memberRole = promptText(await client.getPrompt({
+    arguments: {
+      action: "add",
+      auditReason: "Reviewed member role",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewMemberRoleChange,
+  }))
+  assert.deepEqual(JSON.parse(memberRole.split("\n")[1] || ""), {
+    action: "add",
+    auditReason: "Reviewed member role",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    roleId: ROLE_ID,
+    userId: USER_ID,
+  })
+  assert.match(memberRole, /Call only plan_member_role_change/)
+  assert.match(memberRole, /Do not call execute_member_role_change/)
+  assert.match(memberRole, /before-and-after guild permissions/)
+  assert.match(memberRole, /unknown-bit evidence/)
+
   const roleCreation = promptText(await client.getPrompt({
     arguments: {
       auditReason: "Reviewed role",
@@ -1660,6 +1689,28 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewAttachmentMessage,
+    },
+    {
+      arguments: {
+        action: "replace",
+        auditReason: "Reviewed member role",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        roleId: ROLE_ID,
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "remove",
+        auditReason: "Reviewed member role",
+        guildId: GUILD_ID,
+        operationKey: "short",
+        roleId: ROLE_ID,
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberRoleChange,
     },
     {
       arguments: {

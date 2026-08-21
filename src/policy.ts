@@ -43,6 +43,9 @@ export interface PolicyDescription {
   interactionsEnabled: boolean
   memberDirectoryEnabled: boolean
   memberDirectoryGuildIds: string[]
+  memberRoleChangesEnabled: boolean
+  memberRoleGuildIds: string[]
+  memberRoleCount: number
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
@@ -86,6 +89,7 @@ export class ScopePolicy {
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowMemberDirectory: boolean
+  readonly #allowMemberRoleChanges: boolean
   readonly #allowPermissionOverwrites: boolean
   readonly #allowPinManagement: boolean
   readonly #allowGateway: boolean
@@ -115,6 +119,8 @@ export class ScopePolicy {
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
+  readonly #memberRoleGuildIds: ReadonlySet<string>
+  readonly #memberRoleIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
   readonly #permissionOverwriteChannelIds: ReadonlySet<string>
@@ -148,6 +154,7 @@ export class ScopePolicy {
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
     | "allowMemberDirectory"
+    | "allowMemberRoleChanges"
     | "allowGuildScaffolds"
     | "allowPermissionOverwrites"
     | "allowPinManagement"
@@ -169,6 +176,8 @@ export class ScopePolicy {
     | "guildExpressionGuildIds"
     | "guildExpressionRoots"
     | "memberDirectoryGuildIds"
+    | "memberRoleGuildIds"
+    | "memberRoleIds"
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -190,6 +199,7 @@ export class ScopePolicy {
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
+    this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowGateway = config.allowGateway ?? false
@@ -220,6 +230,8 @@ export class ScopePolicy {
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
+    this.#memberRoleGuildIds = config.memberRoleGuildIds ?? new Set()
+    this.#memberRoleIds = config.memberRoleIds ?? new Set()
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
@@ -280,6 +292,11 @@ export class ScopePolicy {
       memberDirectoryEnabled: this.#allowMemberDirectory
         && this.#memberDirectoryGuildIds.size > 0,
       memberDirectoryGuildIds: [...this.#memberDirectoryGuildIds].sort(),
+      memberRoleChangesEnabled: this.#allowMemberRoleChanges
+        && this.#memberRoleGuildIds.size > 0
+        && this.#memberRoleIds.size > 0,
+      memberRoleGuildIds: [...this.#memberRoleGuildIds].sort(),
+      memberRoleCount: this.#memberRoleIds.size,
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
@@ -358,6 +375,30 @@ export class ScopePolicy {
     }
     if (!this.#adminGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the administration scope`)
+    }
+    this.assertUserNotProtected(userId)
+  }
+
+  assertMemberRoleChangeAllowed(
+    guildId: string,
+    userId: string,
+    roleId: string,
+  ): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowMemberRoleChanges) {
+      throw new PolicyError("Discord member-role changes are disabled by connector configuration")
+    }
+    if (this.#memberRoleGuildIds.size === 0) {
+      throw new PolicyError("Discord member-role changes require an explicit guild allowlist")
+    }
+    if (!this.#memberRoleGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the member-role scope`)
+    }
+    if (this.#memberRoleIds.size === 0) {
+      throw new PolicyError("Discord member-role changes require an exact role allowlist")
+    }
+    if (!this.#memberRoleIds.has(roleId)) {
+      throw new PolicyError(`Discord role ${roleId} is outside the member-role scope`)
     }
     this.assertUserNotProtected(userId)
   }

@@ -4059,6 +4059,50 @@ export class DiscordClient {
     })
   }
 
+  async addGuildMemberRole(
+    guildId: string,
+    userId: string,
+    roleId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord member-role guild ID")
+    assertPositiveSnowflake(userId, "Discord member-role user ID")
+    assertPositiveSnowflake(roleId, "Discord member-role role ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "add_guild_member_role",
+      `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async removeGuildMemberRole(
+    guildId: string,
+    userId: string,
+    roleId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord member-role guild ID")
+    assertPositiveSnowflake(userId, "Discord member-role user ID")
+    assertPositiveSnowflake(roleId, "Discord member-role role ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "remove_guild_member_role",
+      `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
   getGuildBan(
     guildId: string,
     userId: string,

@@ -198,6 +198,7 @@ function serviceFixture(overrides: {
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
+  memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
@@ -223,6 +224,9 @@ function serviceFixture(overrides: {
     user: 0,
   }
   const client: DiscordServiceClient = {
+    async addGuildMemberRole() {
+      throw new Error("Unexpected member-role add")
+    },
     async addOwnReaction() {
       calls.addReaction += 1
     },
@@ -476,6 +480,9 @@ function serviceFixture(overrides: {
     async removeGuildMember() {
       calls.removeMember += 1
     },
+    async removeGuildMemberRole() {
+      throw new Error("Unexpected member-role remove")
+    },
     async searchGuildMessages() {
       return {
         doing_deep_historical_index: false,
@@ -529,6 +536,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.interactionOptions
         ? { interactionOptions: overrides.interactionOptions }
+        : {}),
+      ...(overrides.memberRoleOptions
+        ? { memberRoleOptions: overrides.memberRoleOptions }
         : {}),
       ...(overrides.forumPostOptions
         ? { forumPostOptions: overrides.forumPostOptions }
@@ -1250,6 +1260,101 @@ test("service verifies identity before planning and executing exact member moder
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.removeMember, 1)
+})
+
+test("service pins identity through reviewed exact member-role changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "800000000000000001"
+  const selectedRoleId = "800000000000000002"
+  const targetId = "700000000000000002"
+  let targetRoleIds: string[] = []
+  let roleWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async addGuildMemberRole(guildId, userId, roleId, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(userId, targetId)
+        assert.equal(roleId, selectedRoleId)
+        assert.equal(auditReason, "Reviewed exact role assignment")
+        roleWrites += 1
+        targetRoleIds = [selectedRoleId]
+      },
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildChannels() {
+        return [channel()]
+      },
+      async getGuildMember(_guildId, userId) {
+        return userId === BOT_ID
+          ? { roles: [botRoleId], user: bot() }
+          : {
+              pending: false,
+              roles: [...targetRoleIds],
+              user: { id: targetId, username: "target" },
+            }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "@everyone"),
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.MANAGE_ROLES
+                | DISCORD_PERMISSIONS.VIEW_CHANNEL
+                | DISCORD_PERMISSIONS.SEND_MESSAGES,
+              "connector",
+            ),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+          {
+            ...role(selectedRoleId, DISCORD_PERMISSIONS.SEND_MESSAGES, "reviewer"),
+            position: 2,
+          },
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+      DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_MEMBER_ROLE_IDS: selectedRoleId,
+    },
+    memberRoleOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(5),
+      randomId: () => "activity-member-role",
+    },
+    operationStore,
+  })
+  const request = {
+    action: "add" as const,
+    auditReason: "Reviewed exact role assignment",
+    guildId: GUILD_ID,
+    operationKey: "member-role-attempt-0001",
+    roleId: selectedRoleId,
+    userId: targetId,
+  }
+
+  const plan = await service.planMemberRoleChange(request)
+  const result = await service.executeMemberRoleChange(request, plan.digest)
+
+  assert.equal(plan.applicationId, APPLICATION_ID)
+  assert.equal(plan.botId, BOT_ID)
+  assert.equal(plan.action, "add")
+  assert.equal(result.status, "completed")
+  assert.equal(result.rolePresent, true)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(roleWrites, 1)
+  assert.equal(operationStore.receipt?.kind, "member-role-change")
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.doesNotMatch(
+    JSON.stringify(operationStore.receipt),
+    /member-role-attempt|Reviewed exact|reviewer|target/,
+  )
 })
 
 test("service verifies identity before reviewed additive channel creation", async () => {

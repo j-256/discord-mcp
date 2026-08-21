@@ -11,6 +11,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   execute_guild_scaffold: "administrative-write",
   execute_guild_expression_change: "destructive-write",
   execute_member_moderation: "destructive-write",
+  execute_member_role_change: "destructive-write",
   execute_role_creation: "administrative-write",
   execute_scheduled_event_change: "destructive-write",
   execute_webhook_deletion: "destructive-write",
@@ -45,6 +46,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   list_scheduled_events: "discord-read",
   list_channel_webhooks: "discord-read",
   plan_member_moderation: "discord-read",
+  plan_member_role_change: "discord-read",
   plan_automod_change: "discord-read",
   plan_attachment_message: "discord-read",
   plan_channel_creation: "discord-read",
@@ -70,6 +72,7 @@ export type McpToolRiskClass = typeof MCP_TOOL_RISK_CLASSES[McpToolName]
 
 export const DISCORD_REST_OPERATIONS = Object.freeze({
   add_own_reaction: "PUT",
+  add_guild_member_role: "PUT",
   bulk_delete_messages: "POST",
   create_guild_auto_moderation_rule: "POST",
   create_guild_ban: "PUT",
@@ -128,6 +131,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   pin_message: "PUT",
   remove_guild_ban: "DELETE",
   remove_guild_member: "DELETE",
+  remove_guild_member_role: "DELETE",
   search_guild_messages: "GET",
   search_guild_members: "GET",
   unpin_message: "DELETE",

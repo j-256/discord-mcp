@@ -24,6 +24,8 @@ const GUILD_ID = "100000000000000001"
 const OTHER_GUILD_ID = "100000000000000002"
 const CHANNEL_ID = "200000000000000001"
 const OTHER_CHANNEL_ID = "200000000000000002"
+const ROLE_ID = "300000000000000001"
+const OTHER_ROLE_ID = "300000000000000002"
 const USER_ID = "400000000000000001"
 
 function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
@@ -91,6 +93,9 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.allowInteractions, true)
   assert.equal(config.allowMemberDirectory, true)
   assert.deepEqual([...config.memberDirectoryGuildIds], [GUILD_ID])
+  assert.equal(config.allowMemberRoleChanges, false)
+  assert.deepEqual([...config.memberRoleGuildIds], [])
+  assert.deepEqual([...config.memberRoleIds], [])
   assert.equal(config.allowPermissionOverwrites, true)
   assert.deepEqual([...config.permissionOverwriteChannelIds], [CHANNEL_ID])
   assert.equal(config.allowPinManagement, true)
@@ -160,6 +165,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     interactionsEnabled: false,
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
+    memberRoleChangesEnabled: false,
+    memberRoleGuildIds: [],
+    memberRoleCount: 0,
     mentionUserCount: 0,
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
@@ -419,6 +427,9 @@ test("configuration and policy require an exact administration guild and protect
     interactionsEnabled: false,
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
+    memberRoleChangesEnabled: false,
+    memberRoleGuildIds: [],
+    memberRoleCount: 0,
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -478,6 +489,87 @@ test("configuration and policy require an opt-in exact member-directory guild sc
       DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
     /DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS must be a subset/,
+  )
+})
+
+test("configuration and policy isolate exact member-role authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_MEMBER_ROLE_GUILD_IDS must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_MEMBER_ROLE_IDS: ROLE_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertMemberRoleChangeAllowed(GUILD_ID, USER_ID, ROLE_ID),
+    /member-role changes are disabled/,
+  )
+
+  const missingGuilds = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_MEMBER_ROLE_IDS: ROLE_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => missingGuilds.assertMemberRoleChangeAllowed(GUILD_ID, USER_ID, ROLE_ID),
+    /require an explicit guild allowlist/,
+  )
+
+  const missingRoles = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => missingRoles.assertMemberRoleChangeAllowed(GUILD_ID, USER_ID, ROLE_ID),
+    /require an exact role allowlist/,
+  )
+
+  const policy = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_MEMBER_ROLE_IDS: `${ROLE_ID},${OTHER_ROLE_ID}`,
+    DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" }))
+  policy.assertMemberRoleChangeAllowed(
+    GUILD_ID,
+    "400000000000000002",
+    ROLE_ID,
+  )
+  assert.throws(
+    () => policy.assertMemberRoleChangeAllowed(OTHER_GUILD_ID, "400000000000000002", ROLE_ID),
+    /outside the member-role scope/,
+  )
+  assert.throws(
+    () => policy.assertMemberRoleChangeAllowed(GUILD_ID, "400000000000000002", "300000000000000003"),
+    /outside the member-role scope/,
+  )
+  assert.throws(
+    () => policy.assertMemberRoleChangeAllowed(GUILD_ID, USER_ID, ROLE_ID),
+    /protected from administration/,
+  )
+  assert.equal(policy.describe().memberRoleChangesEnabled, true)
+  assert.deepEqual(policy.describe().memberRoleGuildIds, [GUILD_ID])
+  assert.equal(policy.describe().memberRoleCount, 2)
+
+  const excessiveRoles = Array.from(
+    { length: 101 },
+    (_, index) => (500_000_000_000_000_000n + BigInt(index)).toString(),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_MEMBER_ROLE_IDS: excessiveRoles,
+    }, { homeDirectory: "/test/home" }),
+    /must contain at most 100 unique IDs/,
   )
 })
 
@@ -848,6 +940,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     interactionsEnabled: false,
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
+    memberRoleChangesEnabled: false,
+    memberRoleGuildIds: [],
+    memberRoleCount: 0,
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",

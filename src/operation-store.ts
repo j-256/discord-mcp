@@ -30,6 +30,7 @@ export const OPERATION_KINDS = [
   "forum-post",
   "guild-expression-change",
   "guild-scaffold",
+  "member-role-change",
   "message-pin",
   "role-creation",
   "scheduled-event-change",

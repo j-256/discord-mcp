@@ -47,6 +47,7 @@ export interface ConnectorConfig {
   allowGuildScaffolds: boolean
   allowInteractions: boolean
   allowMemberDirectory: boolean
+  allowMemberRoleChanges: boolean
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
@@ -74,6 +75,8 @@ export interface ConnectorConfig {
   interactionMinWriteIntervalMs: number
   mentionUserIds: ReadonlySet<string>
   memberDirectoryGuildIds: ReadonlySet<string>
+  memberRoleGuildIds: ReadonlySet<string>
+  memberRoleIds: ReadonlySet<string>
   mcpToolsets: ReadonlySet<McpToolsetName>
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
@@ -292,6 +295,15 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.memberDirectoryGuildIds],
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
   )
+  const memberRoleGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.memberRoleGuildIds],
+    ENVIRONMENT_NAMES.memberRoleGuildIds,
+  )
+  const memberRoleIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.memberRoleIds],
+    ENVIRONMENT_NAMES.memberRoleIds,
+    CONNECTOR_LIMITS.memberRoleAllowlist,
+  )
   const protectedUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.protectedUserIds],
     ENVIRONMENT_NAMES.protectedUserIds,
@@ -325,6 +337,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
+    [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
   ] as const) {
@@ -470,6 +483,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowMemberDirectory],
       ENVIRONMENT_NAMES.allowMemberDirectory,
     ),
+    allowMemberRoleChanges: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
+      ENVIRONMENT_NAMES.allowMemberRoleChanges,
+    ),
     allowPermissionOverwrites: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowPermissionOverwrites],
       ENVIRONMENT_NAMES.allowPermissionOverwrites,
@@ -540,6 +557,8 @@ export function loadConnectorConfig(
     ),
     mentionUserIds,
     memberDirectoryGuildIds,
+    memberRoleGuildIds,
+    memberRoleIds,
     mcpToolsets: parseMcpToolsets(
       environment[ENVIRONMENT_NAMES.toolsets],
       ENVIRONMENT_NAMES.toolsets,

@@ -115,6 +115,13 @@ import type {
   MemberDirectorySearchOptions,
 } from "./member-directory-service.js"
 import { MemberDirectoryService } from "./member-directory-service.js"
+import type {
+  MemberRoleChangePlan,
+  MemberRoleChangeRequest,
+  MemberRoleChangeResult,
+  MemberRoleServiceOptions,
+} from "./member-role-service.js"
+import { MemberRoleService } from "./member-role-service.js"
 import {
   normalizeChannel,
   normalizeGuild,
@@ -175,6 +182,7 @@ import type {
 } from "./types.js"
 
 export interface DiscordServiceClient {
+  addGuildMemberRole: DiscordClient["addGuildMemberRole"]
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   createGuildBan: DiscordClient["createGuildBan"]
@@ -234,6 +242,7 @@ export interface DiscordServiceClient {
   pinMessage: DiscordClient["pinMessage"]
   removeGuildBan: DiscordClient["removeGuildBan"]
   removeGuildMember: DiscordClient["removeGuildMember"]
+  removeGuildMemberRole: DiscordClient["removeGuildMemberRole"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
   searchGuildMembers: DiscordClient["searchGuildMembers"]
   unpinMessage: DiscordClient["unpinMessage"]
@@ -293,6 +302,10 @@ export interface ConnectorServiceOptions {
   >
   messagePinOptions?: Pick<
     MessagePinServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  memberRoleOptions?: Pick<
+    MemberRoleServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   permissionOverwriteOptions?: Pick<
@@ -445,6 +458,7 @@ export class ConnectorService {
   readonly #interactionService: InteractionService
   readonly #messagePinService: MessagePinService
   readonly #memberDirectoryService: MemberDirectoryService
+  readonly #memberRoleService: MemberRoleService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
@@ -551,6 +565,13 @@ export class ConnectorService {
     this.#memberDirectoryService = new MemberDirectoryService({
       client: this.#client,
       policy: this.#policy,
+    })
+    this.#memberRoleService = new MemberRoleService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.memberRoleOptions,
     })
     this.#permissionOverwriteService = new ChannelPermissionOverwriteService({
       activityStore: this.#activityStore,
@@ -1313,6 +1334,19 @@ export class ConnectorService {
     return this.#administrationService.plan(identity.bot.id, request, options)
   }
 
+  async planMemberRoleChange(
+    request: MemberRoleChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<MemberRoleChangePlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberRoleService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planChannelCreation(
     request: ChannelCreationRequest,
     options: RequestOptions = {},
@@ -1379,6 +1413,21 @@ export class ConnectorService {
   ): Promise<RoleCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#roleAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeMemberRoleChange(
+    request: MemberRoleChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MemberRoleChangeResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberRoleService.execute(
+      identity.application.id,
       identity.bot.id,
       request,
       planDigest,

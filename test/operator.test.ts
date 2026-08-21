@@ -30,6 +30,7 @@ const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
+const ROLE_ID = "500000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -103,6 +104,9 @@ function status(
       interactionsEnabled: false,
       memberDirectoryEnabled: false,
       memberDirectoryGuildIds: [],
+      memberRoleChangesEnabled: false,
+      memberRoleGuildIds: [],
+      memberRoleCount: 0,
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
@@ -138,6 +142,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    executeMemberRoleChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeScheduledEventChange: unexpected,
@@ -153,6 +158,7 @@ function toolService(): DiscordToolService {
     planWebhookDeletion: unexpected,
     planGuildExpressionChange: unexpected,
     planAutoModerationChange: unexpected,
+    planMemberRoleChange: unexpected,
     planScheduledEventChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
@@ -901,6 +907,51 @@ test("doctor and setup explain reviewed role-creation scope without Discord writ
   assert.match(omitted.warnings.join("\n"), /role-creation toolset/)
 })
 
+test("doctor and setup explain reviewed member-role scope without Discord writes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_MEMBER_ROLE_IDS: ROLE_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const memberRole = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.memberRolePolicy,
+  )
+  assert.equal(memberRole?.status, "pass")
+  assert.match(memberRole?.summary || "", /1 exact guilds and 1 exact roles/)
+  assert.match(memberRole?.summary || "", /permission-impact review and one-shot execution/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.memberRolePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /exact guild and role allowlists/)
+  assert.match(omitted.warnings.join("\n"), /member-roles toolset/)
+})
+
 test("doctor and setup explain resumable guild-scaffold scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
     environment: environment({
@@ -1479,6 +1530,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_expression_change",
     "review_guild_scaffold",
     "review_member_moderation",
+    "review_member_role_change",
     "review_message_deletion",
     "review_message_pin",
     "review_role_creation",
@@ -1517,6 +1569,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
     "execute_member_moderation",
+    "execute_member_role_change",
     "execute_message_pin",
     "execute_scheduled_event_change",
     "execute_webhook_deletion",
@@ -1527,6 +1580,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
+  assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.destructiveTools.includes("execute_channel_creation"), false)
   assert.equal(report.destructiveTools.includes("execute_role_creation"), false)

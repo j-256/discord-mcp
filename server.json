@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, member-roles, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -262,7 +262,7 @@
         },
         {
           "name": "DISCORD_MCP_PROTECTED_USER_IDS",
-          "description": "Exact user IDs that member administration must never target",
+          "description": "Exact user IDs that member administration and member-role changes must never target",
           "format": "string"
         },
         {
@@ -277,6 +277,25 @@
         {
           "name": "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
           "description": "Exact guild IDs eligible for privacy-minimized member-directory reads",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
+          "description": "Enable reviewed exact member-role additions and removals when exact guild and role allowlists are also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_MEMBER_ROLE_GUILD_IDS",
+          "description": "Exact guild IDs eligible for reviewed member-role changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_MEMBER_ROLE_IDS",
+          "description": "Exact role IDs eligible for reviewed addition to or removal from guild members",
           "format": "string"
         },
         {

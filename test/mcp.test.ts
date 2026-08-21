@@ -52,6 +52,10 @@ import type {
   MessagePinPlan,
   MessagePinRequest,
 } from "../src/message-pin-service.js"
+import type {
+  MemberRoleChangePlan,
+  MemberRoleChangeRequest,
+} from "../src/member-role-service.js"
 import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
   type NormalizedDiscordRole,
@@ -85,6 +89,9 @@ import {
   InteractionRateLimitError,
   MessagePinExecutionError,
   MessagePinOperationConflictError,
+  MemberRoleExecutionError,
+  MemberRoleOperationConflictError,
+  MemberRolePlanChangedError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
   ScheduledEventExecutionError,
@@ -143,6 +150,7 @@ const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
+const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
 const WEBHOOK_ID = "370000000000000001"
@@ -1204,6 +1212,119 @@ function rolePlan(
   }
 }
 
+function memberRolePlan(
+  request: MemberRoleChangeRequest,
+  digest = DIGEST,
+  action: "add" | "none" | "remove" = request.action,
+): MemberRoleChangePlan {
+  const selectedPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  const currentHasRole = action === "none"
+    ? request.action === "add"
+    : request.action === "remove"
+  const beforeRoleIds = currentHasRole ? [request.roleId] : []
+  const afterRoleIds = action === "none"
+    ? beforeRoleIds
+    : request.action === "add" ? [request.roleId] : []
+  const guildPermissionsBefore = currentHasRole
+    ? ["VIEW_CHANNEL", "SEND_MESSAGES"] as const
+    : ["VIEW_CHANNEL"] as const
+  const guildPermissionsAfter = afterRoleIds.includes(request.roleId)
+    ? ["VIEW_CHANNEL", "SEND_MESSAGES"] as const
+    : ["VIEW_CHANNEL"] as const
+  const guildPermissionsBeforeSet = new Set<string>(guildPermissionsBefore)
+  const guildPermissionsAfterSet = new Set<string>(guildPermissionsAfter)
+  return {
+    action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    digest,
+    guild: {
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: USER_ID,
+    },
+    highRiskPermissions: [],
+    highRiskPermissionGains: [],
+    impact: {
+      changedChannels: action === "none" ? 0 : 1,
+      channels: action === "none" ? [] : [{
+        channelId: CHANNEL_ID,
+        channelType: 0,
+        changes: [{
+          after: request.action === "add" ? "allowed" : "denied",
+          before: request.action === "add" ? "denied" : "allowed",
+          permission: "SEND_MESSAGES",
+        }],
+      }],
+      evaluatedChannels: 1,
+      guildPermissions: {
+        added: guildPermissionsAfter.filter((permission) => (
+          !guildPermissionsBeforeSet.has(permission)
+        )),
+        after: [...guildPermissionsAfter],
+        before: [...guildPermissionsBefore],
+        removed: guildPermissionsBefore.filter((permission) => (
+          !guildPermissionsAfterSet.has(permission)
+        )),
+      },
+      permissions: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+    },
+    member: {
+      afterRoleIds,
+      beforeRoleIds,
+      id: request.userId,
+      username: "untrusted-member-name",
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      botAdministrator: false,
+      botEffectivePermissionNames: ["MANAGE_ROLES", "VIEW_CHANNEL", "SEND_MESSAGES"],
+      botEffectivePermissions: (
+        DISCORD_PERMISSIONS.MANAGE_ROLES | selectedPermissions
+      ).toString(),
+      botHighestRoleIds: ["350000000000000002"],
+      botHighestRolePosition: 10,
+      channelPermissionEscalationSubset: true,
+      channelOverwriteUnknownPermissionBits: "0",
+      guildRoleUnknownPermissionBits: "0",
+      guildManageRoles: true,
+      roleBelowBot: true,
+      roleOverwriteUnknownPermissionBits: "0",
+      rolePermissionsSubset: true,
+      targetBelowBot: true,
+      targetHighestRoleIds: [request.guildId],
+      targetHighestRolePosition: 0,
+    },
+    requestedAction: request.action,
+    role: {
+      colors: {
+        primaryColor: 0,
+        secondaryColor: null,
+        tertiaryColor: null,
+      },
+      flags: 0,
+      hoist: false,
+      icon: null,
+      id: request.roleId,
+      managed: false,
+      management: { id: null, type: "standard" },
+      mentionable: false,
+      name: "untrusted-role-name",
+      permissionNames: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+      permissions: selectedPermissions.toString(),
+      position: 2,
+      unicodeEmoji: null,
+      unknownPermissionBits: "0",
+    },
+    schemaVersion: 1,
+    status: action === "none" ? "already-current" : "planned",
+    warnings: ["Threads are outside the direct-channel impact proof"],
+  }
+}
+
 function guildScaffoldPlan(
   request: GuildScaffoldRequest,
   digest = DIGEST,
@@ -1333,6 +1454,9 @@ function fixturePolicy(): PolicyDescription {
     interactionsEnabled: false,
     memberDirectoryEnabled: true,
     memberDirectoryGuildIds: [GUILD_ID],
+    memberRoleChangesEnabled: false,
+    memberRoleGuildIds: [],
+    memberRoleCount: 0,
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -1374,6 +1498,9 @@ function serviceFixture(overrides: {
   messagePinAction?: "change" | "none"
   messagePinError?: Error
   messagePinPlanDigest?: string
+  memberRoleAction?: "add" | "none" | "remove"
+  memberRoleError?: Error
+  memberRolePlanDigest?: string
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
@@ -1421,6 +1548,8 @@ function serviceFixture(overrides: {
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    memberRoleExecute: 0,
+    memberRolePlan: 0,
     permissionOverwriteExecute: 0,
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
@@ -1942,6 +2071,30 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
       }
     },
+    async executeMemberRoleChange(request, planDigest) {
+      if (overrides.memberRoleError) throw overrides.memberRoleError
+      calls.memberRoleExecute += 1
+      const planned = memberRolePlan(
+        request,
+        planDigest,
+        overrides.memberRoleAction,
+      )
+      const rolePresent = request.action === "add"
+      return {
+        action: request.action,
+        activityId: planned.action === "none" ? null : "activity-member-role",
+        guildId: request.guildId,
+        observedRoleIds: rolePresent ? [request.roleId] : [],
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        roleId: request.roleId,
+        rolePresent,
+        roleSnapshotMatched: true,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-current" : "completed",
+        userId: request.userId,
+      }
+    },
     async executeRoleCreation(request, planDigest) {
       if (overrides.roleCreationError) throw overrides.roleCreationError
       calls.roleCreationExecute += 1
@@ -2371,6 +2524,14 @@ function serviceFixture(overrides: {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
     },
+    async planMemberRoleChange(request) {
+      calls.memberRolePlan += 1
+      return memberRolePlan(
+        request,
+        overrides.memberRolePlanDigest || DIGEST,
+        overrides.memberRoleAction,
+      )
+    },
     async planMessagePin(request) {
       calls.messagePinPlan += 1
       return messagePinPlan(
@@ -2606,6 +2767,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_attachment_message",
       "plan_guild_scaffold",
       "execute_guild_scaffold",
+      "plan_member_role_change",
+      "execute_member_role_change",
       "plan_role_creation",
       "execute_role_creation",
       "plan_member_moderation",
@@ -2629,6 +2792,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const administration = result.tools.find((tool) => (
     tool.name === "execute_member_moderation"
   ))
+  const memberRole = result.tools.find((tool) => (
+    tool.name === "execute_member_role_change"
+  ))
   for (const tool of [
     deletion,
     messagePin,
@@ -2637,6 +2803,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     scheduledEvent,
     permissionOverwrite,
     administration,
+    memberRole,
   ]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
@@ -2667,6 +2834,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_scheduled_event",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
+    "plan_member_role_change",
     "plan_webhook_deletion",
     "plan_guild_expression_change",
     "plan_scheduled_event_change",
@@ -3093,6 +3261,30 @@ test("progressive discovery enables the complete reviewed role-creation workflow
   )
 })
 
+test("progressive discovery enables the complete reviewed member-role workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_member_role_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_member_role_change",
+    "plan_member_role_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_member_role_change",
+      "execute_member_role_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed message-pin workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -3367,6 +3559,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    memberRoleExecute: 0,
+    memberRolePlan: 0,
     permissionOverwriteExecute: 0,
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
@@ -6564,6 +6758,328 @@ test("MCP guild scaffolds expose resumable, uncertain, and content-free conflict
     JSON.stringify(unsafeResult),
     new RegExp(GUILD_SCAFFOLD_OPERATION_KEY),
   )
+})
+
+test("MCP member-role changes plan exact IDs and reject unsafe schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const planned = await client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "plan_member_role_change",
+  })
+  const invalidAction = await client.callTool({
+    arguments: {
+      action: "replace",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "plan_member_role_change",
+  })
+  const extraField = await client.callTool({
+    arguments: {
+      action: "remove",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      replaceAllRoles: true,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "plan_member_role_change",
+  })
+  const invalidRole = await client.callTool({
+    arguments: {
+      action: "remove",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      roleId: "role-name",
+      userId: USER_ID,
+    },
+    name: "plan_member_role_change",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(structuredContent(planned).requestedAction, "add")
+  assert.equal(invalidAction.isError, true)
+  assert.equal(extraField.isError, true)
+  assert.equal(invalidRole.isError, true)
+  assert.equal(calls.memberRolePlan, 1)
+})
+
+test("MCP member-role changes bind signed approval to exact role impact", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "execute_member_role_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.memberRolePlan, 1)
+  assert.equal(calls.memberRoleExecute, 1)
+  assert.match(confirmationMessage, /Requested action: add/)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, new RegExp(ROLE_ID))
+  assert.match(confirmationMessage, /Guild permissions added: SEND_MESSAGES/)
+  assert.match(confirmationMessage, /Channel permission escalations are a bot subset: true/)
+  assert.match(confirmationMessage, /SEND_MESSAGES: denied -> allowed/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(MEMBER_ROLE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MEMBER_ROLE_OPERATION_KEY),
+  )
+})
+
+test("MCP member-role changes skip confirmation for no-ops and stop on refusal", async (context) => {
+  let confirmations = 0
+  const current = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberRoleAction: "none" },
+  })
+  const currentResult = await current.client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(currentResult).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(current.calls.memberRoleExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "remove",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.memberRoleExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.memberRoleExecute, 0)
+})
+
+test("MCP member-role changes refuse fresh-plan drift before confirmation", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberRolePlanDigest: DIFFERENT_DIGEST },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleId: ROLE_ID,
+      userId: USER_ID,
+    },
+    name: "execute_member_role_change",
+  })
+
+  assert.equal(structuredContent(result).status, "plan-changed")
+  assert.equal(result.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.memberRoleExecute, 0)
+})
+
+test("MCP member-role changes expose uncertain, rate-limited, and conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const arguments_ = {
+    action: "add" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_ROLE_OPERATION_KEY,
+    planDigest: DIGEST,
+    roleId: ROLE_ID,
+    userId: USER_ID,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberRoleError: new MemberRoleExecutionError(
+        "Discord member-role outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const changed = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberRoleError: new MemberRolePlanChangedError(DIGEST, DIFFERENT_DIGEST),
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(
+    ((structuredContent(changedResult).error as Record<string, unknown>).actualDigest),
+    DIFFERENT_DIGEST,
+  )
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PUT",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/members/${USER_ID}/roles/${ROLE_ID}`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberRoleError: new MemberRoleExecutionError(
+        "Discord member-role change was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(limitedResult).status, "rate-limited")
+  assert.equal(
+    ((structuredContent(limitedResult).error as Record<string, unknown>).retryAfterMs),
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-member-role",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    roleId: ROLE_ID,
+    status: "completed",
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberRoleError: new MemberRoleOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_role_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(MEMBER_ROLE_OPERATION_KEY))
+
+  const unsafeConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberRoleError: new MemberRoleOperationConflictError({
+        ...receipt,
+        operationKey: MEMBER_ROLE_OPERATION_KEY,
+      }),
+    },
+  })
+  const unsafeResult = await unsafeConflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_role_change",
+  })
+  assert.deepEqual(
+    (structuredContent(unsafeResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(JSON.stringify(unsafeResult), new RegExp(MEMBER_ROLE_OPERATION_KEY))
 })
 
 test("MCP role creation plans named permissions and rejects unsafe schemas", async (context) => {

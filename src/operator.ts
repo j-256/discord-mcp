@@ -66,6 +66,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildScaffoldPolicy: "guild-scaffold-policy",
   interactionPolicy: "interaction-policy",
   memberDirectoryPolicy: "member-directory-policy",
+  memberRolePolicy: "member-role-policy",
   messageContentIntent: "message-content-intent",
   messagePinPolicy: "message-pin-policy",
   nodeVersion: "node-version",
@@ -258,6 +259,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowMemberDirectory && config.memberDirectoryGuildIds.size === 0) {
     warnings.push("The member-directory toggle is enabled but member lookup remains blocked because an exact guild allowlist is required")
   }
+  if (
+    config.allowMemberRoleChanges
+    && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
+  ) {
+    warnings.push("The member-role toggle is enabled but changes remain blocked because exact guild and role allowlists are both required")
+  }
   if (config.allowAutomodAudit && config.automodGuildIds.size === 0) {
     warnings.push("The AutoMod audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
   }
@@ -316,6 +323,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     ],
     [config.allowInteractions, "interactions", "Message interactions"],
     [config.allowMemberDirectory, "members", "Member directory"],
+    [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
     [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
@@ -657,6 +665,28 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.memberDirectoryPolicy,
         "pass",
         `Member-directory reads are constrained to ${config.memberDirectoryGuildIds.size} exact guilds with bounded privacy-minimized pages`,
+      ))
+    }
+    if (!config.allowMemberRoleChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberRolePolicy,
+        "pass",
+        "Reviewed member-role changes are disabled",
+      ))
+    } else if (
+      config.memberRoleGuildIds.size === 0
+      || config.memberRoleIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberRolePolicy,
+        "warn",
+        "Member-role changes are enabled, but exact guild and role allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberRolePolicy,
+        "pass",
+        `Reviewed member-role changes are constrained to ${config.memberRoleGuildIds.size} exact guilds and ${config.memberRoleIds.size} exact roles with bounded permission-impact review and one-shot execution`,
       ))
     }
     if (!config.allowWebhookAudit) {
@@ -1012,6 +1042,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
+    ENVIRONMENT_NAMES.allowMemberRoleChanges,
+    ENVIRONMENT_NAMES.memberRoleGuildIds,
+    ENVIRONMENT_NAMES.memberRoleIds,
     ENVIRONMENT_NAMES.allowWebhookAudit,
     ENVIRONMENT_NAMES.allowWebhookDeletions,
     ENVIRONMENT_NAMES.webhookChannelIds,

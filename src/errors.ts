@@ -394,6 +394,38 @@ export class RoleCreationExecutionError extends Error {
   }
 }
 
+export class MemberRolePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord member-role snapshot does not match the reviewed plan")
+    this.name = "MemberRolePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class MemberRoleOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord member-role operation key has already been reserved")
+    this.name = "MemberRoleOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class MemberRoleExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "MemberRoleExecutionError"
+    this.result = result
+  }
+}
+
 export class AdministrationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

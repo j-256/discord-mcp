@@ -45,6 +45,7 @@ type McpToolWorkflow =
   | "guild-scaffold"
   | "guild-expression-change"
   | "member-moderation"
+  | "member-role-change"
   | "message-deletion"
   | "message-pin"
   | "role-creation"
@@ -121,6 +122,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  execute_member_role_change: {
+    keywords: ["add", "assign", "execute", "member", "permission", "remove", "role"],
+    toolset: "member-roles",
+    workflow: "member-role-change",
   },
   execute_message_pin: {
     keywords: ["execute", "message", "pin", "state", "unpin"],
@@ -266,6 +272,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  plan_member_role_change: {
+    keywords: ["add", "assign", "member", "permission", "plan", "remove", "review", "role"],
+    toolset: "member-roles",
+    workflow: "member-role-change",
   },
   plan_automod_change: {
     keywords: ["automod", "create", "delete", "disable", "enable", "moderation", "plan", "policy", "review", "rule", "update"],

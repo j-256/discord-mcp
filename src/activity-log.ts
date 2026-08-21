@@ -12,10 +12,12 @@ import {
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
   DISCORD_SNOWFLAKE_PATTERN,
+  MEMBER_ROLE_ACTIONS,
   MEMBER_MODERATION_ACTIONS,
   SCHEMA_VERSION,
   type ChannelCreationKind,
   type MemberModerationAction,
+  type MemberRoleAction,
 } from "./constants.js"
 import { AuditLogError, errorMessage } from "./errors.js"
 import { OPERATION_KEY_HASH_PATTERN } from "./operation-store.js"
@@ -122,6 +124,29 @@ export interface RoleCreationActivity {
   schemaVersion: number
   status: RoleCreationActivityStatus
   timestamp: string
+  verification: "drift" | "match" | null
+}
+
+export type MemberRoleActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface MemberRoleActivity {
+  action: MemberRoleAction
+  error: string | null
+  guildId: string
+  id: string
+  kind: "member-role-change"
+  operationKeyHash: string
+  planDigest: string
+  roleId: string
+  schemaVersion: number
+  status: MemberRoleActivityStatus
+  timestamp: string
+  userId: string
   verification: "drift" | "match" | null
 }
 
@@ -320,6 +345,7 @@ export type ActivityEntry =
   | GuildExpressionActivity
   | InteractionActivity
   | MemberModerationActivity
+  | MemberRoleActivity
   | MessagePinActivity
   | RoleCreationActivity
   | ScheduledEventActivity
@@ -599,6 +625,75 @@ function parseRoleCreationActivity(
     schemaVersion: SCHEMA_VERSION,
     status: record.status as RoleCreationActivityStatus,
     timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseMemberRoleActivity(
+  value: unknown,
+): MemberRoleActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "member-role-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !MEMBER_ROLE_ACTIONS.includes(record.action as MemberRoleAction)
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.userId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.userId)
+    || typeof record.roleId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.roleId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.verification !== "match"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as MemberRoleAction,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "member-role-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    roleId: record.roleId,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as MemberRoleActivityStatus,
+    timestamp: record.timestamp,
+    userId: record.userId,
     verification: record.verification as "drift" | "match" | null,
   }
 }
@@ -1207,6 +1302,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)
     || parseWebhookDeletionActivity(value)
+    || parseMemberRoleActivity(value)
     || parseRoleCreationActivity(value)
     || parseDeletionActivity(value)
     || parseInteractionActivity(value)
