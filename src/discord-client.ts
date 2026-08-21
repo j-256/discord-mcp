@@ -18,6 +18,7 @@ import {
 } from "./constants.js"
 import {
   AutoModerationEvidenceError,
+  ChannelMetadataEvidenceError,
   DiscordApiError,
   errorMessage,
   GuildExpressionEvidenceError,
@@ -54,6 +55,7 @@ import type {
   DiscordMessagePinPage,
   DiscordMessageSearchIndexing,
   DiscordMessageSearchResponse,
+  DiscordPermissionOverwrite,
   DiscordRole,
   DiscordThreadList,
   DiscordThreadMember,
@@ -119,6 +121,31 @@ export interface MessagePageOptions extends MessageCursor, RequestOptions {
 export interface MessagePinPageOptions extends RequestOptions {
   before?: string
   limit?: number
+}
+
+export interface DiscordChannelMetadata {
+  defaultAutoArchiveDuration: number | null
+  defaultThreadRateLimitPerUser: number | null
+  guildId: string
+  id: string
+  name: string
+  nsfw: boolean | null
+  parentId: string | null
+  permissionOverwrites: DiscordPermissionOverwrite[]
+  position: number
+  rateLimitPerUser: number | null
+  topic: string | null
+  type: number
+  unknownFieldCount: number
+}
+
+export interface ModifyChannelMetadataInput {
+  defaultAutoArchiveDuration?: number
+  defaultThreadRateLimitPerUser?: number
+  name?: string
+  nsfw?: boolean
+  rateLimitPerUser?: number
+  topic?: string | null
 }
 
 export interface DiscordWebhookSummary {
@@ -836,6 +863,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_sticker",
+  "get_channel_metadata",
   "get_guild_onboarding",
   "list_guild_invites",
   "list_channel_webhooks",
@@ -846,9 +874,104 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
   "modify_guild_onboarding",
+  "modify_channel_metadata",
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
+])
+
+const CHANNEL_METADATA_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.category,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CHANNEL_METADATA_TOPIC_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.text,
+])
+const CHANNEL_METADATA_NSFW_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CHANNEL_METADATA_RATE_LIMIT_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CHANNEL_METADATA_AUTO_ARCHIVE_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.text,
+])
+const CHANNEL_METADATA_THREAD_RATE_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.text,
+])
+const CHANNEL_METADATA_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "applied_tags",
+  "application_id",
+  "available_tags",
+  "bitrate",
+  "default_auto_archive_duration",
+  "default_forum_layout",
+  "default_reaction_emoji",
+  "default_sort_order",
+  "default_tag_setting",
+  "default_thread_rate_limit_per_user",
+  "flags",
+  "guild_id",
+  "icon",
+  "id",
+  "last_message_id",
+  "last_pin_timestamp",
+  "managed",
+  "member",
+  "member_count",
+  "message_count",
+  "name",
+  "nsfw",
+  "owner_id",
+  "parent_id",
+  "permission_overwrites",
+  "permissions",
+  "position",
+  "rate_limit_per_user",
+  "recipients",
+  "rtc_region",
+  "thread_metadata",
+  "topic",
+  "total_message_sent",
+  "type",
+  "user_limit",
+  "video_quality_mode",
+])
+const CHANNEL_METADATA_OVERWRITE_KEYS: ReadonlySet<string> = new Set([
+  "allow",
+  "deny",
+  "id",
+  "type",
+])
+const MODIFY_CHANNEL_METADATA_KEYS: ReadonlySet<string> = new Set([
+  "defaultAutoArchiveDuration",
+  "defaultThreadRateLimitPerUser",
+  "name",
+  "nsfw",
+  "rateLimitPerUser",
+  "topic",
 ])
 
 function inviteEvidenceError(): InviteEvidenceError {
@@ -2444,6 +2567,292 @@ function projectGuildScheduledEvent(
       "Discord returned an invalid scheduled event object",
       { cause: error },
     )
+  }
+}
+
+function channelMetadataEvidenceError(options?: ErrorOptions): ChannelMetadataEvidenceError {
+  return new ChannelMetadataEvidenceError(
+    "Discord returned invalid guild channel metadata evidence",
+    options,
+  )
+}
+
+function returnedChannelMetadataText(
+  value: unknown,
+  maximum: number,
+  name: string,
+  allowNull: boolean,
+): string | null {
+  if (allowNull && (value === undefined || value === null)) return null
+  if (
+    typeof value !== "string"
+    || (!allowNull && value.length < 1)
+    || value.length > maximum
+    || (name === "name"
+      ? CHANNEL_NAME_CONTROL_PATTERN.test(value)
+      : CHANNEL_TOPIC_CONTROL_PATTERN.test(value))
+  ) {
+    throw channelMetadataEvidenceError()
+  }
+  try {
+    assertValidUnicode(value, `Discord channel ${name}`)
+  } catch (error) {
+    throw channelMetadataEvidenceError({ cause: error })
+  }
+  return value
+}
+
+function returnedChannelMetadataInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const result = value === undefined || value === null ? fallback : value
+  if (
+    typeof result !== "number"
+    || !Number.isSafeInteger(result)
+    || result < minimum
+    || result > maximum
+  ) {
+    throw channelMetadataEvidenceError()
+  }
+  return result
+}
+
+function projectChannelMetadataOverwrites(value: unknown): {
+  overwrites: DiscordPermissionOverwrite[]
+  unknownFieldCount: number
+} {
+  if (!Array.isArray(value) || value.length > DISCORD_LIMITS.channelPermissionOverwrites) {
+    throw channelMetadataEvidenceError()
+  }
+  const seen = new Set<string>()
+  let unknownFieldCount = 0
+  const overwrites = value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw channelMetadataEvidenceError()
+    }
+    const record = entry as Record<string, unknown>
+    try {
+      assertPositiveSnowflake(record.id as string, "Discord channel overwrite ID")
+      if (record.type !== 0 && record.type !== 1) throw new RangeError()
+      const allow = assertPermissionBitfield(
+        record.allow as string,
+        "Discord channel overwrite allow field",
+      )
+      const deny = assertPermissionBitfield(
+        record.deny as string,
+        "Discord channel overwrite deny field",
+      )
+      if ((allow & deny) !== 0n) throw new RangeError()
+    } catch (error) {
+      throw channelMetadataEvidenceError({ cause: error })
+    }
+    const id = record.id as string
+    if (seen.has(id)) throw channelMetadataEvidenceError()
+    seen.add(id)
+    unknownFieldCount += Object.keys(record)
+      .filter((key) => !CHANNEL_METADATA_OVERWRITE_KEYS.has(key)).length
+    return {
+      allow: record.allow as string,
+      deny: record.deny as string,
+      id,
+      type: record.type as 0 | 1,
+    }
+  }).sort((left, right) => {
+    const leftId = BigInt(left.id)
+    const rightId = BigInt(right.id)
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : left.type - right.type
+  })
+  return { overwrites, unknownFieldCount }
+}
+
+function projectGuildChannelMetadata(
+  value: unknown,
+  expectedChannelId: string,
+): DiscordChannelMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw channelMetadataEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(record.id as string, "Discord channel metadata ID")
+    assertPositiveSnowflake(record.guild_id as string, "Discord channel metadata guild ID")
+  } catch (error) {
+    throw channelMetadataEvidenceError({ cause: error })
+  }
+  if (
+    record.id !== expectedChannelId
+    || typeof record.type !== "number"
+    || !Number.isSafeInteger(record.type)
+    || !CHANNEL_METADATA_TYPES.has(record.type)
+    || !Number.isSafeInteger(record.position)
+    || (record.position as number) < 0
+    || !Array.isArray(record.permission_overwrites)
+    || !(
+      record.parent_id === undefined
+      || record.parent_id === null
+      || typeof record.parent_id === "string"
+        && DISCORD_SNOWFLAKE_PATTERN.test(record.parent_id)
+        && BigInt(record.parent_id) >= 1n
+        && BigInt(record.parent_id) <= DISCORD_SNOWFLAKE_MAX
+    )
+    || !(record.nsfw === undefined || typeof record.nsfw === "boolean")
+  ) {
+    throw channelMetadataEvidenceError()
+  }
+  const type = record.type
+  const name = returnedChannelMetadataText(
+    record.name,
+    DISCORD_LIMITS.channelNameCharacters,
+    "name",
+    false,
+  ) as string
+  const topicMaximum = type === DISCORD_CHANNEL_TYPES.forum
+      || type === DISCORD_CHANNEL_TYPES.media
+    ? DISCORD_LIMITS.forumChannelTopicCharacters
+    : DISCORD_LIMITS.channelTopicCharacters
+  const rawTopic = returnedChannelMetadataText(
+    record.topic,
+    topicMaximum,
+    "topic",
+    true,
+  )
+  const rawNsfw = record.nsfw ?? false
+  const rawRateLimit = returnedChannelMetadataInteger(
+    record.rate_limit_per_user,
+    0,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+  )
+  const rawThreadRateLimit = returnedChannelMetadataInteger(
+    record.default_thread_rate_limit_per_user,
+    0,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+  )
+  const rawAutoArchive = record.default_auto_archive_duration === undefined
+      || record.default_auto_archive_duration === null
+    ? null
+    : returnedChannelMetadataInteger(
+        record.default_auto_archive_duration,
+        0,
+        0,
+        CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS.at(-1) as number,
+      )
+  if (
+    rawAutoArchive !== null
+    && !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[]).includes(rawAutoArchive)
+  ) {
+    throw channelMetadataEvidenceError()
+  }
+  if (
+    (!CHANNEL_METADATA_TOPIC_TYPES.has(type) && rawTopic !== null)
+    || (!CHANNEL_METADATA_NSFW_TYPES.has(type) && rawNsfw !== false)
+    || (!CHANNEL_METADATA_RATE_LIMIT_TYPES.has(type) && rawRateLimit !== 0)
+    || (!CHANNEL_METADATA_AUTO_ARCHIVE_TYPES.has(type) && rawAutoArchive !== null)
+    || (!CHANNEL_METADATA_THREAD_RATE_TYPES.has(type) && rawThreadRateLimit !== 0)
+  ) {
+    throw channelMetadataEvidenceError()
+  }
+  const projectedOverwrites = projectChannelMetadataOverwrites(record.permission_overwrites)
+  return {
+    defaultAutoArchiveDuration: CHANNEL_METADATA_AUTO_ARCHIVE_TYPES.has(type)
+      ? rawAutoArchive
+      : null,
+    defaultThreadRateLimitPerUser: CHANNEL_METADATA_THREAD_RATE_TYPES.has(type)
+      ? rawThreadRateLimit
+      : null,
+    guildId: record.guild_id as string,
+    id: expectedChannelId,
+    name,
+    nsfw: CHANNEL_METADATA_NSFW_TYPES.has(type) ? rawNsfw as boolean : null,
+    parentId: (record.parent_id as string | null | undefined) ?? null,
+    permissionOverwrites: projectedOverwrites.overwrites,
+    position: record.position as number,
+    rateLimitPerUser: CHANNEL_METADATA_RATE_LIMIT_TYPES.has(type)
+      ? rawRateLimit
+      : null,
+    topic: CHANNEL_METADATA_TOPIC_TYPES.has(type) ? rawTopic : null,
+    type,
+    unknownFieldCount: Object.keys(record)
+      .filter((key) => !CHANNEL_METADATA_RESPONSE_KEYS.has(key)).length
+      + projectedOverwrites.unknownFieldCount,
+  }
+}
+
+function channelMetadataBody(input: ModifyChannelMetadataInput): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord channel metadata input must be an exact object")
+  }
+  const record = input as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (
+    keys.length < 1
+    || keys.some((key) => !MODIFY_CHANNEL_METADATA_KEYS.has(key))
+    || keys.some((key) => record[key] === undefined)
+  ) {
+    throw new RangeError("Discord channel metadata input must contain supported explicit fields")
+  }
+  if (input.name !== undefined) {
+    if (
+      typeof input.name !== "string"
+      || input.name.length < 1
+      || input.name.length > DISCORD_LIMITS.channelNameCharacters
+      || input.name.trim() !== input.name
+      || CHANNEL_NAME_CONTROL_PATTERN.test(input.name)
+    ) {
+      throw new RangeError("Discord channel metadata name is invalid")
+    }
+    assertValidUnicode(input.name, "Discord channel metadata name")
+  }
+  if (input.topic !== undefined && input.topic !== null) {
+    if (
+      typeof input.topic !== "string"
+      || input.topic.length > DISCORD_LIMITS.forumChannelTopicCharacters
+      || (input.topic.length > 0 && input.topic.trim() !== input.topic)
+      || CHANNEL_TOPIC_CONTROL_PATTERN.test(input.topic)
+    ) {
+      throw new RangeError("Discord channel metadata topic is invalid")
+    }
+    assertValidUnicode(input.topic, "Discord channel metadata topic")
+  }
+  if (input.nsfw !== undefined && typeof input.nsfw !== "boolean") {
+    throw new RangeError("Discord channel metadata NSFW setting must be a boolean")
+  }
+  assertIntegerRange(
+    input.rateLimitPerUser,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+    "Discord channel metadata slowmode seconds",
+  )
+  assertIntegerRange(
+    input.defaultThreadRateLimitPerUser,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+    "Discord channel metadata default thread slowmode seconds",
+  )
+  if (
+    input.defaultAutoArchiveDuration !== undefined
+    && !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[])
+      .includes(input.defaultAutoArchiveDuration)
+  ) {
+    throw new RangeError("Discord channel metadata default auto-archive duration is unsupported")
+  }
+  return {
+    ...(input.defaultAutoArchiveDuration !== undefined
+      ? { default_auto_archive_duration: input.defaultAutoArchiveDuration }
+      : {}),
+    ...(input.defaultThreadRateLimitPerUser !== undefined
+      ? { default_thread_rate_limit_per_user: input.defaultThreadRateLimitPerUser }
+      : {}),
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    ...(input.nsfw !== undefined ? { nsfw: input.nsfw } : {}),
+    ...(input.rateLimitPerUser !== undefined
+      ? { rate_limit_per_user: input.rateLimitPerUser }
+      : {}),
+    ...(input.topic !== undefined ? { topic: input.topic } : {}),
   }
 }
 
@@ -5011,6 +5420,44 @@ export class DiscordClient {
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {
     return this.#request("get_channel", `/channels/${channelId}`, options)
+  }
+
+  async getGuildChannelMetadata(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannelMetadata> {
+    assertPositiveSnowflake(channelId, "Discord channel metadata ID")
+    const response = await this.#request<unknown>(
+      "get_channel_metadata",
+      `/channels/${channelId}`,
+      { ...options, suppressFailureCause: true },
+    )
+    return projectGuildChannelMetadata(response, channelId)
+  }
+
+  async modifyGuildChannelMetadata(
+    channelId: string,
+    input: ModifyChannelMetadataInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannelMetadata> {
+    assertPositiveSnowflake(channelId, "Discord channel metadata ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord channel metadata audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_channel_metadata",
+      `/channels/${channelId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: channelMetadataBody(input),
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildChannelMetadata(response, channelId)
   }
 
   async listChannelWebhooks(

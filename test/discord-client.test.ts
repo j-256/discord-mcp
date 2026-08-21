@@ -6,9 +6,35 @@ import {
   DiscordClient,
 } from "../src/discord-client.js"
 import {
+  ChannelMetadataEvidenceError,
   DiscordApiError,
   OnboardingEvidenceError,
 } from "../src/errors.js"
+
+function channelMetadataPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    default_auto_archive_duration: 1_440,
+    default_thread_rate_limit_per_user: 15,
+    guild_id: "100",
+    id: "200",
+    name: "product-feedback",
+    nsfw: false,
+    parent_id: "300",
+    permission_overwrites: [{
+      allow: "1024",
+      deny: "0",
+      future_overwrite_field: "omitted",
+      id: "400",
+      type: 0,
+    }],
+    position: 4,
+    rate_limit_per_user: 30,
+    topic: "Share product feedback",
+    type: 15,
+    unknown_channel_field: "omitted",
+    ...overrides,
+  }
+}
 import type {
   OperationCompletion,
   OperationalErrorCategory,
@@ -2649,4 +2675,183 @@ test("Discord client sanitizes onboarding evidence and transport failures", asyn
       && error.cause === undefined
     ),
   )
+})
+
+test("Discord client projects exact guild channel metadata and counts unknown fields", async () => {
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse(channelMetadataPayload()),
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.getGuildChannelMetadata("200")
+
+  assert.deepEqual(result, {
+    defaultAutoArchiveDuration: 1_440,
+    defaultThreadRateLimitPerUser: 15,
+    guildId: "100",
+    id: "200",
+    name: "product-feedback",
+    nsfw: false,
+    parentId: "300",
+    permissionOverwrites: [{
+      allow: "1024",
+      deny: "0",
+      id: "400",
+      type: 0,
+    }],
+    position: 4,
+    rateLimitPerUser: 30,
+    topic: "Share product feedback",
+    type: 15,
+    unknownFieldCount: 2,
+  })
+  assert.equal(records[0]?.operation, "get_channel_metadata")
+})
+
+test("Discord client sends one exact non-retried partial channel metadata patch", async () => {
+  let requests = 0
+  let method = ""
+  let body: unknown
+  let auditReason = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      requests += 1
+      method = init?.method || ""
+      body = JSON.parse(String(init?.body)) as unknown
+      auditReason = new Headers(init?.headers).get("X-Audit-Log-Reason") || ""
+      return jsonResponse(channelMetadataPayload({
+        name: "feedback",
+        topic: null,
+      }))
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    sleep: async () => {
+      throw new Error("Channel metadata PATCH must not retry")
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildChannelMetadata(
+    "200",
+    { name: "feedback", topic: null },
+    "Reviewed metadata update",
+  )
+
+  assert.equal(requests, 1)
+  assert.equal(method, "PATCH")
+  assert.deepEqual(body, { name: "feedback", topic: null })
+  assert.equal(auditReason, "Reviewed%20metadata%20update")
+  assert.equal(result.name, "feedback")
+  assert.equal(result.topic, null)
+  assert.equal(records[0]?.operation, "modify_channel_metadata")
+})
+
+test("Discord client rejects malformed and unsupported channel metadata evidence", async () => {
+  for (const payload of [
+    channelMetadataPayload({ id: "201" }),
+    channelMetadataPayload({ permission_overwrites: undefined }),
+    channelMetadataPayload({ type: 11 }),
+    channelMetadataPayload({ default_auto_archive_duration: 120 }),
+    channelMetadataPayload({ permission_overwrites: [{
+      allow: "1024",
+      deny: "1024",
+      id: "400",
+      type: 0,
+    }] }),
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(payload),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      client.getGuildChannelMetadata("200"),
+      ChannelMetadataEvidenceError,
+    )
+  }
+})
+
+test("Discord client validates channel metadata input before fetching", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse(channelMetadataPayload())
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.modifyGuildChannelMetadata("200", {}, "Reviewed"),
+    /explicit fields/,
+  )
+  await assert.rejects(
+    client.modifyGuildChannelMetadata("200", { topic: " surrounding " }, "Reviewed"),
+    /topic is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildChannelMetadata(
+      "200",
+      { defaultAutoArchiveDuration: 120 },
+      "Reviewed",
+    ),
+    /unsupported/,
+  )
+  await assert.rejects(client.getGuildChannelMetadata("invalid"), /positive Discord snowflake/)
+  assert.equal(requests, 0)
+})
+
+test("Discord client suppresses channel metadata content from failures and never retries writes", async () => {
+  const privateText = "private channel topic"
+  const transportClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateText)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transportClient.getGuildChannelMetadata("200"),
+    (error: unknown) => {
+      assert(error instanceof Error)
+      assert.equal(error.message.includes(privateText), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+
+  let requests = 0
+  const rateLimitedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        code: 20_016,
+        message: privateText,
+        retry_after: 0,
+      }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimitedClient.modifyGuildChannelMetadata(
+      "200",
+      { name: "feedback" },
+      "Reviewed",
+    ),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.message.includes(privateText), false)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
 })

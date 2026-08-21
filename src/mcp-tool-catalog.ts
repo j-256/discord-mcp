@@ -40,6 +40,7 @@ type McpToolWorkflow =
   | "attachment-message"
   | "automod-change"
   | "channel-creation"
+  | "channel-metadata-change"
   | "channel-permission-overwrite"
   | "forum-post"
   | "guild-scaffold"
@@ -99,6 +100,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  execute_channel_metadata_change: {
+    keywords: ["channel", "configure", "execute", "metadata", "name", "nsfw", "slowmode", "topic"],
+    toolset: "channel-metadata",
+    workflow: "channel-metadata-change",
   },
   execute_channel_permission_overwrite: {
     keywords: ["access", "channel", "execute", "member", "overwrite", "permission", "role"],
@@ -232,6 +238,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "exact", "integration", "lookup", "webhook"],
     toolset: "webhooks",
   },
+  get_channel: {
+    keywords: ["channel", "exact", "metadata", "name", "nsfw", "read", "slowmode", "topic"],
+    toolset: "guilds",
+  },
   list_active_threads: {
     keywords: ["active", "forum", "list", "thread"],
     toolset: "threads",
@@ -324,6 +334,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  plan_channel_metadata_change: {
+    keywords: ["channel", "configure", "metadata", "name", "nsfw", "plan", "review", "slowmode", "topic"],
+    toolset: "channel-metadata",
+    workflow: "channel-metadata-change",
   },
   plan_channel_permission_overwrite: {
     keywords: ["access", "channel", "member", "overwrite", "permission", "plan", "review", "role"],

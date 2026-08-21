@@ -162,6 +162,42 @@ export class ChannelCreationExecutionError extends Error {
   }
 }
 
+export class ChannelMetadataPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord channel metadata snapshot does not match the reviewed plan")
+    this.name = "ChannelMetadataPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelMetadataOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord channel metadata operation key has already been reserved")
+    this.name = "ChannelMetadataOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelMetadataExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelMetadataExecutionError"
+    this.result = result
+  }
+}
+
+export class ChannelMetadataEvidenceError extends Error {
+  override name = "ChannelMetadataEvidenceError"
+}
+
 export class ForumPostPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

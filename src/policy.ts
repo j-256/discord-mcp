@@ -26,6 +26,8 @@ export interface PolicyDescription {
   banAuditGuildIds: string[]
   channelCreationEnabled: boolean
   channelCreationGuildIds: string[]
+  channelMetadataChangesEnabled: boolean
+  channelMetadataIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
   forumPostChannelIds: string[]
@@ -95,6 +97,7 @@ export class ScopePolicy {
   readonly #allowAutomodChanges: boolean
   readonly #allowBanAudit: boolean
   readonly #allowChannelCreation: boolean
+  readonly #allowChannelMetadataChanges: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowInviteAudit: boolean
@@ -123,6 +126,7 @@ export class ScopePolicy {
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
+  readonly #channelMetadataIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
@@ -167,6 +171,7 @@ export class ScopePolicy {
     | "allowAutomodAudit"
     | "allowAutomodChanges"
     | "allowBanAudit"
+    | "allowChannelMetadataChanges"
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
@@ -187,6 +192,7 @@ export class ScopePolicy {
     | "allowWebhookAudit"
     | "allowWebhookDeletions"
     | "channelCreationGuildIds"
+    | "channelMetadataIds"
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
     | "attachmentRoots"
@@ -221,6 +227,7 @@ export class ScopePolicy {
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
     this.#allowBanAudit = config.allowBanAudit ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
+    this.#allowChannelMetadataChanges = config.allowChannelMetadataChanges ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowInviteAudit = config.allowInviteAudit ?? false
@@ -249,6 +256,7 @@ export class ScopePolicy {
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
+    this.#channelMetadataIds = config.channelMetadataIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
@@ -299,6 +307,9 @@ export class ScopePolicy {
       channelCreationEnabled: this.#allowChannelCreation
         && this.#channelCreationGuildIds.size > 0,
       channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
+      channelMetadataChangesEnabled: this.#allowChannelMetadataChanges
+        && this.#channelMetadataIds.size > 0,
+      channelMetadataIds: [...this.#channelMetadataIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       gatewayEnabled: this.#allowGateway,
@@ -671,6 +682,20 @@ export class ScopePolicy {
     }
     if (!this.#deleteChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the deletion scope`)
+    }
+    return guildId
+  }
+
+  assertChannelMetadataChangeAllowed(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowChannelMetadataChanges) {
+      throw new PolicyError("Discord channel-metadata changes are disabled by connector configuration")
+    }
+    if (this.#channelMetadataIds.size === 0) {
+      throw new PolicyError("Discord channel-metadata changes require an explicit channel allowlist")
+    }
+    if (!this.#channelMetadataIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the channel-metadata scope`)
     }
     return guildId
   }

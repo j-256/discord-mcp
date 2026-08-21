@@ -147,6 +147,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
+    channelMetadataChangesEnabled: false,
+    channelMetadataIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     forumPostChannelIds: [],
@@ -417,6 +419,8 @@ test("configuration and policy require an exact administration guild and protect
     banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
+    channelMetadataChangesEnabled: false,
+    channelMetadataIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     forumPostChannelIds: [],
@@ -837,6 +841,62 @@ test("configuration and policy isolate exact channel creation authority", () => 
   )
 })
 
+test("configuration and policy isolate reviewed metadata changes to exact readable channels", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_CHANNEL_METADATA_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_CHANNEL_METADATA_IDS must be a subset/,
+  )
+
+  const disabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const disabled = new ScopePolicy(disabledConfig)
+  assert.equal(disabledConfig.allowChannelMetadataChanges, false)
+  assert.throws(
+    () => disabled.assertChannelMetadataChangeAllowed(channel()),
+    /channel-metadata changes are disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+    DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabledConfig.allowChannelMetadataChanges, true)
+  assert.deepEqual([...enabledConfig.channelMetadataIds], [CHANNEL_ID])
+  assert.equal(enabled.assertChannelMetadataChangeAllowed(channel()), GUILD_ID)
+  assert.throws(
+    () => enabled.assertChannelMetadataChangeAllowed(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the channel-metadata scope/,
+  )
+  assert.equal(enabled.describe().channelMetadataChangesEnabled, true)
+  assert.deepEqual(enabled.describe().channelMetadataIds, [CHANNEL_ID])
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertChannelMetadataChangeAllowed(channel()),
+    /require an explicit channel allowlist/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
+  )
+})
+
 test("configuration and policy isolate exact role creation authority", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1139,6 +1199,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
+    channelMetadataChangesEnabled: false,
+    channelMetadataIds: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
     forumPostChannelIds: [],

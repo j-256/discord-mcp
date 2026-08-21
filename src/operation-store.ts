@@ -27,6 +27,7 @@ export const OPERATION_KINDS = [
   "attachment-message",
   "automod-change",
   "channel-creation",
+  "channel-metadata-change",
   "channel-permission-overwrite",
   "forum-post",
   "guild-expression-change",

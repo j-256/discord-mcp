@@ -48,6 +48,18 @@ import type {
 } from "./channel-administration-service.js"
 import { ChannelAdministrationService } from "./channel-administration-service.js"
 import type {
+  ChannelMetadataChangePlan,
+  ChannelMetadataChangeRequest,
+  ChannelMetadataChangeResult,
+  ChannelMetadataReadResult,
+  ChannelMetadataServiceOptions,
+} from "./channel-metadata-service.js"
+import {
+  assertChannelMetadataChannelId,
+  ChannelMetadataService,
+  normalizeChannelMetadataChangeRequest,
+} from "./channel-metadata-service.js"
+import type {
   ChannelPermissionOverwriteListOptions,
   ChannelPermissionOverwriteListResult,
   ChannelPermissionOverwritePlan,
@@ -243,6 +255,7 @@ export interface DiscordServiceClient {
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
+  getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
@@ -276,6 +289,7 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
@@ -320,6 +334,10 @@ export interface ConnectorServiceOptions {
   >
   channelAdministrationOptions?: Pick<
     ChannelAdministrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  channelMetadataOptions?: Pick<
+    ChannelMetadataServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   client?: DiscordServiceClient
@@ -496,6 +514,7 @@ export class ConnectorService {
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
   readonly #channelAdministrationService: ChannelAdministrationService
+  readonly #channelMetadataService: ChannelMetadataService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
   readonly #deletionService: DeletionService
@@ -546,6 +565,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelAdministrationOptions,
+    })
+    this.#channelMetadataService = new ChannelMetadataService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.channelMetadataOptions,
     })
     this.#deletionService = new DeletionService({
       activityStore: this.#activityStore,
@@ -779,6 +805,15 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async getChannel(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelMetadataReadResult> {
+    assertChannelMetadataChannelId(channelId)
+    await this.#verifyIdentity(options)
+    return this.#channelMetadataService.get(channelId, options)
   }
 
   async listRoles(guildId: string, options: RequestOptions = {}) {
@@ -1495,6 +1530,20 @@ export class ConnectorService {
     )
   }
 
+  async planChannelMetadataChange(
+    request: ChannelMetadataChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelMetadataChangePlan> {
+    normalizeChannelMetadataChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelMetadataService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberModeration(
     request: MemberModerationRequest,
     options: RequestOptions = {},
@@ -1568,6 +1617,25 @@ export class ConnectorService {
   ): Promise<ChannelCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#channelAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeChannelMetadataChange(
+    request: ChannelMetadataChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelMetadataChangeResult> {
+    normalizeChannelMetadataChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord channel metadata plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelMetadataService.execute(
+      identity.application.id,
       identity.bot.id,
       request,
       planDigest,

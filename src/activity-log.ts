@@ -25,6 +25,14 @@ import { OPERATION_KEY_HASH_PATTERN } from "./operation-store.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 
 const MAX_ACTIVITY_READ_BYTES = 1_048_576
+const CHANNEL_METADATA_ACTIVITY_FIELDS: ReadonlySet<string> = new Set([
+  "defaultAutoArchiveDuration",
+  "defaultThreadRateLimitPerUser",
+  "name",
+  "nsfw",
+  "rateLimitPerUser",
+  "topic",
+])
 
 export type DeletionActivityStatus = "completed" | "failed" | "partial" | "pending"
 
@@ -379,10 +387,33 @@ export interface ChannelPermissionOverwriteActivity {
   verification: "drift" | "match" | null
 }
 
+export type ChannelMetadataActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ChannelMetadataActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "channel-metadata-change"
+  operationKeyHash: string
+  planDigest: string
+  requestedFields: string[]
+  schemaVersion: number
+  status: ChannelMetadataActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ActivityEntry =
   | AttachmentMessageActivity
   | AutoModerationActivity
   | ChannelCreationActivity
+  | ChannelMetadataActivity
   | ChannelPermissionOverwriteActivity
   | DeletionActivity
   | ForumPostActivity
@@ -871,6 +902,71 @@ function parseChannelPermissionOverwriteActivity(
     status: record.status as ChannelPermissionOverwriteActivityStatus,
     targetId: record.targetId,
     targetType: record.targetType as "member" | "role",
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseChannelMetadataActivity(
+  value: unknown,
+): ChannelMetadataActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "channel-metadata-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !stringArray(record.requestedFields)
+    || record.requestedFields.length < 1
+    || record.requestedFields.some((field) => !CHANNEL_METADATA_ACTIVITY_FIELDS.has(field))
+    || new Set(record.requestedFields).size !== record.requestedFields.length
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "channel-metadata-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    requestedFields: [...record.requestedFields].sort(),
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ChannelMetadataActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
@@ -1465,6 +1561,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseAutoModerationActivity(value)
     || parseForumPostActivity(value)
     || parseChannelCreationActivity(value)
+    || parseChannelMetadataActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
     || parseGuildExpressionActivity(value)

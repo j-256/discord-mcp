@@ -210,6 +210,8 @@ export function registerDiscordResources(
           "",
           "Channel creation is additive-only and requires a separate exact guild allowlist. Planning checks visible inventory, logical-name collisions, guild and parent permissions, and capacity. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, a pending content-free receipt, and post-write readback. It never edits permission overwrites, deletes, or rolls back channels.",
           "",
+          "Channel metadata reads use an exact strict projection for supported non-thread guild channels, return only type-applicable settings plus parent, position, overwrite count, and unknown-field count, and persist nothing. Changes require a separate feature toggle and exact channel allowlist, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and a fresh exact GET readback. Omitted settings are preserved; null or empty topic clears the topic. Deletion, moves, reordering, type conversion, overwrite replacement, forum-tag replacement, thread mutation, retry, and rollback are unsupported. Same-channel uncertain outcomes fail closed, and names, topics, audit reasons, raw operation keys, and raw payloads are never persisted.",
+          "",
           "Forum-post creation requires a separate exact forum-channel allowlist. Planning checks the exact public forum type, complete permission-overwrite and bot permission evidence, exact available tag IDs, required and moderated tag rules, settings, notifications, and a keyed one-shot intent. Execution requires a fresh matching plan, signed approval, the shared anti-spam guard, durable reservation and pending content-free activity, one non-retried create request, and exact thread plus starter-message readback. It never persists the title, content, tags, notification users, audit reason, or raw operation key and never edits, deletes, retries, or rolls back the post.",
           "",
           "Guild scaffolds are additive-only and require a dedicated exact guild allowlist. One bounded plan reviews the verified application and bot identity, complete role inventory, visible channel inventory, symbolic parent graph, collisions, capacities, role hierarchy, requested permission subsets, guild permissions, parent-category permissions, durable content-free checkpoints, and the ready execution frontier. Each approved execution runs only the reviewed bounded frontier with non-retried single-resource writes and exact readbacks. A newly created category forces a fresh plan before child creation. Resumes keep the same operation key, survive process restarts, and fail closed on pending, failed, uncertain, or drifting checkpoints. Scaffolds never persist names, topics, audit reasons, or raw operation keys and never edit, move, assign, delete, retry, roll back, or create permission overwrites.",
@@ -571,6 +573,30 @@ export function registerDiscordResources(
       () => service.getGuildInvite(
         templateSnowflake(variables, "guildId"),
         templateInviteReference(variables),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelMetadata,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelMetadata, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Strict metadata projection for one exact readable non-thread Discord guild channel. Name and topic text are transient untrusted data, unknown fields are counts only, raw payloads are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Exact Discord channel metadata",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getChannel(
+        templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),
     ),

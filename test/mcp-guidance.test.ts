@@ -43,6 +43,7 @@ const WEBHOOK_ID = "360000000000000001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const PRIVATE_ONBOARDING_TEXT = "private-onboarding-member-copy"
+const PRIVATE_CHANNEL_TOPIC = "private-channel-roadmap"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
@@ -138,6 +139,7 @@ interface GuidanceCalls {
   automod: number
   bans: number
   channelAccess: number
+  channelMetadata: number
   channels: number
   guilds: number
   guildExpressions: number
@@ -169,6 +171,7 @@ function guidanceService(options: {
     automod: 0,
     bans: 0,
     channelAccess: 0,
+    channelMetadata: 0,
     channels: 0,
     guilds: 0,
     guildExpressions: 0,
@@ -195,6 +198,7 @@ function guidanceService(options: {
     addReaction: unexpected,
     executeMemberRoleChange: unexpected,
     executeAutoModerationChange: unexpected,
+    executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
@@ -204,6 +208,43 @@ function guidanceService(options: {
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
+    async getChannel(channelId) {
+      calls.channelMetadata += 1
+      calls.lastChannelId = channelId
+      return {
+        metadata: {
+          applicableFields: [
+            "defaultAutoArchiveDuration",
+            "defaultThreadRateLimitPerUser",
+            "name",
+            "nsfw",
+            "rateLimitPerUser",
+            "topic",
+          ],
+          defaultAutoArchiveDuration: 1_440,
+          defaultThreadRateLimitPerUser: 0,
+          guildId: GUILD_ID,
+          id: channelId,
+          name: "private-channel-name",
+          nsfw: false,
+          parentId: null,
+          permissionOverwriteCount: 0,
+          position: 1,
+          rateLimitPerUser: 0,
+          topic: PRIVATE_CHANNEL_TOPIC,
+          type: 0,
+          unknownFieldCount: 2,
+        },
+        privacy: {
+          persistence: "none",
+          rawPayloads: "omitted",
+          text: "included",
+          unknownFields: "counts-only",
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async getGuildInvite(guildId, inviteRef) {
       calls.invites += 1
       calls.lastGuildId = guildId
@@ -532,6 +573,7 @@ function guidanceService(options: {
       }
     },
     planGuildExpressionChange: unexpected,
+    planChannelMetadataChange: unexpected,
     planOnboardingChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
@@ -553,6 +595,8 @@ function guidanceService(options: {
         banAuditGuildIds: [],
         channelCreationEnabled: false,
         channelCreationGuildIds: [],
+        channelMetadataChangesEnabled: false,
+        channelMetadataIds: [],
         deleteChannelIds: [],
         deletionsEnabled: false,
         forumPostChannelIds: [],
@@ -916,6 +960,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.automod
     + calls.bans
     + calls.channelAccess
+    + calls.channelMetadata
     + calls.channels
     + calls.guilds
     + calls.guildExpressions
@@ -989,6 +1034,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelAccess,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAccess,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelMetadata,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelMetadata,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelPermissionOverwrites,
@@ -1364,6 +1413,20 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal((onboardingConfiguration.prompts as unknown[]).length, 1)
   assert.doesNotMatch(onboarding.text, new RegExp(PRIVATE_ONBOARDING_TEXT))
 
+  const channelMetadata = await readJsonResource(
+    client,
+    `discord://channels/${CHANNEL_ID}`,
+  )
+  const channelMetadataData = channelMetadata.value.data as Record<string, unknown>
+  const metadata = channelMetadataData.metadata as Record<string, unknown>
+  const metadataPrivacy = channelMetadataData.privacy as Record<string, unknown>
+  assert.equal(metadata.id, CHANNEL_ID)
+  assert.equal(metadata.topic, PRIVATE_CHANNEL_TOPIC)
+  assert.equal(metadata.unknownFieldCount, 2)
+  assert.equal(metadataPrivacy.persistence, "none")
+  assert.equal(metadataPrivacy.rawPayloads, "omitted")
+  assert.equal("permissionOverwrites" in metadata, false)
+
   const exact = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
@@ -1389,6 +1452,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
+  assert.equal(calls.channelMetadata, 1)
   assert.equal(calls.messages, 1)
   assert.equal(calls.members, 1)
   assert.equal(calls.bans, 1)
@@ -1410,6 +1474,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
   await assert.rejects(
     () => malformed.client.readResource({
       uri: `discord://channels/not-a-snowflake/messages/${MESSAGE_ID}`,
+    }),
+    /channelId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: "discord://channels/not-a-snowflake",
     }),
     /channelId must be a Discord snowflake ID/,
   )
@@ -1683,6 +1753,27 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(onboarding, /Do not call execute_onboarding_change/)
   assert.match(onboarding, /complete current and desired onboarding states/)
   assert.match(onboarding, /verification boundary/)
+
+  const channelMetadataRequest = {
+    auditReason: "Reviewed channel metadata",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    name: "announcements",
+    operationKey: OPERATION_KEY,
+    topic: null,
+  }
+  const channelMetadata = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(channelMetadataRequest) },
+    name: MCP_PROMPT_NAMES.reviewChannelMetadataChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(channelMetadata.split("\n")[1] || ""),
+    channelMetadataRequest,
+  )
+  assert.match(channelMetadata, /Call only plan_channel_metadata_change/)
+  assert.match(channelMetadata, /Do not call execute_channel_metadata_change/)
+  assert.match(channelMetadata, /complete current and desired metadata/)
+  assert.match(channelMetadata, /VIEW_CHANNEL and MANAGE_CHANNELS/)
 
   const guildExpression = promptText(await client.getPrompt({
     arguments: {
@@ -2160,6 +2251,30 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         topic: "not accepted",
       },
       name: MCP_PROMPT_NAMES.reviewChannelCreation,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed metadata",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelMetadataChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed metadata",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          name: "announcements",
+          operationKey: OPERATION_KEY,
+          parentId: ROLE_ID,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelMetadataChange,
     },
     {
       arguments: {

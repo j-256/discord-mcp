@@ -191,6 +191,7 @@ function serviceFixture(overrides: {
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
+  channelMetadataOptions?: ConnectorServiceOptions["channelMetadataOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
@@ -320,6 +321,9 @@ function serviceFixture(overrides: {
     },
     async getChannel() {
       return overrides.channel || channel()
+    },
+    async getGuildChannelMetadata() {
+      throw new Error("Unexpected channel metadata lookup")
     },
     async getCurrentApplication() {
       calls.application += 1
@@ -461,6 +465,9 @@ function serviceFixture(overrides: {
         user: { id: userId, username: "target" },
       }
     },
+    async modifyGuildChannelMetadata() {
+      throw new Error("Unexpected channel metadata change")
+    },
     async modifyGuildEmoji(_guildId, expressionId, input) {
       return {
         animated: false,
@@ -540,6 +547,9 @@ function serviceFixture(overrides: {
       config,
       ...(overrides.channelAdministrationOptions
         ? { channelAdministrationOptions: overrides.channelAdministrationOptions }
+        : {}),
+      ...(overrides.channelMetadataOptions
+        ? { channelMetadataOptions: overrides.channelMetadataOptions }
         : {}),
       ...(overrides.attachmentMessageOptions
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
@@ -924,6 +934,96 @@ test("service pins identity through privacy-safe reviewed onboarding", async () 
   assert.equal(result.verification, "not-required")
   assert.equal(onboardingReads, 3)
   assert.equal(onboardingWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through transient channel metadata reads and reviewed changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  let metadataReads = 0
+  let metadataWrites = 0
+  const { calls, service } = serviceFixture({
+    channelMetadataOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(47),
+      randomId: () => "activity-channel-metadata",
+    },
+    client: {
+      async getGuildChannelMetadata(channelId) {
+        assert.equal(channelId, CHANNEL_ID)
+        metadataReads += 1
+        return {
+          defaultAutoArchiveDuration: 1_440,
+          defaultThreadRateLimitPerUser: 0,
+          guildId: GUILD_ID,
+          id: channelId,
+          name: "general",
+          nsfw: false,
+          parentId: null,
+          permissionOverwrites: [],
+          position: 1,
+          rateLimitPerUser: 0,
+          topic: "Private guild topic",
+          type: 0,
+          unknownFieldCount: 0,
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_CHANNELS | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async modifyGuildChannelMetadata() {
+        metadataWrites += 1
+        throw new Error("Unexpected channel metadata write")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed unchanged channel metadata",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    name: "general",
+    operationKey: "channel-metadata-service-attempt-0001",
+  }
+
+  await assert.rejects(
+    () => service.getChannel("bad"),
+    /channel metadata ID/,
+  )
+  await assert.rejects(
+    () => service.planChannelMetadataChange({ ...request, channelId: "bad" }),
+    /channel metadata ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const read = await service.getChannel(CHANNEL_ID)
+  const plan = await service.planChannelMetadataChange(request)
+  const result = await service.executeChannelMetadataChange(request, plan.digest)
+
+  assert.equal(read.metadata.topic, "Private guild topic")
+  assert.equal(read.privacy.persistence, "none")
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(metadataReads, 3)
+  assert.equal(metadataWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

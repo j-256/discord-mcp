@@ -54,6 +54,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   banAuditPolicy: "ban-audit-policy",
   botIdentity: "bot-identity",
   channelCreationPolicy: "channel-creation-policy",
+  channelMetadataPolicy: "channel-metadata-policy",
   channelScope: "channel-scope",
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
@@ -252,6 +253,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowChannelCreation && config.channelCreationGuildIds.size === 0) {
     warnings.push("The channel-creation toggle is enabled but channel creation remains blocked because no channel-creation guild allowlist is configured")
   }
+  if (config.allowChannelMetadataChanges && config.channelMetadataIds.size === 0) {
+    warnings.push("The channel-metadata toggle is enabled but metadata changes remain blocked because an exact channel allowlist is required")
+  }
   if (config.allowRoleCreation && config.roleCreationGuildIds.size === 0) {
     warnings.push("The role-creation toggle is enabled but role creation remains blocked because no role-creation guild allowlist is configured")
   }
@@ -332,6 +336,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "AutoMod audit and changes",
     ],
     [config.allowChannelCreation, "channel-creation", "Channel creation"],
+    [config.allowChannelMetadataChanges, "channel-metadata", "Channel metadata changes"],
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
     [config.allowGateway, "gateway", "Gateway events"],
@@ -544,6 +549,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.channelCreationPolicy,
         "pass",
         `Additive channel creation is constrained to ${config.channelCreationGuildIds.size} guilds with reviewed one-shot execution`,
+      ))
+    }
+    if (!config.allowChannelMetadataChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelMetadataPolicy,
+        "pass",
+        "Reviewed channel metadata changes are disabled",
+      ))
+    } else if (config.channelMetadataIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelMetadataPolicy,
+        "warn",
+        "Channel-metadata toggle is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelMetadataPolicy,
+        "pass",
+        `Reviewed channel metadata changes are constrained to ${config.channelMetadataIds.size} exact channels with partial one-shot execution and complete response plus fresh readback verification`,
       ))
     }
     if (!config.allowDeletions) {
@@ -1141,6 +1165,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.protectedUserIds,
     ENVIRONMENT_NAMES.allowChannelCreation,
     ENVIRONMENT_NAMES.channelCreationGuildIds,
+    ENVIRONMENT_NAMES.allowChannelMetadataChanges,
+    ENVIRONMENT_NAMES.channelMetadataIds,
     ENVIRONMENT_NAMES.allowRoleCreation,
     ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowGuildScaffolds,

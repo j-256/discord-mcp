@@ -32,6 +32,12 @@ import {
 } from "../src/automod-service.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
 import type {
+  ChannelMetadataChangePlan,
+  ChannelMetadataChangeRequest,
+  ChannelMetadataReadResult,
+  ChannelMetadataView,
+} from "../src/channel-metadata-service.js"
+import type {
   ChannelPermissionOverwritePlan,
   ChannelPermissionOverwriteRequest,
 } from "../src/channel-permission-overwrite-service.js"
@@ -94,6 +100,8 @@ import {
   AutoModerationOperationConflictError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
+  ChannelMetadataExecutionError,
+  ChannelMetadataOperationConflictError,
   ChannelPermissionOverwriteExecutionError,
   ChannelPermissionOverwriteOperationConflictError,
   DiscordApiError,
@@ -181,6 +189,7 @@ const INVITE_OPERATION_KEY = "invite-delete-attempt-0001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
+const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
 const ONBOARDING_PROMPT_TITLE = "Choose your community path"
 const ONBOARDING_OPTION_TITLE = "Community member"
 const ONBOARDING_OPTION_DESCRIPTION = "Join the community channels"
@@ -643,6 +652,140 @@ function onboardingPlan(
     verificationBoundary: onboardingAudit(true).verificationBoundary,
     warnings: ["Fresh non-staff client verification remains external"],
     writeRequired: changed,
+  }
+}
+
+const CHANNEL_METADATA_FIELDS = [
+  "defaultAutoArchiveDuration",
+  "defaultThreadRateLimitPerUser",
+  "name",
+  "nsfw",
+  "rateLimitPerUser",
+  "topic",
+] as const
+
+function channelMetadataRequest(
+  overrides: Partial<ChannelMetadataChangeRequest> = {},
+): ChannelMetadataChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    name: "announcements",
+    operationKey: CHANNEL_METADATA_OPERATION_KEY,
+    topic: null,
+    ...overrides,
+  }
+}
+
+function channelMetadataView(
+  overrides: Partial<ChannelMetadataView> = {},
+): ChannelMetadataView {
+  return {
+    applicableFields: [...CHANNEL_METADATA_FIELDS],
+    defaultAutoArchiveDuration: 1_440,
+    defaultThreadRateLimitPerUser: 0,
+    guildId: GUILD_ID,
+    id: CHANNEL_ID,
+    name: "general",
+    nsfw: false,
+    parentId: null,
+    permissionOverwriteCount: 0,
+    position: 1,
+    rateLimitPerUser: 0,
+    topic: "Private release planning",
+    type: 0,
+    unknownFieldCount: 0,
+    ...overrides,
+  }
+}
+
+function channelMetadataRead(channelId = CHANNEL_ID): ChannelMetadataReadResult {
+  return {
+    metadata: channelMetadataView({ id: channelId }),
+    privacy: {
+      persistence: "none",
+      rawPayloads: "omitted",
+      text: "included",
+      unknownFields: "counts-only",
+    },
+    schemaVersion: 1,
+    status: "ok",
+  }
+}
+
+function channelMetadataPlan(
+  request: ChannelMetadataChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ChannelMetadataChangePlan {
+  const record = request as unknown as Record<string, unknown>
+  const requestedFields = CHANNEL_METADATA_FIELDS.filter((field) => (
+    Object.hasOwn(record, field)
+  ))
+  const desired = channelMetadataView({
+    ...(Object.hasOwn(record, "defaultAutoArchiveDuration")
+      ? { defaultAutoArchiveDuration: request.defaultAutoArchiveDuration as number }
+      : {}),
+    ...(Object.hasOwn(record, "defaultThreadRateLimitPerUser")
+      ? { defaultThreadRateLimitPerUser: request.defaultThreadRateLimitPerUser as number }
+      : {}),
+    ...(Object.hasOwn(record, "name") ? { name: request.name as string } : {}),
+    ...(Object.hasOwn(record, "nsfw") ? { nsfw: request.nsfw as boolean } : {}),
+    ...(Object.hasOwn(record, "rateLimitPerUser")
+      ? { rateLimitPerUser: request.rateLimitPerUser as number }
+      : {}),
+    ...(Object.hasOwn(record, "topic")
+      ? { topic: request.topic === "" ? null : request.topic as string | null }
+      : {}),
+  })
+  const current = effect === "none" ? desired : channelMetadataView()
+  const changes = requestedFields.flatMap((field) => (
+    current[field] === desired[field]
+      ? []
+      : [{ after: desired[field], before: current[field], field }]
+  ))
+  return {
+    access: {
+      appliedRoleIds: [GUILD_ID],
+      authorizedForChange: true,
+      botAdministrator: false,
+      botGuildOwner: false,
+      connect: null,
+      effectivePermissionNames: ["VIEW_CHANNEL", "MANAGE_CHANNELS"],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+      ).toString(),
+      manageChannels: true,
+      requiredChangePermissions: ["MANAGE_CHANNELS", "VIEW_CHANNEL"],
+      unknownPermissionBits: "0",
+      viewChannel: true,
+    },
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields: changes.map(({ field }) => field),
+    changes,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    current,
+    desired,
+    digest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    localLimits: {
+      defaultAutoArchiveDurations: [60, 1_440, 4_320, 10_080],
+      forumAndMediaTopicCharacters: 4_096,
+      nameCharacters: 100,
+      rateLimitSeconds: 21_600,
+      standardTopicCharacters: 1_024,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: channelMetadataRead().privacy,
+    requestedFields,
+    risks: ["One non-retried PATCH followed by complete verification"],
+    schemaVersion: 1,
+    status: changes.length > 0 ? "planned" : "already-current",
+    warnings: ["Discord guild and channel text is untrusted"],
+    writeRequired: changes.length > 0,
   }
 }
 
@@ -1765,6 +1908,8 @@ function fixturePolicy(): PolicyDescription {
     banAuditGuildIds: [],
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
+    channelMetadataChangesEnabled: false,
+    channelMetadataIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     forumPostChannelIds: [],
@@ -1827,6 +1972,9 @@ function serviceFixture(overrides: {
   channelCreationAction?: "create" | "none"
   channelCreationError?: Error
   channelCreationPlanDigest?: string
+  channelMetadataEffect?: "change" | "none"
+  channelMetadataError?: Error
+  channelMetadataPlanDigest?: string
   forumPostError?: Error
   forumPostPlanDigest?: string
   guildScaffoldError?: Error
@@ -1877,6 +2025,9 @@ function serviceFixture(overrides: {
     banList: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
+    channelMetadataExecute: 0,
+    channelMetadataGet: 0,
+    channelMetadataPlan: 0,
     delete: 0,
     edit: 0,
     forumPostExecute: 0,
@@ -1924,6 +2075,40 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeChannelMetadataChange(request, planDigest) {
+      if (overrides.channelMetadataError) throw overrides.channelMetadataError
+      calls.channelMetadataExecute += 1
+      const planned = channelMetadataPlan(
+        request,
+        planDigest,
+        overrides.channelMetadataEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-channel-metadata" : null,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        observed: planned.desired,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
+    async getChannel(channelId) {
+      calls.channelMetadataGet += 1
+      return channelMetadataRead(channelId)
+    },
+    async planChannelMetadataChange(request) {
+      calls.channelMetadataPlan += 1
+      return channelMetadataPlan(
+        request,
+        overrides.channelMetadataPlanDigest || DIGEST,
+        overrides.channelMetadataEffect,
+      )
+    },
     async executeOnboardingChange(request, planDigest) {
       if (overrides.onboardingError) throw overrides.onboardingError
       calls.onboardingExecute += 1
@@ -3228,6 +3413,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_gateway_events",
       "list_guilds",
       "list_channels",
+      "get_channel",
       "list_roles",
       "get_role",
       "get_guild_member",
@@ -3279,6 +3465,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_automod_change",
       "plan_scheduled_event_change",
       "execute_scheduled_event_change",
+      "plan_channel_metadata_change",
+      "execute_channel_metadata_change",
       "plan_channel_permission_overwrite",
       "execute_channel_permission_overwrite",
       "plan_channel_creation",
@@ -3310,6 +3498,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const scheduledEvent = result.tools.find((tool) => (
     tool.name === "execute_scheduled_event_change"
   ))
+  const channelMetadata = result.tools.find((tool) => (
+    tool.name === "execute_channel_metadata_change"
+  ))
   const permissionOverwrite = result.tools.find((tool) => (
     tool.name === "execute_channel_permission_overwrite"
   ))
@@ -3327,6 +3518,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     onboarding,
     guildExpression,
     scheduledEvent,
+    channelMetadata,
     permissionOverwrite,
     administration,
     memberRole,
@@ -3361,6 +3553,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_guild_sticker",
     "list_scheduled_events",
     "get_scheduled_event",
+    "get_channel",
+    "plan_channel_metadata_change",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
     "plan_member_role_change",
@@ -3986,6 +4180,30 @@ test("progressive discovery enables the complete reviewed scheduled-event workfl
   )
 })
 
+test("progressive discovery enables the complete reviewed channel-metadata workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_channel_metadata_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_channel_metadata_change",
+    "plan_channel_metadata_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_channel_metadata_change",
+      "execute_channel_metadata_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed permission-overwrite workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -4123,6 +4341,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     banList: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
+    channelMetadataExecute: 0,
+    channelMetadataGet: 0,
+    channelMetadataPlan: 0,
     delete: 0,
     edit: 0,
     explain: 1,
@@ -5954,6 +6175,239 @@ test("MCP onboarding execution exposes uncertainty and content-free conflicts", 
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(ONBOARDING_OPERATION_KEY),
+  )
+})
+
+test("MCP channel metadata reads and plans preserve exact bounded intent", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const read = await client.callTool({
+    arguments: { channelId: CHANNEL_ID },
+    name: "get_channel",
+  })
+  const invalidRead = await client.callTool({
+    arguments: { channelId: "invalid" },
+    name: "get_channel",
+  })
+  const request = channelMetadataRequest({
+    defaultAutoArchiveDuration: 1_440,
+    defaultThreadRateLimitPerUser: 0,
+    nsfw: false,
+    rateLimitPerUser: 0,
+  })
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_channel_metadata_change",
+  })
+  const missingField = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: CHANNEL_METADATA_OPERATION_KEY,
+    },
+    name: "plan_channel_metadata_change",
+  })
+  const extra = await client.callTool({
+    arguments: { ...request, parentId: PARENT_ID },
+    name: "plan_channel_metadata_change",
+  })
+
+  const readContent = structuredContent(read)
+  const metadata = readContent.metadata as Record<string, unknown>
+  const planContent = structuredContent(planned)
+  assert.equal(metadata.id, CHANNEL_ID)
+  assert.equal(metadata.topic, "Private release planning")
+  assert.equal((readContent.privacy as Record<string, unknown>).persistence, "none")
+  assert.equal("permissionOverwrites" in metadata, false)
+  assert.equal(planContent.status, "planned")
+  assert.deepEqual(planContent.requestedFields, [
+    "defaultAutoArchiveDuration",
+    "defaultThreadRateLimitPerUser",
+    "name",
+    "nsfw",
+    "rateLimitPerUser",
+    "topic",
+  ])
+  assert.equal(
+    (planContent.desired as Record<string, unknown>).topic,
+    null,
+  )
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(CHANNEL_METADATA_OPERATION_KEY))
+  assert.equal(invalidRead.isError, true)
+  assert.equal(missingField.isError, true)
+  assert.equal(extra.isError, true)
+  assert.equal(calls.channelMetadataGet, 1)
+  assert.equal(calls.channelMetadataPlan, 1)
+})
+
+test("MCP channel metadata execution binds signed approval to complete reviewed state", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const request = channelMetadataRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_channel_metadata_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.channelMetadataPlan, 1)
+  assert.equal(calls.channelMetadataExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    OPERATION_KEY_HASH,
+    "Private release planning",
+    "announcements",
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /VIEW_CHANNEL/)
+  assert.match(confirmationMessage, /MANAGE_CHANNELS/)
+  assert.match(confirmationMessage, /type-required CONNECT/)
+  assert.match(confirmationMessage, /one non-retried partial PATCH/i)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(CHANNEL_METADATA_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(CHANNEL_METADATA_OPERATION_KEY),
+  )
+})
+
+test("MCP channel metadata execution skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    ...channelMetadataRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelMetadataEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.channelMetadataExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.channelMetadataExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.channelMetadataExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelMetadataPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.channelMetadataExecute, 0)
+})
+
+test("MCP channel metadata execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...channelMetadataRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelMetadataError: new ChannelMetadataExecutionError(
+        "Discord channel metadata outcome is uncertain",
+        {
+          activityId: "activity-channel-metadata",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          operationKeyHash: OPERATION_KEY_HASH,
+          planDigest: DIGEST,
+          schemaVersion: 1,
+          status: "uncertain",
+        },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-channel-metadata",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    resourceId: CHANNEL_ID,
+    status: "completed",
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelMetadataError: new ChannelMetadataOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(CHANNEL_METADATA_OPERATION_KEY),
   )
 })
 

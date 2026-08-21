@@ -40,6 +40,7 @@ export interface ConnectorConfig {
   allowAutomodChanges: boolean
   allowBanAudit: boolean
   allowChannelCreation: boolean
+  allowChannelMetadataChanges: boolean
   allowDeletions: boolean
   allowForumPosts: boolean
   allowGateway: boolean
@@ -68,6 +69,7 @@ export interface ConnectorConfig {
   automodGuildIds: ReadonlySet<string>
   banAuditGuildIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
+  channelMetadataIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
   expectedBotId: string | undefined
@@ -270,6 +272,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.channelCreationGuildIds],
     ENVIRONMENT_NAMES.channelCreationGuildIds,
   )
+  const channelMetadataIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.channelMetadataIds],
+    ENVIRONMENT_NAMES.channelMetadataIds,
+  )
   const attachmentChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.attachmentChannelIds],
     ENVIRONMENT_NAMES.attachmentChannelIds,
@@ -375,6 +381,7 @@ export function loadConnectorConfig(
   for (const [name, channelIds] of [
     [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
     [ENVIRONMENT_NAMES.automodAlertChannelIds, automodAlertChannelIds],
+    [ENVIRONMENT_NAMES.channelMetadataIds, channelMetadataIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
@@ -513,6 +520,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowChannelCreation],
       ENVIRONMENT_NAMES.allowChannelCreation,
     ),
+    allowChannelMetadataChanges: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowChannelMetadataChanges],
+      ENVIRONMENT_NAMES.allowChannelMetadataChanges,
+    ),
     allowDeletions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowDeletions],
       ENVIRONMENT_NAMES.allowDeletions,
@@ -581,6 +592,7 @@ export function loadConnectorConfig(
     automodGuildIds,
     banAuditGuildIds,
     channelCreationGuildIds,
+    channelMetadataIds,
     deleteChannelIds,
     expectedApplicationId,
     expectedBotId,

@@ -82,6 +82,8 @@ function status(
       banAuditGuildIds: [],
       channelCreationEnabled: false,
       channelCreationGuildIds: [],
+      channelMetadataChangesEnabled: false,
+      channelMetadataIds: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
       forumPostChannelIds: [],
@@ -183,6 +185,7 @@ function toolService(): DiscordToolService {
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelMetadataChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
     executeGuildScaffold: unexpected,
@@ -192,6 +195,7 @@ function toolService(): DiscordToolService {
     explainChannelAccess: unexpected,
     explainPrincipalPermissions: unexpected,
     getGuildAuditEntry: unexpected,
+    getChannel: unexpected,
     getGuildBan: unexpected,
     getGuildMember: unexpected,
     getMessage: unexpected,
@@ -214,6 +218,7 @@ function toolService(): DiscordToolService {
     planMessagePin: unexpected,
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
+    planChannelMetadataChange: unexpected,
     planChannelPermissionOverwrite: unexpected,
     planForumPost: unexpected,
     planGuildScaffold: unexpected,
@@ -740,6 +745,52 @@ test("doctor and setup explain privacy-safe reviewed onboarding", async () => {
   assert.match(setup.warnings.join("\n"), /onboarding-audit toggle/)
   assert.match(setup.warnings.join("\n"), /onboarding-change toggle/)
   assert.match(omitted.warnings.join("\n"), /onboarding toolset/)
+})
+
+test("doctor and setup explain reviewed exact-channel metadata changes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+    DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const policy = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelMetadataPolicy,
+  )
+  assert.equal(policy?.status, "pass")
+  assert.match(policy?.summary || "", /1 exact channels/)
+  assert.match(policy?.summary || "", /partial one-shot execution/)
+  assert.match(policy?.summary || "", /complete response plus fresh readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.channelMetadataPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /channel-metadata toggle/)
+  assert.match(omitted.warnings.join("\n"), /channel-metadata toolset/)
 })
 
 test("doctor and setup explain privacy-safe reviewed guild expression scope", async (context) => {
@@ -1714,6 +1765,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_attachment_message",
     "review_automod_change",
     "review_channel_creation",
+    "review_channel_metadata_change",
     "review_channel_permission_overwrite",
     "review_forum_post",
     "review_guild_expression_change",
@@ -1740,6 +1792,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
+    "discord://channels/{channelId}",
     "discord://channels/{channelId}/access",
     "discord://channels/{channelId}/messages/{messageId}",
     "discord://channels/{channelId}/permission-overwrites",
@@ -1760,6 +1813,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "delete_messages",
     "edit_own_message",
     "execute_automod_change",
+    "execute_channel_metadata_change",
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
     "execute_invite_deletion",
