@@ -205,6 +205,7 @@ function serviceFixture(overrides: {
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
+  roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
 } = {}) {
@@ -371,6 +372,9 @@ function serviceFixture(overrides: {
       calls.getRole += 1
       return role(roleId, 0n, "role")
     },
+    async getGuildRoleMemberCounts() {
+      return {}
+    },
     async getGuildRoles() {
       return [role(
         GUILD_ID,
@@ -486,6 +490,9 @@ function serviceFixture(overrides: {
     async modifyGuildScheduledEvent() {
       throw new Error("Unexpected scheduled-event modification")
     },
+    async modifyGuildRole() {
+      throw new Error("Unexpected role configuration")
+    },
     async modifyGuildSticker(_guildId, expressionId, input) {
       return {
         available: true,
@@ -584,6 +591,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
+        : {}),
+      ...(overrides.roleConfigurationOptions
+        ? { roleConfigurationOptions: overrides.roleConfigurationOptions }
         : {}),
       ...(overrides.scheduledEventOptions
         ? { scheduledEventOptions: overrides.scheduledEventOptions }
@@ -2143,6 +2153,100 @@ test("service verifies identity before reviewed additive role creation", async (
   assert.equal(calls.getRole, 1)
   assert.equal(operationStore.receipt?.status, "completed")
   assert.doesNotMatch(JSON.stringify(operationStore.receipt), /role-create-attempt|Support/)
+})
+
+test("service pins identity through exact reviewed role configuration", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "700000000000000002"
+  const target = {
+    ...role(CREATED_ROLE_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "Support"),
+    position: 2,
+  }
+  const roles = [
+    role(GUILD_ID, 0n, "@everyone"),
+    target,
+    {
+      ...role(
+        botRoleId,
+        DISCORD_PERMISSIONS.MANAGE_ROLES | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+        "connector",
+      ),
+      managed: true,
+      position: 10,
+      tags: { bot_id: BOT_ID },
+    },
+  ]
+  let memberCountReads = 0
+  let roleWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), features: [], owner_id: "800000000000000001" }
+      },
+      async getGuildMember() {
+        return { roles: [botRoleId], user: bot() }
+      },
+      async getGuildRole(guildId, roleId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(roleId, CREATED_ROLE_ID)
+        return target
+      },
+      async getGuildRoleMemberCounts() {
+        memberCountReads += 1
+        return {
+          [CREATED_ROLE_ID]: 4,
+          [botRoleId]: 1,
+        }
+      },
+      async getGuildRoles() {
+        return roles
+      },
+      async modifyGuildRole() {
+        roleWrites += 1
+        throw new Error("Unexpected role configuration write")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
+      DISCORD_MCP_ROLE_CONFIGURATION_IDS: CREATED_ROLE_ID,
+    },
+    operationStore,
+    roleConfigurationOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(10),
+      randomId: () => "activity-role-configuration",
+    },
+  })
+  const request = {
+    auditReason: "Reviewed unchanged role configuration",
+    guildId: GUILD_ID,
+    name: "Support",
+    operationKey: "role-configuration-attempt-0001",
+    roleId: CREATED_ROLE_ID,
+  }
+
+  await assert.rejects(
+    () => service.planRoleConfiguration({ ...request, roleId: "bad" }),
+    /role ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const plan = await service.planRoleConfiguration(request)
+  const result = await service.executeRoleConfiguration(request, plan.digest)
+
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.memberCount, 4)
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(memberCountReads, 2)
+  assert.equal(roleWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
 })
 
 test("service verifies identity once and reports scope without message reads", async () => {

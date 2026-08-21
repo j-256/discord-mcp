@@ -68,6 +68,8 @@ export interface PolicyDescription {
   readGuildScope: "all-visible" | "allowlist"
   roleCreationEnabled: boolean
   roleCreationGuildIds: string[]
+  roleConfigurationEnabled: boolean
+  roleConfigurationIds: string[]
   scheduledEventAuditEnabled: boolean
   scheduledEventChangesEnabled: boolean
   scheduledEventCoverChangesEnabled: boolean
@@ -114,6 +116,7 @@ export class ScopePolicy {
   readonly #allowGuildScaffolds: boolean
   readonly #allowForumPosts: boolean
   readonly #allowRoleCreation: boolean
+  readonly #allowRoleConfiguration: boolean
   readonly #allowScheduledEventAudit: boolean
   readonly #allowScheduledEventChanges: boolean
   readonly #allowWebhookAudit: boolean
@@ -147,6 +150,7 @@ export class ScopePolicy {
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
+  readonly #roleConfigurationIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
   readonly #webhookChannelIds: ReadonlySet<string>
@@ -187,6 +191,7 @@ export class ScopePolicy {
     | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
+    | "allowRoleConfiguration"
     | "allowScheduledEventAudit"
     | "allowScheduledEventChanges"
     | "allowWebhookAudit"
@@ -214,6 +219,7 @@ export class ScopePolicy {
     | "permissionOverwriteChannelIds"
     | "pinChannelIds"
     | "roleCreationGuildIds"
+    | "roleConfigurationIds"
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
     | "webhookChannelIds"
@@ -244,6 +250,7 @@ export class ScopePolicy {
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
+    this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
     this.#allowScheduledEventChanges = config.allowScheduledEventChanges ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
@@ -278,6 +285,7 @@ export class ScopePolicy {
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
+    this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
@@ -367,6 +375,9 @@ export class ScopePolicy {
       roleCreationEnabled: this.#allowRoleCreation
         && this.#roleCreationGuildIds.size > 0,
       roleCreationGuildIds: [...this.#roleCreationGuildIds].sort(),
+      roleConfigurationEnabled: this.#allowRoleConfiguration
+        && this.#roleConfigurationIds.size > 0,
+      roleConfigurationIds: [...this.#roleConfigurationIds].sort(),
       scheduledEventAuditEnabled: this.#allowScheduledEventAudit
         && this.#scheduledEventGuildIds.size > 0,
       scheduledEventChangesEnabled: this.#allowScheduledEventAudit
@@ -541,6 +552,19 @@ export class ScopePolicy {
     }
     if (!this.#roleCreationGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the role creation scope`)
+    }
+  }
+
+  assertRoleConfigurationAllowed(guildId: string, roleId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowRoleConfiguration) {
+      throw new PolicyError("Discord role configuration is disabled by connector configuration")
+    }
+    if (this.#roleConfigurationIds.size === 0) {
+      throw new PolicyError("Discord role configuration requires an explicit role allowlist")
+    }
+    if (!this.#roleConfigurationIds.has(roleId)) {
+      throw new PolicyError(`Discord role ${roleId} is outside the role-configuration scope`)
     }
   }
 

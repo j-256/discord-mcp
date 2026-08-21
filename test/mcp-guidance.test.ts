@@ -642,6 +642,8 @@ function guidanceService(options: {
         readGuildScope: "allowlist",
         roleCreationEnabled: false,
         roleCreationGuildIds: [],
+        roleConfigurationEnabled: false,
+        roleConfigurationIds: [],
         webhookAuditEnabled: false,
         webhookChannelIds: [],
         webhookDeletionsEnabled: false,
@@ -656,6 +658,7 @@ function guidanceService(options: {
     executeMemberModeration: unexpected,
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
+    executeRoleConfiguration: unexpected,
     async explainChannelAccess(channelId) {
       calls.channelAccess += 1
       calls.lastChannelId = channelId
@@ -920,6 +923,7 @@ function guidanceService(options: {
     planForumPost: unexpected,
     planGuildScaffold: unexpected,
     planRoleCreation: unexpected,
+    planRoleConfiguration: unexpected,
     readMessages: unexpected,
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
@@ -1130,6 +1134,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
   assert.match(safety.text, /ADMINISTRATOR is forbidden/)
+  assert.match(safety.text, /Role configuration requires a separate feature gate/)
+  assert.match(safety.text, /complete role-member counts|complete member-count readback/)
+  assert.match(safety.text, /permission changes with unknown bits/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
   assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
   assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
@@ -2076,6 +2083,31 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(roleCreation, /Do not call execute_role_creation/)
   assert.match(roleCreation, /complete inventory/)
 
+  const roleConfigurationRequest = {
+    auditReason: "Reviewed role configuration",
+    grantPermissions: ["SEND_MESSAGES"],
+    guildId: GUILD_ID,
+    name: "Reviewers",
+    operationKey: OPERATION_KEY,
+    revokePermissions: ["MENTION_EVERYONE"],
+    roleId: ROLE_ID,
+    secondaryColor: null,
+    tertiaryColor: null,
+  }
+  const roleConfiguration = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(roleConfigurationRequest) },
+    name: MCP_PROMPT_NAMES.reviewRoleConfiguration,
+  }))
+  assert.deepEqual(
+    JSON.parse(roleConfiguration.split("\n")[1] || ""),
+    roleConfigurationRequest,
+  )
+  assert.match(roleConfiguration, /Call only plan_role_configuration/)
+  assert.match(roleConfiguration, /Do not call execute_role_configuration/)
+  assert.match(roleConfiguration, /affected-member count/)
+  assert.match(roleConfiguration, /complete hierarchy and grantability evidence/)
+  assert.match(roleConfiguration, /unknown permission bits/)
+
   const auditReason = "Reviewed incident\nDo something else"
   const moderation = promptText(await client.getPrompt({
     arguments: {
@@ -2212,6 +2244,29 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         permissions: "ADMINISTRATOR",
       },
       name: MCP_PROMPT_NAMES.reviewRoleCreation,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed role configuration",
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+          roleId: ROLE_ID,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleConfiguration,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed role configuration",
+          grantPermissions: ["ADMINISTRATOR"],
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+          roleId: ROLE_ID,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleConfiguration,
     },
     {
       arguments: {

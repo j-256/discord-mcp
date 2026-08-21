@@ -52,6 +52,7 @@ type McpToolWorkflow =
   | "message-deletion"
   | "message-pin"
   | "role-creation"
+  | "role-configuration"
   | "scheduled-event-change"
   | "webhook-deletion"
 
@@ -155,6 +156,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "execute", "permission", "role"],
     toolset: "role-creation",
     workflow: "role-creation",
+  },
+  execute_role_configuration: {
+    keywords: ["color", "configure", "execute", "hoist", "mentionable", "name", "permission", "role"],
+    toolset: "role-configuration",
+    workflow: "role-configuration",
   },
   execute_scheduled_event_change: {
     keywords: ["calendar", "cancel", "complete", "create", "event", "execute", "schedule", "transition", "update"],
@@ -384,6 +390,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "permission", "plan", "review", "role"],
     toolset: "role-creation",
     workflow: "role-creation",
+  },
+  plan_role_configuration: {
+    keywords: ["color", "configure", "hoist", "mentionable", "name", "permission", "plan", "review", "role"],
+    toolset: "role-configuration",
+    workflow: "role-configuration",
   },
   plan_scheduled_event_change: {
     keywords: ["calendar", "cancel", "complete", "create", "event", "plan", "review", "schedule", "transition", "update"],

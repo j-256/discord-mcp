@@ -79,6 +79,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
   roleCreationPolicy: "role-creation-policy",
+  roleConfigurationPolicy: "role-configuration-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
   scheduledEventChangePolicy: "scheduled-event-change-policy",
   token: "token",
@@ -259,6 +260,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowRoleCreation && config.roleCreationGuildIds.size === 0) {
     warnings.push("The role-creation toggle is enabled but role creation remains blocked because no role-creation guild allowlist is configured")
   }
+  if (config.allowRoleConfiguration && config.roleConfigurationIds.size === 0) {
+    warnings.push("The role-configuration toggle is enabled but role changes remain blocked because no exact role allowlist is configured")
+  }
   if (config.allowGuildScaffolds && config.guildScaffoldGuildIds.size === 0) {
     warnings.push("The guild-scaffold toggle is enabled but scaffold execution remains blocked because no guild-scaffold allowlist is configured")
   }
@@ -363,6 +367,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
+    [config.allowRoleConfiguration, "role-configuration", "Role configuration"],
     [
       config.allowScheduledEventAudit || config.allowScheduledEventChanges,
       "scheduled-events",
@@ -663,6 +668,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.roleCreationPolicy,
         "pass",
         `Additive role creation is constrained to ${config.roleCreationGuildIds.size} guilds with reviewed one-shot execution`,
+      ))
+    }
+    if (!config.allowRoleConfiguration) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleConfigurationPolicy,
+        "pass",
+        "Reviewed role configuration is disabled",
+      ))
+    } else if (config.roleConfigurationIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleConfigurationPolicy,
+        "warn",
+        "Role-configuration toggle is enabled, but the required exact role allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleConfigurationPolicy,
+        "pass",
+        `Reviewed role configuration is constrained to ${config.roleConfigurationIds.size} exact roles with partial updates, one-shot execution, and complete readback`,
       ))
     }
     if (!config.allowGuildScaffolds) {
@@ -1169,6 +1193,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.channelMetadataIds,
     ENVIRONMENT_NAMES.allowRoleCreation,
     ENVIRONMENT_NAMES.roleCreationGuildIds,
+    ENVIRONMENT_NAMES.allowRoleConfiguration,
+    ENVIRONMENT_NAMES.roleConfigurationIds,
     ENVIRONMENT_NAMES.allowGuildScaffolds,
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
     ENVIRONMENT_NAMES.allowGuildExpressionAudit,

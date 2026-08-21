@@ -197,6 +197,16 @@ import {
   RoleAdministrationService,
 } from "./role-administration-service.js"
 import type {
+  RoleConfigurationPlan,
+  RoleConfigurationRequest,
+  RoleConfigurationResult,
+  RoleConfigurationServiceOptions,
+} from "./role-configuration-service.js"
+import {
+  normalizeRoleConfigurationRequest,
+  RoleConfigurationService,
+} from "./role-configuration-service.js"
+import type {
   ScheduledEventChangeRequest,
   ScheduledEventInventoryResult,
   ScheduledEventLookupResult,
@@ -267,6 +277,7 @@ export interface DiscordServiceClient {
   getGuildOnboarding: DiscordClient["getGuildOnboarding"]
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
+  getGuildRoleMemberCounts: DiscordClient["getGuildRoleMemberCounts"]
   getGuildRoles: DiscordClient["getGuildRoles"]
   getGuildScheduledEvent: DiscordClient["getGuildScheduledEvent"]
   getGuildSticker: DiscordClient["getGuildSticker"]
@@ -294,6 +305,7 @@ export interface DiscordServiceClient {
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
+  modifyGuildRole: DiscordClient["modifyGuildRole"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
   pinMessage: DiscordClient["pinMessage"]
   removeGuildBan: DiscordClient["removeGuildBan"]
@@ -379,6 +391,10 @@ export interface ConnectorServiceOptions {
   policy?: ScopePolicy
   roleAdministrationOptions?: Pick<
     RoleAdministrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  roleConfigurationOptions?: Pick<
+    RoleConfigurationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   scheduledEventOptions?: Pick<
@@ -533,6 +549,7 @@ export class ConnectorService {
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
+  readonly #roleConfigurationService: RoleConfigurationService
   readonly #scheduledEventService: ScheduledEventService
   readonly #webhookService: WebhookService
 
@@ -693,6 +710,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.roleAdministrationOptions,
+    })
+    this.#roleConfigurationService = new RoleConfigurationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.roleConfigurationOptions,
     })
     this.#guildScaffoldService = new GuildScaffoldService({
       channelService: this.#channelAdministrationService,
@@ -1581,6 +1605,20 @@ export class ConnectorService {
     return this.#roleAdministrationService.plan(identity.bot.id, request, options)
   }
 
+  async planRoleConfiguration(
+    request: RoleConfigurationRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleConfigurationPlan> {
+    normalizeRoleConfigurationRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleConfigurationService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildScaffold(
     request: GuildScaffoldRequest,
     options: RequestOptions = {},
@@ -1650,6 +1688,25 @@ export class ConnectorService {
   ): Promise<RoleCreationResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#roleAdministrationService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeRoleConfiguration(
+    request: RoleConfigurationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<RoleConfigurationResult> {
+    normalizeRoleConfigurationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord role-configuration plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleConfigurationService.execute(
+      identity.application.id,
       identity.bot.id,
       request,
       planDigest,

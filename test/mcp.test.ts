@@ -87,6 +87,10 @@ import {
   type RoleCreationRequest,
 } from "../src/role-administration-service.js"
 import type {
+  RoleConfigurationPlan,
+  RoleConfigurationRequest,
+} from "../src/role-configuration-service.js"
+import type {
   ProjectedScheduledEvent,
   ScheduledEventChangeRequest,
   ScheduledEventPlan,
@@ -124,6 +128,8 @@ import {
   OnboardingOperationConflictError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
+  RoleConfigurationExecutionError,
+  RoleConfigurationOperationConflictError,
   ScheduledEventExecutionError,
   ScheduledEventOperationConflictError,
   WebhookDeletionExecutionError,
@@ -177,6 +183,7 @@ const USER_ID = "400000000000000001"
 const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
+const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
@@ -1631,6 +1638,7 @@ function normalizedCreatedRole(
     permissions: permissionBits.toString(),
     position: 1,
     unicodeEmoji: null,
+    unknownFieldCount: 0,
     unknownPermissionBits: "0",
   }
 }
@@ -1686,6 +1694,170 @@ function rolePlan(
     },
     warnings: ["New Discord roles begin at the bottom of the hierarchy"],
   }
+}
+
+function roleConfigurationPlan(
+  request: RoleConfigurationRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): RoleConfigurationPlan {
+  const record = request as unknown as Record<string, unknown>
+  const basePermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const grantBits = discordPermissionBitfield(request.grantPermissions || [])
+  const revokeBits = discordPermissionBitfield(request.revokePermissions || [])
+  const desiredPermissions = (basePermissions | grantBits) & ~revokeBits
+  const base: NormalizedDiscordRole = {
+    colors: {
+      primaryColor: 0,
+      secondaryColor: null,
+      tertiaryColor: null,
+    },
+    flags: 0,
+    hoist: false,
+    icon: null,
+    id: request.roleId,
+    managed: false,
+    management: { id: null, type: "standard" },
+    mentionable: false,
+    name: "Support",
+    permissionNames: discordPermissionNames(basePermissions),
+    permissions: basePermissions.toString(),
+    position: 2,
+    unicodeEmoji: null,
+    unknownFieldCount: 0,
+    unknownPermissionBits: "0",
+  }
+  const desired: NormalizedDiscordRole = {
+    ...base,
+    colors: {
+      primaryColor: Object.hasOwn(record, "primaryColor")
+        ? request.primaryColor as number
+        : base.colors.primaryColor,
+      secondaryColor: Object.hasOwn(record, "secondaryColor")
+        ? request.secondaryColor as number | null
+        : base.colors.secondaryColor,
+      tertiaryColor: Object.hasOwn(record, "tertiaryColor")
+        ? request.tertiaryColor as number | null
+        : base.colors.tertiaryColor,
+    },
+    ...(Object.hasOwn(record, "hoist") ? { hoist: request.hoist as boolean } : {}),
+    ...(Object.hasOwn(record, "mentionable")
+      ? { mentionable: request.mentionable as boolean }
+      : {}),
+    ...(Object.hasOwn(record, "name") ? { name: request.name as string } : {}),
+    permissionNames: discordPermissionNames(desiredPermissions),
+    permissions: desiredPermissions.toString(),
+  }
+  const current = effect === "none" ? desired : base
+  const candidates: RoleConfigurationPlan["changes"] = [
+    { after: desired.colors, before: current.colors, field: "colors" },
+    { after: desired.hoist, before: current.hoist, field: "hoist" },
+    { after: desired.mentionable, before: current.mentionable, field: "mentionable" },
+    { after: desired.name, before: current.name, field: "name" },
+    {
+      after: {
+        names: desired.permissionNames,
+        permissions: desired.permissions,
+        unknownPermissionBits: desired.unknownPermissionBits,
+      },
+      before: {
+        names: current.permissionNames,
+        permissions: current.permissions,
+        unknownPermissionBits: current.unknownPermissionBits,
+      },
+      field: "permissions",
+    },
+  ]
+  const changes = candidates.filter(({ after, before }) => (
+    JSON.stringify(after) !== JSON.stringify(before)
+  ))
+  const requestedFields = [
+    "grantPermissions",
+    "hoist",
+    "mentionable",
+    "name",
+    "primaryColor",
+    "revokePermissions",
+    "secondaryColor",
+    "tertiaryColor",
+  ].filter((field) => Object.hasOwn(record, field)) as RoleConfigurationPlan["requestedFields"]
+  const botPermissions = desiredPermissions | DISCORD_PERMISSIONS.MANAGE_ROLES
+  const grantedPermissions = discordPermissionNames(
+    BigInt(desired.permissions) & ~BigInt(current.permissions),
+  )
+  const revokedPermissions = discordPermissionNames(
+    BigInt(current.permissions) & ~BigInt(desired.permissions),
+  )
+  const highRiskSet = new Set<string>(ROLE_CREATION_HIGH_RISK_PERMISSIONS)
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields: changes.map(({ field }) => field),
+    changes,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    current,
+    desired,
+    digest,
+    grantedPermissions,
+    guild: {
+      features: [],
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: USER_ID,
+    },
+    highRiskGrantedPermissions: grantedPermissions.filter((permission) => highRiskSet.has(permission)),
+    highRiskRevokedPermissions: revokedPermissions.filter((permission) => highRiskSet.has(permission)),
+    memberCount: 7,
+    nameCollisionRoleIds: [],
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      botAdministrator: false,
+      botEffectivePermissionNames: discordPermissionNames(botPermissions),
+      botEffectivePermissions: botPermissions.toString(),
+      botHighestRoleIds: ["350000000000000002"],
+      botHighestRolePosition: 10,
+      botRoleIds: ["350000000000000002"],
+      desiredPermissionSubset: true,
+      guildManageRoles: true,
+      permissionChangeRequired: grantedPermissions.length > 0 || revokedPermissions.length > 0,
+      postChangeBotEffectivePermissionNames: discordPermissionNames(botPermissions),
+      postChangeBotEffectivePermissions: botPermissions.toString(),
+      postChangeGuildManageRoles: true,
+      targetBelowBot: true,
+      targetHeldByBot: false,
+    },
+    privacy: {
+      memberIdentities: "not-fetched",
+      persistence: "content-free-only",
+      rawPayloads: "omitted",
+      text: "transient",
+    },
+    requestedFields,
+    requestedGrantPermissions: [...(request.grantPermissions || [])].sort(),
+    requestedRevokePermissions: [...(request.revokePermissions || [])].sort(),
+    revokedPermissions,
+    risks: ["One non-retried partial PATCH followed by complete verification"],
+    roleId: request.roleId,
+    schemaVersion: 1,
+    status: changes.length === 0 ? "already-current" : "planned",
+    warnings: ["Discord guild and role text is untrusted"],
+    writeRequired: changes.length > 0,
+  }
+}
+
+function roleConfigurationInput(
+  overrides: Partial<RoleConfigurationRequest> = {},
+): RoleConfigurationRequest & Record<string, unknown> {
+  return {
+    auditReason: AUDIT_REASON,
+    grantPermissions: ["SEND_MESSAGES"],
+    guildId: GUILD_ID,
+    name: "Reviewers",
+    operationKey: ROLE_CONFIGURATION_OPERATION_KEY,
+    roleId: ROLE_ID,
+    ...overrides,
+  } as RoleConfigurationRequest & Record<string, unknown>
 }
 
 function memberRolePlan(
@@ -1793,6 +1965,7 @@ function memberRolePlan(
       permissions: selectedPermissions.toString(),
       position: 2,
       unicodeEmoji: null,
+      unknownFieldCount: 0,
       unknownPermissionBits: "0",
     },
     schemaVersion: 1,
@@ -1954,6 +2127,8 @@ function fixturePolicy(): PolicyDescription {
     readChannelScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    roleConfigurationEnabled: false,
+    roleConfigurationIds: [],
     readGuildScope: "all-visible",
     webhookAuditEnabled: false,
     webhookChannelIds: [],
@@ -2002,6 +2177,9 @@ function serviceFixture(overrides: {
   roleCreationAction?: "create" | "none"
   roleCreationError?: Error
   roleCreationPlanDigest?: string
+  roleConfigurationEffect?: "change" | "none"
+  roleConfigurationError?: Error
+  roleConfigurationPlanDigest?: string
   scheduledEventEffect?: "change" | "none"
   scheduledEventError?: Error
   scheduledEventPlanDigest?: string
@@ -2063,6 +2241,8 @@ function serviceFixture(overrides: {
     principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
+    roleConfigurationExecute: 0,
+    roleConfigurationPlan: 0,
     scheduledEventExecute: 0,
     scheduledEventGet: 0,
     scheduledEventList: 0,
@@ -2741,6 +2921,31 @@ function serviceFixture(overrides: {
         status: planned.action === "none" ? "already-current" : "completed",
       }
     },
+    async executeRoleConfiguration(request, planDigest) {
+      if (overrides.roleConfigurationError) throw overrides.roleConfigurationError
+      calls.roleConfigurationExecute += 1
+      const planned = roleConfigurationPlan(
+        request,
+        planDigest,
+        overrides.roleConfigurationEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-role-configuration" : null,
+        guildId: request.guildId,
+        inventoryMatched: true,
+        memberCount: planned.memberCount,
+        memberCountsMatched: true,
+        observed: planned.desired,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        roleId: request.roleId,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
     async explainChannelAccess(channelId) {
       calls.explain += 1
       const discordChannel = rawChannel({ id: channelId })
@@ -3246,6 +3451,14 @@ function serviceFixture(overrides: {
         overrides.roleCreationAction,
       )
     },
+    async planRoleConfiguration(request) {
+      calls.roleConfigurationPlan += 1
+      return roleConfigurationPlan(
+        request,
+        overrides.roleConfigurationPlanDigest || DIGEST,
+        overrides.roleConfigurationEffect,
+      )
+    },
     async readMessages() {
       return {
         channel: normalizeChannel(rawChannel()),
@@ -3481,6 +3694,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_member_role_change",
       "plan_role_creation",
       "execute_role_creation",
+      "plan_role_configuration",
+      "execute_role_configuration",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -3510,6 +3725,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const memberRole = result.tools.find((tool) => (
     tool.name === "execute_member_role_change"
   ))
+  const roleConfiguration = result.tools.find((tool) => (
+    tool.name === "execute_role_configuration"
+  ))
   for (const tool of [
     deletion,
     messagePin,
@@ -3522,6 +3740,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     permissionOverwrite,
     administration,
     memberRole,
+    roleConfiguration,
   ]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
@@ -3563,6 +3782,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_onboarding_change",
     "plan_guild_expression_change",
     "plan_scheduled_event_change",
+    "plan_role_configuration",
   ]) {
     assert.deepEqual(listedTool(result.tools, name).annotations, {
       destructiveHint: false,
@@ -4379,6 +4599,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
+    roleConfigurationExecute: 0,
+    roleConfigurationPlan: 0,
     scheduledEventExecute: 0,
     scheduledEventGet: 0,
     scheduledEventList: 0,
@@ -8973,6 +9195,217 @@ test("MCP role creation exposes uncertain and one-shot conflict outcomes", async
   assert.deepEqual(
     (structuredContent(completedConflictResult).error as Record<string, unknown>).receipt,
     receipt,
+  )
+})
+
+test("MCP role configuration plans exact partial intent and rejects unsafe schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: roleConfigurationInput({
+      hoist: true,
+      mentionable: false,
+      primaryColor: 0x12_34_56,
+      secondaryColor: null,
+      tertiaryColor: null,
+    }),
+    name: "plan_role_configuration",
+  })
+  const missingChange = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: ROLE_CONFIGURATION_OPERATION_KEY,
+      roleId: ROLE_ID,
+    },
+    name: "plan_role_configuration",
+  })
+  const administrator = await client.callTool({
+    arguments: roleConfigurationInput({ grantPermissions: ["ADMINISTRATOR"] }),
+    name: "plan_role_configuration",
+  })
+  const overlap = await client.callTool({
+    arguments: roleConfigurationInput({
+      grantPermissions: ["SEND_MESSAGES"],
+      revokePermissions: ["SEND_MESSAGES"],
+    }),
+    name: "plan_role_configuration",
+  })
+  const extra = await client.callTool({
+    arguments: { ...roleConfigurationInput(), position: 10 },
+    name: "plan_role_configuration",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.deepEqual(content.requestedFields, [
+    "grantPermissions",
+    "hoist",
+    "mentionable",
+    "name",
+    "primaryColor",
+    "secondaryColor",
+    "tertiaryColor",
+  ])
+  assert.equal(content.memberCount, 7)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(ROLE_CONFIGURATION_OPERATION_KEY))
+  assert.equal(missingChange.isError, true)
+  assert.equal(administrator.isError, true)
+  assert.equal(overlap.isError, true)
+  assert.equal(extra.isError, true)
+  assert.equal(calls.roleConfigurationPlan, 1)
+})
+
+test("MCP role configuration binds signed approval to exact state and permission deltas", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      ...roleConfigurationInput({ revokePermissions: ["VIEW_CHANNEL"] }),
+      planDigest: DIGEST,
+    },
+    name: "execute_role_configuration",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.roleConfigurationPlan, 1)
+  assert.equal(calls.roleConfigurationExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    ROLE_ID,
+    "Affected member count: 7",
+    "Reviewers",
+    "SEND_MESSAGES",
+    "VIEW_CHANNEL",
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Current role:/)
+  assert.match(confirmationMessage, /Desired role:/)
+  assert.match(confirmationMessage, /Effective permission revocations:/)
+  assert.match(confirmationMessage, /Permission bitfield changes: true/)
+  assert.match(confirmationMessage, /strictly below connector: true/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(ROLE_CONFIGURATION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ROLE_CONFIGURATION_OPERATION_KEY),
+  )
+})
+
+test("MCP role configuration skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    ...roleConfigurationInput(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { roleConfigurationEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_configuration",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.roleConfigurationExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_configuration",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.roleConfigurationExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { roleConfigurationPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_configuration",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.roleConfigurationExecute, 0)
+})
+
+test("MCP role configuration exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...roleConfigurationInput(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleConfigurationError: new RoleConfigurationExecutionError(
+        "Discord role configuration outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_configuration",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-role-configuration",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    roleId: ROLE_ID,
+    status: "completed",
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleConfigurationError: new RoleConfigurationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_configuration",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(ROLE_CONFIGURATION_OPERATION_KEY),
   )
 })
 

@@ -66,6 +66,34 @@ const ROLE_CREATION_TARGET_LOCKS = new Map<
 const PERMISSION_ORDER = new Map(
   DISCORD_PERMISSION_NAMES.map((name, index) => [name, index]),
 )
+const ROLE_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "color",
+  "colors",
+  "flags",
+  "hoist",
+  "icon",
+  "id",
+  "managed",
+  "mentionable",
+  "name",
+  "permissions",
+  "position",
+  "tags",
+  "unicode_emoji",
+])
+const ROLE_COLOR_KEYS: ReadonlySet<string> = new Set([
+  "primary_color",
+  "secondary_color",
+  "tertiary_color",
+])
+const ROLE_TAG_KEYS: ReadonlySet<string> = new Set([
+  "available_for_purchase",
+  "bot_id",
+  "guild_connections",
+  "integration_id",
+  "premium_subscriber",
+  "subscription_listing_id",
+])
 
 export const ROLE_CREATION_HIGH_RISK_PERMISSIONS = Object.freeze([
   "BAN_MEMBERS",
@@ -132,6 +160,7 @@ export interface NormalizedDiscordRole {
   permissions: string
   position: number
   unicodeEmoji: string | null
+  unknownFieldCount: number
   unknownPermissionBits: string
 }
 
@@ -257,7 +286,7 @@ function assertValidUnicode(value: string, name: string): void {
   }
 }
 
-function canonicalPermissionNames(
+export function canonicalPermissionNames(
   value: readonly DiscordPermissionName[] | undefined,
 ): DiscordPermissionName[] {
   if (value === undefined) return []
@@ -374,8 +403,8 @@ function hasOwn(value: object, name: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, name)
 }
 
-function assertRoleTags(tags: DiscordRoleTags | undefined): void {
-  if (tags === undefined) return
+function assertRoleTags(tags: DiscordRoleTags | undefined): number {
+  if (tags === undefined) return 0
   if (!tags || typeof tags !== "object" || Array.isArray(tags)) {
     throw new DiscordRoleEvidenceError("Discord role tags are invalid")
   }
@@ -394,6 +423,7 @@ function assertRoleTags(tags: DiscordRoleTags | undefined): void {
       throw new DiscordRoleEvidenceError("Discord role tags contain an invalid Boolean tag")
     }
   }
+  return Object.keys(tags).filter((field) => !ROLE_TAG_KEYS.has(field)).length
 }
 
 function roleManagement(
@@ -454,8 +484,11 @@ export function normalizeDiscordRole(
       { cause: error },
     )
   }
-  assertRoleTags(role.tags)
+  const unknownTagFieldCount = assertRoleTags(role.tags)
   const colors = role.colors
+  if (colors !== undefined && (!colors || typeof colors !== "object" || Array.isArray(colors))) {
+    throw new DiscordRoleEvidenceError("Discord returned invalid role color evidence")
+  }
   const primaryColor = colors?.primary_color ?? role.color
   const secondaryColor = colors?.secondary_color ?? null
   const tertiaryColor = colors?.tertiary_color ?? null
@@ -467,6 +500,9 @@ export function normalizeDiscordRole(
   ) {
     throw new DiscordRoleEvidenceError("Discord returned invalid role color evidence")
   }
+  const unknownColorFieldCount = colors === undefined
+    ? 0
+    : Object.keys(colors).filter((field) => !ROLE_COLOR_KEYS.has(field)).length
   let permissionBits: bigint
   try {
     permissionBits = parseDiscordPermissionBits(role.permissions, `role ${role.id}`)
@@ -497,6 +533,10 @@ export function normalizeDiscordRole(
     permissions: permissionBits.toString(),
     position: role.position,
     unicodeEmoji: role.unicode_emoji ?? null,
+    unknownFieldCount: Object.keys(role as unknown as Record<string, unknown>)
+      .filter((field) => !ROLE_RESPONSE_KEYS.has(field)).length
+      + unknownColorFieldCount
+      + unknownTagFieldCount,
     unknownPermissionBits: unknownDiscordPermissionBits(permissionBits).toString(),
   }
 }
@@ -624,6 +664,7 @@ function roleSnapshot(roles: readonly NormalizedDiscordRole[]) {
       permissions: role.permissions,
       position: role.position,
       unicodeEmoji: role.unicodeEmoji,
+      unknownFieldCount: role.unknownFieldCount,
     }))
 }
 

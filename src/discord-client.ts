@@ -25,6 +25,7 @@ import {
   InviteEvidenceError,
   OnboardingEvidenceError,
   redactText,
+  RoleConfigurationEvidenceError,
   ScheduledEventEvidenceError,
   WebhookEvidenceError,
 } from "./errors.js"
@@ -719,6 +720,20 @@ export interface CreateGuildRoleInput {
   permissions: string
   primaryColor: number
 }
+
+export interface ModifyGuildRoleInput {
+  colors?: {
+    primaryColor: number
+    secondaryColor: number | null
+    tertiaryColor: number | null
+  }
+  hoist?: boolean
+  mentionable?: boolean
+  name?: string
+  permissions?: string
+}
+
+export type DiscordGuildRoleMemberCounts = Readonly<Record<string, number>>
 
 export interface CreateGuildEmojiInput {
   bytes: Uint8Array
@@ -3195,6 +3210,142 @@ function assertCreateGuildRoleInput(input: CreateGuildRoleInput): void {
   }
 }
 
+const MODIFY_GUILD_ROLE_KEYS: ReadonlySet<string> = new Set([
+  "colors",
+  "hoist",
+  "mentionable",
+  "name",
+  "permissions",
+])
+const MODIFY_GUILD_ROLE_COLOR_KEYS: ReadonlySet<string> = new Set([
+  "primaryColor",
+  "secondaryColor",
+  "tertiaryColor",
+])
+
+function roleConfigurationEvidenceError(options?: ErrorOptions): RoleConfigurationEvidenceError {
+  return new RoleConfigurationEvidenceError(
+    "Discord returned invalid role-configuration evidence",
+    options,
+  )
+}
+
+function projectGuildRoleMemberCounts(value: unknown): DiscordGuildRoleMemberCounts {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw roleConfigurationEvidenceError()
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > DISCORD_LIMITS.guildRoles - 1) {
+    throw roleConfigurationEvidenceError()
+  }
+  const validated = entries.map(([roleId, count]) => {
+    try {
+      assertPositiveSnowflake(roleId, "Discord role member-count role ID")
+    } catch (error) {
+      throw roleConfigurationEvidenceError({ cause: error })
+    }
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+      throw roleConfigurationEvidenceError()
+    }
+    return [roleId, count] as const
+  })
+  const projected: Record<string, number> = {}
+  for (const [roleId, count] of validated.sort(([left], [right]) => {
+    const leftId = BigInt(left)
+    const rightId = BigInt(right)
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+  })) {
+    projected[roleId] = count
+  }
+  return projected
+}
+
+function modifyGuildRoleBody(input: ModifyGuildRoleInput): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord role configuration input must be an exact object")
+  }
+  const record = input as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (
+    keys.length < 1
+    || keys.some((key) => !MODIFY_GUILD_ROLE_KEYS.has(key))
+    || keys.some((key) => record[key] === undefined)
+  ) {
+    throw new RangeError("Discord role configuration input requires supported explicit fields")
+  }
+  if (input.name !== undefined) {
+    if (
+      typeof input.name !== "string"
+      || input.name.length < 1
+      || input.name.length > DISCORD_LIMITS.roleNameCharacters
+      || input.name.trim() !== input.name
+      || ROLE_NAME_CONTROL_PATTERN.test(input.name)
+    ) {
+      throw new RangeError(
+        `Discord role name must contain 1-${DISCORD_LIMITS.roleNameCharacters} characters without surrounding whitespace or controls`,
+      )
+    }
+    assertValidUnicode(input.name, "Discord role name")
+  }
+  if (input.colors !== undefined) {
+    if (
+      !input.colors
+      || typeof input.colors !== "object"
+      || Array.isArray(input.colors)
+      || Object.keys(input.colors).length !== MODIFY_GUILD_ROLE_COLOR_KEYS.size
+      || Object.keys(input.colors).some((key) => !MODIFY_GUILD_ROLE_COLOR_KEYS.has(key))
+    ) {
+      throw new RangeError("Discord role colors must be a complete exact object")
+    }
+    assertIntegerRange(
+      input.colors.primaryColor,
+      0,
+      DISCORD_LIMITS.roleColor,
+      "Discord role primary color",
+    )
+    for (const [name, color] of [
+      ["secondary", input.colors.secondaryColor],
+      ["tertiary", input.colors.tertiaryColor],
+    ] as const) {
+      if (color !== null) {
+        assertIntegerRange(
+          color,
+          0,
+          DISCORD_LIMITS.roleColor,
+          `Discord role ${name} color`,
+        )
+      }
+    }
+  }
+  if (input.hoist !== undefined && typeof input.hoist !== "boolean") {
+    throw new RangeError("Discord role hoist setting must be a boolean")
+  }
+  if (input.mentionable !== undefined && typeof input.mentionable !== "boolean") {
+    throw new RangeError("Discord role mentionable setting must be a boolean")
+  }
+  if (
+    input.permissions !== undefined
+    && (typeof input.permissions !== "string" || !/^(0|[1-9][0-9]*)$/.test(input.permissions))
+  ) {
+    throw new RangeError("Discord role permissions must be a canonical decimal bitfield")
+  }
+  return {
+    ...(input.colors !== undefined
+      ? {
+          colors: {
+            primary_color: input.colors.primaryColor,
+            secondary_color: input.colors.secondaryColor,
+            tertiary_color: input.colors.tertiaryColor,
+          },
+        }
+      : {}),
+    ...(input.hoist !== undefined ? { hoist: input.hoist } : {}),
+    ...(input.mentionable !== undefined ? { mentionable: input.mentionable } : {}),
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+  }
+}
+
 function assertGuildExpressionName(name: string, kind: "emoji" | "sticker"): void {
   const maximum = kind === "emoji"
     ? DISCORD_LIMITS.emojiNameCharacters
@@ -4620,6 +4771,19 @@ export class DiscordClient {
     )
   }
 
+  async getGuildRoleMemberCounts(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildRoleMemberCounts> {
+    assertPositiveSnowflake(guildId, "Discord role member-count guild ID")
+    const response = await this.#request<unknown>(
+      "get_guild_role_member_counts",
+      `/guilds/${guildId}/roles/member-counts`,
+      { ...options, suppressFailureCause: true },
+    )
+    return projectGuildRoleMemberCounts(response)
+  }
+
   async listGuildEmojis(
     guildId: string,
     options: RequestOptions = {},
@@ -5225,6 +5389,32 @@ export class DiscordClient {
         permissions: input.permissions,
       },
     })
+  }
+
+  modifyGuildRole(
+    guildId: string,
+    roleId: string,
+    input: ModifyGuildRoleInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordRole> {
+    assertPositiveSnowflake(guildId, "Discord role-configuration guild ID")
+    assertPositiveSnowflake(roleId, "Discord role-configuration role ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord role-configuration audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request(
+      "modify_guild_role",
+      `/guilds/${guildId}/roles/${roleId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: modifyGuildRoleBody(input),
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async addGuildMemberRole(

@@ -12,6 +12,7 @@ import test from "node:test"
 
 import { loadConnectorConfig } from "../src/config.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
@@ -194,6 +195,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    roleConfigurationEnabled: false,
+    roleConfigurationIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
@@ -466,6 +469,8 @@ test("configuration and policy require an exact administration guild and protect
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    roleConfigurationEnabled: false,
+    roleConfigurationIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
@@ -930,6 +935,67 @@ test("configuration and policy isolate exact role creation authority", () => {
   assert.deepEqual(enabled.describe().roleCreationGuildIds, [GUILD_ID])
 })
 
+test("configuration and policy isolate reviewed role configuration to exact roles", () => {
+  const disabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
+  }, { homeDirectory: "/test/home" })
+  const disabled = new ScopePolicy(disabledConfig)
+  assert.equal(disabledConfig.allowRoleConfiguration, false)
+  assert.throws(
+    () => disabled.assertRoleConfigurationAllowed(GUILD_ID, ROLE_ID),
+    /role configuration is disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
+    DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabledConfig.allowRoleConfiguration, true)
+  assert.deepEqual([...enabledConfig.roleConfigurationIds], [ROLE_ID])
+  enabled.assertRoleConfigurationAllowed(GUILD_ID, ROLE_ID)
+  assert.throws(
+    () => enabled.assertRoleConfigurationAllowed(GUILD_ID, "999999999999999999"),
+    /outside the role-configuration scope/,
+  )
+  assert.throws(
+    () => enabled.assertRoleConfigurationAllowed(OTHER_GUILD_ID, ROLE_ID),
+    /configured read scope/,
+  )
+  assert.equal(enabled.describe().roleConfigurationEnabled, true)
+  assert.deepEqual(enabled.describe().roleConfigurationIds, [ROLE_ID])
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertRoleConfigurationAllowed(GUILD_ID, ROLE_ID),
+    /requires an explicit role allowlist/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
+  )
+  const excessiveRoleIds = Array.from(
+    { length: CONNECTOR_LIMITS.roleConfigurationAllowlist + 1 },
+    (_, index) => (500_000_000_000_000_000n + BigInt(index)).toString(),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ROLE_CONFIGURATION_IDS: excessiveRoleIds,
+    }, { homeDirectory: "/test/home" }),
+    /must contain at most 100 unique IDs/,
+  )
+})
+
 test("configuration and policy isolate exact guild scaffold authority", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1246,6 +1312,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     readGuildScope: "allowlist",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
+    roleConfigurationEnabled: false,
+    roleConfigurationIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,

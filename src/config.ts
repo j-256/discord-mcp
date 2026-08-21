@@ -57,6 +57,7 @@ export interface ConnectorConfig {
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
+  allowRoleConfiguration: boolean
   allowScheduledEventAudit: boolean
   allowScheduledEventChanges: boolean
   allowWebhookAudit: boolean
@@ -94,6 +95,7 @@ export interface ConnectorConfig {
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
+  roleConfigurationIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
   token: string
@@ -331,6 +333,11 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.roleCreationGuildIds],
     ENVIRONMENT_NAMES.roleCreationGuildIds,
   )
+  const roleConfigurationIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.roleConfigurationIds],
+    ENVIRONMENT_NAMES.roleConfigurationIds,
+    CONNECTOR_LIMITS.roleConfigurationAllowlist,
+  )
   const guildScaffoldGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.guildScaffoldGuildIds],
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
@@ -567,6 +574,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowRoleCreation],
       ENVIRONMENT_NAMES.allowRoleCreation,
     ),
+    allowRoleConfiguration: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowRoleConfiguration],
+      ENVIRONMENT_NAMES.allowRoleConfiguration,
+    ),
     allowScheduledEventAudit,
     allowScheduledEventChanges,
     allowWebhookAudit,
@@ -644,6 +655,7 @@ export function loadConnectorConfig(
     protectedUserIds,
     pinChannelIds,
     roleCreationGuildIds,
+    roleConfigurationIds,
     scheduledEventGuildIds,
     scheduledEventRoots: parseOwnedRoots(
       environment[ENVIRONMENT_NAMES.scheduledEventRoots],

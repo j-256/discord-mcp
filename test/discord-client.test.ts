@@ -9,6 +9,7 @@ import {
   ChannelMetadataEvidenceError,
   DiscordApiError,
   OnboardingEvidenceError,
+  RoleConfigurationEvidenceError,
 } from "../src/errors.js"
 
 function channelMetadataPayload(overrides: Record<string, unknown> = {}) {
@@ -1430,6 +1431,157 @@ test("Discord client never retries rate-limited role creation", async () => {
       permissions: "0",
       primaryColor: 0,
     }, "Reviewed support role"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client reads exact role-member counts and sends one narrow role PATCH", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (init?.method === "PATCH") {
+        return jsonResponse({
+          color: 1,
+          colors: {
+            primary_color: 1,
+            secondary_color: 2,
+            tertiary_color: null,
+          },
+          flags: 0,
+          hoist: true,
+          id: "300",
+          managed: false,
+          mentionable: false,
+          name: "Support",
+          permissions: "3072",
+          position: 1,
+        })
+      }
+      return jsonResponse({ 300: 5, 200: 0 })
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getGuildRoleMemberCounts("100"), {
+    200: 0,
+    300: 5,
+  })
+  await client.modifyGuildRole("100", "300", {
+    colors: {
+      primaryColor: 1,
+      secondaryColor: 2,
+      tertiaryColor: null,
+    },
+    hoist: true,
+    name: "Support",
+    permissions: "3072",
+  }, "Support / reviewed")
+
+  assert.deepEqual(requests, [
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/guilds/100/roles/member-counts`,
+    },
+    {
+      body: {
+        colors: {
+          primary_color: 1,
+          secondary_color: 2,
+          tertiary_color: null,
+        },
+        hoist: true,
+        name: "Support",
+        permissions: "3072",
+      },
+      method: "PATCH",
+      reason: "Support%20%2F%20reviewed",
+      url: `${API_BASE_URL}/guilds/100/roles/300`,
+    },
+  ])
+})
+
+test("Discord client rejects malformed role configuration evidence and input", async () => {
+  let requests = 0
+  const malformed = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ 0: 1 })
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => malformed.getGuildRoleMemberCounts("100"),
+    RoleConfigurationEvidenceError,
+  )
+
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  assert.throws(
+    () => client.modifyGuildRole("100", "300", {}, "reviewed"),
+    /requires supported explicit fields/,
+  )
+  assert.throws(
+    () => client.modifyGuildRole("100", "300", {
+      colors: { primaryColor: 1, secondaryColor: null } as never,
+    }, "reviewed"),
+    /complete exact object/,
+  )
+  assert.throws(
+    () => client.modifyGuildRole("100", "300", { permissions: "01" }, "reviewed"),
+    /canonical decimal/,
+  )
+  assert.throws(
+    () => client.modifyGuildRole("invalid", "300", { hoist: false }, "reviewed"),
+    /guild ID/,
+  )
+  assert.throws(
+    () => client.modifyGuildRole("100", "300", { future: true } as never, "reviewed"),
+    /supported explicit fields/,
+  )
+  assert.equal(requests, 1)
+})
+
+test("Discord client never retries a rate-limited role configuration", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.modifyGuildRole("100", "300", { mentionable: true }, "reviewed"),
     (error: unknown) => error instanceof DiscordApiError && error.status === 429,
   )
   assert.equal(requests, 1)
