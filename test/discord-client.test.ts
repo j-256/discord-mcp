@@ -12,6 +12,7 @@ import {
   DiscordApiError,
   OnboardingEvidenceError,
   RoleConfigurationEvidenceError,
+  StageInstanceEvidenceError,
 } from "../src/errors.js"
 
 function channelMetadataPayload(overrides: Record<string, unknown> = {}) {
@@ -2039,6 +2040,172 @@ test("Discord client rejects unsafe poll wire inputs before fetching", () => {
   )
   assert.throws(() => client.endPoll("200", "invalid"), /message ID/)
   assert.equal(requests, 0)
+})
+
+test("Discord client projects exact Stage instances without forwarding unknown fields", async () => {
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      assert.equal(String(input), `${API_BASE_URL}/stage-instances/200`)
+      assert.equal(init?.method, "GET")
+      return jsonResponse({
+        channel_id: "200",
+        discoverable_disabled: false,
+        future_private_field: "discarded",
+        guild_id: "100",
+        guild_scheduled_event_id: "400",
+        id: "300",
+        privacy_level: 1,
+        topic: "Town hall",
+      })
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getStageInstance("200"), {
+    channelId: "200",
+    discoverableDisabled: false,
+    guildId: "100",
+    id: "300",
+    privacyLevel: 1,
+    scheduledEventId: "400",
+    topic: "Town hall",
+    unknownFieldCount: 1,
+  })
+})
+
+test("Discord client sends exact non-retried Stage lifecycle requests with audit reasons", async () => {
+  const requests: Array<{
+    auditReason: string | null
+    body: unknown
+    method: string
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        auditReason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      const body = typeof init?.body === "string"
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : {}
+      return jsonResponse({
+        channel_id: body.channel_id ?? "200",
+        discoverable_disabled: true,
+        guild_id: "100",
+        guild_scheduled_event_id: null,
+        id: "300",
+        privacy_level: 2,
+        topic: body.topic,
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.createStageInstance({
+    channelId: "200",
+    sendStartNotification: true,
+    topic: "Town hall",
+  }, "Reviewed Stage start")
+  await client.modifyStageInstance(
+    "200",
+    { topic: "Questions" },
+    "Reviewed Stage update",
+  )
+  await client.deleteStageInstance("200", "Reviewed Stage end")
+
+  assert.deepEqual(requests, [
+    {
+      auditReason: "Reviewed%20Stage%20start",
+      body: {
+        channel_id: "200",
+        privacy_level: 2,
+        send_start_notification: true,
+        topic: "Town hall",
+      },
+      method: "POST",
+      url: `${API_BASE_URL}/stage-instances`,
+    },
+    {
+      auditReason: "Reviewed%20Stage%20update",
+      body: { topic: "Questions" },
+      method: "PATCH",
+      url: `${API_BASE_URL}/stage-instances/200`,
+    },
+    {
+      auditReason: "Reviewed%20Stage%20end",
+      body: null,
+      method: "DELETE",
+      url: `${API_BASE_URL}/stage-instances/200`,
+    },
+  ])
+  assert.deepEqual(records.map(({ operation, retries }) => ({ operation, retries })), [
+    { operation: "create_stage_instance", retries: 0 },
+    { operation: "modify_stage_instance", retries: 0 },
+    { operation: "delete_stage_instance", retries: 0 },
+  ])
+})
+
+test("Discord client rejects unsafe Stage data and redacts topic-bearing failures", async () => {
+  let requests = 0
+  const privateTopic = "private Stage instructions"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: `Rejected ${privateTopic}` }, 429, {
+        "Retry-After": "0",
+      })
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.createStageInstance({
+      channelId: "200",
+      sendStartNotification: false,
+      topic: privateTopic,
+    }, "Reviewed Stage start"),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.doesNotMatch(error.message, new RegExp(privateTopic))
+      assert.equal(error.message.includes("Rejected"), false)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+
+  const invalidClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    invalidClient.createStageInstance({
+      channelId: "200",
+      sendStartNotification: false,
+      topic: " ",
+    }, "Reviewed Stage start"),
+    /topic/,
+  )
+  await assert.rejects(
+    invalidClient.getStageInstance("200"),
+    StageInstanceEvidenceError,
+  )
+  assert.equal(requests, 2)
 })
 
 test("Discord client sends one bounded attachment through native multipart form data", async () => {

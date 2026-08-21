@@ -86,6 +86,9 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   roleConfigurationPolicy: "role-configuration-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
   scheduledEventChangePolicy: "scheduled-event-change-policy",
+  stageInstanceAuditPolicy: "stage-instance-audit-policy",
+  stageInstanceChangePolicy: "stage-instance-change-policy",
+  stageStartNotificationPolicy: "stage-start-notification-policy",
   token: "token",
   toolSurface: "tool-surface",
   threadCreationPolicy: "thread-creation-policy",
@@ -351,6 +354,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("Scheduled-event changes are enabled, but cover updates remain blocked because no canonical local roots are configured")
   }
+  if (config.allowStageInstanceAudit && config.stageChannelIds.size === 0) {
+    warnings.push("The Stage-instance audit toggle is enabled but inventory remains blocked because an exact Stage-channel allowlist is required")
+  }
+  if (config.allowStageInstanceChanges && config.stageChannelIds.size === 0) {
+    warnings.push("The Stage-instance change toggle is enabled but changes remain blocked because an exact Stage-channel allowlist is required")
+  }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [config.allowAttachments, "attachments", "Attachment messages"],
@@ -401,6 +410,13 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowScheduledEventAudit || config.allowScheduledEventChanges,
       "scheduled-events",
       "Scheduled event audit and changes",
+    ],
+    [
+      config.allowStageInstanceAudit
+        || config.allowStageInstanceChanges
+        || config.allowStageStartNotifications,
+      "stage-instances",
+      "Stage instance audit and reviewed lifecycle",
     ],
     [
       config.allowWebhookAudit || config.allowWebhookDeletions,
@@ -1151,6 +1167,63 @@ export async function diagnoseConnector(
         `Reviewed scheduled-event changes are constrained to ${config.scheduledEventGuildIds.size} exact guilds and ${config.scheduledEventRoots.length} canonical cover roots with one-shot execution and exact state or absence readback`,
       ))
     }
+    if (!config.allowStageInstanceAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageInstanceAuditPolicy,
+        "pass",
+        "Privacy-safe Stage-instance inventory is disabled",
+      ))
+    } else if (config.stageChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageInstanceAuditPolicy,
+        "warn",
+        "Stage-instance audit is enabled, but the required exact Stage-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageInstanceAuditPolicy,
+        "pass",
+        `Privacy-safe Stage-instance inventory is constrained to ${config.stageChannelIds.size} exact Stage channels`,
+      ))
+    }
+    if (!config.allowStageInstanceChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageInstanceChangePolicy,
+        "pass",
+        "Reviewed Stage-instance changes are disabled",
+      ))
+    } else if (config.stageChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageInstanceChangePolicy,
+        "warn",
+        "Stage-instance changes are enabled, but the required exact Stage-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageInstanceChangePolicy,
+        "pass",
+        `Reviewed Stage-instance start, topic update, and end are constrained to ${config.stageChannelIds.size} exact Stage channels with signed approval, one-shot execution, exact readback, and ambiguity quarantine`,
+      ))
+    }
+    if (!config.allowStageStartNotifications) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageStartNotificationPolicy,
+        "pass",
+        "Stage start notifications are disabled",
+      ))
+    } else if (config.stageChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageStartNotificationPolicy,
+        "warn",
+        "Stage start notifications are enabled, but the required exact Stage-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.stageStartNotificationPolicy,
+        "pass",
+        `Stage start notifications are constrained to ${config.stageChannelIds.size} exact Stage channels and require fresh Mention Everyone permission evidence`,
+      ))
+    }
     checks.push(config.allowGateway
       ? check(
         DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -1329,6 +1402,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowScheduledEventChanges,
     ENVIRONMENT_NAMES.scheduledEventGuildIds,
     ENVIRONMENT_NAMES.scheduledEventRoots,
+    ENVIRONMENT_NAMES.allowStageInstanceAudit,
+    ENVIRONMENT_NAMES.allowStageInstanceChanges,
+    ENVIRONMENT_NAMES.allowStageStartNotifications,
+    ENVIRONMENT_NAMES.stageChannelIds,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowPinManagement,

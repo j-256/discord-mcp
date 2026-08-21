@@ -232,6 +232,18 @@ import type {
 } from "./scheduled-event-service.js"
 import { ScheduledEventService } from "./scheduled-event-service.js"
 import type {
+  StageInstanceChangeRequest,
+  StageInstanceInventoryResult,
+  StageInstanceLookupResult,
+  StageInstancePlan,
+  StageInstanceResult,
+  StageInstanceServiceOptions,
+} from "./stage-instance-service.js"
+import {
+  normalizeStageInstanceChangeRequest,
+  StageInstanceService,
+} from "./stage-instance-service.js"
+import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
   ThreadCreationResult,
@@ -277,6 +289,7 @@ export interface DiscordServiceClient {
   createGuildRole: DiscordClient["createGuildRole"]
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
   createGuildSticker: DiscordClient["createGuildSticker"]
+  createStageInstance: DiscordClient["createStageInstance"]
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
@@ -289,6 +302,7 @@ export interface DiscordServiceClient {
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
   deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
+  deleteStageInstance: DiscordClient["deleteStageInstance"]
   deleteInvite: DiscordClient["deleteInvite"]
   deleteWebhook: DiscordClient["deleteWebhook"]
   endPoll: DiscordClient["endPoll"]
@@ -311,6 +325,7 @@ export interface DiscordServiceClient {
   getGuildRoles: DiscordClient["getGuildRoles"]
   getGuildScheduledEvent: DiscordClient["getGuildScheduledEvent"]
   getGuildSticker: DiscordClient["getGuildSticker"]
+  getStageInstance: DiscordClient["getStageInstance"]
   getMessage: DiscordClient["getMessage"]
   getThreadMember: DiscordClient["getThreadMember"]
   getUser: DiscordClient["getUser"]
@@ -338,6 +353,7 @@ export interface DiscordServiceClient {
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
   modifyGuildRole: DiscordClient["modifyGuildRole"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
+  modifyStageInstance: DiscordClient["modifyStageInstance"]
   pinMessage: DiscordClient["pinMessage"]
   removeGuildBan: DiscordClient["removeGuildBan"]
   removeGuildMember: DiscordClient["removeGuildMember"]
@@ -431,6 +447,10 @@ export interface ConnectorServiceOptions {
   >
   scheduledEventOptions?: Pick<
     ScheduledEventServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  stageInstanceOptions?: Pick<
+    StageInstanceServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   threadCreationOptions?: Pick<
@@ -588,6 +608,7 @@ export class ConnectorService {
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
   readonly #scheduledEventService: ScheduledEventService
+  readonly #stageInstanceService: StageInstanceService
   readonly #threadCreationService: ThreadCreationService
   readonly #webhookService: WebhookService
 
@@ -707,6 +728,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.scheduledEventOptions,
+    })
+    this.#stageInstanceService = new StageInstanceService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.stageInstanceOptions,
     })
     this.#memberDirectoryService = new MemberDirectoryService({
       client: this.#client,
@@ -1493,6 +1522,27 @@ export class ConnectorService {
     })
   }
 
+  async listStageInstances(
+    options: RequestOptions = {},
+  ): Promise<StageInstanceInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#stageInstanceService.list(identity.bot.id, options)
+  }
+
+  async getStageInstance(
+    guildId: string,
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<StageInstanceLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#stageInstanceService.get(
+      identity.bot.id,
+      guildId,
+      channelId,
+      options,
+    )
+  }
+
   async getChannelWebhook(
     channelId: string,
     webhookId: string,
@@ -1567,6 +1617,20 @@ export class ConnectorService {
   ): Promise<ScheduledEventPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#scheduledEventService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planStageInstanceChange(
+    request: StageInstanceChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<StageInstancePlan> {
+    normalizeStageInstanceChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#stageInstanceService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -2063,6 +2127,25 @@ export class ConnectorService {
   ): Promise<ScheduledEventResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#scheduledEventService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeStageInstanceChange(
+    request: StageInstanceChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<StageInstanceResult> {
+    normalizeStageInstanceChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord Stage-instance plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#stageInstanceService.execute(
       identity.application.id,
       identity.bot.id,
       request,

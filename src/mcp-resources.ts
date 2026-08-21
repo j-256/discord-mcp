@@ -234,6 +234,8 @@ export function registerDiscordResources(
           "",
           "Scheduled-event inventory requires a separate exact guild allowlist and returns bounded privacy-safe metadata plus complete entity-specific read evidence. Subscriber counts are aggregate and opt-in; subscriber identities, creator profiles, cover URLs and hashes, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate and validate ownership, state transitions, future timing, visible capacity, destination channel type and permissions, and Discord-supported recurrence shapes. Cover changes accept only bounded canonical owned JPEG or non-animated PNG files from dedicated roots. Every create, update, transition, or delete requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact state or absence readback. Same-guild uncertain outcomes fail closed; no operation accepts a URL or base64 payload, exposes subscriber identities, retries, rolls back, or persists event content.",
           "",
+          "Stage-instance inventory requires a separate exact Stage-channel allowlist and returns an explicit active or inactive privacy projection with complete read evidence. Speaker and audience identities, voice state, scheduled-event objects, and unknown raw fields are omitted and never persisted. Start, exact topic update, and end require an additional feature gate, guild-only unlinked state, complete VIEW_CHANNEL, CONNECT, MANAGE_CHANNELS, MUTE_MEMBERS, and MOVE_MEMBERS evidence, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free records, one non-retried mutation, and exact active-state or absence readback. Guild-wide start notification has a third gate, requires MENTION_EVERYONE, and consumes the shared interaction rate budget. Same-channel uncertain outcomes are quarantined for the process; no operation enumerates speakers or listeners, mutates scheduled-event association, retries, rolls back, or persists Stage content.",
+          "",
           "Deletion and member moderation are review-first workflows. Planning is read-only. Execution remains a separate destructive tool and requires every configured policy, freshness, signed-state, approval, confirmation, and audit gate.",
         ].join("\n"),
         uri: uri.href,
@@ -622,6 +624,31 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.explainChannelAccess(
+        templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelStageInstance,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelStageInstance, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Privacy-safe active or inactive Stage-instance state and complete connector read evidence for one exact separately allowlisted Discord Stage channel. Speaker and audience identities, scheduled-event objects, raw payloads, and unknown raw fields are never returned.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord Stage instance",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getStageInstance(
+        templateSnowflake(variables, "guildId"),
         templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),

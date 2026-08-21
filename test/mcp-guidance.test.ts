@@ -48,6 +48,7 @@ const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
 const SCHEDULED_EVENT_ID = "390000000000000001"
+const STAGE_INSTANCE_ID = "395000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -155,6 +156,7 @@ interface GuidanceCalls {
   permissionOverwrites: number
   roles: number
   scheduledEvents: number
+  stageInstances: number
   unexpected: number
   webhooks: number
 }
@@ -187,6 +189,7 @@ function guidanceService(options: {
     permissionOverwrites: 0,
     roles: 0,
     scheduledEvents: 0,
+    stageInstances: 0,
     unexpected: 0,
     webhooks: 0,
   }
@@ -205,10 +208,60 @@ function guidanceService(options: {
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
+    executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
+    async getStageInstance(guildId, channelId) {
+      calls.stageInstances += 1
+      calls.lastGuildId = guildId
+      calls.lastChannelId = channelId
+      return {
+        access: {
+          administrator: false,
+          appliedRoleIds: [guildId],
+          confidence: "complete",
+          effectivePermissionNames: ["VIEW_CHANNEL"],
+          effectivePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+          guildOwner: false,
+          missingPermissions: [],
+          requiredPermissions: ["VIEW_CHANNEL"],
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        channel: {
+          guildId,
+          id: channelId,
+          name: "Private Stage channel",
+          type: "stage",
+        },
+        guild: { id: guildId, name: "Private guild name" },
+        instance: {
+          channelId,
+          discoverableDisabled: true,
+          guildId,
+          id: STAGE_INSTANCE_ID,
+          privacyLevel: "guild-only",
+          scheduledEventId: null,
+          topic: "Private Stage topic",
+          unknownFieldCount: 0,
+        },
+        privacy: {
+          omittedFields: [
+            "audienceState",
+            "rawDiscordObject",
+            "scheduledEventObject",
+            "speakerState",
+          ],
+          rawPayloadExposed: false,
+          speakerIdentitiesExposed: false,
+          topicPersisted: false,
+        },
+        schemaVersion: 1,
+        status: "active",
+      }
+    },
     getChannelWebhook: unexpected,
     getPoll: unexpected,
     async getChannel(channelId) {
@@ -409,6 +462,7 @@ function guidanceService(options: {
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
     planScheduledEventChange: unexpected,
+    planStageInstanceChange: unexpected,
     async listAutoModerationRules(guildId) {
       calls.automod += 1
       calls.lastGuildId = guildId
@@ -517,6 +571,7 @@ function guidanceService(options: {
         subscriberCountsIncluded: false,
       }
     },
+    listStageInstances: unexpected,
     async listGuildExpressions(guildId, kind) {
       calls.guildExpressions += 1
       calls.lastGuildId = guildId
@@ -618,6 +673,10 @@ function guidanceService(options: {
         scheduledEventCoverChangesEnabled: false,
         scheduledEventGuildIds: [],
         scheduledEventRootCount: 0,
+        stageChannelIds: [],
+        stageInstanceAuditEnabled: false,
+        stageInstanceChangesEnabled: false,
+        stageStartNotificationsEnabled: false,
         interactionChannelIds: [],
         interactionMaxWritesPerMinute: 10,
         interactionMinWriteIntervalMs: 500,
@@ -990,6 +1049,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.permissionOverwrites
     + calls.roles
     + calls.scheduledEvents
+    + calls.stageInstances
     + calls.unexpected
     + calls.webhooks
 }
@@ -1061,6 +1121,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelPermissionOverwrites,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelPermissionOverwrites,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelStageInstance,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelStageInstance,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelWebhooks,
@@ -1372,6 +1436,22 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("subscriberProfiles" in scheduledEvent, false)
   assert.equal("coverImageHash" in scheduledEvent, false)
 
+  const stageInstanceResource = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/channels/${CHANNEL_ID}/stage-instance`,
+  )
+  const stageInstanceData = stageInstanceResource.value.data as Record<string, unknown>
+  const stageInstance = stageInstanceData.instance as Record<string, unknown>
+  assert.equal(stageInstance.id, STAGE_INSTANCE_ID)
+  assert.equal(stageInstance.privacyLevel, "guild-only")
+  assert.equal(stageInstance.scheduledEventId, null)
+  assert.equal(
+    (stageInstanceData.privacy as Record<string, unknown>).speakerIdentitiesExposed,
+    false,
+  )
+  assert.equal("speakerState" in stageInstance, false)
+  assert.equal("audienceState" in stageInstance, false)
+
   const exactRole = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/roles/${ROLE_ID}`,
@@ -1481,6 +1561,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.roles, 2)
   assert.equal(calls.scheduledEvents, 1)
+  assert.equal(calls.stageInstances, 1)
   assert.equal(calls.webhooks, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
@@ -1916,6 +1997,32 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(scheduledEvent, /Do not call execute_scheduled_event_change/)
   assert.match(scheduledEvent, /entity-specific permission and ownership evidence/)
   assert.match(scheduledEvent, /subscriber identity or other private field/)
+
+  const stageInstance = promptText(await client.getPrompt({
+    arguments: {
+      action: "start",
+      auditReason: "Reviewed Stage start",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      sendStartNotification: "true",
+      topic: "Planning session",
+    },
+    name: MCP_PROMPT_NAMES.reviewStageInstanceChange,
+  }))
+  assert.deepEqual(JSON.parse(stageInstance.split("\n")[1] || ""), {
+    action: "start",
+    auditReason: "Reviewed Stage start",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    sendStartNotification: true,
+    topic: "Planning session",
+  })
+  assert.match(stageInstance, /Call only plan_stage_instance_change/)
+  assert.match(stageInstance, /Do not call execute_stage_instance_change/)
+  assert.match(stageInstance, /scheduled-event association/)
+  assert.match(stageInstance, /uncertain same-channel predecessor/)
 
   const permissionOverwrite = promptText(await client.getPrompt({
     arguments: {
@@ -2606,6 +2713,39 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         targetStatus: "active",
       },
       name: MCP_PROMPT_NAMES.reviewScheduledEventChange,
+    },
+    {
+      arguments: {
+        action: "start",
+        auditReason: "Reviewed Stage start",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewStageInstanceChange,
+    },
+    {
+      arguments: {
+        action: "end",
+        auditReason: "Reviewed Stage end",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        topic: "Not accepted",
+      },
+      name: MCP_PROMPT_NAMES.reviewStageInstanceChange,
+    },
+    {
+      arguments: {
+        action: "update",
+        auditReason: "Reviewed Stage update",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        sendStartNotification: "true",
+        topic: "Planning session",
+      },
+      name: MCP_PROMPT_NAMES.reviewStageInstanceChange,
     },
     {
       arguments: {

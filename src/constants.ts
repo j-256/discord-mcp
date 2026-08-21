@@ -53,6 +53,7 @@ export const MCP_TOOLSET_NAMES = [
   "role-creation",
   "roles",
   "scheduled-events",
+  "stage-instances",
   "threads",
   "webhooks",
 ] as const
@@ -94,6 +95,9 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowRoleConfiguration: "DISCORD_MCP_ALLOW_ROLE_CONFIGURATION",
   allowScheduledEventAudit: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
   allowScheduledEventChanges: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES",
+  allowStageInstanceAudit: "DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT",
+  allowStageInstanceChanges: "DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES",
+  allowStageStartNotifications: "DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS",
   allowThreadCreation: "DISCORD_MCP_ALLOW_THREAD_CREATION",
   allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
   allowWebhookDeletions: "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
@@ -150,6 +154,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   roleConfigurationIds: "DISCORD_MCP_ROLE_CONFIGURATION_IDS",
   scheduledEventGuildIds: "DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS",
   scheduledEventRoots: "DISCORD_MCP_SCHEDULED_EVENT_ROOTS",
+  stageChannelIds: "DISCORD_MCP_STAGE_CHANNEL_IDS",
   token: "DISCORD_BOT_TOKEN",
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
   toolsets: "DISCORD_MCP_TOOLSETS",
@@ -215,6 +220,7 @@ export const DISCORD_LIMITS = Object.freeze({
   scheduledEventLocationCharacters: 100,
   scheduledEventNameCharacters: 100,
   scheduledEvents: 100,
+  stageTopicCharacters: 120,
   searchChannelIds: 500,
   searchContentCharacters: 1_024,
   searchFilenameCharacters: 1_024,
@@ -353,8 +359,17 @@ export const CONNECTOR_LIMITS = Object.freeze({
   roleConfigurationAllowlist: 100,
   searchFilterIds: 25,
   searchFilterStrings: 25,
+  stageInstanceChannels: 25,
   threadPageDefault: 50,
 })
+
+export const STAGE_INSTANCE_ACTIONS = [
+  "end",
+  "start",
+  "update",
+] as const
+
+export type StageInstanceAction = typeof STAGE_INSTANCE_ACTIONS[number]
 
 export const GATEWAY_DEFAULTS = Object.freeze({
   authenticationTimeoutMs: 30_000,

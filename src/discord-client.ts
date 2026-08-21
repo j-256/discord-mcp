@@ -28,6 +28,7 @@ import {
   redactText,
   RoleConfigurationEvidenceError,
   ScheduledEventEvidenceError,
+  StageInstanceEvidenceError,
   WebhookEvidenceError,
 } from "./errors.js"
 import type {
@@ -140,6 +141,32 @@ export interface DiscordChannelMetadata {
   topic: string | null
   type: number
   unknownFieldCount: number
+}
+
+export interface DiscordStageInstanceSummary {
+  channelId: string
+  discoverableDisabled: boolean
+  guildId: string
+  id: string
+  privacyLevel: 1 | 2
+  scheduledEventId: string | null
+  topic: string
+  unknownFieldCount: number
+}
+
+export const DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS = Object.freeze({
+  guildOnly: 2,
+  public: 1,
+} as const)
+
+export interface CreateStageInstanceInput {
+  channelId: string
+  sendStartNotification: boolean
+  topic: string
+}
+
+export interface ModifyStageInstanceInput {
+  topic: string
 }
 
 export interface ModifyChannelMetadataInput {
@@ -904,12 +931,15 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_guild_auto_moderation_rule",
   "create_guild_emoji",
   "create_guild_sticker",
+  "create_stage_instance",
   "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
   "delete_guild_sticker",
+  "delete_stage_instance",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_sticker",
+  "get_stage_instance",
   "get_channel_metadata",
   "get_guild_onboarding",
   "list_guild_invites",
@@ -920,11 +950,22 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_emoji",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
+  "modify_stage_instance",
   "modify_guild_onboarding",
   "modify_channel_metadata",
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
+])
+
+const STAGE_INSTANCE_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "channel_id",
+  "discoverable_disabled",
+  "guild_id",
+  "guild_scheduled_event_id",
+  "id",
+  "privacy_level",
+  "topic",
 ])
 
 const CHANNEL_METADATA_TYPES: ReadonlySet<number> = new Set([
@@ -1783,6 +1824,114 @@ function hasOnlyKeys(
 ): boolean {
   const keys = Object.keys(value)
   return keys.every((key) => allowed.includes(key))
+}
+
+function stageInstanceEvidenceError(
+  message = "Discord returned an invalid Stage instance",
+  cause?: unknown,
+): StageInstanceEvidenceError {
+  return new StageInstanceEvidenceError(
+    message,
+    cause === undefined ? undefined : { cause },
+  )
+}
+
+function assertStageTopic(value: unknown, description: string): asserts value is string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || [...value].length > DISCORD_LIMITS.stageTopicCharacters
+    || !value.trim()
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(
+      `${description} must contain 1-${DISCORD_LIMITS.stageTopicCharacters} nonblank characters without unsupported controls`,
+    )
+  }
+  assertValidUnicode(value, description)
+}
+
+function projectStageInstance(value: unknown): DiscordStageInstanceSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw stageInstanceEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(record.id as string, "Discord Stage-instance ID")
+    assertPositiveSnowflake(record.guild_id as string, "Discord Stage-instance guild ID")
+    assertPositiveSnowflake(record.channel_id as string, "Discord Stage-instance channel ID")
+    assertStageTopic(record.topic, "Discord Stage-instance topic")
+    if (
+      record.privacy_level !== DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS.public
+      && record.privacy_level !== DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS.guildOnly
+    ) {
+      throw new RangeError("Discord Stage-instance privacy level is unsupported")
+    }
+    if (typeof record.discoverable_disabled !== "boolean") {
+      throw new RangeError("Discord Stage-instance discoverability field is invalid")
+    }
+    if (
+      record.guild_scheduled_event_id !== undefined
+      && record.guild_scheduled_event_id !== null
+    ) {
+      assertPositiveSnowflake(
+        record.guild_scheduled_event_id as string,
+        "Discord Stage-instance scheduled event ID",
+      )
+    }
+  } catch (error) {
+    if (error instanceof StageInstanceEvidenceError) throw error
+    throw stageInstanceEvidenceError(undefined, error)
+  }
+  return {
+    channelId: record.channel_id as string,
+    discoverableDisabled: record.discoverable_disabled as boolean,
+    guildId: record.guild_id as string,
+    id: record.id as string,
+    privacyLevel: record.privacy_level as 1 | 2,
+    scheduledEventId: typeof record.guild_scheduled_event_id === "string"
+      ? record.guild_scheduled_event_id
+      : null,
+    topic: record.topic as string,
+    unknownFieldCount: Object.keys(record)
+      .filter((key) => !STAGE_INSTANCE_RESPONSE_KEYS.has(key)).length,
+  }
+}
+
+function assertCreateStageInstanceInput(
+  input: CreateStageInstanceInput,
+): void {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || !hasOnlyKeys(input as unknown as Record<string, unknown>, [
+      "channelId",
+      "sendStartNotification",
+      "topic",
+    ])
+  ) {
+    throw new RangeError("Discord Stage-instance creation input is invalid")
+  }
+  assertPositiveSnowflake(input.channelId, "Discord Stage-instance channel ID")
+  assertStageTopic(input.topic, "Discord Stage-instance topic")
+  if (typeof input.sendStartNotification !== "boolean") {
+    throw new RangeError("Discord Stage start notification setting must be a boolean")
+  }
+}
+
+function assertModifyStageInstanceInput(
+  input: ModifyStageInstanceInput,
+): void {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || Object.keys(input).join("\0") !== "topic"
+  ) {
+    throw new RangeError("Discord Stage-instance update input is invalid")
+  }
+  assertStageTopic(input.topic, "Discord Stage-instance topic")
 }
 
 function autoModerationReturnedText(
@@ -5405,6 +5554,111 @@ export class DiscordClient {
       )
     }
     return events
+  }
+
+  async getStageInstance(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordStageInstanceSummary> {
+    assertPositiveSnowflake(channelId, "Discord Stage-instance channel ID")
+    const response = await this.#request<unknown>(
+      "get_stage_instance",
+      `/stage-instances/${channelId}`,
+      options,
+    )
+    const stageInstance = projectStageInstance(response)
+    if (stageInstance.channelId !== channelId) {
+      throw stageInstanceEvidenceError(
+        "Discord returned another Stage instance for an exact channel lookup",
+      )
+    }
+    return stageInstance
+  }
+
+  async createStageInstance(
+    input: CreateStageInstanceInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordStageInstanceSummary> {
+    assertCreateStageInstanceInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord Stage-instance audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "create_stage_instance",
+      "/stage-instances",
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          channel_id: input.channelId,
+          privacy_level: DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS.guildOnly,
+          send_start_notification: input.sendStartNotification,
+          topic: input.topic,
+        },
+      },
+    )
+    const stageInstance = projectStageInstance(response)
+    if (stageInstance.channelId !== input.channelId) {
+      throw stageInstanceEvidenceError(
+        "Discord returned another Stage instance after exact creation",
+      )
+    }
+    return stageInstance
+  }
+
+  async modifyStageInstance(
+    channelId: string,
+    input: ModifyStageInstanceInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordStageInstanceSummary> {
+    assertPositiveSnowflake(channelId, "Discord Stage-instance channel ID")
+    assertModifyStageInstanceInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord Stage-instance audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_stage_instance",
+      `/stage-instances/${channelId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { topic: input.topic },
+      },
+    )
+    const stageInstance = projectStageInstance(response)
+    if (stageInstance.channelId !== channelId) {
+      throw stageInstanceEvidenceError(
+        "Discord returned another Stage instance after an exact update",
+      )
+    }
+    return stageInstance
+  }
+
+  async deleteStageInstance(
+    channelId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord Stage-instance channel ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord Stage-instance audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_stage_instance",
+      `/stage-instances/${channelId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
   }
 
   async getGuildScheduledEvent(

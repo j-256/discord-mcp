@@ -18,6 +18,7 @@ export type DiscordGuidanceService = Pick<
   | "getGuildOnboarding"
   | "getMessage"
   | "getRole"
+  | "getStageInstance"
   | "listActivity"
   | "listAutoModerationRules"
   | "listChannels"

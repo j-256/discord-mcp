@@ -103,6 +103,12 @@ import type {
   ScheduledEventPlan,
   ScheduledEventPrivacyProjection,
 } from "../src/scheduled-event-service.js"
+import type {
+  ProjectedStageInstance,
+  StageInstanceChangeRequest,
+  StageInstancePlan,
+  StageInstancePrivacyProjection,
+} from "../src/stage-instance-service.js"
 import {
   AdministrationExecutionError,
   AttachmentMessageExecutionError,
@@ -141,6 +147,8 @@ import {
   RoleConfigurationOperationConflictError,
   ScheduledEventExecutionError,
   ScheduledEventOperationConflictError,
+  StageInstanceExecutionError,
+  StageInstanceOperationConflictError,
   ThreadCreationExecutionError,
   ThreadCreationOperationConflictError,
   WebhookDeletionExecutionError,
@@ -234,6 +242,8 @@ const AUTOMOD_OPERATION_KEY = "automod-attempt-0001"
 const SCHEDULED_EVENT_ID = "395000000000000001"
 const SCHEDULED_EVENT_OPERATION_KEY = "scheduled-event-attempt-0001"
 const SCHEDULED_EVENT_COVER_PATH = "/test/discord-mcp/reviewed-event-cover.png"
+const STAGE_INSTANCE_ID = "396000000000000001"
+const STAGE_INSTANCE_OPERATION_KEY = "stage-instance-attempt-0001"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -1478,6 +1488,110 @@ function scheduledEventPlan(
   }
 }
 
+function stageInstancePrivacy(): StageInstancePrivacyProjection {
+  return {
+    omittedFields: [
+      "audienceState",
+      "rawDiscordObject",
+      "scheduledEventObject",
+      "speakerState",
+    ],
+    rawPayloadExposed: false,
+    speakerIdentitiesExposed: false,
+    topicPersisted: false,
+  }
+}
+
+function projectedStageInstance(
+  topic = "Planning session",
+): ProjectedStageInstance {
+  return {
+    channelId: CHANNEL_ID,
+    discoverableDisabled: true,
+    guildId: GUILD_ID,
+    id: STAGE_INSTANCE_ID,
+    privacyLevel: "guild-only",
+    scheduledEventId: null,
+    topic,
+    unknownFieldCount: 0,
+  }
+}
+
+function stageInstancePlan(
+  request: StageInstanceChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): StageInstancePlan {
+  const existing = request.action === "start"
+    ? null
+    : projectedStageInstance()
+  const desired = request.action === "end"
+    ? null
+    : {
+        channelId: request.channelId,
+        guildId: request.guildId,
+        id: existing?.id ?? null,
+        privacyLevel: "guild-only" as const,
+        scheduledEventId: null,
+        topic: request.topic,
+      }
+  const requiredPermissions = [
+    "VIEW_CHANNEL",
+    "CONNECT",
+    "MANAGE_CHANNELS",
+    "MUTE_MEMBERS",
+    "MOVE_MEMBERS",
+    ...(request.action === "start" && request.sendStartNotification
+      ? ["MENTION_EVERYONE" as const]
+      : []),
+  ] as const
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    channel: {
+      guildId: request.guildId,
+      id: request.channelId,
+      name: "Private Stage channel",
+      type: "stage",
+    },
+    createdAt: "2026-08-21T00:00:00.000Z",
+    desired,
+    digest,
+    effect: effect === "none"
+      ? "none"
+      : request.action === "start"
+        ? "create"
+        : request.action === "update"
+          ? "update"
+          : "delete",
+    existing,
+    guild: { id: request.guildId, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      appliedRoleIds: [request.guildId],
+      confidence: "complete",
+      effectivePermissionNames: [...requiredPermissions],
+      effectivePermissions: requiredPermissions.reduce(
+        (bits, name) => bits | DISCORD_PERMISSIONS[name],
+        0n,
+      ).toString(),
+      guildOwner: false,
+      missingPermissions: [],
+      requiredPermissions: [...requiredPermissions],
+      unknownPermissionBits: "0",
+      warnings: [],
+    },
+    privacy: stageInstancePrivacy(),
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    warnings: ["One-shot reviewed Stage-instance change"],
+    writeRequired: effect !== "none",
+  }
+}
+
 function permissionOverwritePlan(
   request: ChannelPermissionOverwriteRequest,
   digest = DIGEST,
@@ -2386,6 +2500,10 @@ function fixturePolicy(): PolicyDescription {
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    stageChannelIds: [],
+    stageInstanceAuditEnabled: false,
+    stageInstanceChangesEnabled: false,
+    stageStartNotificationsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -2480,6 +2598,9 @@ function serviceFixture(overrides: {
   scheduledEventEffect?: "change" | "none"
   scheduledEventError?: Error
   scheduledEventPlanDigest?: string
+  stageInstanceEffect?: "change" | "none"
+  stageInstanceError?: Error
+  stageInstancePlanDigest?: string
   threadCreationError?: Error
   threadCreationPlanDigest?: string
   threadCreationWriteRequired?: boolean
@@ -2553,6 +2674,10 @@ function serviceFixture(overrides: {
     scheduledEventGet: 0,
     scheduledEventList: 0,
     scheduledEventPlan: 0,
+    stageInstanceExecute: 0,
+    stageInstanceGet: 0,
+    stageInstanceList: 0,
+    stageInstancePlan: 0,
     search: 0,
     send: 0,
     threadCreationExecute: 0,
@@ -2848,6 +2973,99 @@ function serviceFixture(overrides: {
         request,
         overrides.scheduledEventPlanDigest || DIGEST,
         overrides.scheduledEventEffect,
+      )
+    },
+    async executeStageInstanceChange(request, planDigest) {
+      if (overrides.stageInstanceError) throw overrides.stageInstanceError
+      calls.stageInstanceExecute += 1
+      const planned = stageInstancePlan(
+        request,
+        planDigest,
+        overrides.stageInstanceEffect,
+      )
+      return {
+        action: request.action,
+        activityId: planned.writeRequired ? "activity-stage-instance" : null,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        observed: request.action === "end"
+          ? null
+          : projectedStageInstance(request.topic),
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        stageInstanceId: STAGE_INSTANCE_ID,
+        status: planned.writeRequired ? "completed" : "already-current",
+      }
+    },
+    async getStageInstance(guildId, channelId) {
+      calls.stageInstanceGet += 1
+      const instance = projectedStageInstance()
+      return {
+        access: stageInstancePlan({
+          action: "update",
+          auditReason: AUDIT_REASON,
+          channelId,
+          guildId,
+          operationKey: STAGE_INSTANCE_OPERATION_KEY,
+          topic: instance.topic,
+        }).permission,
+        channel: {
+          guildId,
+          id: channelId,
+          name: "Private Stage channel",
+          type: "stage",
+        },
+        guild: { id: guildId, name: "Private guild name" },
+        instance: { ...instance, channelId, guildId },
+        privacy: stageInstancePrivacy(),
+        schemaVersion: 1,
+        status: "active",
+      }
+    },
+    async listStageInstances() {
+      calls.stageInstanceList += 1
+      const instance = projectedStageInstance()
+      return {
+        entries: [{
+          access: stageInstancePlan({
+            action: "update",
+            auditReason: AUDIT_REASON,
+            channelId: CHANNEL_ID,
+            guildId: GUILD_ID,
+            operationKey: STAGE_INSTANCE_OPERATION_KEY,
+            topic: instance.topic,
+          }).permission,
+          channel: {
+            guildId: GUILD_ID,
+            id: CHANNEL_ID,
+            name: "Private Stage channel",
+            type: "stage",
+          },
+          guild: { id: GUILD_ID, name: "Private guild name" },
+          instance,
+          privacy: stageInstancePrivacy(),
+          schemaVersion: 1,
+          status: "active",
+        }],
+        page: {
+          active: 1,
+          configured: 1,
+          inactive: 0,
+          returned: 1,
+          safetyLimit: 25,
+        },
+        privacy: stageInstancePrivacy(),
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async planStageInstanceChange(request) {
+      calls.stageInstancePlan += 1
+      return stageInstancePlan(
+        request,
+        overrides.stageInstancePlanDigest || DIGEST,
+        overrides.stageInstanceEffect,
       )
     },
     async executeGuildExpressionChange(request, planDigest) {
@@ -4085,6 +4303,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_automod_rule",
       "list_scheduled_events",
       "get_scheduled_event",
+      "list_stage_instances",
+      "get_stage_instance",
       "list_channel_permission_overwrites",
       "send_message",
       "edit_own_message",
@@ -4109,6 +4329,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_automod_change",
       "plan_scheduled_event_change",
       "execute_scheduled_event_change",
+      "plan_stage_instance_change",
+      "execute_stage_instance_change",
       "plan_channel_metadata_change",
       "execute_channel_metadata_change",
       "plan_channel_permission_overwrite",
@@ -4930,6 +5152,30 @@ test("progressive discovery enables the complete reviewed scheduled-event workfl
   )
 })
 
+test("progressive discovery enables the complete reviewed Stage-instance workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_stage_instance_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_stage_instance_change",
+    "plan_stage_instance_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_stage_instance_change",
+      "execute_stage_instance_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed channel-metadata workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -5141,6 +5387,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     scheduledEventGet: 0,
     scheduledEventList: 0,
     scheduledEventPlan: 0,
+    stageInstanceExecute: 0,
+    stageInstanceGet: 0,
+    stageInstanceList: 0,
+    stageInstancePlan: 0,
     search: 0,
     send: 0,
     threadCreationExecute: 0,
@@ -8405,6 +8655,261 @@ test("MCP scheduled event execution exposes uncertain and one-shot conflict outc
     JSON.stringify(conflictResult),
     new RegExp(SCHEDULED_EVENT_OPERATION_KEY),
   )
+})
+
+test("MCP Stage-instance reads expose bounded active state without audience data", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: {},
+    name: "list_stage_instances",
+  })
+  const exact = await client.callTool({
+    arguments: { channelId: CHANNEL_ID, guildId: GUILD_ID },
+    name: "get_stage_instance",
+  })
+  const invalid = await client.callTool({
+    arguments: { channelId: "invalid", guildId: GUILD_ID },
+    name: "get_stage_instance",
+  })
+
+  const listedContent = structuredContent(listed)
+  const exactContent = structuredContent(exact)
+  const entry = (listedContent.entries as Array<Record<string, unknown>>)[0] || {}
+  const listedInstance = entry.instance as Record<string, unknown>
+  const exactInstance = exactContent.instance as Record<string, unknown>
+  assert.equal(listedContent.status, "ok")
+  assert.equal(exactContent.status, "active")
+  assert.equal(listedInstance.id, STAGE_INSTANCE_ID)
+  assert.equal(exactInstance.privacyLevel, "guild-only")
+  assert.equal(exactInstance.scheduledEventId, null)
+  assert.equal(exactInstance.unknownFieldCount, 0)
+  assert.equal(
+    (exactContent.privacy as Record<string, unknown>).speakerIdentitiesExposed,
+    false,
+  )
+  for (const privateField of [
+    "audienceState",
+    "rawDiscordObject",
+    "scheduledEventObject",
+    "speakerState",
+  ]) {
+    assert.equal(privateField in listedInstance, false)
+    assert.equal(privateField in exactInstance, false)
+  }
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.stageInstanceList, 1)
+  assert.equal(calls.stageInstanceGet, 1)
+})
+
+test("MCP Stage-instance plans enforce exact lifecycle-specific inputs", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const validRequests = [
+    {
+      action: "start",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: STAGE_INSTANCE_OPERATION_KEY,
+      sendStartNotification: true,
+      topic: "Planning session",
+    },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: STAGE_INSTANCE_OPERATION_KEY,
+      topic: "Questions",
+    },
+    {
+      action: "end",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: STAGE_INSTANCE_OPERATION_KEY,
+    },
+  ]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_stage_instance_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(STAGE_INSTANCE_OPERATION_KEY))
+  }
+
+  const invalidRequests = [
+    { ...validRequests[0], topic: " " },
+    { ...validRequests[0], topic: "x".repeat(121) },
+    { ...validRequests[1], sendStartNotification: true },
+    { ...validRequests[2], topic: "Not accepted" },
+    { ...validRequests[2], operationKey: "short" },
+  ]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_stage_instance_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.stageInstancePlan, validRequests.length)
+})
+
+test("MCP Stage-instance execution binds signed approval to exact reviewed evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "start",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: STAGE_INSTANCE_OPERATION_KEY,
+      planDigest: DIGEST,
+      sendStartNotification: true,
+      topic: "Planning session",
+    },
+    name: "execute_stage_instance_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).stageInstanceId, STAGE_INSTANCE_ID)
+  assert.equal(calls.stageInstancePlan, 1)
+  assert.equal(calls.stageInstanceExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /MENTION_EVERYONE/)
+  assert.match(confirmationMessage, /privacyLevel.*guild-only/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /blocks later same-channel changes/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(STAGE_INSTANCE_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(STAGE_INSTANCE_OPERATION_KEY))
+})
+
+test("MCP Stage-instance execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    action: "update",
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: STAGE_INSTANCE_OPERATION_KEY,
+    planDigest: DIGEST,
+    topic: "Planning session",
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { stageInstanceEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_stage_instance_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.stageInstanceExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_stage_instance_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.stageInstanceExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { stageInstancePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_stage_instance_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.stageInstanceExecute, 0)
+})
+
+test("MCP Stage-instance execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "end",
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: STAGE_INSTANCE_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      stageInstanceError: new StageInstanceExecutionError(
+        "Discord Stage-instance outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_stage_instance_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-stage-instance",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    stageInstanceId: STAGE_INSTANCE_ID,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      stageInstanceError: new StageInstanceOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_stage_instance_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(STAGE_INSTANCE_OPERATION_KEY))
 })
 
 test("MCP channel permission overwrites expose bounded read inventory", async (context) => {

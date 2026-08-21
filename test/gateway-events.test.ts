@@ -10,6 +10,7 @@ const THREAD_ID = "200000000000000002"
 const OTHER_CHANNEL_ID = "200000000000000003"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
+const STAGE_INSTANCE_ID = "350000000000000001"
 const TOKEN = "test-discord-token"
 
 function store(options: {
@@ -198,6 +199,54 @@ test("Gateway event kinds retain only bounded identifiers", () => {
     receivedAt: "2026-08-19T00:00:03.000Z",
   })
   assert.doesNotMatch(JSON.stringify(events), new RegExp(TOKEN))
+})
+
+test("Gateway Stage-instance dispatches retain only scoped identifiers", () => {
+  const feed = store()
+  for (const dispatch of [
+    "STAGE_INSTANCE_CREATE",
+    "STAGE_INSTANCE_UPDATE",
+    "STAGE_INSTANCE_DELETE",
+  ]) {
+    assert.equal(feed.ingestDispatch(dispatch, {
+      channel_id: CHANNEL_ID,
+      guild_id: GUILD_ID,
+      guild_scheduled_event: { id: MESSAGE_ID, name: TOKEN },
+      id: STAGE_INSTANCE_ID,
+      members: [{ id: MESSAGE_ID, username: TOKEN }],
+      topic: `Private Stage topic ${TOKEN}`,
+    }), true)
+  }
+  assert.equal(feed.ingestDispatch("STAGE_INSTANCE_CREATE", {
+    channel_id: OTHER_CHANNEL_ID,
+    guild_id: GUILD_ID,
+    id: STAGE_INSTANCE_ID,
+    topic: TOKEN,
+  }), false)
+  assert.equal(feed.ingestDispatch("STAGE_INSTANCE_CREATE", {
+    channel_id: CHANNEL_ID,
+    guild_id: GUILD_ID,
+    id: "invalid",
+    topic: TOKEN,
+  }), false)
+
+  const events = feed.listEvents().events
+  assert.deepEqual(events.map((event) => event.kind), [
+    "stage-instance-created",
+    "stage-instance-updated",
+    "stage-instance-deleted",
+  ])
+  assert.deepEqual(events[0], {
+    channelId: CHANNEL_ID,
+    cursor: "gw1.testcursor12.0.1",
+    guildId: GUILD_ID,
+    kind: "stage-instance-created",
+    receivedAt: "2026-08-19T00:00:00.000Z",
+    stageInstanceId: STAGE_INSTANCE_ID,
+  })
+  const rendered = JSON.stringify(events)
+  assert.doesNotMatch(rendered, new RegExp(TOKEN))
+  assert.doesNotMatch(rendered, /topic|member|scheduledEvent|guildScheduledEvent/)
 })
 
 test("Gateway cursors report overflow, foreign processes, malformed input, and pagination", () => {

@@ -168,6 +168,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    stageChannelIds: [],
+    stageInstanceAuditEnabled: false,
+    stageInstanceChangesEnabled: false,
+    stageStartNotificationsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -449,6 +453,10 @@ test("configuration and policy require an exact administration guild and protect
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    stageChannelIds: [],
+    stageInstanceAuditEnabled: false,
+    stageInstanceChangesEnabled: false,
+    stageStartNotificationsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -1401,6 +1409,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    stageChannelIds: [],
+    stageInstanceAuditEnabled: false,
+    stageInstanceChangesEnabled: false,
+    stageStartNotificationsEnabled: false,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -1617,6 +1629,78 @@ test("configuration and policy isolate scheduled event audit, changes, and cover
   } finally {
     await rm(temporary, { force: true, recursive: true })
   }
+})
+
+test("configuration and policy isolate Stage instances to exact channels", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
+    DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
+    DISCORD_MCP_STAGE_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+  const stageChannel = channel({ type: DISCORD_CHANNEL_TYPES.stageVoice })
+
+  assert.equal(config.allowStageInstanceAudit, true)
+  assert.equal(config.allowStageInstanceChanges, true)
+  assert.equal(config.allowStageStartNotifications, true)
+  assert.deepEqual([...config.stageChannelIds], [CHANNEL_ID])
+  assert.deepEqual(policy.stageInstanceAuditChannelIds(), [CHANNEL_ID])
+  assert.equal(policy.assertStageInstanceAuditable(stageChannel), GUILD_ID)
+  assert.equal(policy.assertStageInstanceChangeAllowed(stageChannel, true), GUILD_ID)
+  assert.throws(
+    () => policy.assertStageInstanceAuditable(channel()),
+    /requires an exact Stage channel/,
+  )
+  assert.throws(
+    () => policy.assertStageInstanceAuditable(channel({
+      id: OTHER_CHANNEL_ID,
+      type: DISCORD_CHANNEL_TYPES.stageVoice,
+    })),
+    /outside the Stage-instance scope/,
+  )
+  const description = policy.describe()
+  assert.deepEqual(description.stageChannelIds, [CHANNEL_ID])
+  assert.equal(description.stageInstanceAuditEnabled, true)
+  assert.equal(description.stageInstanceChangesEnabled, true)
+  assert.equal(description.stageStartNotificationsEnabled, true)
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_STAGE_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_STAGE_CHANNEL_IDS: Array.from(
+        { length: CONNECTOR_LIMITS.stageInstanceChannels + 1 },
+        (_, index) => String(500000000000000000n + BigInt(index)),
+      ).join(","),
+    }, { homeDirectory: "/test/home" }),
+    /at most 25 unique IDs/,
+  )
 })
 
 test("configuration and policy isolate local attachments to exact channels and roots", async () => {

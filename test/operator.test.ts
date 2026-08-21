@@ -102,6 +102,10 @@ function status(
       scheduledEventCoverChangesEnabled: false,
       scheduledEventGuildIds: [],
       scheduledEventRootCount: 0,
+      stageChannelIds: [],
+      stageInstanceAuditEnabled: false,
+      stageInstanceChangesEnabled: false,
+      stageStartNotificationsEnabled: false,
       interactionChannelIds: [],
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 500,
@@ -169,10 +173,12 @@ function toolService(): DiscordToolService {
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
+    executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
+    getStageInstance: unexpected,
     getChannelWebhook: unexpected,
     getPoll: unexpected,
     getGuildInvite: unexpected,
@@ -182,6 +188,7 @@ function toolService(): DiscordToolService {
     listGuildExpressions: unexpected,
     listAutoModerationRules: unexpected,
     listScheduledEvents: unexpected,
+    listStageInstances: unexpected,
     planWebhookDeletion: unexpected,
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
@@ -189,6 +196,7 @@ function toolService(): DiscordToolService {
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
     planScheduledEventChange: unexpected,
+    planStageInstanceChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -1072,6 +1080,70 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   assert.match(omitted.warnings.join("\n"), /scheduled-events toolset/)
 })
 
+test("doctor and setup explain reviewed Stage-instance scope", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
+    DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
+    DISCORD_MCP_STAGE_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const missingChannelEnvironment = environment({
+    DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
+    DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
+  })
+  const missingChannel = await diagnoseConnector({
+    environment: missingChannelEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: missingChannelEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.stageInstanceAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.stageInstanceChangePolicy,
+  )
+  const notifications = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.stageStartNotificationPolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /privacy-safe Stage-instance inventory/i)
+  assert.match(audit?.summary || "", /1 exact Stage channels/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /signed approval/)
+  assert.match(changes?.summary || "", /ambiguity quarantine/)
+  assert.equal(notifications?.status, "pass")
+  assert.match(notifications?.summary || "", /Mention Everyone permission evidence/)
+  for (const checkId of [
+    DOCTOR_CHECK_IDS.stageInstanceAuditPolicy,
+    DOCTOR_CHECK_IDS.stageInstanceChangePolicy,
+    DOCTOR_CHECK_IDS.stageStartNotificationPolicy,
+  ]) {
+    assert.equal(
+      missingChannel.checks.find((entry) => entry.id === checkId)?.status,
+      "warn",
+    )
+  }
+  assert.match(setup.warnings.join("\n"), /Stage-instance audit toggle/)
+  assert.match(setup.warnings.join("\n"), /Stage-instance change toggle/)
+  assert.match(omitted.warnings.join("\n"), /stage-instances toolset/)
+})
+
 test("doctor and setup explain privacy-safe reviewed AutoMod scope", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
@@ -1950,6 +2022,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_role_configuration",
     "review_role_creation",
     "review_scheduled_event_change",
+    "review_stage_instance_change",
     "review_webhook_deletion",
     "search_guild_messages",
     "summarize_channel",
@@ -1972,6 +2045,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/automod-rules",
     "discord://guilds/{guildId}/bans/{userId}",
     "discord://guilds/{guildId}/channels",
+    "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/invites/{inviteRef}",
     "discord://guilds/{guildId}/members/{userId}",
@@ -1996,6 +2070,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_poll_end",
     "execute_role_configuration",
     "execute_scheduled_event_change",
+    "execute_stage_instance_change",
     "execute_webhook_deletion",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)

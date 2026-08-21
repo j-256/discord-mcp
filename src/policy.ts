@@ -80,6 +80,10 @@ export interface PolicyDescription {
   scheduledEventCoverChangesEnabled: boolean
   scheduledEventGuildIds: string[]
   scheduledEventRootCount: number
+  stageChannelIds: string[]
+  stageInstanceAuditEnabled: boolean
+  stageInstanceChangesEnabled: boolean
+  stageStartNotificationsEnabled: boolean
   threadCreationEnabled: boolean
   threadParentIds: string[]
   webhookAuditEnabled: boolean
@@ -130,6 +134,9 @@ export class ScopePolicy {
   readonly #allowRoleConfiguration: boolean
   readonly #allowScheduledEventAudit: boolean
   readonly #allowScheduledEventChanges: boolean
+  readonly #allowStageInstanceAudit: boolean
+  readonly #allowStageInstanceChanges: boolean
+  readonly #allowStageStartNotifications: boolean
   readonly #allowThreadCreation: boolean
   readonly #allowWebhookAudit: boolean
   readonly #allowWebhookDeletions: boolean
@@ -166,6 +173,7 @@ export class ScopePolicy {
   readonly #roleConfigurationIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
+  readonly #stageChannelIds: ReadonlySet<string>
   readonly #threadParentIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
 
@@ -212,6 +220,9 @@ export class ScopePolicy {
     | "allowRoleConfiguration"
     | "allowScheduledEventAudit"
     | "allowScheduledEventChanges"
+    | "allowStageInstanceAudit"
+    | "allowStageInstanceChanges"
+    | "allowStageStartNotifications"
     | "allowThreadCreation"
     | "allowWebhookAudit"
     | "allowWebhookDeletions"
@@ -242,6 +253,7 @@ export class ScopePolicy {
     | "roleConfigurationIds"
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
+    | "stageChannelIds"
     | "threadParentIds"
     | "webhookChannelIds"
   >>) {
@@ -278,6 +290,9 @@ export class ScopePolicy {
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
     this.#allowScheduledEventChanges = config.allowScheduledEventChanges ?? false
+    this.#allowStageInstanceAudit = config.allowStageInstanceAudit ?? false
+    this.#allowStageInstanceChanges = config.allowStageInstanceChanges ?? false
+    this.#allowStageStartNotifications = config.allowStageStartNotifications ?? false
     this.#allowThreadCreation = config.allowThreadCreation ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
     this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
@@ -315,6 +330,7 @@ export class ScopePolicy {
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
+    this.#stageChannelIds = config.stageChannelIds ?? new Set()
     this.#threadParentIds = config.threadParentIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
   }
@@ -428,6 +444,16 @@ export class ScopePolicy {
         && this.#scheduledEventRoots.length > 0,
       scheduledEventGuildIds: [...this.#scheduledEventGuildIds].sort(),
       scheduledEventRootCount: this.#scheduledEventRoots.length,
+      stageChannelIds: [...this.#stageChannelIds].sort(),
+      stageInstanceAuditEnabled: this.#allowStageInstanceAudit
+        && this.#stageChannelIds.size > 0,
+      stageInstanceChangesEnabled: this.#allowStageInstanceAudit
+        && this.#allowStageInstanceChanges
+        && this.#stageChannelIds.size > 0,
+      stageStartNotificationsEnabled: this.#allowStageInstanceAudit
+        && this.#allowStageInstanceChanges
+        && this.#allowStageStartNotifications
+        && this.#stageChannelIds.size > 0,
       threadCreationEnabled: this.#allowThreadCreation
         && this.#threadParentIds.size > 0,
       threadParentIds: [...this.#threadParentIds].sort(),
@@ -694,6 +720,57 @@ export class ScopePolicy {
     this.assertScheduledEventAuditable(guildId)
     if (!this.#allowScheduledEventChanges) {
       throw new PolicyError("Discord scheduled event changes are disabled by connector configuration")
+    }
+  }
+
+  stageInstanceAuditChannelIds(): string[] {
+    if (!this.#allowStageInstanceAudit) {
+      throw new PolicyError("Discord Stage-instance audit is disabled by connector configuration")
+    }
+    if (this.#stageChannelIds.size === 0) {
+      throw new PolicyError("Discord Stage-instance audit requires an explicit Stage-channel allowlist")
+    }
+    return [...this.#stageChannelIds].sort()
+  }
+
+  assertStageInstanceChannelIdAuditable(channelId: string): void {
+    this.stageInstanceAuditChannelIds()
+    if (!this.#stageChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the Stage-instance scope`)
+    }
+  }
+
+  assertStageInstanceAuditable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    this.assertStageInstanceChannelIdAuditable(channel.id)
+    if (channel.type !== DISCORD_CHANNEL_TYPES.stageVoice) {
+      throw new PolicyError("Discord Stage-instance scope requires an exact Stage channel")
+    }
+    return guildId
+  }
+
+  assertStageInstanceChangeAllowed(
+    channel: DiscordChannel,
+    sendStartNotification = false,
+  ): string {
+    const guildId = this.assertStageInstanceAuditable(channel)
+    this.assertStageInstanceChannelIdChangeAllowed(
+      channel.id,
+      sendStartNotification,
+    )
+    return guildId
+  }
+
+  assertStageInstanceChannelIdChangeAllowed(
+    channelId: string,
+    sendStartNotification = false,
+  ): void {
+    this.assertStageInstanceChannelIdAuditable(channelId)
+    if (!this.#allowStageInstanceChanges) {
+      throw new PolicyError("Discord Stage-instance changes are disabled by connector configuration")
+    }
+    if (sendStartNotification && !this.#allowStageStartNotifications) {
+      throw new PolicyError("Discord Stage start notifications are disabled by connector configuration")
     }
   }
 

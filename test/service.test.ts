@@ -17,8 +17,10 @@ import {
   DISCORD_AUTO_MODERATION_TRIGGER_TYPES,
   DISCORD_SCHEDULED_EVENT_ENTITY_TYPES,
   DISCORD_SCHEDULED_EVENT_STATUSES,
+  DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS,
   type DiscordAutoModerationRuleSummary,
   type DiscordScheduledEventSummary,
+  type DiscordStageInstanceSummary,
 } from "../src/discord-client.js"
 import {
   ConfigurationError,
@@ -63,6 +65,7 @@ const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
 const AUTOMOD_RULE_ID = "910000000000000001"
 const SCHEDULED_EVENT_ID = "930000000000000001"
+const STAGE_INSTANCE_ID = "940000000000000001"
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -209,6 +212,7 @@ function serviceFixture(overrides: {
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
   roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
+  stageInstanceOptions?: ConnectorServiceOptions["stageInstanceOptions"]
   threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
 } = {}) {
@@ -314,12 +318,16 @@ function serviceFixture(overrides: {
     async createThreadWithoutMessage() {
       throw new Error("Unexpected standalone thread creation")
     },
+    async createStageInstance() {
+      throw new Error("Unexpected Stage-instance creation")
+    },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
     async deleteGuildEmoji() {},
     async deleteGuildAutoModerationRule() {},
     async deleteGuildScheduledEvent() {},
     async deleteGuildSticker() {},
+    async deleteStageInstance() {},
     async deleteInvite() {
       throw new Error("Unexpected invite deletion")
     },
@@ -412,6 +420,9 @@ function serviceFixture(overrides: {
         tags: "wave",
         type: 2,
       }
+    },
+    async getStageInstance() {
+      throw new Error("Unexpected Stage-instance lookup")
     },
     async getMessage() {
       return message()
@@ -524,6 +535,9 @@ function serviceFixture(overrides: {
         type: 2,
       }
     },
+    async modifyStageInstance() {
+      throw new Error("Unexpected Stage-instance modification")
+    },
     async pinMessage() {},
     async removeGuildBan() {},
     async removeGuildMember() {
@@ -618,6 +632,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.scheduledEventOptions
         ? { scheduledEventOptions: overrides.scheduledEventOptions }
+        : {}),
+      ...(overrides.stageInstanceOptions
+        ? { stageInstanceOptions: overrides.stageInstanceOptions }
         : {}),
       ...(overrides.threadCreationOptions
         ? { threadCreationOptions: overrides.threadCreationOptions }
@@ -1369,6 +1386,108 @@ test("service pins identity through privacy-safe scheduled event reads and revie
   ])
   assert.equal(operationStore.receipt?.kind, "scheduled-event-change")
   assert.equal(operationStore.receipt?.resourceId, SCHEDULED_EVENT_ID)
+})
+
+test("service pins identity through privacy-safe reviewed Stage-instance lifecycle", async () => {
+  const operationStore = new MemoryOperationStore()
+  let stageInstance: DiscordStageInstanceSummary = {
+    channelId: CHANNEL_ID,
+    discoverableDisabled: true,
+    guildId: GUILD_ID,
+    id: STAGE_INSTANCE_ID,
+    privacyLevel: DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS.guildOnly,
+    scheduledEventId: null,
+    topic: "Private planning session",
+    unknownFieldCount: 0,
+  }
+  let exactReads = 0
+  let updateCalls = 0
+  const botPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.CONNECT
+    | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MUTE_MEMBERS
+    | DISCORD_PERMISSIONS.MOVE_MEMBERS
+  const { calls, service } = serviceFixture({
+    client: {
+      async getChannel() {
+        return channel({ name: "Private Stage", type: 13 })
+      },
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, botPermissions, "@everyone")]
+      },
+      async getStageInstance(channelId) {
+        assert.equal(channelId, CHANNEL_ID)
+        exactReads += 1
+        return stageInstance
+      },
+      async modifyStageInstance(channelId, input, auditReason) {
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(auditReason, "Reviewed Stage topic update")
+        updateCalls += 1
+        stageInstance = { ...stageInstance, topic: input.topic }
+        return stageInstance
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
+      DISCORD_MCP_STAGE_CHANNEL_IDS: CHANNEL_ID,
+    },
+    operationStore,
+    stageInstanceOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(30),
+      randomId: () => "activity-stage-instance-change",
+    },
+  })
+  const request = {
+    action: "update" as const,
+    auditReason: "Reviewed Stage topic update",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: "stage-instance-service-attempt-0001",
+    topic: "Release planning session",
+  }
+
+  const listed = await service.listStageInstances()
+  const exact = await service.getStageInstance(GUILD_ID, CHANNEL_ID)
+  const plan = await service.planStageInstanceChange(request)
+  const result = await service.executeStageInstanceChange(request, plan.digest)
+
+  assert.equal(listed.entries[0]?.instance?.id, STAGE_INSTANCE_ID)
+  assert.equal(exact.instance?.topic, "Private planning session")
+  assert.equal(plan.existing?.id, STAGE_INSTANCE_ID)
+  assert.deepEqual(plan.permission.requiredPermissions, [
+    "VIEW_CHANNEL",
+    "CONNECT",
+    "MANAGE_CHANNELS",
+    "MUTE_MEMBERS",
+    "MOVE_MEMBERS",
+  ])
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed?.topic, "Release planning session")
+  assert.equal(exactReads, 5)
+  assert.equal(updateCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(calls.activityEntries.map((entry) => entry.status), [
+    "pending",
+    "completed",
+  ])
+  assert.equal(operationStore.receipt?.kind, "stage-instance-change")
+  assert.equal(operationStore.receipt?.resourceId, STAGE_INSTANCE_ID)
+  assert.doesNotMatch(
+    JSON.stringify(operationStore.receipt),
+    /Private planning session|Release planning session|stage-instance-service-attempt/,
+  )
 })
 
 test("service verifies identity through reviewed channel permission changes", async () => {

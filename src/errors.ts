@@ -270,6 +270,42 @@ export class ThreadCreationEvidenceError extends Error {
   override name = "ThreadCreationEvidenceError"
 }
 
+export class StageInstancePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord Stage-instance snapshot does not match the reviewed plan")
+    this.name = "StageInstancePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class StageInstanceOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord Stage-instance operation key has already been reserved")
+    this.name = "StageInstanceOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class StageInstanceExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "StageInstanceExecutionError"
+    this.result = result
+  }
+}
+
+export class StageInstanceEvidenceError extends Error {
+  override name = "StageInstanceEvidenceError"
+}
+
 export class GuildScaffoldPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

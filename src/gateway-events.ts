@@ -29,6 +29,9 @@ export const GATEWAY_EVENT_KINDS = [
   "role-created",
   "role-deleted",
   "role-updated",
+  "stage-instance-created",
+  "stage-instance-deleted",
+  "stage-instance-updated",
   "thread-created",
   "thread-deleted",
   "thread-members-changed",
@@ -78,6 +81,7 @@ export interface ContentFreeGatewayEvent {
   parentChannelId?: string
   receivedAt: string
   roleId?: string
+  stageInstanceId?: string
 }
 
 export type GatewayCursorResetReason =
@@ -174,6 +178,7 @@ interface EventFields {
   messageIds?: string[]
   parentChannelId?: string
   roleId?: string
+  stageInstanceId?: string
 }
 
 const CURSOR_NAMESPACE_PATTERN = /^[A-Za-z0-9_-]{8,64}$/
@@ -372,6 +377,7 @@ export class GatewayEventStore implements GatewayEventSource {
       ...(fields.messageIds ? { messageIds: [...fields.messageIds] } : {}),
       ...(fields.parentChannelId ? { parentChannelId: fields.parentChannelId } : {}),
       ...(fields.roleId ? { roleId: fields.roleId } : {}),
+      ...(fields.stageInstanceId ? { stageInstanceId: fields.stageInstanceId } : {}),
     }
     this.#events.push(event)
     if (this.#events.length > this.#bufferSize) {
@@ -487,6 +493,27 @@ export class GatewayEventStore implements GatewayEventSource {
     return true
   }
 
+  #stageInstanceEvent(kind: GatewayEventKind, raw: unknown): boolean {
+    const record = recordValue(raw)
+    const guildId = snowflake(record?.guild_id)
+    const channelId = snowflake(record?.channel_id)
+    const stageInstanceId = snowflake(record?.id)
+    if (
+      !guildId
+      || !channelId
+      || !stageInstanceId
+      || !this.#guildAllowed(guildId)
+      || !this.#channelAllowed(channelId, null)
+    ) return false
+    this.#append({
+      channelId,
+      guildId,
+      kind,
+      stageInstanceId,
+    })
+    return true
+  }
+
   ingestDispatch(name: string, raw: unknown): boolean {
     if (!this.enabled) return false
     switch (name) {
@@ -574,6 +601,12 @@ export class GatewayEventStore implements GatewayEventSource {
         return this.#roleEvent("role-updated", raw)
       case "GUILD_ROLE_DELETE":
         return this.#roleEvent("role-deleted", raw)
+      case "STAGE_INSTANCE_CREATE":
+        return this.#stageInstanceEvent("stage-instance-created", raw)
+      case "STAGE_INSTANCE_UPDATE":
+        return this.#stageInstanceEvent("stage-instance-updated", raw)
+      case "STAGE_INSTANCE_DELETE":
+        return this.#stageInstanceEvent("stage-instance-deleted", raw)
       default:
         return false
     }

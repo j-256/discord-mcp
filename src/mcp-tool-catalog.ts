@@ -56,6 +56,7 @@ type McpToolWorkflow =
   | "role-creation"
   | "role-configuration"
   | "scheduled-event-change"
+  | "stage-instance-change"
   | "thread-creation"
   | "webhook-deletion"
 
@@ -185,6 +186,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "scheduled-events",
     workflow: "scheduled-event-change",
   },
+  execute_stage_instance_change: {
+    keywords: ["end", "execute", "live", "stage", "start", "topic", "update"],
+    toolset: "stage-instances",
+    workflow: "stage-instance-change",
+  },
   execute_webhook_deletion: {
     keywords: ["cleanup", "delete", "execute", "integration", "webhook"],
     toolset: "webhooks",
@@ -262,6 +268,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["calendar", "event", "exact", "guild", "schedule"],
     toolset: "scheduled-events",
   },
+  get_stage_instance: {
+    keywords: ["active", "exact", "live", "stage", "topic"],
+    toolset: "stage-instances",
+  },
   get_channel_webhook: {
     keywords: ["audit", "exact", "integration", "lookup", "webhook"],
     toolset: "webhooks",
@@ -337,6 +347,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_scheduled_events: {
     keywords: ["calendar", "event", "guild", "inventory", "list", "schedule", "subscriber"],
     toolset: "scheduled-events",
+  },
+  list_stage_instances: {
+    keywords: ["active", "configured", "inventory", "list", "live", "stage"],
+    toolset: "stage-instances",
   },
   list_channel_webhooks: {
     keywords: ["audit", "channel", "integration", "inventory", "list", "webhook"],
@@ -441,6 +455,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["calendar", "cancel", "complete", "create", "event", "plan", "review", "schedule", "transition", "update"],
     toolset: "scheduled-events",
     workflow: "scheduled-event-change",
+  },
+  plan_stage_instance_change: {
+    keywords: ["end", "live", "plan", "review", "stage", "start", "topic", "update"],
+    toolset: "stage-instances",
+    workflow: "stage-instance-change",
   },
   plan_webhook_deletion: {
     keywords: ["cleanup", "delete", "integration", "plan", "review", "webhook"],

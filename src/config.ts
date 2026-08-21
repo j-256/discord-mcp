@@ -64,6 +64,9 @@ export interface ConnectorConfig {
   allowRoleConfiguration: boolean
   allowScheduledEventAudit: boolean
   allowScheduledEventChanges: boolean
+  allowStageInstanceAudit: boolean
+  allowStageInstanceChanges: boolean
+  allowStageStartNotifications: boolean
   allowThreadCreation: boolean
   allowWebhookAudit: boolean
   allowWebhookDeletions: boolean
@@ -104,6 +107,7 @@ export interface ConnectorConfig {
   roleConfigurationIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
+  stageChannelIds: ReadonlySet<string>
   token: string
   threadParentIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
@@ -321,6 +325,11 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.threadParentIds],
     ENVIRONMENT_NAMES.threadParentIds,
   )
+  const stageChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.stageChannelIds],
+    ENVIRONMENT_NAMES.stageChannelIds,
+    CONNECTOR_LIMITS.stageInstanceChannels,
+  )
   const mentionUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.mentionUserIds],
     ENVIRONMENT_NAMES.mentionUserIds,
@@ -410,6 +419,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
+    [ENVIRONMENT_NAMES.stageChannelIds, stageChannelIds],
     [ENVIRONMENT_NAMES.threadParentIds, threadParentIds],
     [ENVIRONMENT_NAMES.webhookChannelIds, webhookChannelIds],
   ] as const) {
@@ -521,6 +531,28 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowScheduledEventChanges} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
     )
   }
+  const allowStageInstanceAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowStageInstanceAudit],
+    ENVIRONMENT_NAMES.allowStageInstanceAudit,
+  )
+  const allowStageInstanceChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowStageInstanceChanges],
+    ENVIRONMENT_NAMES.allowStageInstanceChanges,
+  )
+  if (allowStageInstanceChanges && !allowStageInstanceAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowStageInstanceChanges} requires ${ENVIRONMENT_NAMES.allowStageInstanceAudit}`,
+    )
+  }
+  const allowStageStartNotifications = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowStageStartNotifications],
+    ENVIRONMENT_NAMES.allowStageStartNotifications,
+  )
+  if (allowStageStartNotifications && !allowStageInstanceChanges) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowStageStartNotifications} requires ${ENVIRONMENT_NAMES.allowStageInstanceChanges}`,
+    )
+  }
   const allowPollAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowPollAudit],
     ENVIRONMENT_NAMES.allowPollAudit,
@@ -622,6 +654,9 @@ export function loadConnectorConfig(
     ),
     allowScheduledEventAudit,
     allowScheduledEventChanges,
+    allowStageInstanceAudit,
+    allowStageInstanceChanges,
+    allowStageStartNotifications,
     allowThreadCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowThreadCreation],
       ENVIRONMENT_NAMES.allowThreadCreation,
@@ -708,6 +743,7 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.scheduledEventRoots],
       ENVIRONMENT_NAMES.scheduledEventRoots,
     ),
+    stageChannelIds,
     token,
     threadParentIds,
     webhookChannelIds,

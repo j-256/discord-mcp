@@ -241,6 +241,16 @@ export interface DiscordRole {
   unicode_emoji?: string | null
 }
 
+export interface DiscordStageInstance {
+  channel_id: string
+  discoverable_disabled: boolean
+  guild_id: string
+  guild_scheduled_event_id?: string | null
+  id: string
+  privacy_level: number
+  topic: string
+}
+
 export interface DiscordRoleColors {
   primary_color: number
   secondary_color: number | null
