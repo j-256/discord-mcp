@@ -204,6 +204,7 @@ function serviceFixture(overrides: {
   onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
+  pollOptions?: ConnectorServiceOptions["pollOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
   roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
@@ -302,6 +303,9 @@ function serviceFixture(overrides: {
         nonce: input.nonce,
       })
     },
+    async createPoll() {
+      throw new Error("Unexpected poll creation")
+    },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
     async deleteGuildEmoji() {},
@@ -319,6 +323,9 @@ function serviceFixture(overrides: {
         author: bot(),
         content: input.content,
       })
+    },
+    async endPoll() {
+      throw new Error("Unexpected poll ending")
     },
     async getChannel() {
       return overrides.channel || channel()
@@ -449,6 +456,9 @@ function serviceFixture(overrides: {
     async listMessagePins() {
       return { has_more: false, items: [] }
     },
+    async listPollAnswerVoters() {
+      return { users: [] }
+    },
     async listChannelWebhooks() {
       return []
     },
@@ -567,6 +577,9 @@ function serviceFixture(overrides: {
       ...(overrides.operationStore ? { operationStore: overrides.operationStore } : {}),
       ...(overrides.permissionOverwriteOptions
         ? { permissionOverwriteOptions: overrides.permissionOverwriteOptions }
+        : {}),
+      ...(overrides.pollOptions
+        ? { pollOptions: overrides.pollOptions }
         : {}),
       ...(overrides.interactionOptions
         ? { interactionOptions: overrides.interactionOptions }
@@ -1835,6 +1848,112 @@ test("service verifies identity before an exact guild-scaffold no-op", async () 
   assert.equal(calls.createChannel, 0)
   assert.equal(calls.createRole, 0)
   assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through native poll audit and reviewed creation", async () => {
+  const operationStore = new MemoryOperationStore()
+  const question = "Which direction should we take?"
+  const answers = ["Reliability", "Usability"] as const
+  const pollMessage = (nonce: string): DiscordMessage => ({
+    attachments: [],
+    author: bot(),
+    channel_id: CHANNEL_ID,
+    content: "",
+    guild_id: GUILD_ID,
+    id: MESSAGE_ID,
+    nonce,
+    poll: {
+      allow_multiselect: false,
+      answers: [
+        { answer_id: 8, poll_media: { text: answers[0] } },
+        { answer_id: 2, poll_media: { text: answers[1] } },
+      ],
+      expiry: "2026-08-22T00:00:00.000Z",
+      layout_type: 1,
+      question: { text: question },
+    },
+    timestamp: "2026-08-21T00:00:00.000Z",
+    type: 0,
+  })
+  let currentMessage = pollMessage("initial-poll-nonce")
+  let createCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async createPoll(channelId, input) {
+        assert.equal(channelId, CHANNEL_ID)
+        createCalls += 1
+        currentMessage = pollMessage(input.nonce)
+        return structuredClone(currentMessage)
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES
+            | DISCORD_PERMISSIONS.SEND_POLLS,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        return structuredClone(currentMessage)
+      },
+      async listPollAnswerVoters() {
+        return {
+          users: [{ id: MEMBER_USER_ID, username: "private-voter" }],
+        }
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
+      DISCORD_MCP_ALLOW_POLL_CREATION: "true",
+      DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
+      DISCORD_MCP_POLL_CHANNEL_IDS: CHANNEL_ID,
+    },
+    operationStore,
+    pollOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(53),
+      randomId: () => "activity-poll-create",
+    },
+  })
+  const request = {
+    answers: answers.map((text) => ({ text })),
+    channelId: CHANNEL_ID,
+    operationKey: "poll-service-attempt-0001",
+    question,
+  }
+
+  await assert.rejects(
+    () => service.planPollCreation({ ...request, channelId: "bad" }),
+    /poll channel ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const read = await service.getPoll(CHANNEL_ID, MESSAGE_ID)
+  const voters = await service.listPollAnswerVoters(CHANNEL_ID, MESSAGE_ID, 8)
+  const plan = await service.planPollCreation(request)
+  const result = await service.executePollCreation(request, plan.digest)
+
+  assert.equal(read.poll.question, question)
+  assert.deepEqual(voters.voterUserIds, [MEMBER_USER_ID])
+  assert.equal(JSON.stringify(voters).includes("private-voter"), false)
+  assert.equal(plan.target.question, question)
+  assert.equal(result.status, "completed")
+  assert.equal(result.messageId, MESSAGE_ID)
+  assert.equal(createCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(JSON.stringify(calls.activityEntries).includes(question), false)
+  assert.equal(operationStore.receipt?.kind, "poll-create")
+  assert.equal(operationStore.receipt?.resourceId, MESSAGE_ID)
 })
 
 test("service pins identity through reviewed forum creation without persisting intent", async () => {

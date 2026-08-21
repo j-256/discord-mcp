@@ -64,6 +64,11 @@ export interface PolicyDescription {
   protectedUserCount: number
   pinChannelIds: string[]
   pinManagementEnabled: boolean
+  pollAuditEnabled: boolean
+  pollChannelIds: string[]
+  pollCreationEnabled: boolean
+  pollEndingEnabled: boolean
+  pollVoterAuditEnabled: boolean
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
   roleCreationEnabled: boolean
@@ -110,6 +115,10 @@ export class ScopePolicy {
   readonly #allowOnboardingChanges: boolean
   readonly #allowPermissionOverwrites: boolean
   readonly #allowPinManagement: boolean
+  readonly #allowPollAudit: boolean
+  readonly #allowPollCreation: boolean
+  readonly #allowPollEnding: boolean
+  readonly #allowPollVoterAudit: boolean
   readonly #allowGateway: boolean
   readonly #allowGuildExpressionAudit: boolean
   readonly #allowGuildExpressionChanges: boolean
@@ -149,6 +158,7 @@ export class ScopePolicy {
   readonly #permissionOverwriteChannelIds: ReadonlySet<string>
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
+  readonly #pollChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
   readonly #roleConfigurationIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
@@ -188,6 +198,10 @@ export class ScopePolicy {
     | "allowGuildScaffolds"
     | "allowPermissionOverwrites"
     | "allowPinManagement"
+    | "allowPollAudit"
+    | "allowPollCreation"
+    | "allowPollEnding"
+    | "allowPollVoterAudit"
     | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
@@ -218,6 +232,7 @@ export class ScopePolicy {
     | "onboardingGuildIds"
     | "permissionOverwriteChannelIds"
     | "pinChannelIds"
+    | "pollChannelIds"
     | "roleCreationGuildIds"
     | "roleConfigurationIds"
     | "scheduledEventGuildIds"
@@ -244,6 +259,10 @@ export class ScopePolicy {
     this.#allowOnboardingChanges = config.allowOnboardingChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
+    this.#allowPollAudit = config.allowPollAudit ?? false
+    this.#allowPollCreation = config.allowPollCreation ?? false
+    this.#allowPollEnding = config.allowPollEnding ?? false
+    this.#allowPollVoterAudit = config.allowPollVoterAudit ?? false
     this.#allowGateway = config.allowGateway ?? false
     this.#allowGuildExpressionAudit = config.allowGuildExpressionAudit ?? false
     this.#allowGuildExpressionChanges = config.allowGuildExpressionChanges ?? false
@@ -284,6 +303,7 @@ export class ScopePolicy {
     this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
+    this.#pollChannelIds = config.pollChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
@@ -370,6 +390,17 @@ export class ScopePolicy {
       protectedUserCount: this.#protectedUserIds.size,
       pinChannelIds: [...this.#pinChannelIds].sort(),
       pinManagementEnabled: this.#allowPinManagement && this.#pinChannelIds.size > 0,
+      pollAuditEnabled: this.#allowPollAudit && this.#pollChannelIds.size > 0,
+      pollChannelIds: [...this.#pollChannelIds].sort(),
+      pollCreationEnabled: this.#allowPollAudit
+        && this.#allowPollCreation
+        && this.#pollChannelIds.size > 0,
+      pollEndingEnabled: this.#allowPollAudit
+        && this.#allowPollEnding
+        && this.#pollChannelIds.size > 0,
+      pollVoterAuditEnabled: this.#allowPollAudit
+        && this.#allowPollVoterAudit
+        && this.#pollChannelIds.size > 0,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
       roleCreationEnabled: this.#allowRoleCreation
@@ -764,6 +795,44 @@ export class ScopePolicy {
     }
     if (!this.#pinChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the pin-management scope`)
+    }
+    return guildId
+  }
+
+  assertPollAuditable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowPollAudit) {
+      throw new PolicyError("Discord poll audit is disabled by connector configuration")
+    }
+    if (this.#pollChannelIds.size === 0) {
+      throw new PolicyError("Discord poll audit requires an explicit channel allowlist")
+    }
+    if (!this.#pollChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the poll scope`)
+    }
+    return guildId
+  }
+
+  assertPollVotersAuditable(channel: DiscordChannel): string {
+    const guildId = this.assertPollAuditable(channel)
+    if (!this.#allowPollVoterAudit) {
+      throw new PolicyError("Discord poll voter audit is disabled by connector configuration")
+    }
+    return guildId
+  }
+
+  assertPollCreatable(channel: DiscordChannel): string {
+    const guildId = this.assertPollAuditable(channel)
+    if (!this.#allowPollCreation) {
+      throw new PolicyError("Discord poll creation is disabled by connector configuration")
+    }
+    return guildId
+  }
+
+  assertPollEndable(channel: DiscordChannel): string {
+    const guildId = this.assertPollAuditable(channel)
+    if (!this.#allowPollEnding) {
+      throw new PolicyError("Discord poll ending is disabled by connector configuration")
     }
     return guildId
   }

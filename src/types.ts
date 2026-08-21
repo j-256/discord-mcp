@@ -145,12 +145,51 @@ export interface DiscordMessage {
   }
   nonce?: number | string | null
   pinned?: boolean
+  poll?: DiscordPoll
   reactions?: unknown[]
   referenced_message?: DiscordMessage | null
   timestamp: string
   tts?: boolean
   type: number
   webhook_id?: string
+}
+
+export interface DiscordPollMedia {
+  emoji?: {
+    animated?: boolean
+    id?: string | null
+    name?: string | null
+  } | null
+  text?: string | null
+}
+
+export interface DiscordPollAnswer {
+  answer_id: number
+  poll_media: DiscordPollMedia
+}
+
+export interface DiscordPollAnswerCount {
+  count: number
+  id: number
+  me_voted: boolean
+}
+
+export interface DiscordPollResults {
+  answer_counts: DiscordPollAnswerCount[]
+  is_finalized: boolean
+}
+
+export interface DiscordPoll {
+  allow_multiselect: boolean
+  answers: DiscordPollAnswer[]
+  expiry: string | null
+  layout_type: number
+  question: DiscordPollMedia
+  results?: DiscordPollResults
+}
+
+export interface DiscordPollVoters {
+  users: DiscordUser[]
 }
 
 export interface DiscordMessagePin {

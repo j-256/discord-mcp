@@ -56,6 +56,10 @@ export interface ConnectorConfig {
   allowOnboardingChanges: boolean
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
+  allowPollAudit: boolean
+  allowPollCreation: boolean
+  allowPollEnding: boolean
+  allowPollVoterAudit: boolean
   allowRoleCreation: boolean
   allowRoleConfiguration: boolean
   allowScheduledEventAudit: boolean
@@ -94,6 +98,7 @@ export interface ConnectorConfig {
   permissionOverwriteChannelIds: ReadonlySet<string>
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
+  pollChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
   roleConfigurationIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
@@ -302,6 +307,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.permissionOverwriteChannelIds],
     ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
   )
+  const pollChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.pollChannelIds],
+    ENVIRONMENT_NAMES.pollChannelIds,
+  )
   const forumPostChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.forumPostChannelIds],
     ENVIRONMENT_NAMES.forumPostChannelIds,
@@ -394,6 +403,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
+    [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
     [ENVIRONMENT_NAMES.webhookChannelIds, webhookChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
@@ -504,6 +514,27 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowScheduledEventChanges} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
     )
   }
+  const allowPollAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowPollAudit],
+    ENVIRONMENT_NAMES.allowPollAudit,
+  )
+  const allowPollCreation = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowPollCreation],
+    ENVIRONMENT_NAMES.allowPollCreation,
+  )
+  const allowPollEnding = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowPollEnding],
+    ENVIRONMENT_NAMES.allowPollEnding,
+  )
+  const allowPollVoterAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowPollVoterAudit],
+    ENVIRONMENT_NAMES.allowPollVoterAudit,
+  )
+  if ((allowPollCreation || allowPollEnding || allowPollVoterAudit) && !allowPollAudit) {
+    throw new ConfigurationError(
+      `Poll creation, ending, and voter audit require ${ENVIRONMENT_NAMES.allowPollAudit}`,
+    )
+  }
 
   return {
     adminGuildIds,
@@ -570,6 +601,10 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowPinManagement],
       ENVIRONMENT_NAMES.allowPinManagement,
     ),
+    allowPollAudit,
+    allowPollCreation,
+    allowPollEnding,
+    allowPollVoterAudit,
     allowRoleCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowRoleCreation],
       ENVIRONMENT_NAMES.allowRoleCreation,
@@ -654,6 +689,7 @@ export function loadConnectorConfig(
     permissionOverwriteChannelIds,
     protectedUserIds,
     pinChannelIds,
+    pollChannelIds,
     roleCreationGuildIds,
     roleConfigurationIds,
     scheduledEventGuildIds,

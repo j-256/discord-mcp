@@ -202,12 +202,15 @@ function guidanceService(options: {
     executeGuildExpressionChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
+    executePollCreation: unexpected,
+    executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
+    getPoll: unexpected,
     async getChannel(channelId) {
       calls.channelMetadata += 1
       calls.lastChannelId = channelId
@@ -638,6 +641,11 @@ function guidanceService(options: {
         protectedUserCount: 0,
         pinChannelIds: [],
         pinManagementEnabled: false,
+        pollAuditEnabled: false,
+        pollChannelIds: [],
+        pollCreationEnabled: false,
+        pollEndingEnabled: false,
+        pollVoterAuditEnabled: false,
         readChannelScope: "allowlist",
         readGuildScope: "allowlist",
         roleCreationEnabled: false,
@@ -903,6 +911,7 @@ function guidanceService(options: {
     listGuildBans: unexpected,
     listGuildMembers: unexpected,
     listMessagePins: unexpected,
+    listPollAnswerVoters: unexpected,
     async listRoles(guildId) {
       calls.roles += 1
       calls.lastGuildId = guildId
@@ -919,6 +928,8 @@ function guidanceService(options: {
     planMemberModeration: unexpected,
     planMessageDeletion: unexpected,
     planMessagePin: unexpected,
+    planPollCreation: unexpected,
+    planPollEnd: unexpected,
     planAttachmentMessage: unexpected,
     planForumPost: unexpected,
     planGuildScaffold: unexpected,

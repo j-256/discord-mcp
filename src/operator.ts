@@ -78,6 +78,10 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   onboardingChangePolicy: "onboarding-change-policy",
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
+  pollAuditPolicy: "poll-audit-policy",
+  pollCreationPolicy: "poll-creation-policy",
+  pollEndPolicy: "poll-end-policy",
+  pollVoterAuditPolicy: "poll-voter-audit-policy",
   roleCreationPolicy: "role-creation-policy",
   roleConfigurationPolicy: "role-configuration-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
@@ -233,6 +237,18 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowPinManagement && config.pinChannelIds.size === 0) {
     warnings.push("The message-pin toggle is enabled but pin management remains blocked because no pin-channel allowlist is configured")
   }
+  if (config.allowPollAudit && config.pollChannelIds.size === 0) {
+    warnings.push("The poll-audit toggle is enabled but poll reads remain blocked because no exact poll-channel allowlist is configured")
+  }
+  if (config.allowPollCreation && config.pollChannelIds.size === 0) {
+    warnings.push("The poll-creation toggle is enabled but creation remains blocked because no exact poll-channel allowlist is configured")
+  }
+  if (config.allowPollEnding && config.pollChannelIds.size === 0) {
+    warnings.push("The poll-ending toggle is enabled but ending remains blocked because no exact poll-channel allowlist is configured")
+  }
+  if (config.allowPollVoterAudit && config.pollChannelIds.size === 0) {
+    warnings.push("The poll-voter-audit toggle is enabled but voter inspection remains blocked because no exact poll-channel allowlist is configured")
+  }
   if (
     config.allowPermissionOverwrites
     && config.permissionOverwriteChannelIds.size === 0
@@ -365,6 +381,14 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowBanAudit, "bans", "Guild ban audit"],
     [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
     [config.allowPinManagement, "pins", "Message pin management"],
+    [
+      config.allowPollAudit
+        || config.allowPollCreation
+        || config.allowPollEnding
+        || config.allowPollVoterAudit,
+      "polls",
+      "Native poll audit and reviewed changes",
+    ],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
     [config.allowRoleConfiguration, "role-configuration", "Role configuration"],
@@ -630,6 +654,82 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.messagePinPolicy,
         "pass",
         `Reviewed message pin management is constrained to ${config.pinChannelIds.size} exact channels with one-shot execution and exact state plus review-snapshot readback`,
+      ))
+    }
+    if (!config.allowPollAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollAuditPolicy,
+        "pass",
+        "Native poll audit is disabled",
+      ))
+    } else if (config.pollChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollAuditPolicy,
+        "warn",
+        "Poll-audit toggle is enabled, but the required exact poll-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollAuditPolicy,
+        "pass",
+        `Native poll audit is constrained to ${config.pollChannelIds.size} exact channels with bounded transient aggregate results and no persistence`,
+      ))
+    }
+    if (!config.allowPollVoterAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollVoterAuditPolicy,
+        "pass",
+        "Poll voter audit is disabled",
+      ))
+    } else if (config.pollChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollVoterAuditPolicy,
+        "warn",
+        "Poll-voter-audit toggle is enabled, but the required exact poll-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollVoterAuditPolicy,
+        "pass",
+        `Poll voter audit is constrained to ${config.pollChannelIds.size} exact channels with bounded ID-only pages and no profile persistence`,
+      ))
+    }
+    if (!config.allowPollCreation) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollCreationPolicy,
+        "pass",
+        "Reviewed native poll creation is disabled",
+      ))
+    } else if (config.pollChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollCreationPolicy,
+        "warn",
+        "Poll-creation toggle is enabled, but the required exact poll-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollCreationPolicy,
+        "pass",
+        `Reviewed native poll creation is constrained to ${config.pollChannelIds.size} exact channels with signed approval, nonce-bound one-shot execution, and exact readback`,
+      ))
+    }
+    if (!config.allowPollEnding) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollEndPolicy,
+        "pass",
+        "Reviewed native poll ending is disabled",
+      ))
+    } else if (config.pollChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollEndPolicy,
+        "warn",
+        "Poll-ending toggle is enabled, but the required exact poll-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.pollEndPolicy,
+        "pass",
+        `Reviewed native poll ending is constrained to ${config.pollChannelIds.size} exact channels with live-count-bound approval, one-shot execution, and finalization-aware readback`,
       ))
     }
     if (!config.allowPermissionOverwrites) {
@@ -1209,6 +1309,11 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowPinManagement,
     ENVIRONMENT_NAMES.pinChannelIds,
+    ENVIRONMENT_NAMES.allowPollAudit,
+    ENVIRONMENT_NAMES.allowPollVoterAudit,
+    ENVIRONMENT_NAMES.allowPollCreation,
+    ENVIRONMENT_NAMES.allowPollEnding,
+    ENVIRONMENT_NAMES.pollChannelIds,
     ENVIRONMENT_NAMES.allowPermissionOverwrites,
     ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
     ENVIRONMENT_NAMES.allowForumPosts,
@@ -1507,6 +1612,7 @@ export async function smokeConnector(
     for (const name of [
       "delete_messages",
       "execute_member_moderation",
+      "execute_poll_end",
     ] as const) {
       if (!selectedToolNames.includes(name)) continue
       const tool = listed.tools.find((entry) => entry.name === name)
@@ -1574,6 +1680,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error("MCP smoke check found invalid execute_forum_post annotations")
+      }
+    }
+    if (selectedToolNames.includes("execute_poll_creation")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_poll_creation"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== false
+        || tool.annotations.idempotentHint !== false
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_poll_creation annotations")
       }
     }
     const interactionAnnotations = [

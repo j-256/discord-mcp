@@ -125,6 +125,11 @@ function status(
       protectedUserCount: 0,
       pinChannelIds: [],
       pinManagementEnabled: false,
+      pollAuditEnabled: false,
+      pollChannelIds: [],
+      pollCreationEnabled: false,
+      pollEndingEnabled: false,
+      pollVoterAuditEnabled: false,
       readChannelScope: "allowlist",
       readGuildScope: "allowlist",
       roleCreationEnabled: false,
@@ -159,12 +164,15 @@ function toolService(): DiscordToolService {
     executeGuildExpressionChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
+    executePollCreation: unexpected,
+    executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
+    getPoll: unexpected,
     getGuildInvite: unexpected,
     getGuildOnboarding: unexpected,
     listChannelWebhooks: unexpected,
@@ -216,9 +224,12 @@ function toolService(): DiscordToolService {
     listGuildBans: unexpected,
     listGuildMembers: unexpected,
     listMessagePins: unexpected,
+    listPollAnswerVoters: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
     planMessagePin: unexpected,
+    planPollCreation: unexpected,
+    planPollEnd: unexpected,
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
     planChannelMetadataChange: unexpected,
@@ -571,6 +582,68 @@ test("doctor and setup explain reviewed message-pin scope without Discord writes
   )
   assert.match(setup.warnings.join("\n"), /pin-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /pins toolset/)
+})
+
+test("doctor and setup explain native poll privacy and reviewed write scope", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
+    DISCORD_MCP_ALLOW_POLL_CREATION: "true",
+    DISCORD_MCP_ALLOW_POLL_ENDING: "true",
+    DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
+    DISCORD_MCP_POLL_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
+    DISCORD_MCP_ALLOW_POLL_CREATION: "true",
+    DISCORD_MCP_ALLOW_POLL_ENDING: "true",
+    DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const expected = [
+    [DOCTOR_CHECK_IDS.pollAuditPolicy, /bounded transient aggregate results/],
+    [DOCTOR_CHECK_IDS.pollVoterAuditPolicy, /bounded ID-only pages/],
+    [DOCTOR_CHECK_IDS.pollCreationPolicy, /nonce-bound one-shot execution/],
+    [DOCTOR_CHECK_IDS.pollEndPolicy, /live-count-bound approval/],
+  ] as const
+  for (const [id, summary] of expected) {
+    const entry = enabled.checks.find((check) => check.id === id)
+    assert.equal(entry?.status, "pass")
+    assert.match(entry?.summary || "", summary)
+    assert.equal(
+      warning.checks.find((check) => check.id === id)?.status,
+      "warn",
+    )
+  }
+  assert.match(setup.warnings.join("\n"), /poll-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /polls toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_POLL_AUDIT",
+    "DISCORD_MCP_ALLOW_POLL_CREATION",
+    "DISCORD_MCP_ALLOW_POLL_ENDING",
+    "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
+    "DISCORD_MCP_POLL_CHANNEL_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
 })
 
 test("doctor and setup explain credential-redacted webhook audit and cleanup", async () => {
@@ -1872,6 +1945,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_member_role_change",
     "execute_message_pin",
     "execute_onboarding_change",
+    "execute_poll_end",
     "execute_role_configuration",
     "execute_scheduled_event_change",
     "execute_webhook_deletion",
@@ -1885,10 +1959,13 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_configuration"), true)
+  assert.equal(report.readOnlyTools.includes("plan_poll_creation"), true)
+  assert.equal(report.readOnlyTools.includes("plan_poll_end"), true)
   assert.equal(report.destructiveTools.includes("execute_channel_creation"), false)
   assert.equal(report.destructiveTools.includes("execute_role_creation"), false)
   assert.equal(report.destructiveTools.includes("execute_attachment_message"), false)
   assert.equal(report.destructiveTools.includes("execute_forum_post"), false)
+  assert.equal(report.destructiveTools.includes("execute_poll_creation"), false)
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(

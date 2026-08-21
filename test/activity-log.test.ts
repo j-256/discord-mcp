@@ -26,6 +26,7 @@ import {
   type MemberRoleActivity,
   type MessagePinActivity,
   type OnboardingActivity,
+  type PollActivity,
   type RoleCreationActivity,
   type RoleConfigurationActivity,
   type ScheduledEventActivity,
@@ -197,6 +198,39 @@ function roleConfiguration(
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
     requestedFields: ["name", "grantPermissions"],
     roleId: "350",
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function pollActivity(
+  id: string,
+  kind: PollActivity["kind"],
+  status: PollActivity["status"],
+): PollActivity {
+  const terminalMessage = [
+    "completed",
+    "completed-with-drift",
+  ].includes(status)
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind,
+    messageId: terminalMessage || kind === "poll-end" && status === "pending"
+      ? "300"
+      : null,
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -682,6 +716,70 @@ test("JSONL activity log keeps role-configuration evidence content-free", async 
       "planDigest",
       "requestedFields",
       "roleId",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log strips poll content and enforces pending identity shape", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private poll question",
+    "private poll answer",
+    "private-operation-key",
+    "private voter identity",
+  ]
+
+  await store.append({
+    ...pollActivity("1", "poll-create", "pending"),
+    answers: [privateValues[1]],
+    operationKey: privateValues[2],
+    question: privateValues[0],
+    voterUserIds: [privateValues[3]],
+  } as PollActivity)
+  await store.append({
+    ...pollActivity("2", "poll-end", "completed-with-drift"),
+    answers: [privateValues[1]],
+    question: privateValues[0],
+  } as PollActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...pollActivity("3", "poll-create", "pending"),
+      messageId: "300",
+    })}\n${JSON.stringify({
+      ...pollActivity("4", "poll-end", "pending"),
+      messageId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 2)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "messageId",
+      "operationKeyHash",
+      "planDigest",
       "schemaVersion",
       "status",
       "timestamp",

@@ -11,6 +11,7 @@ import {
   INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
   ONBOARDING_LIMITS,
+  POLL_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -57,6 +58,7 @@ import type {
   DiscordMessageSearchIndexing,
   DiscordMessageSearchResponse,
   DiscordPermissionOverwrite,
+  DiscordPollVoters,
   DiscordRole,
   DiscordThreadList,
   DiscordThreadMember,
@@ -582,6 +584,9 @@ const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const CHANNEL_TOPIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const ROLE_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const EXPRESSION_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const POLL_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const POLL_EMOJI_CONTROL_OR_SPACE_PATTERN = /[\u0000-\u0020\u007F]/u
+const POLL_EMOJI_CODE_POINT_PATTERN = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3)/u
 const ALLOWED_MENTION_PARSE_KEYS = ["parse", "replied_user"] as const
 const ALLOWED_MENTION_USER_KEYS = ["replied_user", "users"] as const
 const EMOJI_FORMAT_MEDIA_TYPES: Readonly<Record<EmojiFileFormat, string>> = Object.freeze({
@@ -688,6 +693,22 @@ export interface CreateMessageInput {
     guildId: string
     messageId: string
   }
+}
+
+export interface CreatePollInput {
+  allowMultiselect: boolean
+  answers: ReadonlyArray<{
+    emoji?: string
+    text: string
+  }>
+  durationHours: number
+  nonce: string
+  question: string
+}
+
+export interface PollVoterPageOptions extends RequestOptions {
+  after?: string
+  limit?: number
 }
 
 export interface CreateAttachmentMessageInput {
@@ -3022,6 +3043,81 @@ function assertMessageContent(content: string): void {
   if (content.length > DISCORD_LIMITS.messageContentCharacters) {
     throw new RangeError(
       `Discord message content must not exceed ${DISCORD_LIMITS.messageContentCharacters} characters`,
+    )
+  }
+}
+
+function assertPollText(value: string, maximum: number, name: string): void {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > maximum
+    || value.trim() !== value
+    || POLL_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(`${name} must contain 1-${maximum} trimmed characters without controls`)
+  }
+  assertValidUnicode(value, name)
+}
+
+function assertPollEmoji(value: string): void {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > CONNECTOR_LIMITS.interactionEmojiCharacters
+    || POLL_EMOJI_CONTROL_OR_SPACE_PATTERN.test(value)
+  ) {
+    throw new RangeError("Discord poll answer emoji is invalid")
+  }
+  const segments = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(value)]
+  if (segments.length !== 1 || !POLL_EMOJI_CODE_POINT_PATTERN.test(value)) {
+    throw new RangeError("Discord poll answer emoji must be one Unicode emoji")
+  }
+}
+
+function assertCreatePollInput(input: CreatePollInput): void {
+  assertPollText(input.question, POLL_LIMITS.questionCharacters, "Discord poll question")
+  if (
+    !Array.isArray(input.answers)
+    || input.answers.length < POLL_LIMITS.answersMinimum
+    || input.answers.length > POLL_LIMITS.answers
+  ) {
+    throw new RangeError(
+      `Discord poll answers must contain ${POLL_LIMITS.answersMinimum}-${POLL_LIMITS.answers} entries`,
+    )
+  }
+  const logicalAnswers = new Set<string>()
+  for (const answer of input.answers) {
+    if (!answer || typeof answer !== "object" || Array.isArray(answer)) {
+      throw new RangeError("Discord poll answers must be objects")
+    }
+    assertPollText(answer.text, POLL_LIMITS.answerCharacters, "Discord poll answer")
+    const logical = answer.text.normalize("NFKC").toLocaleLowerCase("en-US")
+    if (logicalAnswers.has(logical)) {
+      throw new RangeError("Discord poll answers must be logically unique")
+    }
+    logicalAnswers.add(logical)
+    if (answer.emoji !== undefined) assertPollEmoji(answer.emoji)
+  }
+  if (
+    !Number.isInteger(input.durationHours)
+    || input.durationHours < 1
+    || input.durationHours > POLL_LIMITS.durationHours
+  ) {
+    throw new RangeError(
+      `Discord poll duration must be an integer between 1 and ${POLL_LIMITS.durationHours} hours`,
+    )
+  }
+  if (typeof input.allowMultiselect !== "boolean") {
+    throw new RangeError("Discord poll multiselect setting must be a boolean")
+  }
+  if (
+    typeof input.nonce !== "string"
+    || input.nonce.length < 1
+    || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters
+  ) {
+    throw new RangeError(
+      `Discord poll nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
     )
   }
 }
@@ -5789,6 +5885,33 @@ export class DiscordClient {
     return this.#request("get_message", `/channels/${channelId}/messages/${messageId}`, options)
   }
 
+  listPollAnswerVoters(
+    channelId: string,
+    messageId: string,
+    answerId: number,
+    options: PollVoterPageOptions = {},
+  ): Promise<DiscordPollVoters> {
+    assertSearchSnowflake(channelId, "Discord poll channel ID")
+    assertSearchSnowflake(messageId, "Discord poll message ID")
+    if (!Number.isSafeInteger(answerId) || answerId < 1) {
+      throw new RangeError("Discord poll answer ID must be a positive safe integer")
+    }
+    assertSearchSnowflake(options.after, "Discord poll voter cursor")
+    assertBoundedLimit(
+      options.limit,
+      POLL_LIMITS.voterPage,
+      "Discord poll voter page limit",
+    )
+    return this.#request(
+      "list_poll_answer_voters",
+      `/channels/${channelId}/polls/${messageId}/answers/${answerId}${queryString({
+        after: options.after,
+        limit: options.limit,
+      })}`,
+      options,
+    )
+  }
+
   listMessagePins(
     channelId: string,
     options: MessagePinPageOptions = {},
@@ -5881,6 +6004,52 @@ export class DiscordClient {
         nonce: input.nonce,
       },
     })
+  }
+
+  createPoll(
+    channelId: string,
+    input: CreatePollInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord poll channel ID")
+    assertCreatePollInput(input)
+    return this.#request("create_poll", `/channels/${channelId}/messages`, {
+      ...options,
+      automaticRateLimitRetry: false,
+      body: {
+        enforce_nonce: true,
+        nonce: input.nonce,
+        poll: {
+          allow_multiselect: input.allowMultiselect,
+          answers: input.answers.map((answer) => ({
+            poll_media: {
+              ...(answer.emoji !== undefined ? { emoji: { name: answer.emoji } } : {}),
+              text: answer.text,
+            },
+          })),
+          duration: input.durationHours,
+          layout_type: 1,
+          question: { text: input.question },
+        },
+      },
+    })
+  }
+
+  endPoll(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord poll channel ID")
+    assertSearchSnowflake(messageId, "Discord poll message ID")
+    return this.#request(
+      "end_poll",
+      `/channels/${channelId}/polls/${messageId}/expire`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+      },
+    )
   }
 
   createAttachmentMessage(

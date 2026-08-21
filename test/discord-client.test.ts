@@ -1752,6 +1752,163 @@ test("Discord client sends safe message, edit, and own-reaction wire contracts",
   ])
 })
 
+test("Discord client sends one nonce-enforced native poll without automatic retries", async () => {
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({ body, method: init?.method || "GET", url: String(input) })
+      return jsonResponse({
+        author: { bot: true, id: "400", username: "bot" },
+        channel_id: "200",
+        content: "",
+        guild_id: "100",
+        id: "300",
+        nonce: "stable-poll-nonce",
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: 0,
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.createPoll("200", {
+    allowMultiselect: true,
+    answers: [
+      { emoji: "👍", text: "Ship it" },
+      { text: "Revise it" },
+    ],
+    durationHours: 48,
+    nonce: "stable-poll-nonce",
+    question: "What should we do?",
+  })
+
+  assert.deepEqual(requests, [{
+    body: {
+      enforce_nonce: true,
+      nonce: "stable-poll-nonce",
+      poll: {
+        allow_multiselect: true,
+        answers: [
+          { poll_media: { emoji: { name: "👍" }, text: "Ship it" } },
+          { poll_media: { text: "Revise it" } },
+        ],
+        duration: 48,
+        layout_type: 1,
+        question: { text: "What should we do?" },
+      },
+    },
+    method: "POST",
+    url: `${API_BASE_URL}/channels/200/messages`,
+  }])
+  assert.deepEqual(records.map(({ operation, retries }) => ({ operation, retries })), [{
+    operation: "create_poll",
+    retries: 0,
+  }])
+})
+
+test("Discord client uses bounded poll voter and non-retried end routes", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      if (init?.method === "GET") {
+        return jsonResponse({ users: [{ id: "500", username: "private-name" }] })
+      }
+      return jsonResponse({
+        author: { bot: true, id: "400", username: "bot" },
+        channel_id: "200",
+        content: "",
+        guild_id: "100",
+        id: "300",
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: 0,
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const voters = await client.listPollAnswerVoters("200", "300", 7, {
+    after: "499",
+    limit: 25,
+  })
+  await client.endPoll("200", "300")
+
+  assert.equal(voters.users[0]?.username, "private-name")
+  assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: `${API_BASE_URL}/channels/200/polls/300/answers/7?after=499&limit=25`,
+    },
+    {
+      method: "POST",
+      url: `${API_BASE_URL}/channels/200/polls/300/expire`,
+    },
+  ])
+  assert.deepEqual(records.map(({ operation, retries }) => ({ operation, retries })), [
+    { operation: "list_poll_answer_voters", retries: 0 },
+    { operation: "end_poll", retries: 0 },
+  ])
+})
+
+test("Discord client rejects unsafe poll wire inputs before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const valid = {
+    allowMultiselect: false,
+    answers: [{ text: "Yes" }, { text: "No" }],
+    durationHours: 24,
+    nonce: "poll-nonce",
+    question: "Proceed?",
+  }
+
+  assert.throws(() => client.createPoll("invalid", valid), /channel ID/)
+  assert.throws(
+    () => client.createPoll("200", { ...valid, answers: [{ text: "Only one" }] }),
+    /2-10 entries/,
+  )
+  assert.throws(
+    () => client.createPoll("200", {
+      ...valid,
+      answers: [{ text: "Same" }, { text: "Ｓａｍｅ" }],
+    }),
+    /logically unique/,
+  )
+  assert.throws(
+    () => client.createPoll("200", {
+      ...valid,
+      answers: [{ emoji: "not-emoji", text: "Yes" }, { text: "No" }],
+    }),
+    /one Unicode emoji/,
+  )
+  assert.throws(
+    () => client.createPoll("200", { ...valid, durationHours: 769 }),
+    /between 1 and 768 hours/,
+  )
+  assert.throws(() => client.listPollAnswerVoters("200", "300", 0), /answer ID/)
+  assert.throws(
+    () => client.listPollAnswerVoters("200", "300", 1, { limit: 101 }),
+    /between 1 and 100/,
+  )
+  assert.throws(() => client.endPoll("200", "invalid"), /message ID/)
+  assert.equal(requests, 0)
+})
+
 test("Discord client sends one bounded attachment through native multipart form data", async () => {
   let contentType: string | null = "unexpected"
   let file: File | undefined

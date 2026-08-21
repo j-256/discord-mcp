@@ -77,6 +77,13 @@ import type {
   OnboardingPrivacyProjection,
 } from "../src/onboarding-service.js"
 import type {
+  PollCreationPlan,
+  PollCreationRequest,
+  PollEndPlan,
+  PollEndRequest,
+  PollReadResult,
+} from "../src/poll-service.js"
+import type {
   MemberRoleChangePlan,
   MemberRoleChangeRequest,
 } from "../src/member-role-service.js"
@@ -126,6 +133,8 @@ import {
   MemberRolePlanChangedError,
   OnboardingExecutionError,
   OnboardingOperationConflictError,
+  PollExecutionError,
+  PollOperationConflictError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
   RoleConfigurationExecutionError,
@@ -188,6 +197,11 @@ const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
+const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
+const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
+const POLL_QUESTION = "Which release theme should we choose?"
+const POLL_ANSWER_ONE = "Reliability"
+const POLL_ANSWER_TWO = "Usability"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
@@ -360,6 +374,173 @@ function messagePinPlan(
       pinned: desiredPinned,
     },
     warnings: ["One-shot reviewed message pin change"],
+  }
+}
+
+function pollRead(
+  channelId = CHANNEL_ID,
+  messageId = MESSAGE_ID,
+  ended = false,
+): PollReadResult {
+  return {
+    author: {
+      bot: true,
+      id: BOT_ID,
+      webhook: false,
+    },
+    channelId,
+    createdAt: "2026-08-20T00:00:00.000Z",
+    editedAt: null,
+    guildId: GUILD_ID,
+    messageId,
+    poll: {
+      allowMultiselect: false,
+      answers: [
+        {
+          answerId: 7,
+          count: 4,
+          emoji: {
+            animated: null,
+            id: null,
+            name: "🔒",
+            type: "unicode",
+          },
+          meVoted: false,
+          text: POLL_ANSWER_ONE,
+        },
+        {
+          answerId: 3,
+          count: 0,
+          emoji: null,
+          meVoted: false,
+          text: POLL_ANSWER_TWO,
+        },
+      ],
+      expiry: ended
+        ? "2026-08-20T00:30:00.000Z"
+        : "2026-08-21T00:00:00.000Z",
+      layoutType: 1,
+      lifecycleState: ended ? "ended" : "active",
+      question: POLL_QUESTION,
+      resultState: ended ? "final" : "approximate",
+      resultsFinalized: ended,
+      totalVotes: 4,
+      unknownFieldCount: 0,
+    },
+    privacy: {
+      persistence: "none",
+      rawPayloads: "omitted",
+      voterIdentities: "not-fetched",
+    },
+    schemaVersion: 1,
+    status: "ok",
+    url: `https://discord.com/channels/${GUILD_ID}/${channelId}/${messageId}`,
+  }
+}
+
+function pollCreationPlan(
+  request: PollCreationRequest,
+  digest = DIGEST,
+): PollCreationPlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      parentId: null,
+      type: 0,
+    },
+    createdAt: "2026-08-20T00:00:00.000Z",
+    digest,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "SEND_MESSAGES",
+        "READ_MESSAGE_HISTORY",
+        "SEND_POLLS",
+      ],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.SEND_MESSAGES
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.SEND_POLLS
+      ).toString(),
+      permissionSourceChannelId: request.channelId,
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "SEND_MESSAGES",
+        "SEND_POLLS",
+      ],
+    },
+    privacy: {
+      persistence: "content-free-only",
+      rawPayloads: "omitted",
+      text: "transient",
+      voterIdentities: "not-fetched",
+    },
+    risks: ["Poll messages cannot be edited"],
+    schemaVersion: 1,
+    status: "planned",
+    target: {
+      allowMultiselect: request.allowMultiselect ?? false,
+      answers: request.answers.map((answer) => ({
+        emoji: answer.emoji ?? null,
+        text: answer.text,
+      })),
+      durationHours: request.durationHours ?? 24,
+      question: request.question,
+    },
+    warnings: ["Poll text is transient"],
+    writeRequired: true,
+  }
+}
+
+function pollEndPlan(
+  request: PollEndRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): PollEndPlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      parentId: null,
+      type: 0,
+    },
+    createdAt: "2026-08-20T00:00:00.000Z",
+    digest,
+    messageId: request.messageId,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+      ).toString(),
+      permissionSourceChannelId: request.channelId,
+      requiredPermissionNames: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+    },
+    poll: pollRead(request.channelId, request.messageId, !writeRequired).poll,
+    privacy: {
+      persistence: "content-free-only",
+      rawPayloads: "omitted",
+      text: "transient",
+      voterIdentities: "not-fetched",
+    },
+    risks: ["Ending a poll is irreversible"],
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-ended",
+    warnings: ["Vote-count changes invalidate the plan"],
+    writeRequired,
   }
 }
 
@@ -2124,6 +2305,11 @@ function fixturePolicy(): PolicyDescription {
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,
+    pollAuditEnabled: false,
+    pollChannelIds: [],
+    pollCreationEnabled: false,
+    pollEndingEnabled: false,
+    pollVoterAuditEnabled: false,
     readChannelScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
@@ -2174,6 +2360,11 @@ function serviceFixture(overrides: {
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
   planDigest?: string
+  pollCreationError?: Error
+  pollCreationPlanDigest?: string
+  pollEndError?: Error
+  pollEndPlanDigest?: string
+  pollEndWriteRequired?: boolean
   roleCreationAction?: "create" | "none"
   roleCreationError?: Error
   roleCreationPlanDigest?: string
@@ -2238,6 +2429,12 @@ function serviceFixture(overrides: {
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
     plan: 0,
+    pollCreationExecute: 0,
+    pollCreationPlan: 0,
+    pollEndExecute: 0,
+    pollEndPlan: 0,
+    pollGet: 0,
+    pollVoters: 0,
     principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
@@ -2877,6 +3074,45 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
       }
     },
+    async executePollCreation(request, planDigest) {
+      if (overrides.pollCreationError) throw overrides.pollCreationError
+      calls.pollCreationExecute += 1
+      return {
+        activityId: "activity-poll-create",
+        channelId: request.channelId,
+        expiryMatched: true,
+        guildId: GUILD_ID,
+        messageId: MESSAGE_ID,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${MESSAGE_ID}`,
+        verification: "match",
+      }
+    },
+    async executePollEnd(request, planDigest) {
+      if (overrides.pollEndError) throw overrides.pollEndError
+      calls.pollEndExecute += 1
+      const writeRequired = overrides.pollEndWriteRequired ?? true
+      return {
+        activityId: writeRequired ? "activity-poll-end" : null,
+        channelId: request.channelId,
+        finalization: writeRequired ? "final" : "not-required",
+        guildId: GUILD_ID,
+        messageId: request.messageId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: writeRequired ? "completed" : "already-ended",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+        verification: writeRequired ? "match" : "not-required",
+      }
+    },
     async executeMemberRoleChange(request, planDigest) {
       if (overrides.memberRoleError) throw overrides.memberRoleError
       calls.memberRoleExecute += 1
@@ -3048,6 +3284,10 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: "ok",
       }
+    },
+    async getPoll(channelId, messageId) {
+      calls.pollGet += 1
+      return pollRead(channelId, messageId)
     },
     async getGuildAuditEntry(guildId, entryId, options) {
       return {
@@ -3366,6 +3606,28 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listPollAnswerVoters(channelId, messageId, answerId, options) {
+      calls.pollVoters += 1
+      return {
+        answerId,
+        channelId,
+        guildId: GUILD_ID,
+        messageId,
+        page: {
+          after: options?.after ?? null,
+          nextAfter: null,
+          requestedLimit: options?.limit ?? 25,
+          returned: 1,
+        },
+        privacy: {
+          persistence: "none",
+          profileFields: "omitted",
+        },
+        schemaVersion: 1,
+        status: "ok",
+        voterUserIds: [USER_ID],
+      }
+    },
     async listRoles(guildId) {
       calls.listRoles += 1
       return {
@@ -3441,6 +3703,21 @@ function serviceFixture(overrides: {
         request,
         overrides.messagePinPlanDigest || DIGEST,
         overrides.messagePinAction,
+      )
+    },
+    async planPollCreation(request) {
+      calls.pollCreationPlan += 1
+      return pollCreationPlan(
+        request,
+        overrides.pollCreationPlanDigest || DIGEST,
+      )
+    },
+    async planPollEnd(request) {
+      calls.pollEndPlan += 1
+      return pollEndPlan(
+        request,
+        overrides.pollEndPlanDigest || DIGEST,
+        overrides.pollEndWriteRequired ?? true,
       )
     },
     async planRoleCreation(request) {
@@ -3647,6 +3924,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "read_messages",
       "search_messages",
       "get_message",
+      "get_poll",
+      "list_poll_answer_voters",
       "list_message_pins",
       "list_channel_webhooks",
       "get_channel_webhook",
@@ -3662,6 +3941,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "send_message",
       "edit_own_message",
       "add_reaction",
+      "plan_poll_creation",
+      "execute_poll_creation",
+      "plan_poll_end",
+      "execute_poll_end",
       "plan_message_deletion",
       "delete_messages",
       "plan_message_pin",
@@ -3704,6 +3987,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
+  const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
   const onboarding = result.tools.find((tool) => tool.name === "execute_onboarding_change")
@@ -3731,6 +4015,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   for (const tool of [
     deletion,
     messagePin,
+    pollEnd,
     webhookDeletion,
     inviteDeletion,
     onboarding,
@@ -3761,6 +4046,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   for (const name of [
     "list_channel_permission_overwrites",
     "list_message_pins",
+    "get_poll",
+    "list_poll_answer_voters",
     "list_channel_webhooks",
     "get_channel_webhook",
     "list_guild_invites",
@@ -3776,6 +4063,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_channel_metadata_change",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
+    "plan_poll_creation",
+    "plan_poll_end",
     "plan_member_role_change",
     "plan_webhook_deletion",
     "plan_invite_deletion",
@@ -3822,6 +4111,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     tool.name === "execute_forum_post"
   ))
   assert.deepEqual(forumPost?.annotations, {
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  const pollCreation = result.tools.find((tool) => (
+    tool.name === "execute_poll_creation"
+  ))
+  assert.deepEqual(pollCreation?.annotations, {
     destructiveHint: false,
     idempotentHint: false,
     openWorldHint: true,
@@ -4256,6 +4554,54 @@ test("progressive discovery enables the complete reviewed message-pin workflow",
   )
 })
 
+test("progressive discovery enables the complete reviewed poll-creation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_poll_creation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_poll_creation",
+    "plan_poll_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_poll_creation",
+      "execute_poll_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed poll-ending workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_poll_end" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_poll_end",
+    "plan_poll_end",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_poll_end",
+      "execute_poll_end",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed webhook-deletion workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -4596,6 +4942,12 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
     plan: 0,
+    pollCreationExecute: 0,
+    pollCreationPlan: 0,
+    pollEndExecute: 0,
+    pollEndPlan: 0,
+    pollGet: 0,
+    pollVoters: 0,
     principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
@@ -5695,6 +6047,304 @@ test("MCP message pins expose uncertain and one-shot conflict outcomes safely", 
     JSON.stringify(conflictResult),
     new RegExp(MESSAGE_PIN_OPERATION_KEY),
   )
+})
+
+test("MCP poll reads preserve exact answer IDs and return voter IDs only", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const exact = await client.callTool({
+    arguments: { channelId: CHANNEL_ID, messageId: MESSAGE_ID },
+    name: "get_poll",
+  })
+  const voters = await client.callTool({
+    arguments: {
+      answerId: 7,
+      channelId: CHANNEL_ID,
+      limit: 25,
+      messageId: MESSAGE_ID,
+    },
+    name: "list_poll_answer_voters",
+  })
+  const invalid = await client.callTool({
+    arguments: {
+      answerId: 0,
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+    },
+    name: "list_poll_answer_voters",
+  })
+
+  const exactPoll = structuredContent(exact).poll as {
+    answers: Array<{ answerId: number }>
+    question: string
+    resultState: string
+  }
+  assert.deepEqual(exactPoll.answers.map(({ answerId }) => answerId), [7, 3])
+  assert.equal(exactPoll.question, POLL_QUESTION)
+  assert.equal(exactPoll.resultState, "approximate")
+  assert.deepEqual(structuredContent(voters).voterUserIds, [USER_ID])
+  assert.equal(JSON.stringify(voters).includes("username"), false)
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.pollGet, 1)
+  assert.equal(calls.pollVoters, 1)
+})
+
+test("MCP poll planning enforces bounded exact creation and ending inputs", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const created = await client.callTool({
+    arguments: {
+      answers: [
+        { emoji: "🔒", text: POLL_ANSWER_ONE },
+        { text: POLL_ANSWER_TWO },
+      ],
+      channelId: CHANNEL_ID,
+      operationKey: POLL_CREATION_OPERATION_KEY,
+      question: POLL_QUESTION,
+    },
+    name: "plan_poll_creation",
+  })
+  const ended = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: POLL_END_OPERATION_KEY,
+    },
+    name: "plan_poll_end",
+  })
+  const tooFewAnswers = await client.callTool({
+    arguments: {
+      answers: [{ text: POLL_ANSWER_ONE }],
+      channelId: CHANNEL_ID,
+      operationKey: POLL_CREATION_OPERATION_KEY,
+      question: POLL_QUESTION,
+    },
+    name: "plan_poll_creation",
+  })
+  const tooLongDuration = await client.callTool({
+    arguments: {
+      answers: [{ text: POLL_ANSWER_ONE }, { text: POLL_ANSWER_TWO }],
+      channelId: CHANNEL_ID,
+      durationHours: 769,
+      operationKey: POLL_CREATION_OPERATION_KEY,
+      question: POLL_QUESTION,
+    },
+    name: "plan_poll_creation",
+  })
+
+  assert.equal(structuredContent(created).status, "planned")
+  assert.equal(
+    (structuredContent(created).target as Record<string, unknown>).durationHours,
+    24,
+  )
+  assert.equal(structuredContent(ended).status, "planned")
+  assert.equal(tooFewAnswers.isError, true)
+  assert.equal(tooLongDuration.isError, true)
+  assert.equal(calls.pollCreationPlan, 1)
+  assert.equal(calls.pollEndPlan, 1)
+})
+
+test("MCP poll creation binds signed approval to every immutable field", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      allowMultiselect: true,
+      answers: [
+        { emoji: "🔒", text: POLL_ANSWER_ONE },
+        { text: POLL_ANSWER_TWO },
+      ],
+      channelId: CHANNEL_ID,
+      durationHours: 72,
+      operationKey: POLL_CREATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      question: POLL_QUESTION,
+    },
+    name: "execute_poll_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.pollCreationPlan, 1)
+  assert.equal(calls.pollCreationExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(POLL_QUESTION.replace("?", "\\?")))
+  assert.match(confirmationMessage, new RegExp(POLL_ANSWER_ONE))
+  assert.match(confirmationMessage, /Duration hours: 72/u)
+  assert.match(confirmationMessage, /Allow multiple answers: true/u)
+  assert.match(confirmationMessage, /SEND_POLLS/u)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted transient Discord data/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(POLL_CREATION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(POLL_CREATION_OPERATION_KEY),
+  )
+})
+
+test("MCP poll ending binds signed approval to exact live counts", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: POLL_END_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_poll_end",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.pollEndPlan, 1)
+  assert.equal(calls.pollEndExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Answer ID 7/u)
+  assert.match(confirmationMessage, /count 4/u)
+  assert.match(confirmationMessage, /Ending a poll is irreversible/u)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(confirmationMessage, new RegExp(POLL_END_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(POLL_END_OPERATION_KEY))
+})
+
+test("MCP poll writes stop on refusal or drift and skip approval for an ended poll", async (context) => {
+  const declinedCreation = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedCreationResult = await declinedCreation.client.callTool({
+    arguments: {
+      answers: [{ text: POLL_ANSWER_ONE }, { text: POLL_ANSWER_TWO }],
+      channelId: CHANNEL_ID,
+      operationKey: POLL_CREATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      question: POLL_QUESTION,
+    },
+    name: "execute_poll_creation",
+  })
+  assert.equal(structuredContent(declinedCreationResult).status, "confirmation-declined")
+  assert.equal(declinedCreation.calls.pollCreationExecute, 0)
+
+  let changedConfirmations = 0
+  const changedEnd = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { pollEndPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedEndResult = await changedEnd.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: POLL_END_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_poll_end",
+  })
+  assert.equal(structuredContent(changedEndResult).status, "plan-changed")
+  assert.equal(changedEndResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changedEnd.calls.pollEndExecute, 0)
+
+  let noOpConfirmations = 0
+  const noOpEnd = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { pollEndWriteRequired: false },
+  })
+  const noOpEndResult = await noOpEnd.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: POLL_END_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_poll_end",
+  })
+  assert.equal(structuredContent(noOpEndResult).status, "already-ended")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOpEnd.calls.pollEndExecute, 1)
+})
+
+test("MCP poll writes expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      pollCreationError: new PollExecutionError(
+        "Discord poll creation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      answers: [{ text: POLL_ANSWER_ONE }, { text: POLL_ANSWER_TWO }],
+      channelId: CHANNEL_ID,
+      operationKey: POLL_CREATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      question: POLL_QUESTION,
+    },
+    name: "execute_poll_creation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-poll-end",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    planDigest: DIGEST,
+    status: "completed",
+    timestamp: "2026-08-20T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      pollEndError: new PollOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: POLL_END_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_poll_end",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(POLL_END_OPERATION_KEY))
 })
 
 test("MCP webhook reads expose only bounded credential-redacted evidence", async (context) => {

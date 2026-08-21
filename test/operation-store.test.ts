@@ -138,6 +138,8 @@ test("file operation store isolates every durable write operation-key domain", a
   const onboarding = { ...receipt(), kind: "onboarding-change" as const }
   const memberRole = { ...receipt(), kind: "member-role-change" as const }
   const pin = { ...receipt(), kind: "message-pin" as const }
+  const pollCreate = { ...receipt(), kind: "poll-create" as const }
+  const pollEnd = { ...receipt(), kind: "poll-end" as const }
   const role = { ...receipt(), kind: "role-creation" as const }
   const scheduledEvent = { ...receipt(), kind: "scheduled-event-change" as const }
   const webhook = { ...receipt(), kind: "webhook-deletion" as const }
@@ -153,6 +155,8 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(onboarding)).created, true)
   assert.equal((await store.reserve(memberRole)).created, true)
   assert.equal((await store.reserve(pin)).created, true)
+  assert.equal((await store.reserve(pollCreate)).created, true)
+  assert.equal((await store.reserve(pollEnd)).created, true)
   assert.equal((await store.reserve(role)).created, true)
   assert.equal((await store.reserve(scheduledEvent)).created, true)
   assert.equal((await store.reserve(webhook)).created, true)
@@ -199,6 +203,14 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("message-pin", pin.operationKeyHash),
     pin,
+  )
+  assert.deepEqual(
+    await store.get("poll-create", pollCreate.operationKeyHash),
+    pollCreate,
+  )
+  assert.deepEqual(
+    await store.get("poll-end", pollEnd.operationKeyHash),
+    pollEnd,
   )
   assert.deepEqual(
     await store.get("role-creation", role.operationKeyHash),

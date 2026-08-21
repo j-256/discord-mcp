@@ -191,6 +191,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,
+    pollAuditEnabled: false,
+    pollChannelIds: [],
+    pollCreationEnabled: false,
+    pollEndingEnabled: false,
+    pollVoterAuditEnabled: false,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
@@ -465,6 +470,11 @@ test("configuration and policy require an exact administration guild and protect
     protectedUserCount: 1,
     pinChannelIds: [],
     pinManagementEnabled: false,
+    pollAuditEnabled: false,
+    pollChannelIds: [],
+    pollCreationEnabled: false,
+    pollEndingEnabled: false,
+    pollVoterAuditEnabled: false,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
@@ -1105,6 +1115,70 @@ test("configuration and policy isolate pin management to exact readable channels
   assert.deepEqual(enabled.describe().pinChannelIds, [CHANNEL_ID])
 })
 
+test("configuration and policy separate poll audit, voter, creation, and ending authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_POLL_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_POLL_CHANNEL_IDS must be a subset/,
+  )
+  for (const environmentName of [
+    "DISCORD_MCP_ALLOW_POLL_CREATION",
+    "DISCORD_MCP_ALLOW_POLL_ENDING",
+    "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
+  ]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        [environmentName]: "true",
+      }, { homeDirectory: "/test/home" }),
+      /require DISCORD_MCP_ALLOW_POLL_AUDIT/,
+    )
+  }
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
+    DISCORD_MCP_POLL_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.equal(auditOnly.assertPollAuditable(channel()), GUILD_ID)
+  assert.throws(() => auditOnly.assertPollVotersAuditable(channel()), /voter audit is disabled/)
+  assert.throws(() => auditOnly.assertPollCreatable(channel()), /creation is disabled/)
+  assert.throws(() => auditOnly.assertPollEndable(channel()), /ending is disabled/)
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
+    DISCORD_MCP_ALLOW_POLL_CREATION: "true",
+    DISCORD_MCP_ALLOW_POLL_ENDING: "true",
+    DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
+    DISCORD_MCP_POLL_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabled.assertPollAuditable(channel()), GUILD_ID)
+  assert.equal(enabled.assertPollVotersAuditable(channel()), GUILD_ID)
+  assert.equal(enabled.assertPollCreatable(channel()), GUILD_ID)
+  assert.equal(enabled.assertPollEndable(channel()), GUILD_ID)
+  assert.throws(
+    () => enabled.assertPollAuditable(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the poll scope/,
+  )
+  assert.equal(enabled.describe().pollAuditEnabled, true)
+  assert.deepEqual(enabled.describe().pollChannelIds, [CHANNEL_ID])
+  assert.equal(enabled.describe().pollCreationEnabled, true)
+  assert.equal(enabled.describe().pollEndingEnabled, true)
+  assert.equal(enabled.describe().pollVoterAuditEnabled, true)
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(() => empty.assertPollAuditable(channel()), /requires an explicit channel allowlist/)
+})
+
 test("configuration and policy isolate permission overwrites to exact readable channels", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1308,6 +1382,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,
+    pollAuditEnabled: false,
+    pollChannelIds: [],
+    pollCreationEnabled: false,
+    pollEndingEnabled: false,
+    pollVoterAuditEnabled: false,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",
     roleCreationEnabled: false,

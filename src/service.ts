@@ -88,6 +88,7 @@ import type {
   GuildMessageSearchOptions,
   MessagePinPageOptions,
   MessagePageOptions,
+  PollVoterPageOptions,
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
 import { ConfigurationError } from "./errors.js"
@@ -184,6 +185,21 @@ import type {
 } from "./permission-service.js"
 import { PermissionService } from "./permission-service.js"
 import { ScopePolicy } from "./policy.js"
+import type {
+  PollCreationPlan,
+  PollCreationRequest,
+  PollCreationResult,
+  PollEndPlan,
+  PollEndRequest,
+  PollEndResult,
+  PollServiceOptions,
+  PollVoterListResult,
+} from "./poll-service.js"
+import {
+  normalizePollCreationRequest,
+  normalizePollEndRequest,
+  PollService,
+} from "./poll-service.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 import type {
   RoleAdministrationServiceOptions,
@@ -254,6 +270,7 @@ export interface DiscordServiceClient {
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createMessage: DiscordClient["createMessage"]
+  createPoll: DiscordClient["createPoll"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
@@ -262,6 +279,7 @@ export interface DiscordServiceClient {
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
   deleteInvite: DiscordClient["deleteInvite"]
   deleteWebhook: DiscordClient["deleteWebhook"]
+  endPoll: DiscordClient["endPoll"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
@@ -295,6 +313,7 @@ export interface DiscordServiceClient {
   listGuildEmojis: DiscordClient["listGuildEmojis"]
   listGuildStickers: DiscordClient["listGuildStickers"]
   listMessagePins: DiscordClient["listMessagePins"]
+  listPollAnswerVoters: DiscordClient["listPollAnswerVoters"]
   listChannelWebhooks: DiscordClient["listChannelWebhooks"]
   listMessages: DiscordClient["listMessages"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
@@ -388,6 +407,7 @@ export interface ConnectorServiceOptions {
   >
   operationStore?: OperationStore
   permissionOptions?: Pick<PermissionServiceOptions, "clock">
+  pollOptions?: Pick<PollServiceOptions, "clock" | "planKey" | "randomId">
   policy?: ScopePolicy
   roleAdministrationOptions?: Pick<
     RoleAdministrationServiceOptions,
@@ -548,6 +568,7 @@ export class ConnectorService {
   readonly #guildExpressionService: GuildExpressionService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
+  readonly #pollService: PollService
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
   readonly #scheduledEventService: ScheduledEventService
@@ -695,6 +716,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.forumPostOptions,
+    })
+    this.#pollService = new PollService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.pollOptions,
     })
     this.#guildAuditLogService = new GuildAuditLogService({
       client: this.#client,
@@ -1640,6 +1669,58 @@ export class ConnectorService {
     return this.#forumPostService.plan(identity.bot.id, request, options)
   }
 
+  async getPoll(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#pollService.get(channelId, messageId, options)
+  }
+
+  async listPollAnswerVoters(
+    channelId: string,
+    messageId: string,
+    answerId: number,
+    options: PollVoterPageOptions = {},
+  ): Promise<PollVoterListResult> {
+    await this.#verifyIdentity(options)
+    return this.#pollService.listAnswerVoters(
+      channelId,
+      messageId,
+      answerId,
+      options,
+    )
+  }
+
+  async planPollCreation(
+    request: PollCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<PollCreationPlan> {
+    normalizePollCreationRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#pollService.planCreation(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planPollEnd(
+    request: PollEndRequest,
+    options: RequestOptions = {},
+  ): Promise<PollEndPlan> {
+    normalizePollEndRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#pollService.planEnd(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planAttachmentMessage(
     request: AttachmentMessageRequest,
     options: RequestOptions = {},
@@ -1751,6 +1832,44 @@ export class ConnectorService {
   ): Promise<ForumPostResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#forumPostService.execute(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executePollCreation(
+    request: PollCreationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<PollCreationResult> {
+    normalizePollCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord poll-creation plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#pollService.executeCreation(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executePollEnd(
+    request: PollEndRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<PollEndResult> {
+    normalizePollEndRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord poll-end plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#pollService.executeEnd(
+      identity.application.id,
       identity.bot.id,
       request,
       planDigest,

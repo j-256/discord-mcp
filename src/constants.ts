@@ -48,6 +48,7 @@ export const MCP_TOOLSET_NAMES = [
   "permission-overwrites",
   "permissions",
   "pins",
+  "polls",
   "role-configuration",
   "role-creation",
   "roles",
@@ -85,6 +86,10 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
   allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
   allowPermissionOverwrites: "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
+  allowPollAudit: "DISCORD_MCP_ALLOW_POLL_AUDIT",
+  allowPollCreation: "DISCORD_MCP_ALLOW_POLL_CREATION",
+  allowPollEnding: "DISCORD_MCP_ALLOW_POLL_ENDING",
+  allowPollVoterAudit: "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
   allowRoleCreation: "DISCORD_MCP_ALLOW_ROLE_CREATION",
   allowRoleConfiguration: "DISCORD_MCP_ALLOW_ROLE_CONFIGURATION",
   allowScheduledEventAudit: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
@@ -138,6 +143,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   otelTracesSamplerArg: "OTEL_TRACES_SAMPLER_ARG",
   protectedUserIds: "DISCORD_MCP_PROTECTED_USER_IDS",
   pinChannelIds: "DISCORD_MCP_PIN_CHANNEL_IDS",
+  pollChannelIds: "DISCORD_MCP_POLL_CHANNEL_IDS",
   permissionOverwriteChannelIds: "DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS",
   roleCreationGuildIds: "DISCORD_MCP_ROLE_CREATION_GUILD_IDS",
   roleConfigurationIds: "DISCORD_MCP_ROLE_CONFIGURATION_IDS",
@@ -260,6 +266,16 @@ export const BAN_AUDIT_LIMITS = Object.freeze({
   reasonCharacters: 512,
   responseEntries: 101,
   userTextCharacters: 100,
+})
+
+export const POLL_LIMITS = Object.freeze({
+  answerCharacters: 55,
+  answers: 10,
+  answersMinimum: 2,
+  durationHours: 32 * 24,
+  questionCharacters: 300,
+  voterPage: 100,
+  voterPageDefault: 25,
 })
 
 export const INVITE_LIMITS = Object.freeze({

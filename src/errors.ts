@@ -542,6 +542,42 @@ export class RoleConfigurationEvidenceError extends Error {
   override name = "RoleConfigurationEvidenceError"
 }
 
+export class PollEvidenceError extends Error {
+  override name = "PollEvidenceError"
+}
+
+export class PollPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord poll snapshot does not match the reviewed plan")
+    this.name = "PollPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class PollOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord poll operation key has already been reserved")
+    this.name = "PollOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class PollExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "PollExecutionError"
+    this.result = result
+  }
+}
+
 export class MemberRolePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

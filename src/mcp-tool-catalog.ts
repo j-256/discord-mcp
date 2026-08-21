@@ -47,6 +47,8 @@ type McpToolWorkflow =
   | "guild-expression-change"
   | "invite-deletion"
   | "onboarding-change"
+  | "poll-creation"
+  | "poll-end"
   | "member-moderation"
   | "member-role-change"
   | "message-deletion"
@@ -136,6 +138,16 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["configure", "execute", "join", "onboarding", "prompt", "role"],
     toolset: "onboarding",
     workflow: "onboarding-change",
+  },
+  execute_poll_creation: {
+    keywords: ["create", "execute", "poll", "question", "vote"],
+    toolset: "polls",
+    workflow: "poll-creation",
+  },
+  execute_poll_end: {
+    keywords: ["close", "end", "execute", "expire", "poll"],
+    toolset: "polls",
+    workflow: "poll-end",
   },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
@@ -232,6 +244,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["health", "metrics", "observability", "telemetry", "traces"],
     toolset: "observability",
   },
+  get_poll: {
+    keywords: ["answer", "count", "exact", "poll", "result", "vote"],
+    toolset: "polls",
+  },
   get_role: {
     keywords: ["exact", "permission", "read", "role"],
     toolset: "roles",
@@ -279,6 +295,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_message_pins: {
     keywords: ["list", "message", "paginated", "pin", "pinned"],
     toolset: "pins",
+  },
+  list_poll_answer_voters: {
+    keywords: ["answer", "list", "poll", "user", "vote", "voter"],
+    toolset: "polls",
   },
   list_guild_audit_entries: {
     keywords: ["action", "actor", "audit", "guild", "history", "moderation"],
@@ -375,6 +395,16 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["configure", "join", "onboarding", "plan", "prompt", "review", "role"],
     toolset: "onboarding",
     workflow: "onboarding-change",
+  },
+  plan_poll_creation: {
+    keywords: ["create", "plan", "poll", "question", "vote"],
+    toolset: "polls",
+    workflow: "poll-creation",
+  },
+  plan_poll_end: {
+    keywords: ["close", "end", "expire", "plan", "poll"],
+    toolset: "polls",
+    workflow: "poll-end",
   },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],
