@@ -258,6 +258,42 @@ export class GuildExpressionEvidenceError extends Error {
   override name = "GuildExpressionEvidenceError"
 }
 
+export class ScheduledEventPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord scheduled event snapshot does not match the reviewed plan")
+    this.name = "ScheduledEventPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ScheduledEventOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord scheduled event operation key has already been reserved")
+    this.name = "ScheduledEventOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ScheduledEventExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ScheduledEventExecutionError"
+    this.result = result
+  }
+}
+
+export class ScheduledEventEvidenceError extends Error {
+  override name = "ScheduledEventEvidenceError"
+}
+
 export class ChannelPermissionOverwritePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

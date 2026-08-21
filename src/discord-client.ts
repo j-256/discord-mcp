@@ -18,12 +18,14 @@ import {
   errorMessage,
   GuildExpressionEvidenceError,
   redactText,
+  ScheduledEventEvidenceError,
   WebhookEvidenceError,
 } from "./errors.js"
 import type {
   EmojiFileFormat,
   StickerFileFormat,
 } from "./guild-expression-file.js"
+import type { ScheduledEventCoverFormat } from "./scheduled-event-file.js"
 import {
   DISCORD_REST_OPERATIONS,
   type DiscordRestOperation,
@@ -141,6 +143,116 @@ export interface DiscordGuildStickerSummary {
   type: number
 }
 
+export const DISCORD_SCHEDULED_EVENT_ENTITY_TYPES = Object.freeze({
+  external: 3,
+  stage: 1,
+  voice: 2,
+} as const)
+
+export const DISCORD_SCHEDULED_EVENT_STATUSES = Object.freeze({
+  active: 2,
+  canceled: 4,
+  completed: 3,
+  scheduled: 1,
+} as const)
+
+export const DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES = Object.freeze({
+  daily: 3,
+  monthly: 1,
+  weekly: 2,
+  yearly: 0,
+} as const)
+
+export type DiscordScheduledEventEntityType =
+  typeof DISCORD_SCHEDULED_EVENT_ENTITY_TYPES[keyof typeof DISCORD_SCHEDULED_EVENT_ENTITY_TYPES]
+export type DiscordScheduledEventStatus =
+  typeof DISCORD_SCHEDULED_EVENT_STATUSES[keyof typeof DISCORD_SCHEDULED_EVENT_STATUSES]
+export type DiscordScheduledEventRecurrenceFrequency =
+  typeof DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES[
+    keyof typeof DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES
+  ]
+
+export interface DiscordScheduledEventRecurrenceNWeekday {
+  day: number
+  n: number
+}
+
+export interface DiscordScheduledEventRecurrenceRule {
+  byMonth: number[] | null
+  byMonthDay: number[] | null
+  byNWeekday: DiscordScheduledEventRecurrenceNWeekday[] | null
+  byWeekday: number[] | null
+  byYearDay: number[] | null
+  count: number | null
+  endTime: string | null
+  frequency: DiscordScheduledEventRecurrenceFrequency
+  interval: number
+  startTime: string
+}
+
+export interface DiscordScheduledEventRecurrenceInput {
+  byMonth: number[] | null
+  byMonthDay: number[] | null
+  byNWeekday: DiscordScheduledEventRecurrenceNWeekday[] | null
+  byWeekday: number[] | null
+  frequency: DiscordScheduledEventRecurrenceFrequency
+  interval: number
+  startTime: string
+}
+
+export interface DiscordScheduledEventSummary {
+  channelId: string | null
+  creatorUserId: string | null
+  description: string | null
+  entityId: string | null
+  entityType: DiscordScheduledEventEntityType
+  guildId: string
+  hasCoverImage: boolean
+  id: string
+  location: string | null
+  name: string
+  privacyLevel: 2
+  recurrenceRule: DiscordScheduledEventRecurrenceRule | null
+  scheduledEndTime: string | null
+  scheduledStartTime: string
+  status: DiscordScheduledEventStatus
+  subscriberCount: number | null
+}
+
+export interface ScheduledEventReadOptions extends RequestOptions {
+  includeSubscriberCount?: boolean
+}
+
+export interface ScheduledEventCoverInput {
+  bytes: Uint8Array
+  format: ScheduledEventCoverFormat
+}
+
+export interface CreateGuildScheduledEventInput {
+  channelId: string | null
+  cover?: ScheduledEventCoverInput
+  description?: string
+  entityType: DiscordScheduledEventEntityType
+  location: string | null
+  name: string
+  recurrenceRule?: DiscordScheduledEventRecurrenceInput
+  scheduledEndTime?: string
+  scheduledStartTime: string
+}
+
+export interface ModifyGuildScheduledEventInput {
+  channelId?: string | null
+  cover?: ScheduledEventCoverInput | null
+  description?: string | null
+  entityType?: DiscordScheduledEventEntityType
+  location?: string | null
+  name?: string
+  recurrenceRule?: DiscordScheduledEventRecurrenceInput | null
+  scheduledEndTime?: string
+  scheduledStartTime?: string
+  status?: Exclude<DiscordScheduledEventStatus, 1>
+}
+
 export type SearchAuthorType =
   | "-bot"
   | "-user"
@@ -233,6 +345,30 @@ const STICKER_FORMAT_UPLOADS: Readonly<Record<
   lottie: { extension: "json", mediaType: "application/json" },
   png: { extension: "png", mediaType: "image/png" },
 })
+const SCHEDULED_EVENT_COVER_MEDIA_TYPES: Readonly<Record<
+  ScheduledEventCoverFormat,
+  "image/jpeg" | "image/png"
+>> = Object.freeze({
+  jpeg: "image/jpeg",
+  png: "image/png",
+})
+const SCHEDULED_EVENT_ENTITY_TYPE_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_SCHEDULED_EVENT_ENTITY_TYPES),
+)
+const SCHEDULED_EVENT_STATUS_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_SCHEDULED_EVENT_STATUSES),
+)
+const SCHEDULED_EVENT_RECURRENCE_FREQUENCY_VALUES: ReadonlySet<number> = new Set(
+  Object.values(DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES),
+)
+const SCHEDULED_EVENT_DAILY_WEEKDAY_SETS: ReadonlySet<string> = new Set([
+  "0,1,2,3,4",
+  "1,2,3,4,5",
+  "4,5",
+  "5,6",
+  "6,0",
+  "6,0,1,2,3",
+])
 
 export interface GuildMessageSearchOptions extends RequestOptions {
   attachmentExtensions?: readonly string[]
@@ -652,6 +788,403 @@ function projectGuildSticker(
     throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker object", {
       cause: error,
     })
+  }
+}
+
+function canonicalScheduledEventTimestamp(
+  value: unknown,
+  description: string,
+): string {
+  if (
+    typeof value !== "string"
+    || !ISO_8601_TIMESTAMP_PATTERN.test(value)
+    || Number.isNaN(Date.parse(value))
+  ) {
+    throw new ScheduledEventEvidenceError(
+      `Discord returned an invalid scheduled event ${description}`,
+    )
+  }
+  return new Date(Date.parse(value)).toISOString()
+}
+
+function scheduledEventIntegerArray(
+  value: unknown,
+  description: string,
+  minimum: number,
+  maximum: number,
+): number[] | null {
+  if (value === null) return null
+  if (
+    !Array.isArray(value)
+    || value.length < 1
+    || value.some((entry) => (
+      !Number.isSafeInteger(entry)
+      || (entry as number) < minimum
+      || (entry as number) > maximum
+    ))
+  ) {
+    throw new ScheduledEventEvidenceError(
+      `Discord returned invalid scheduled event recurrence ${description}`,
+    )
+  }
+  const result = value as number[]
+  if (new Set(result).size !== result.length) {
+    throw new ScheduledEventEvidenceError(
+      `Discord returned duplicate scheduled event recurrence ${description}`,
+    )
+  }
+  return [...result]
+}
+
+function projectScheduledEventRecurrence(
+  value: unknown,
+): DiscordScheduledEventRecurrenceRule | null {
+  if (value === null) return null
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid scheduled event recurrence rule",
+    )
+  }
+  const record = value as Record<string, unknown>
+  if (
+    !Number.isSafeInteger(record.frequency)
+    || !SCHEDULED_EVENT_RECURRENCE_FREQUENCY_VALUES.has(record.frequency as number)
+    || !Number.isSafeInteger(record.interval)
+    || (record.interval as number) < 1
+    || !(record.end === null || typeof record.end === "string")
+    || !(record.count === null || (
+      Number.isSafeInteger(record.count)
+      && (record.count as number) >= 1
+    ))
+  ) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned invalid scheduled event recurrence fields",
+    )
+  }
+  const byWeekday = scheduledEventIntegerArray(
+    record.by_weekday,
+    "weekdays",
+    0,
+    6,
+  )
+  const byMonth = scheduledEventIntegerArray(
+    record.by_month,
+    "months",
+    1,
+    12,
+  )
+  const byMonthDay = scheduledEventIntegerArray(
+    record.by_month_day,
+    "month days",
+    1,
+    31,
+  )
+  const byYearDay = scheduledEventIntegerArray(
+    record.by_year_day,
+    "year days",
+    1,
+    364,
+  )
+  let byNWeekday: DiscordScheduledEventRecurrenceNWeekday[] | null = null
+  if (record.by_n_weekday !== null) {
+    if (
+      !Array.isArray(record.by_n_weekday)
+      || record.by_n_weekday.length < 1
+      || record.by_n_weekday.some((entry) => (
+        !entry
+        || typeof entry !== "object"
+        || Array.isArray(entry)
+        || !Number.isSafeInteger((entry as Record<string, unknown>).n)
+        || ((entry as Record<string, unknown>).n as number) < 1
+        || ((entry as Record<string, unknown>).n as number) > 5
+        || !Number.isSafeInteger((entry as Record<string, unknown>).day)
+        || ((entry as Record<string, unknown>).day as number) < 0
+        || ((entry as Record<string, unknown>).day as number) > 6
+      ))
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned invalid scheduled event recurrence numbered weekdays",
+      )
+    }
+    byNWeekday = record.by_n_weekday.map((entry) => ({
+      day: (entry as Record<string, unknown>).day as number,
+      n: (entry as Record<string, unknown>).n as number,
+    }))
+    if (
+      new Set(byNWeekday.map((entry) => `${entry.n}:${entry.day}`)).size
+      !== byNWeekday.length
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned duplicate scheduled event recurrence numbered weekdays",
+      )
+    }
+  }
+  const groups = [
+    byWeekday !== null,
+    byNWeekday !== null,
+    byMonth !== null || byMonthDay !== null,
+  ].filter(Boolean).length
+  if (groups > 1 || (byMonth === null) !== (byMonthDay === null)) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned mutually incompatible scheduled event recurrence fields",
+    )
+  }
+  const frequency = record.frequency as DiscordScheduledEventRecurrenceFrequency
+  const interval = record.interval as number
+  if (
+    frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.daily
+    && (
+      interval !== 1
+      || byNWeekday !== null
+      || byMonth !== null
+      || byMonthDay !== null
+      || (byWeekday !== null && !SCHEDULED_EVENT_DAILY_WEEKDAY_SETS.has(byWeekday.join(",")))
+    )
+  ) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an unsupported daily scheduled event recurrence",
+    )
+  }
+  if (
+    frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.weekly
+    && (
+      (interval !== 1 && interval !== 2)
+      || byNWeekday !== null
+      || byMonth !== null
+      || byMonthDay !== null
+      || (byWeekday !== null && byWeekday.length !== 1)
+    )
+  ) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an unsupported weekly scheduled event recurrence",
+    )
+  }
+  if (
+    frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.monthly
+    && (
+      interval !== 1
+      || byWeekday !== null
+      || byMonth !== null
+      || byMonthDay !== null
+      || (byNWeekday !== null && byNWeekday.length !== 1)
+    )
+  ) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an unsupported monthly scheduled event recurrence",
+    )
+  }
+  if (
+    frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.yearly
+    && (
+      interval !== 1
+      || byWeekday !== null
+      || byNWeekday !== null
+      || (byMonth !== null && byMonth.length !== 1)
+      || (byMonthDay !== null && byMonthDay.length !== 1)
+    )
+  ) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an unsupported yearly scheduled event recurrence",
+    )
+  }
+  return {
+    byMonth,
+    byMonthDay,
+    byNWeekday,
+    byWeekday,
+    byYearDay,
+    count: record.count as number | null,
+    endTime: record.end === null
+      ? null
+      : canonicalScheduledEventTimestamp(record.end, "recurrence end time"),
+    frequency,
+    interval,
+    startTime: canonicalScheduledEventTimestamp(
+      record.start,
+      "recurrence start time",
+    ),
+  }
+}
+
+function assertScheduledEventReturnedText(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  description: string,
+): asserts value is string {
+  if (
+    typeof value !== "string"
+    || value.length < minimum
+    || value.length > maximum
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new ScheduledEventEvidenceError(
+      `Discord returned an invalid scheduled event ${description}`,
+    )
+  }
+  try {
+    assertValidUnicode(value, `Discord scheduled event ${description}`)
+  } catch (error) {
+    throw new ScheduledEventEvidenceError(
+      `Discord returned an invalid scheduled event ${description}`,
+      { cause: error },
+    )
+  }
+}
+
+function projectGuildScheduledEvent(
+  value: unknown,
+  guildId: string,
+  includeSubscriberCount: boolean,
+): DiscordScheduledEventSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid scheduled event object",
+    )
+  }
+  const record = value as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    assertPositiveSnowflake(record.id as string, "Discord scheduled event ID")
+    assertPositiveSnowflake(record.guild_id as string, "Discord scheduled event response guild ID")
+    if (record.guild_id !== guildId) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned a scheduled event for another guild",
+      )
+    }
+    if (record.channel_id !== null) {
+      assertPositiveSnowflake(
+        record.channel_id as string,
+        "Discord scheduled event channel ID",
+      )
+    }
+    if (record.creator_id !== undefined && record.creator_id !== null) {
+      assertPositiveSnowflake(
+        record.creator_id as string,
+        "Discord scheduled event creator ID",
+      )
+    }
+    if (record.entity_id !== null) {
+      assertPositiveSnowflake(
+        record.entity_id as string,
+        "Discord scheduled event entity ID",
+      )
+    }
+    assertScheduledEventReturnedText(
+      record.name,
+      1,
+      DISCORD_LIMITS.scheduledEventNameCharacters,
+      "name",
+    )
+    if (record.description !== undefined && record.description !== null) {
+      assertScheduledEventReturnedText(
+        record.description,
+        1,
+        DISCORD_LIMITS.scheduledEventDescriptionCharacters,
+        "description",
+      )
+    }
+    if (
+      record.privacy_level !== 2
+      || !Number.isSafeInteger(record.status)
+      || !SCHEDULED_EVENT_STATUS_VALUES.has(record.status as number)
+      || !Number.isSafeInteger(record.entity_type)
+      || !SCHEDULED_EVENT_ENTITY_TYPE_VALUES.has(record.entity_type as number)
+      || !(record.image === undefined || record.image === null || (
+        typeof record.image === "string"
+        && record.image.length >= 1
+        && record.image.length <= 256
+        && !EXPRESSION_TEXT_CONTROL_PATTERN.test(record.image)
+      ))
+      || !(record.user_count === undefined || (
+        Number.isSafeInteger(record.user_count)
+        && (record.user_count as number) >= 0
+      ))
+      || (includeSubscriberCount && record.user_count === undefined)
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned invalid scheduled event metadata",
+      )
+    }
+    const entityType = record.entity_type as DiscordScheduledEventEntityType
+    let location: string | null = null
+    if (entityType === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.external) {
+      if (
+        record.channel_id !== null
+        || !record.entity_metadata
+        || typeof record.entity_metadata !== "object"
+        || Array.isArray(record.entity_metadata)
+      ) {
+        throw new ScheduledEventEvidenceError(
+          "Discord returned invalid external scheduled event hosting",
+        )
+      }
+      const rawLocation = (record.entity_metadata as Record<string, unknown>).location
+      assertScheduledEventReturnedText(
+        rawLocation,
+        1,
+        DISCORD_LIMITS.scheduledEventLocationCharacters,
+        "location",
+      )
+      location = rawLocation
+      if (record.scheduled_end_time === null) {
+        throw new ScheduledEventEvidenceError(
+          "Discord returned an external scheduled event without an end time",
+        )
+      }
+    } else if (
+      typeof record.channel_id !== "string"
+      || record.entity_metadata !== null
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned invalid channel scheduled event hosting",
+      )
+    }
+    const scheduledStartTime = canonicalScheduledEventTimestamp(
+      record.scheduled_start_time,
+      "start time",
+    )
+    const scheduledEndTime = record.scheduled_end_time === null
+      ? null
+      : canonicalScheduledEventTimestamp(record.scheduled_end_time, "end time")
+    if (
+      scheduledEndTime !== null
+      && Date.parse(scheduledEndTime) <= Date.parse(scheduledStartTime)
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned a scheduled event whose end is not after its start",
+      )
+    }
+    return {
+      channelId: record.channel_id as string | null,
+      creatorUserId: record.creator_id === undefined
+        ? null
+        : record.creator_id as string | null,
+      description: record.description === undefined
+        ? null
+        : record.description as string | null,
+      entityId: record.entity_id as string | null,
+      entityType,
+      guildId,
+      hasCoverImage: typeof record.image === "string",
+      id: record.id as string,
+      location,
+      name: record.name,
+      privacyLevel: 2,
+      recurrenceRule: projectScheduledEventRecurrence(record.recurrence_rule),
+      scheduledEndTime,
+      scheduledStartTime,
+      status: record.status as DiscordScheduledEventStatus,
+      subscriberCount: includeSubscriberCount
+        ? record.user_count as number
+        : null,
+    }
+  } catch (error) {
+    if (error instanceof ScheduledEventEvidenceError) throw error
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid scheduled event object",
+      { cause: error },
+    )
   }
 }
 
@@ -1130,6 +1663,376 @@ function assertModifyGuildStickerInput(input: ModifyGuildStickerInput): void {
   if (input.name !== undefined) assertGuildExpressionName(input.name, "sticker")
   if (input.description !== undefined) assertStickerDescription(input.description)
   if (input.tags !== undefined) assertStickerTags(input.tags)
+}
+
+function assertScheduledEventInputText(
+  value: string,
+  minimum: number,
+  maximum: number,
+  description: string,
+): void {
+  if (
+    typeof value !== "string"
+    || value.length < minimum
+    || value.length > maximum
+    || value.trim() !== value
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(
+      `Discord scheduled event ${description} must contain ${minimum}-${maximum} trimmed characters without controls`,
+    )
+  }
+  assertValidUnicode(value, `Discord scheduled event ${description}`)
+}
+
+function assertScheduledEventCoverInput(
+  cover: ScheduledEventCoverInput,
+): void {
+  if (
+    !cover
+    || typeof cover !== "object"
+    || Array.isArray(cover)
+    || !(cover.bytes instanceof Uint8Array)
+    || cover.bytes.byteLength < 1
+    || cover.bytes.byteLength > DISCORD_LIMITS.scheduledEventCoverBytes
+    || !Object.hasOwn(SCHEDULED_EVENT_COVER_MEDIA_TYPES, cover.format)
+  ) {
+    throw new RangeError("Discord scheduled event cover input is invalid")
+  }
+}
+
+function assertScheduledEventRecurrenceInput(
+  recurrence: DiscordScheduledEventRecurrenceInput,
+): void {
+  if (!recurrence || typeof recurrence !== "object" || Array.isArray(recurrence)) {
+    throw new RangeError("Discord scheduled event recurrence must be an object")
+  }
+  assertIsoTimestamp(
+    recurrence.startTime,
+    "Discord scheduled event recurrence start time",
+  )
+  if (
+    !SCHEDULED_EVENT_RECURRENCE_FREQUENCY_VALUES.has(recurrence.frequency)
+    || !Number.isSafeInteger(recurrence.interval)
+    || recurrence.interval < 1
+  ) {
+    throw new RangeError("Discord scheduled event recurrence frequency or interval is invalid")
+  }
+  const arrays = [
+    [recurrence.byWeekday, 0, 6, "weekdays"],
+    [recurrence.byMonth, 1, 12, "months"],
+    [recurrence.byMonthDay, 1, 31, "month days"],
+  ] as const
+  for (const [values, minimum, maximum, description] of arrays) {
+    if (values === null) continue
+    if (
+      !Array.isArray(values)
+      || values.length < 1
+      || new Set(values).size !== values.length
+      || values.some((value) => (
+        !Number.isSafeInteger(value)
+        || value < minimum
+        || value > maximum
+      ))
+    ) {
+      throw new RangeError(
+        `Discord scheduled event recurrence ${description} are invalid`,
+      )
+    }
+  }
+  if (recurrence.byNWeekday !== null && (
+    !Array.isArray(recurrence.byNWeekday)
+    || recurrence.byNWeekday.length < 1
+    || new Set(
+      recurrence.byNWeekday.map((entry) => `${entry?.n}:${entry?.day}`),
+    ).size !== recurrence.byNWeekday.length
+    || recurrence.byNWeekday.some((entry) => (
+      !entry
+      || typeof entry !== "object"
+      || Array.isArray(entry)
+      || !Number.isSafeInteger(entry.n)
+      || entry.n < 1
+      || entry.n > 5
+      || !Number.isSafeInteger(entry.day)
+      || entry.day < 0
+      || entry.day > 6
+    ))
+  )) {
+    throw new RangeError(
+      "Discord scheduled event recurrence numbered weekdays are invalid",
+    )
+  }
+  const groups = [
+    recurrence.byWeekday !== null,
+    recurrence.byNWeekday !== null,
+    recurrence.byMonth !== null || recurrence.byMonthDay !== null,
+  ].filter(Boolean).length
+  if (groups > 1 || (recurrence.byMonth === null) !== (recurrence.byMonthDay === null)) {
+    throw new RangeError(
+      "Discord scheduled event recurrence fields are mutually incompatible",
+    )
+  }
+  if (
+    recurrence.frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.daily
+    && (
+      recurrence.interval !== 1
+      || recurrence.byNWeekday !== null
+      || recurrence.byMonth !== null
+      || recurrence.byMonthDay !== null
+      || (
+        recurrence.byWeekday !== null
+        && !SCHEDULED_EVENT_DAILY_WEEKDAY_SETS.has(recurrence.byWeekday.join(","))
+      )
+    )
+  ) {
+    throw new RangeError("Discord daily scheduled event recurrence is unsupported")
+  }
+  if (
+    recurrence.frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.weekly
+    && (
+      (recurrence.interval !== 1 && recurrence.interval !== 2)
+      || recurrence.byNWeekday !== null
+      || recurrence.byMonth !== null
+      || recurrence.byMonthDay !== null
+      || recurrence.byWeekday?.length !== 1
+    )
+  ) {
+    throw new RangeError("Discord weekly scheduled event recurrence is unsupported")
+  }
+  if (
+    recurrence.frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.monthly
+    && (
+      recurrence.interval !== 1
+      || recurrence.byWeekday !== null
+      || recurrence.byMonth !== null
+      || recurrence.byMonthDay !== null
+      || recurrence.byNWeekday?.length !== 1
+    )
+  ) {
+    throw new RangeError("Discord monthly scheduled event recurrence is unsupported")
+  }
+  if (
+    recurrence.frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.yearly
+    && (
+      recurrence.interval !== 1
+      || recurrence.byWeekday !== null
+      || recurrence.byNWeekday !== null
+      || recurrence.byMonth?.length !== 1
+      || recurrence.byMonthDay?.length !== 1
+    )
+  ) {
+    throw new RangeError("Discord yearly scheduled event recurrence is unsupported")
+  }
+  if (recurrence.frequency === DISCORD_SCHEDULED_EVENT_RECURRENCE_FREQUENCIES.yearly) {
+    const month = recurrence.byMonth![0] as number
+    const day = recurrence.byMonthDay![0] as number
+    const date = new Date(Date.UTC(2000, month - 1, day))
+    if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+      throw new RangeError("Discord yearly scheduled event recurrence date is invalid")
+    }
+  }
+}
+
+function scheduledEventRecurrenceBody(
+  recurrence: DiscordScheduledEventRecurrenceInput,
+): Record<string, unknown> {
+  assertScheduledEventRecurrenceInput(recurrence)
+  return {
+    by_month: recurrence.byMonth,
+    by_month_day: recurrence.byMonthDay,
+    by_n_weekday: recurrence.byNWeekday,
+    by_weekday: recurrence.byWeekday,
+    frequency: recurrence.frequency,
+    interval: recurrence.interval,
+    start: recurrence.startTime,
+  }
+}
+
+function assertCreateGuildScheduledEventInput(
+  input: CreateGuildScheduledEventInput,
+): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord scheduled event creation input must be an object")
+  }
+  assertScheduledEventInputText(
+    input.name,
+    1,
+    DISCORD_LIMITS.scheduledEventNameCharacters,
+    "name",
+  )
+  if (input.description !== undefined) {
+    assertScheduledEventInputText(
+      input.description,
+      1,
+      DISCORD_LIMITS.scheduledEventDescriptionCharacters,
+      "description",
+    )
+  }
+  assertIsoTimestamp(input.scheduledStartTime, "Discord scheduled event start time")
+  assertIsoTimestamp(input.scheduledEndTime, "Discord scheduled event end time")
+  if (
+    input.scheduledEndTime !== undefined
+    && Date.parse(input.scheduledEndTime) <= Date.parse(input.scheduledStartTime)
+  ) {
+    throw new RangeError("Discord scheduled event end time must be after its start time")
+  }
+  if (!SCHEDULED_EVENT_ENTITY_TYPE_VALUES.has(input.entityType)) {
+    throw new RangeError("Discord scheduled event entity type is unsupported")
+  }
+  if (input.entityType === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.external) {
+    if (input.channelId !== null || input.scheduledEndTime === undefined) {
+      throw new RangeError(
+        "Discord external scheduled event requires a null channel and an end time",
+      )
+    }
+    assertScheduledEventInputText(
+      input.location as string,
+      1,
+      DISCORD_LIMITS.scheduledEventLocationCharacters,
+      "location",
+    )
+  } else {
+    assertPositiveSnowflake(
+      input.channelId as string,
+      "Discord scheduled event channel ID",
+    )
+    if (input.location !== null) {
+      throw new RangeError(
+        "Discord channel scheduled event location must be null",
+      )
+    }
+  }
+  if (input.cover !== undefined) assertScheduledEventCoverInput(input.cover)
+  if (input.recurrenceRule !== undefined) {
+    assertScheduledEventRecurrenceInput(input.recurrenceRule)
+    if (
+      Date.parse(input.recurrenceRule.startTime)
+      !== Date.parse(input.scheduledStartTime)
+    ) {
+      throw new RangeError(
+        "Discord scheduled event recurrence must start with the event",
+      )
+    }
+  }
+}
+
+function assertModifyGuildScheduledEventInput(
+  input: ModifyGuildScheduledEventInput,
+): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord scheduled event update input must be an object")
+  }
+  const fields = [
+    input.channelId,
+    input.cover,
+    input.description,
+    input.entityType,
+    input.location,
+    input.name,
+    input.recurrenceRule,
+    input.scheduledEndTime,
+    input.scheduledStartTime,
+    input.status,
+  ]
+  if (fields.every((value) => value === undefined)) {
+    throw new RangeError("Discord scheduled event update must contain a change")
+  }
+  if (input.name !== undefined) {
+    assertScheduledEventInputText(
+      input.name,
+      1,
+      DISCORD_LIMITS.scheduledEventNameCharacters,
+      "name",
+    )
+  }
+  if (input.description !== undefined && input.description !== null) {
+    assertScheduledEventInputText(
+      input.description,
+      1,
+      DISCORD_LIMITS.scheduledEventDescriptionCharacters,
+      "description",
+    )
+  }
+  assertIsoTimestamp(input.scheduledStartTime, "Discord scheduled event start time")
+  assertIsoTimestamp(input.scheduledEndTime, "Discord scheduled event end time")
+  if (
+    input.scheduledStartTime !== undefined
+    && input.scheduledEndTime !== undefined
+    && Date.parse(input.scheduledEndTime) <= Date.parse(input.scheduledStartTime)
+  ) {
+    throw new RangeError("Discord scheduled event end time must be after its start time")
+  }
+  const hostingChanged = input.entityType !== undefined
+    || input.channelId !== undefined
+    || input.location !== undefined
+  if (hostingChanged) {
+    if (
+      input.entityType === undefined
+      || input.channelId === undefined
+      || input.location === undefined
+    ) {
+      throw new RangeError(
+        "Discord scheduled event hosting update must be complete",
+      )
+    }
+    if (input.entityType === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.external) {
+      if (input.channelId !== null || input.scheduledEndTime === undefined) {
+        throw new RangeError(
+          "Discord external scheduled event update requires a null channel and an end time",
+        )
+      }
+      assertScheduledEventInputText(
+        input.location as string,
+        1,
+        DISCORD_LIMITS.scheduledEventLocationCharacters,
+        "location",
+      )
+    } else if (
+      input.entityType === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.stage
+      || input.entityType === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.voice
+    ) {
+      assertPositiveSnowflake(
+        input.channelId as string,
+        "Discord scheduled event channel ID",
+      )
+      if (input.location !== null) {
+        throw new RangeError(
+          "Discord channel scheduled event location must be null",
+        )
+      }
+    } else {
+      throw new RangeError("Discord scheduled event entity type is unsupported")
+    }
+  }
+  if (input.cover !== undefined && input.cover !== null) {
+    assertScheduledEventCoverInput(input.cover)
+  }
+  if (input.recurrenceRule !== undefined && input.recurrenceRule !== null) {
+    assertScheduledEventRecurrenceInput(input.recurrenceRule)
+    if (
+      input.scheduledStartTime !== undefined
+      && Date.parse(input.recurrenceRule.startTime)
+      !== Date.parse(input.scheduledStartTime)
+    ) {
+      throw new RangeError(
+        "Discord scheduled event recurrence must start with the event",
+      )
+    }
+  }
+  if (input.status !== undefined) {
+    if (
+      input.status !== DISCORD_SCHEDULED_EVENT_STATUSES.active
+      && input.status !== DISCORD_SCHEDULED_EVENT_STATUSES.completed
+      && input.status !== DISCORD_SCHEDULED_EVENT_STATUSES.canceled
+    ) {
+      throw new RangeError("Discord scheduled event target status is unsupported")
+    }
+    if (fields.slice(0, -1).some((value) => value !== undefined)) {
+      throw new RangeError(
+        "Discord scheduled event status transition must not include metadata changes",
+      )
+    }
+  }
 }
 
 export function encodeDiscordAuditReason(auditReason: string): string {
@@ -1802,6 +2705,216 @@ export class DiscordClient {
     await this.#request<void>(
       "delete_guild_sticker",
       `/guilds/${guildId}/stickers/${stickerId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async listGuildScheduledEvents(
+    guildId: string,
+    options: ScheduledEventReadOptions = {},
+  ): Promise<DiscordScheduledEventSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    if (
+      options.includeSubscriberCount !== undefined
+      && typeof options.includeSubscriberCount !== "boolean"
+    ) {
+      throw new RangeError(
+        "Discord scheduled event subscriber-count option must be a boolean",
+      )
+    }
+    const includeSubscriberCount = options.includeSubscriberCount === true
+    const response = await this.#request<unknown>(
+      "list_guild_scheduled_events",
+      `/guilds/${guildId}/scheduled-events${queryString({
+        with_user_count: includeSubscriberCount ? true : undefined,
+      })}`,
+      options.signal ? { signal: options.signal } : {},
+    )
+    if (
+      !Array.isArray(response)
+      || response.length > DISCORD_LIMITS.scheduledEvents
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned an invalid scheduled event inventory",
+      )
+    }
+    const events = response.map((event) => projectGuildScheduledEvent(
+      event,
+      guildId,
+      includeSubscriberCount,
+    ))
+    if (new Set(events.map((event) => event.id)).size !== events.length) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned duplicate scheduled event IDs",
+      )
+    }
+    return events
+  }
+
+  async getGuildScheduledEvent(
+    guildId: string,
+    eventId: string,
+    options: ScheduledEventReadOptions = {},
+  ): Promise<DiscordScheduledEventSummary> {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    assertPositiveSnowflake(eventId, "Discord scheduled event ID")
+    if (
+      options.includeSubscriberCount !== undefined
+      && typeof options.includeSubscriberCount !== "boolean"
+    ) {
+      throw new RangeError(
+        "Discord scheduled event subscriber-count option must be a boolean",
+      )
+    }
+    const includeSubscriberCount = options.includeSubscriberCount === true
+    const response = await this.#request<unknown>(
+      "get_guild_scheduled_event",
+      `/guilds/${guildId}/scheduled-events/${eventId}${queryString({
+        with_user_count: includeSubscriberCount ? true : undefined,
+      })}`,
+      options.signal ? { signal: options.signal } : {},
+    )
+    const event = projectGuildScheduledEvent(
+      response,
+      guildId,
+      includeSubscriberCount,
+    )
+    if (event.id !== eventId) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned another scheduled event for an exact lookup",
+      )
+    }
+    return event
+  }
+
+  async createGuildScheduledEvent(
+    guildId: string,
+    input: CreateGuildScheduledEventInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordScheduledEventSummary> {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    assertCreateGuildScheduledEventInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const image = input.cover === undefined
+      ? undefined
+      : `data:${SCHEDULED_EVENT_COVER_MEDIA_TYPES[input.cover.format]};base64,${Buffer.from(input.cover.bytes).toString("base64")}`
+    const response = await this.#request<unknown>(
+      "create_guild_scheduled_event",
+      `/guilds/${guildId}/scheduled-events`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          channel_id: input.channelId,
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          entity_metadata: input.entityType
+            === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.external
+            ? { location: input.location }
+            : null,
+          entity_type: input.entityType,
+          ...(image !== undefined ? { image } : {}),
+          name: input.name,
+          privacy_level: 2,
+          ...(input.recurrenceRule !== undefined
+            ? { recurrence_rule: scheduledEventRecurrenceBody(input.recurrenceRule) }
+            : {}),
+          ...(input.scheduledEndTime !== undefined
+            ? { scheduled_end_time: input.scheduledEndTime }
+            : {}),
+          scheduled_start_time: input.scheduledStartTime,
+        },
+      },
+    )
+    return projectGuildScheduledEvent(response, guildId, false)
+  }
+
+  async modifyGuildScheduledEvent(
+    guildId: string,
+    eventId: string,
+    input: ModifyGuildScheduledEventInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordScheduledEventSummary> {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    assertPositiveSnowflake(eventId, "Discord scheduled event ID")
+    assertModifyGuildScheduledEventInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const image = input.cover === undefined
+      ? undefined
+      : input.cover === null
+        ? null
+        : `data:${SCHEDULED_EVENT_COVER_MEDIA_TYPES[input.cover.format]};base64,${Buffer.from(input.cover.bytes).toString("base64")}`
+    const response = await this.#request<unknown>(
+      "modify_guild_scheduled_event",
+      `/guilds/${guildId}/scheduled-events/${eventId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          ...(input.channelId !== undefined
+            ? { channel_id: input.channelId }
+            : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.entityType !== undefined
+            ? {
+                entity_metadata: input.entityType
+                  === DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.external
+                  ? { location: input.location }
+                  : null,
+                entity_type: input.entityType,
+              }
+            : {}),
+          ...(image !== undefined ? { image } : {}),
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.recurrenceRule !== undefined
+            ? {
+                recurrence_rule: input.recurrenceRule === null
+                  ? null
+                  : scheduledEventRecurrenceBody(input.recurrenceRule),
+              }
+            : {}),
+          ...(input.scheduledEndTime !== undefined
+            ? { scheduled_end_time: input.scheduledEndTime }
+            : {}),
+          ...(input.scheduledStartTime !== undefined
+            ? { scheduled_start_time: input.scheduledStartTime }
+            : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+        },
+      },
+    )
+    const event = projectGuildScheduledEvent(response, guildId, false)
+    if (event.id !== eventId) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned another scheduled event after an exact update",
+      )
+    }
+    return event
+  }
+
+  async deleteGuildScheduledEvent(
+    guildId: string,
+    eventId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    assertPositiveSnowflake(eventId, "Discord scheduled event ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_scheduled_event",
+      `/guilds/${guildId}/scheduled-events/${eventId}`,
       {
         ...options,
         auditReason,

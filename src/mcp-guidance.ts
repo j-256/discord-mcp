@@ -20,6 +20,7 @@ export type DiscordGuidanceService = Pick<
   | "listChannelWebhooks"
   | "listGuilds"
   | "listGuildExpressions"
+  | "listScheduledEvents"
   | "listRoles"
 >
 

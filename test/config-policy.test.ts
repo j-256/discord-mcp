@@ -145,6 +145,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    scheduledEventAuditEnabled: false,
+    scheduledEventChangesEnabled: false,
+    scheduledEventCoverChangesEnabled: false,
+    scheduledEventGuildIds: [],
+    scheduledEventRootCount: 0,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -395,6 +400,11 @@ test("configuration and policy require an exact administration guild and protect
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    scheduledEventAuditEnabled: false,
+    scheduledEventChangesEnabled: false,
+    scheduledEventCoverChangesEnabled: false,
+    scheduledEventGuildIds: [],
+    scheduledEventRootCount: 0,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -815,6 +825,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    scheduledEventAuditEnabled: false,
+    scheduledEventChangesEnabled: false,
+    scheduledEventCoverChangesEnabled: false,
+    scheduledEventGuildIds: [],
+    scheduledEventRootCount: 0,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -889,6 +904,64 @@ test("configuration and policy isolate guild expression audit, changes, and loca
       () => loadConnectorConfig({
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_GUILD_EXPRESSION_ROOTS: "relative/path",
+      }, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
+})
+
+test("configuration and policy isolate scheduled event audit, changes, and cover roots", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-event-"))
+  const root = await realpath(temporary)
+  try {
+    const config = loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
+      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+      DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_SCHEDULED_EVENT_ROOTS: JSON.stringify([root]),
+    }, { homeDirectory: "/test/home" })
+    const scoped = new ScopePolicy(config)
+
+    assert.equal(config.allowScheduledEventAudit, true)
+    assert.equal(config.allowScheduledEventChanges, true)
+    assert.deepEqual([...config.scheduledEventGuildIds], [GUILD_ID])
+    assert.deepEqual(config.scheduledEventRoots, [root])
+    scoped.assertScheduledEventAuditable(GUILD_ID)
+    scoped.assertScheduledEventChangeAllowed(GUILD_ID)
+    assert.throws(
+      () => scoped.assertScheduledEventAuditable(OTHER_GUILD_ID),
+      /configured read scope/,
+    )
+    const description = scoped.describe()
+    assert.equal(description.scheduledEventAuditEnabled, true)
+    assert.equal(description.scheduledEventChangesEnabled, true)
+    assert.equal(description.scheduledEventCoverChangesEnabled, true)
+    assert.equal(description.scheduledEventRootCount, 1)
+    assert.equal(JSON.stringify(description).includes(root), false)
+
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+      }, { homeDirectory: "/test/home" }),
+      /requires DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+        DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: OTHER_GUILD_ID,
+      }, { homeDirectory: "/test/home" }),
+      /must be a subset/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_SCHEDULED_EVENT_ROOTS: "relative/path",
       }, { homeDirectory: "/test/home" }),
       ConfigurationError,
     )

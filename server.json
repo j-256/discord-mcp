@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.j-256/discord-mcp",
   "title": "Discord MCP",
-  "description": "Least-privilege Discord reads, credential-safe webhook audit, reviewed changes, and guild scaffolds",
+  "description": "Least-privilege Discord reads, privacy-safe audits, and reviewed administration",
   "repository": {
     "url": "https://github.com/j-256/discord-mcp",
     "source": "github",
@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, channel-creation, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, members, messages, moderation, observability, permission-overwrites, permissions, pins, role-creation, roles, scheduled-events, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -443,6 +443,34 @@
         {
           "name": "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
           "description": "One absolute canonical directory or JSON array of directories containing eligible owned emoji and sticker files",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
+          "description": "Enable privacy-safe scheduled-event inventory when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES",
+          "description": "Enable reviewed scheduled-event creation, update, transition, and deletion; requires event audit",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS",
+          "description": "Exact guild IDs eligible for privacy-safe scheduled-event inventory and reviewed changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_SCHEDULED_EVENT_ROOTS",
+          "description": "One absolute canonical directory or JSON array of directories containing eligible owned JPEG or non-animated PNG covers",
           "format": "string"
         },
         {

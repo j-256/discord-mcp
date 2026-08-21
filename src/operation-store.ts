@@ -31,6 +31,7 @@ export const OPERATION_KINDS = [
   "guild-scaffold",
   "message-pin",
   "role-creation",
+  "scheduled-event-change",
   "webhook-deletion",
 ] as const
 

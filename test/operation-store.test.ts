@@ -134,6 +134,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const scaffold = { ...receipt(), kind: "guild-scaffold" as const }
   const pin = { ...receipt(), kind: "message-pin" as const }
   const role = { ...receipt(), kind: "role-creation" as const }
+  const scheduledEvent = { ...receipt(), kind: "scheduled-event-change" as const }
   const webhook = { ...receipt(), kind: "webhook-deletion" as const }
 
   assert.equal((await store.reserve(channel)).created, true)
@@ -144,6 +145,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(scaffold)).created, true)
   assert.equal((await store.reserve(pin)).created, true)
   assert.equal((await store.reserve(role)).created, true)
+  assert.equal((await store.reserve(scheduledEvent)).created, true)
   assert.equal((await store.reserve(webhook)).created, true)
   assert.deepEqual(
     await store.get("attachment-message", attachment.operationKeyHash),
@@ -176,6 +178,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("role-creation", role.operationKeyHash),
     role,
+  )
+  assert.deepEqual(
+    await store.get("scheduled-event-change", scheduledEvent.operationKeyHash),
+    scheduledEvent,
   )
   assert.deepEqual(
     await store.get("webhook-deletion", webhook.operationKeyHash),

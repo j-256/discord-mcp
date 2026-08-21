@@ -12,6 +12,11 @@ import test from "node:test"
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
 import {
+  DISCORD_SCHEDULED_EVENT_ENTITY_TYPES,
+  DISCORD_SCHEDULED_EVENT_STATUSES,
+  type DiscordScheduledEventSummary,
+} from "../src/discord-client.js"
+import {
   ConfigurationError,
   InteractionRateLimitError,
   PolicyError,
@@ -51,6 +56,7 @@ const CREATED_ROLE_ID = "700000000000000001"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
+const SCHEDULED_EVENT_ID = "930000000000000001"
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -189,6 +195,7 @@ function serviceFixture(overrides: {
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
+  scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
 } = {}) {
   const calls = {
@@ -254,6 +261,9 @@ function serviceFixture(overrides: {
       calls.createRole += 1
       return role(CREATED_ROLE_ID, 0n, "created")
     },
+    async createGuildScheduledEvent() {
+      throw new Error("Unexpected scheduled-event creation")
+    },
     async createGuildSticker(_guildId, input) {
       return {
         available: true,
@@ -278,6 +288,7 @@ function serviceFixture(overrides: {
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
     async deleteGuildEmoji() {},
+    async deleteGuildScheduledEvent() {},
     async deleteGuildSticker() {},
     async deleteWebhook() {},
     async editChannelPermissionOverwrite() {},
@@ -338,6 +349,9 @@ function serviceFixture(overrides: {
         "@everyone",
       )]
     },
+    async getGuildScheduledEvent() {
+      throw new Error("Unexpected scheduled-event lookup")
+    },
     async getGuildSticker() {
       return {
         available: true,
@@ -373,6 +387,9 @@ function serviceFixture(overrides: {
       return [guild()]
     },
     async listGuildMembers() {
+      return []
+    },
+    async listGuildScheduledEvents() {
       return []
     },
     async listGuildEmojis() {
@@ -418,6 +435,9 @@ function serviceFixture(overrides: {
         requiresColons: true,
         roleIds: input.roleIds ? [...input.roleIds] : [],
       }
+    },
+    async modifyGuildScheduledEvent() {
+      throw new Error("Unexpected scheduled-event modification")
     },
     async modifyGuildSticker(_guildId, expressionId, input) {
       return {
@@ -499,6 +519,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.roleAdministrationOptions
         ? { roleAdministrationOptions: overrides.roleAdministrationOptions }
+        : {}),
+      ...(overrides.scheduledEventOptions
+        ? { scheduledEventOptions: overrides.scheduledEventOptions }
         : {}),
       ...(overrides.webhookOptions
         ? { webhookOptions: overrides.webhookOptions }
@@ -733,6 +756,123 @@ test("service pins identity through privacy-safe guild expression reads and revi
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "guild-expression-change")
   assert.equal(operationStore.receipt?.resourceId, expressionId)
+})
+
+test("service pins identity through privacy-safe scheduled event reads and reviewed changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  let scheduledEvent: DiscordScheduledEventSummary = {
+    channelId: CHANNEL_ID,
+    creatorUserId: BOT_ID,
+    description: "Private planning details",
+    entityId: null,
+    entityType: DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.voice,
+    guildId: GUILD_ID,
+    hasCoverImage: false,
+    id: SCHEDULED_EVENT_ID,
+    location: null,
+    name: "Planning call",
+    privacyLevel: 2,
+    recurrenceRule: null,
+    scheduledEndTime: null,
+    scheduledStartTime: "2026-09-01T20:00:00.000Z",
+    status: DISCORD_SCHEDULED_EVENT_STATUSES.scheduled,
+    subscriberCount: null,
+  }
+  let exactReads = 0
+  let inventoryReads = 0
+  let updateCalls = 0
+  const botPermissions = DISCORD_PERMISSIONS.CREATE_EVENTS
+    | DISCORD_PERMISSIONS.MANAGE_EVENTS
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.CONNECT
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildChannels() {
+        return [channel({ type: 2 })]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, botPermissions, "@everyone")]
+      },
+      async getGuildScheduledEvent(guildId, eventId, options) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(eventId, SCHEDULED_EVENT_ID)
+        exactReads += 1
+        return {
+          ...scheduledEvent,
+          subscriberCount: options?.includeSubscriberCount ? 4 : null,
+        }
+      },
+      async listGuildScheduledEvents(guildId, options) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryReads += 1
+        return [{
+          ...scheduledEvent,
+          subscriberCount: options?.includeSubscriberCount ? 4 : null,
+        }]
+      },
+      async modifyGuildScheduledEvent(guildId, eventId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(eventId, SCHEDULED_EVENT_ID)
+        assert.equal(auditReason, "Reviewed event update")
+        updateCalls += 1
+        scheduledEvent = {
+          ...scheduledEvent,
+          name: input.name ?? scheduledEvent.name,
+        }
+        return scheduledEvent
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
+      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+      DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+    scheduledEventOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(29),
+      randomId: () => "activity-scheduled-event-change",
+    },
+  })
+  const request = {
+    action: "update" as const,
+    auditReason: "Reviewed event update",
+    eventId: SCHEDULED_EVENT_ID,
+    guildId: GUILD_ID,
+    name: "Release planning call",
+    operationKey: "scheduled-event-service-attempt-0001",
+  }
+
+  const listed = await service.listScheduledEvents(GUILD_ID, true)
+  const exact = await service.getScheduledEvent(GUILD_ID, SCHEDULED_EVENT_ID)
+  const plan = await service.planScheduledEventChange(request)
+  const result = await service.executeScheduledEventChange(request, plan.digest)
+
+  assert.equal(listed.events[0]?.event.subscriberCount, 4)
+  assert.equal(exact.event.subscriberCount, null)
+  assert.equal(plan.existing?.eventId, SCHEDULED_EVENT_ID)
+  assert.deepEqual(plan.permission.current.requiredPermissions, [
+    "MANAGE_EVENTS",
+    "VIEW_CHANNEL",
+    "CONNECT",
+  ])
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed?.name, "Release planning call")
+  assert.equal(inventoryReads, 1)
+  assert.equal(exactReads, 4)
+  assert.equal(updateCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(calls.activityEntries.map((entry) => entry.status), [
+    "pending",
+    "completed",
+  ])
+  assert.equal(operationStore.receipt?.kind, "scheduled-event-change")
+  assert.equal(operationStore.receipt?.resourceId, SCHEDULED_EVENT_ID)
 })
 
 test("service verifies identity through reviewed channel permission changes", async () => {

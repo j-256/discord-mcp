@@ -48,6 +48,8 @@ export interface ConnectorConfig {
   allowPermissionOverwrites: boolean
   allowPinManagement: boolean
   allowRoleCreation: boolean
+  allowScheduledEventAudit: boolean
+  allowScheduledEventChanges: boolean
   allowWebhookAudit: boolean
   allowWebhookDeletions: boolean
   auditFile: string
@@ -75,6 +77,8 @@ export interface ConnectorConfig {
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
+  scheduledEventGuildIds: ReadonlySet<string>
+  scheduledEventRoots: readonly string[]
   token: string
   webhookChannelIds: ReadonlySet<string>
 }
@@ -293,6 +297,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.guildExpressionGuildIds],
     ENVIRONMENT_NAMES.guildExpressionGuildIds,
   )
+  const scheduledEventGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.scheduledEventGuildIds],
+    ENVIRONMENT_NAMES.scheduledEventGuildIds,
+  )
   const webhookChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.webhookChannelIds],
     ENVIRONMENT_NAMES.webhookChannelIds,
@@ -305,6 +313,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
+    [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
       if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
@@ -379,6 +388,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowGuildExpressionChanges} requires ${ENVIRONMENT_NAMES.allowGuildExpressionAudit}`,
     )
   }
+  const allowScheduledEventAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowScheduledEventAudit],
+    ENVIRONMENT_NAMES.allowScheduledEventAudit,
+  )
+  const allowScheduledEventChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowScheduledEventChanges],
+    ENVIRONMENT_NAMES.allowScheduledEventChanges,
+  )
+  if (allowScheduledEventChanges && !allowScheduledEventAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowScheduledEventChanges} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
+    )
+  }
 
   return {
     adminGuildIds,
@@ -431,6 +453,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowRoleCreation],
       ENVIRONMENT_NAMES.allowRoleCreation,
     ),
+    allowScheduledEventAudit,
+    allowScheduledEventChanges,
     allowWebhookAudit,
     allowWebhookDeletions,
     auditFile: auditFile(
@@ -498,6 +522,11 @@ export function loadConnectorConfig(
     protectedUserIds,
     pinChannelIds,
     roleCreationGuildIds,
+    scheduledEventGuildIds,
+    scheduledEventRoots: parseOwnedRoots(
+      environment[ENVIRONMENT_NAMES.scheduledEventRoots],
+      ENVIRONMENT_NAMES.scheduledEventRoots,
+    ),
     token,
     webhookChannelIds,
   }

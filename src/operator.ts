@@ -70,6 +70,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
   roleCreationPolicy: "role-creation-policy",
+  scheduledEventAuditPolicy: "scheduled-event-audit-policy",
+  scheduledEventChangePolicy: "scheduled-event-change-policy",
   token: "token",
   toolSurface: "tool-surface",
   webhookAuditPolicy: "webhook-audit-policy",
@@ -273,6 +275,19 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("Guild-expression updates and deletions are enabled, but creation remains blocked because no canonical local roots are configured")
   }
+  if (config.allowScheduledEventAudit && config.scheduledEventGuildIds.size === 0) {
+    warnings.push("The scheduled-event audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowScheduledEventChanges && config.scheduledEventGuildIds.size === 0) {
+    warnings.push("The scheduled-event change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (
+    config.allowScheduledEventChanges
+    && config.scheduledEventGuildIds.size > 0
+    && config.scheduledEventRoots.length === 0
+  ) {
+    warnings.push("Scheduled-event changes are enabled, but cover updates remain blocked because no canonical local roots are configured")
+  }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [config.allowAttachments, "attachments", "Attachment messages"],
@@ -291,6 +306,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowPinManagement, "pins", "Message pin management"],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
+    [
+      config.allowScheduledEventAudit || config.allowScheduledEventChanges,
+      "scheduled-events",
+      "Scheduled event audit and changes",
+    ],
     [
       config.allowWebhookAudit || config.allowWebhookDeletions,
       "webhooks",
@@ -708,6 +728,50 @@ export async function diagnoseConnector(
         `Reviewed guild-expression changes are constrained to ${config.guildExpressionGuildIds.size} exact guilds and ${config.guildExpressionRoots.length} canonical creation roots with one-shot execution and exact metadata or absence readback`,
       ))
     }
+    if (!config.allowScheduledEventAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventAuditPolicy,
+        "pass",
+        "Privacy-safe scheduled event inventory is disabled",
+      ))
+    } else if (config.scheduledEventGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventAuditPolicy,
+        "warn",
+        "Scheduled-event audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventAuditPolicy,
+        "pass",
+        `Privacy-safe scheduled event inventory is constrained to ${config.scheduledEventGuildIds.size} exact guilds`,
+      ))
+    }
+    if (!config.allowScheduledEventChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventChangePolicy,
+        "pass",
+        "Reviewed scheduled event changes are disabled",
+      ))
+    } else if (config.scheduledEventGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventChangePolicy,
+        "warn",
+        "Scheduled-event changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else if (config.scheduledEventRoots.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventChangePolicy,
+        "warn",
+        `Reviewed scheduled-event changes are constrained to ${config.scheduledEventGuildIds.size} exact guilds, but cover updates are blocked because canonical local roots are empty`,
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventChangePolicy,
+        "pass",
+        `Reviewed scheduled-event changes are constrained to ${config.scheduledEventGuildIds.size} exact guilds and ${config.scheduledEventRoots.length} canonical cover roots with one-shot execution and exact state or absence readback`,
+      ))
+    }
     checks.push(config.allowGateway
       ? check(
         DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -874,6 +938,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowGuildExpressionChanges,
     ENVIRONMENT_NAMES.guildExpressionGuildIds,
     ENVIRONMENT_NAMES.guildExpressionRoots,
+    ENVIRONMENT_NAMES.allowScheduledEventAudit,
+    ENVIRONMENT_NAMES.allowScheduledEventChanges,
+    ENVIRONMENT_NAMES.scheduledEventGuildIds,
+    ENVIRONMENT_NAMES.scheduledEventRoots,
     ENVIRONMENT_NAMES.allowDeletions,
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowPinManagement,

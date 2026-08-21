@@ -132,6 +132,15 @@ import {
   RoleAdministrationService,
 } from "./role-administration-service.js"
 import type {
+  ScheduledEventChangeRequest,
+  ScheduledEventInventoryResult,
+  ScheduledEventLookupResult,
+  ScheduledEventPlan,
+  ScheduledEventResult,
+  ScheduledEventServiceOptions,
+} from "./scheduled-event-service.js"
+import { ScheduledEventService } from "./scheduled-event-service.js"
+import type {
   WebhookDeletionPlan,
   WebhookDeletionRequest,
   WebhookDeletionResult,
@@ -163,6 +172,7 @@ export interface DiscordServiceClient {
   createGuildChannel: DiscordClient["createGuildChannel"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
+  createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
   createGuildSticker: DiscordClient["createGuildSticker"]
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
@@ -170,6 +180,7 @@ export interface DiscordServiceClient {
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteMessage: DiscordClient["deleteMessage"]
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
+  deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
   deleteWebhook: DiscordClient["deleteWebhook"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
@@ -185,6 +196,7 @@ export interface DiscordServiceClient {
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoles: DiscordClient["getGuildRoles"]
+  getGuildScheduledEvent: DiscordClient["getGuildScheduledEvent"]
   getGuildSticker: DiscordClient["getGuildSticker"]
   getMessage: DiscordClient["getMessage"]
   getThreadMember: DiscordClient["getThreadMember"]
@@ -193,6 +205,7 @@ export interface DiscordServiceClient {
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
+  listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
   listGuildEmojis: DiscordClient["listGuildEmojis"]
   listGuildStickers: DiscordClient["listGuildStickers"]
   listMessagePins: DiscordClient["listMessagePins"]
@@ -202,6 +215,7 @@ export interface DiscordServiceClient {
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
+  modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
   pinMessage: DiscordClient["pinMessage"]
   removeGuildBan: DiscordClient["removeGuildBan"]
@@ -272,6 +286,10 @@ export interface ConnectorServiceOptions {
   policy?: ScopePolicy
   roleAdministrationOptions?: Pick<
     RoleAdministrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  scheduledEventOptions?: Pick<
+    ScheduledEventServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
@@ -416,6 +434,7 @@ export class ConnectorService {
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #roleAdministrationService: RoleAdministrationService
+  readonly #scheduledEventService: ScheduledEventService
   readonly #webhookService: WebhookService
 
   constructor(options: ConnectorServiceOptions) {
@@ -494,6 +513,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildExpressionOptions,
+    })
+    this.#scheduledEventService = new ScheduledEventService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      fileRoots: options.config.scheduledEventRoots,
+      operationStore,
+      policy: this.#policy,
+      ...options.scheduledEventOptions,
     })
     this.#memberDirectoryService = new MemberDirectoryService({
       client: this.#client,
@@ -1123,6 +1150,31 @@ export class ConnectorService {
     )
   }
 
+  async listScheduledEvents(
+    guildId: string,
+    includeSubscriberCount = false,
+    options: RequestOptions = {},
+  ): Promise<ScheduledEventInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#scheduledEventService.list(identity.bot.id, guildId, {
+      ...options,
+      includeSubscriberCount,
+    })
+  }
+
+  async getScheduledEvent(
+    guildId: string,
+    eventId: string,
+    includeSubscriberCount = false,
+    options: RequestOptions = {},
+  ): Promise<ScheduledEventLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#scheduledEventService.get(identity.bot.id, guildId, eventId, {
+      ...options,
+      includeSubscriberCount,
+    })
+  }
+
   async getChannelWebhook(
     channelId: string,
     webhookId: string,
@@ -1156,6 +1208,19 @@ export class ConnectorService {
   ): Promise<GuildExpressionPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#guildExpressionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planScheduledEventChange(
+    request: ScheduledEventChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ScheduledEventPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#scheduledEventService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -1369,6 +1434,21 @@ export class ConnectorService {
   ): Promise<GuildExpressionResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#guildExpressionService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeScheduledEventChange(
+    request: ScheduledEventChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ScheduledEventResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#scheduledEventService.execute(
       identity.application.id,
       identity.bot.id,
       request,

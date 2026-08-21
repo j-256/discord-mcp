@@ -47,6 +47,7 @@ type McpToolWorkflow =
   | "message-deletion"
   | "message-pin"
   | "role-creation"
+  | "scheduled-event-change"
   | "webhook-deletion"
 
 interface ToolCatalogMetadata {
@@ -125,6 +126,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "role-creation",
     workflow: "role-creation",
   },
+  execute_scheduled_event_change: {
+    keywords: ["calendar", "cancel", "complete", "create", "event", "execute", "schedule", "transition", "update"],
+    toolset: "scheduled-events",
+    workflow: "scheduled-event-change",
+  },
   execute_webhook_deletion: {
     keywords: ["cleanup", "delete", "execute", "integration", "webhook"],
     toolset: "webhooks",
@@ -178,6 +184,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["exact", "permission", "read", "role"],
     toolset: "roles",
   },
+  get_scheduled_event: {
+    keywords: ["calendar", "event", "exact", "guild", "schedule"],
+    toolset: "scheduled-events",
+  },
   get_channel_webhook: {
     keywords: ["audit", "exact", "integration", "lookup", "webhook"],
     toolset: "webhooks",
@@ -229,6 +239,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_roles: {
     keywords: ["guild", "hierarchy", "list", "permission", "role"],
     toolset: "roles",
+  },
+  list_scheduled_events: {
+    keywords: ["calendar", "event", "guild", "inventory", "list", "schedule", "subscriber"],
+    toolset: "scheduled-events",
   },
   list_channel_webhooks: {
     keywords: ["audit", "channel", "integration", "inventory", "list", "webhook"],
@@ -283,6 +297,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "permission", "plan", "review", "role"],
     toolset: "role-creation",
     workflow: "role-creation",
+  },
+  plan_scheduled_event_change: {
+    keywords: ["calendar", "cancel", "complete", "create", "event", "plan", "review", "schedule", "transition", "update"],
+    toolset: "scheduled-events",
+    workflow: "scheduled-event-change",
   },
   plan_webhook_deletion: {
     keywords: ["cleanup", "delete", "integration", "plan", "review", "webhook"],

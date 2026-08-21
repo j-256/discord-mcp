@@ -50,6 +50,12 @@ import {
   type RoleCreationPlan,
   type RoleCreationRequest,
 } from "../src/role-administration-service.js"
+import type {
+  ProjectedScheduledEvent,
+  ScheduledEventChangeRequest,
+  ScheduledEventPlan,
+  ScheduledEventPrivacyProjection,
+} from "../src/scheduled-event-service.js"
 import {
   AdministrationExecutionError,
   AttachmentMessageExecutionError,
@@ -71,6 +77,8 @@ import {
   MessagePinOperationConflictError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
+  ScheduledEventExecutionError,
+  ScheduledEventOperationConflictError,
   WebhookDeletionExecutionError,
   WebhookDeletionOperationConflictError,
 } from "../src/errors.js"
@@ -132,6 +140,9 @@ const EMOJI_ID = "380000000000000001"
 const STICKER_ID = "390000000000000001"
 const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
 const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
+const SCHEDULED_EVENT_ID = "395000000000000001"
+const SCHEDULED_EVENT_OPERATION_KEY = "scheduled-event-attempt-0001"
+const SCHEDULED_EVENT_COVER_PATH = "/test/discord-mcp/reviewed-event-cover.png"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -478,6 +489,177 @@ function guildExpressionPlan(
       safetyLimit: request.kind === "emoji" ? 1_000 : 100,
     },
     warnings: ["One-shot reviewed guild expression change"],
+  }
+}
+
+function scheduledEventPrivacy(): ScheduledEventPrivacyProjection {
+  return {
+    omittedFields: [
+      "coverImageCdnUrl",
+      "coverImageHash",
+      "creatorProfile",
+      "rawDiscordObject",
+      "subscriberProfiles",
+    ],
+    privateFieldsProjectedOut: true,
+    subscriberIdentitiesExposed: false,
+  }
+}
+
+function projectedScheduledEvent(
+  eventId = SCHEDULED_EVENT_ID,
+  subscriberCount: number | null = null,
+): ProjectedScheduledEvent {
+  return {
+    channelId: CHANNEL_ID,
+    creatorUserId: BOT_ID,
+    description: "Reviewed event",
+    entityId: null,
+    entityType: "voice",
+    eventId,
+    guildId: GUILD_ID,
+    hasCoverImage: false,
+    location: null,
+    name: "Planning session",
+    privacyLevel: "guild-only",
+    recurrence: null,
+    scheduledEndTime: "2026-09-01T22:00:00.000Z",
+    scheduledStartTime: "2026-09-01T20:00:00.000Z",
+    status: "scheduled",
+    subscriberCount,
+  }
+}
+
+function scheduledEventAccess(
+  entityType: "external" | "stage" | "voice" = "voice",
+  channelId: string | null = entityType === "external" ? null : CHANNEL_ID,
+) {
+  return {
+    administrator: false,
+    channelId,
+    confidence: "complete" as const,
+    effectivePermissions: (
+      DISCORD_PERMISSIONS.CREATE_EVENTS
+      | DISCORD_PERMISSIONS.MANAGE_EVENTS
+      | DISCORD_PERMISSIONS.VIEW_CHANNEL
+      | DISCORD_PERMISSIONS.CONNECT
+      | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+      | DISCORD_PERMISSIONS.MUTE_MEMBERS
+      | DISCORD_PERMISSIONS.MOVE_MEMBERS
+    ).toString(),
+    entityType,
+    guildOwner: false,
+    missingPermissions: [] as [],
+    permissionScope: entityType === "external" ? "guild" as const : "channel" as const,
+    requiredPermissions: entityType === "external"
+      ? ["CREATE_EVENTS" as const]
+      : entityType === "voice"
+        ? ["CREATE_EVENTS" as const, "VIEW_CHANNEL" as const, "CONNECT" as const]
+        : [
+            "CREATE_EVENTS" as const,
+            "MANAGE_CHANNELS" as const,
+            "MUTE_MEMBERS" as const,
+            "MOVE_MEMBERS" as const,
+          ],
+  }
+}
+
+function scheduledEventPlan(
+  request: ScheduledEventChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ScheduledEventPlan {
+  const existing = request.action === "create"
+    ? null
+    : projectedScheduledEvent(request.eventId)
+  const hosting = request.action === "create"
+    ? request.hosting
+    : request.action === "update" && request.hosting
+      ? request.hosting
+      : existing?.entityType === "external"
+        ? { entityType: "external" as const, location: existing.location || "Town Hall" }
+        : {
+            channelId: existing?.channelId || CHANNEL_ID,
+            entityType: existing?.entityType === "stage" ? "stage" as const : "voice" as const,
+          }
+  const entityType = hosting.entityType
+  const channelId = entityType === "external" ? null : hosting.channelId
+  const location = entityType === "external" ? hosting.location : null
+  const desired = request.action === "delete"
+    ? null
+    : request.action === "transition"
+      ? { ...existing!, status: request.targetStatus }
+      : {
+          ...(existing || projectedScheduledEvent("placeholder")),
+          channelId,
+          creatorUserId: existing?.creatorUserId ?? BOT_ID,
+          description: request.description === undefined
+            ? existing?.description ?? null
+            : request.description,
+          entityType,
+          eventId: existing?.eventId ?? null,
+          hasCoverImage: request.coverImagePath === undefined
+            ? existing?.hasCoverImage ?? false
+            : request.coverImagePath !== null,
+          location,
+          name: request.name ?? existing?.name ?? "Planning session",
+          scheduledEndTime: request.scheduledEndTime
+            ?? existing?.scheduledEndTime
+            ?? null,
+          scheduledStartTime: request.scheduledStartTime
+            ?? existing?.scheduledStartTime
+            ?? "2026-09-01T20:00:00.000Z",
+        }
+  const permissionEntityType = existing?.entityType ?? entityType
+  const permissionChannelId = existing?.channelId ?? channelId
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    desired,
+    digest,
+    effect: effect === "none" ? "none" : request.action,
+    existing,
+    file: "coverImagePath" in request && typeof request.coverImagePath === "string"
+      ? {
+          contentDigest: `hmac-sha256:${"e".repeat(64)}`,
+          review: {
+            canonicalPath: request.coverImagePath,
+            containedByConfiguredRoot: true,
+            format: "png",
+            height: 512,
+            mediaType: "image/png",
+            ownerMatchesProcess: true,
+            regularFile: true,
+            singleLink: true,
+            sizeBytes: 256,
+            stableRead: true,
+            width: 1024,
+          },
+        }
+      : null,
+    guild: { id: request.guildId, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      botOwned: existing === null ? null : true,
+      current: scheduledEventAccess(permissionEntityType, permissionChannelId),
+      destination: request.action === "create" || request.action === "update" && request.hosting
+        ? scheduledEventAccess(entityType, channelId)
+        : null,
+      ownershipRequired: false,
+    },
+    privacy: scheduledEventPrivacy(),
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    visibleInventory: {
+      digest: request.action === "create" ? `hmac-sha256:${"f".repeat(64)}` : null,
+      returned: request.action === "create" ? 1 : null,
+      safetyLimit: 100,
+      visibility: "connector-visible",
+    },
+    warnings: ["One-shot reviewed scheduled event change"],
   }
 }
 
@@ -1000,6 +1182,11 @@ function fixturePolicy(): PolicyDescription {
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    scheduledEventAuditEnabled: false,
+    scheduledEventChangesEnabled: false,
+    scheduledEventCoverChangesEnabled: false,
+    scheduledEventGuildIds: [],
+    scheduledEventRootCount: 0,
     interactionChannelIds: [],
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 500,
@@ -1051,6 +1238,9 @@ function serviceFixture(overrides: {
   roleCreationAction?: "create" | "none"
   roleCreationError?: Error
   roleCreationPlanDigest?: string
+  scheduledEventEffect?: "change" | "none"
+  scheduledEventError?: Error
+  scheduledEventPlanDigest?: string
   webhookDeletionError?: Error
   webhookDeletionPlanDigest?: string
 } = {}) {
@@ -1091,6 +1281,10 @@ function serviceFixture(overrides: {
     principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
+    scheduledEventExecute: 0,
+    scheduledEventGet: 0,
+    scheduledEventList: 0,
+    scheduledEventPlan: 0,
     search: 0,
     send: 0,
     webhookDeletionExecute: 0,
@@ -1099,6 +1293,78 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeScheduledEventChange(request, planDigest) {
+      if (overrides.scheduledEventError) throw overrides.scheduledEventError
+      calls.scheduledEventExecute += 1
+      const planned = scheduledEventPlan(
+        request,
+        planDigest,
+        overrides.scheduledEventEffect,
+      )
+      const eventId = request.action === "create"
+        ? SCHEDULED_EVENT_ID
+        : request.eventId
+      return {
+        action: request.action,
+        activityId: planned.effect === "none" ? null : "activity-scheduled-event",
+        eventId,
+        guildId: request.guildId,
+        observed: request.action === "delete"
+          ? null
+          : { ...planned.desired, eventId } as ProjectedScheduledEvent,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
+    async getScheduledEvent(guildId, eventId, includeSubscriberCount) {
+      calls.scheduledEventGet += 1
+      const event = projectedScheduledEvent(
+        eventId,
+        includeSubscriberCount ? 7 : null,
+      )
+      return {
+        access: scheduledEventAccess(event.entityType, event.channelId),
+        event,
+        guild: { id: guildId, name: "Private guild name" },
+        privacy: scheduledEventPrivacy(),
+        schemaVersion: 1,
+        status: "ok",
+        subscriberCountIncluded: includeSubscriberCount === true,
+      }
+    },
+    async listScheduledEvents(guildId, includeSubscriberCount) {
+      calls.scheduledEventList += 1
+      const event = projectedScheduledEvent(
+        SCHEDULED_EVENT_ID,
+        includeSubscriberCount ? 7 : null,
+      )
+      return {
+        events: [{
+          access: scheduledEventAccess(event.entityType, event.channelId),
+          event,
+        }],
+        guild: { id: guildId, name: "Private guild name" },
+        page: {
+          returned: 1,
+          safetyLimit: 100,
+          visibility: "connector-visible",
+        },
+        privacy: scheduledEventPrivacy(),
+        schemaVersion: 1,
+        status: "ok",
+        subscriberCountsIncluded: includeSubscriberCount === true,
+      }
+    },
+    async planScheduledEventChange(request) {
+      calls.scheduledEventPlan += 1
+      return scheduledEventPlan(
+        request,
+        overrides.scheduledEventPlanDigest || DIGEST,
+        overrides.scheduledEventEffect,
+      )
+    },
     async executeGuildExpressionChange(request, planDigest) {
       if (overrides.guildExpressionError) throw overrides.guildExpressionError
       calls.guildExpressionExecute += 1
@@ -2068,6 +2334,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_emoji",
       "list_guild_stickers",
       "get_guild_sticker",
+      "list_scheduled_events",
+      "get_scheduled_event",
       "list_channel_permission_overwrites",
       "send_message",
       "edit_own_message",
@@ -2080,6 +2348,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_webhook_deletion",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
+      "plan_scheduled_event_change",
+      "execute_scheduled_event_change",
       "plan_channel_permission_overwrite",
       "execute_channel_permission_overwrite",
       "plan_channel_creation",
@@ -2104,6 +2374,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
+  const scheduledEvent = result.tools.find((tool) => (
+    tool.name === "execute_scheduled_event_change"
+  ))
   const permissionOverwrite = result.tools.find((tool) => (
     tool.name === "execute_channel_permission_overwrite"
   ))
@@ -2115,6 +2388,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     messagePin,
     webhookDeletion,
     guildExpression,
+    scheduledEvent,
     permissionOverwrite,
     administration,
   ]) {
@@ -2143,10 +2417,13 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_guild_emoji",
     "list_guild_stickers",
     "get_guild_sticker",
+    "list_scheduled_events",
+    "get_scheduled_event",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
     "plan_webhook_deletion",
     "plan_guild_expression_change",
+    "plan_scheduled_event_change",
   ]) {
     assert.deepEqual(listedTool(result.tools, name).annotations, {
       destructiveHint: false,
@@ -2642,6 +2919,30 @@ test("progressive discovery enables the complete reviewed guild-expression workf
   )
 })
 
+test("progressive discovery enables the complete reviewed scheduled-event workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_scheduled_event_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_scheduled_event_change",
+    "plan_scheduled_event_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_scheduled_event_change",
+      "execute_scheduled_event_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed permission-overwrite workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -2799,6 +3100,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     principalExplain: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
+    scheduledEventExecute: 0,
+    scheduledEventGet: 0,
+    scheduledEventList: 0,
+    scheduledEventPlan: 0,
     search: 0,
     send: 0,
     webhookDeletionExecute: 0,
@@ -4387,6 +4692,340 @@ test("MCP guild expression execution exposes uncertain and one-shot conflict out
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(GUILD_EXPRESSION_OPERATION_KEY),
+  )
+})
+
+test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in counts", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: { guildId: GUILD_ID, includeSubscriberCount: true },
+    name: "list_scheduled_events",
+  })
+  const exact = await client.callTool({
+    arguments: {
+      eventId: SCHEDULED_EVENT_ID,
+      guildId: GUILD_ID,
+      includeSubscriberCount: false,
+    },
+    name: "get_scheduled_event",
+  })
+  const invalid = await client.callTool({
+    arguments: { eventId: "invalid", guildId: GUILD_ID },
+    name: "get_scheduled_event",
+  })
+
+  const listedContent = structuredContent(listed)
+  const exactContent = structuredContent(exact)
+  const listedItem = (
+    listedContent.events as Array<Record<string, unknown>>
+  )[0] || {}
+  const listedEvent = listedItem.event as Record<string, unknown>
+  const exactEvent = exactContent.event as Record<string, unknown>
+  assert.equal(listedContent.status, "ok")
+  assert.equal(exactContent.status, "ok")
+  assert.equal(listedContent.subscriberCountsIncluded, true)
+  assert.equal(exactContent.subscriberCountIncluded, false)
+  assert.equal(listedEvent.subscriberCount, 7)
+  assert.equal(exactEvent.subscriberCount, null)
+  assert.deepEqual(Object.keys(exactEvent).sort(), [
+    "channelId",
+    "creatorUserId",
+    "description",
+    "entityId",
+    "entityType",
+    "eventId",
+    "guildId",
+    "hasCoverImage",
+    "location",
+    "name",
+    "privacyLevel",
+    "recurrence",
+    "scheduledEndTime",
+    "scheduledStartTime",
+    "status",
+    "subscriberCount",
+  ])
+  assert.equal(
+    (exactContent.privacy as Record<string, unknown>).subscriberIdentitiesExposed,
+    false,
+  )
+  for (const privateField of [
+    "coverImageCdnUrl",
+    "coverImageHash",
+    "creatorProfile",
+    "subscriberProfiles",
+  ]) {
+    assert.equal(privateField in exactEvent, false)
+    assert.equal(privateField in listedEvent, false)
+  }
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.scheduledEventList, 1)
+  assert.equal(calls.scheduledEventGet, 1)
+})
+
+test("MCP scheduled event plans accept exact lifecycle actions and reject transported media", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const validRequests = [
+    {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      coverImagePath: SCHEDULED_EVENT_COVER_PATH,
+      description: "Reviewed public planning session",
+      guildId: GUILD_ID,
+      hosting: { entityType: "external", location: "Town Hall" },
+      name: "Planning session",
+      operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+      recurrence: {
+        frequency: "daily",
+        weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+      },
+      scheduledEndTime: "2026-09-01T22:00:00.000Z",
+      scheduledStartTime: "2026-09-01T20:00:00.000Z",
+    },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      coverImagePath: null,
+      description: null,
+      eventId: SCHEDULED_EVENT_ID,
+      guildId: GUILD_ID,
+      name: "Updated planning session",
+      operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+    },
+    {
+      action: "transition",
+      auditReason: AUDIT_REASON,
+      eventId: SCHEDULED_EVENT_ID,
+      guildId: GUILD_ID,
+      operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+      targetStatus: "active",
+    },
+    {
+      action: "delete",
+      auditReason: AUDIT_REASON,
+      eventId: SCHEDULED_EVENT_ID,
+      guildId: GUILD_ID,
+      operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+    },
+  ]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_scheduled_event_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      new RegExp(SCHEDULED_EVENT_OPERATION_KEY),
+    )
+  }
+
+  const invalidRequests = [
+    { ...validRequests[0], coverImageUrl: "https://cdn.example/event.png" },
+    { ...validRequests[0], coverImage: "data:image/png;base64,AAAA" },
+    { ...validRequests[0], coverImagePath: "relative/event.png" },
+    { ...validRequests[0], scheduledEndTime: undefined },
+    {
+      ...validRequests[0],
+      hosting: { entityType: "voice", location: "not-a-channel" },
+    },
+    {
+      ...validRequests[0],
+      recurrence: { frequency: "daily", weekdays: ["monday"] },
+    },
+    {
+      ...validRequests[0],
+      scheduledEndTime: "2026-09-01T19:00:00.000Z",
+    },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      eventId: SCHEDULED_EVENT_ID,
+      guildId: GUILD_ID,
+      operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+    },
+    { ...validRequests[2], targetStatus: "scheduled" },
+    { ...validRequests[3], name: "not-accepted" },
+    { ...validRequests[3], operationKey: "short" },
+  ]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_scheduled_event_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.scheduledEventPlan, validRequests.length)
+})
+
+test("MCP scheduled event execution binds signed approval to exact reviewed evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      coverImagePath: SCHEDULED_EVENT_COVER_PATH,
+      description: "Reviewed public planning session",
+      guildId: GUILD_ID,
+      hosting: { entityType: "external", location: "Town Hall" },
+      name: "Planning session",
+      operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+      planDigest: DIGEST,
+      recurrence: { frequency: "weekly", interval: 2, weekday: "tuesday" },
+      scheduledEndTime: "2026-09-01T22:00:00.000Z",
+      scheduledStartTime: "2026-09-01T20:00:00.000Z",
+    },
+    name: "execute_scheduled_event_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).eventId, SCHEDULED_EVENT_ID)
+  assert.equal(calls.scheduledEventPlan, 1)
+  assert.equal(calls.scheduledEventExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    SCHEDULED_EVENT_COVER_PATH,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Current permission evidence:/)
+  assert.match(confirmationMessage, /Visible inventory:/)
+  assert.match(confirmationMessage, /Regular owned single-link file: true/)
+  assert.match(confirmationMessage, /Subscriber identities exposed: false/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(SCHEDULED_EVENT_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(SCHEDULED_EVENT_OPERATION_KEY),
+  )
+})
+
+test("MCP scheduled event execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    action: "update",
+    auditReason: AUDIT_REASON,
+    eventId: SCHEDULED_EVENT_ID,
+    guildId: GUILD_ID,
+    name: "Planning session",
+    operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { scheduledEventEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_scheduled_event_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.scheduledEventExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_scheduled_event_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.scheduledEventExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { scheduledEventPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_scheduled_event_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.scheduledEventExecute, 0)
+})
+
+test("MCP scheduled event execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    eventId: SCHEDULED_EVENT_ID,
+    guildId: GUILD_ID,
+    operationKey: SCHEDULED_EVENT_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      scheduledEventError: new ScheduledEventExecutionError(
+        "Discord scheduled event outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_scheduled_event_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-scheduled-event",
+    error: null,
+    eventId: SCHEDULED_EVENT_ID,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      scheduledEventError: new ScheduledEventOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_scheduled_event_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(SCHEDULED_EVENT_OPERATION_KEY),
   )
 })
 
@@ -6067,7 +6706,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, 7)
-  assert.equal(templates.resourceTemplates.length, 10)
+  assert.equal(templates.resourceTemplates.length, 11)
   for (const catalog of [tools, prompts, resources, templates]) {
     assert.equal(catalog.cacheScope, "public")
     assert.equal(catalog.ttlMs, CATALOG_CACHE_TTL_MS)

@@ -39,6 +39,7 @@ const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
+const SCHEDULED_EVENT_ID = "390000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -140,6 +141,7 @@ interface GuidanceCalls {
   messages: number
   permissionOverwrites: number
   roles: number
+  scheduledEvents: number
   unexpected: number
   webhooks: number
 }
@@ -166,6 +168,7 @@ function guidanceService(options: {
     messages: 0,
     permissionOverwrites: 0,
     roles: 0,
+    scheduledEvents: 0,
     unexpected: 0,
     webhooks: 0,
   }
@@ -176,10 +179,70 @@ function guidanceService(options: {
   const service: DiscordToolService = {
     addReaction: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeScheduledEventChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
+    getScheduledEvent: unexpected,
     getChannelWebhook: unexpected,
     planWebhookDeletion: unexpected,
+    planScheduledEventChange: unexpected,
+    async listScheduledEvents(guildId) {
+      calls.scheduledEvents += 1
+      calls.lastGuildId = guildId
+      return {
+        events: [{
+          access: {
+            administrator: false,
+            channelId: CHANNEL_ID,
+            confidence: "complete",
+            effectivePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+            entityType: "voice",
+            guildOwner: false,
+            missingPermissions: [],
+            permissionScope: "channel",
+            requiredPermissions: ["VIEW_CHANNEL"],
+          },
+          event: {
+            channelId: CHANNEL_ID,
+            creatorUserId: USER_ID,
+            description: "Reviewed event",
+            entityId: null,
+            entityType: "voice",
+            eventId: SCHEDULED_EVENT_ID,
+            guildId,
+            hasCoverImage: true,
+            location: null,
+            name: "Planning session",
+            privacyLevel: "guild-only",
+            recurrence: null,
+            scheduledEndTime: "2026-09-01T22:00:00.000Z",
+            scheduledStartTime: "2026-09-01T20:00:00.000Z",
+            status: "scheduled",
+            subscriberCount: null,
+          },
+        }],
+        guild: { id: guildId, name: "Private guild name" },
+        page: {
+          returned: 1,
+          safetyLimit: 100,
+          visibility: "connector-visible",
+        },
+        privacy: {
+          omittedFields: [
+            "coverImageCdnUrl",
+            "coverImageHash",
+            "creatorProfile",
+            "rawDiscordObject",
+            "subscriberProfiles",
+          ],
+          privateFieldsProjectedOut: true,
+          subscriberIdentitiesExposed: false,
+        },
+        schemaVersion: 1,
+        status: "ok",
+        subscriberCountsIncluded: false,
+      }
+    },
     async listGuildExpressions(guildId, kind) {
       calls.guildExpressions += 1
       calls.lastGuildId = guildId
@@ -266,6 +329,11 @@ function guidanceService(options: {
         guildExpressionCreationEnabled: false,
         guildExpressionGuildIds: [],
         guildExpressionRootCount: 0,
+        scheduledEventAuditEnabled: false,
+        scheduledEventChangesEnabled: false,
+        scheduledEventCoverChangesEnabled: false,
+        scheduledEventGuildIds: [],
+        scheduledEventRootCount: 0,
         interactionChannelIds: [],
         interactionMaxWritesPerMinute: 10,
         interactionMinWriteIntervalMs: 500,
@@ -669,6 +737,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildScheduledEvents,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildScheduledEvents,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildStickers,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildStickers,
       },
@@ -711,6 +783,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
+  assert.match(safety.text, /Scheduled-event inventory requires a separate exact guild allowlist/)
+  assert.match(safety.text, /Subscriber counts are aggregate and opt-in/)
   assert.match(safety.text, /Guild audit-log reads are separately selectable/)
   assert.match(safety.text, /include reasons only by explicit opt-in/)
   assert.match(safety.text, /Member-directory reads require a separate feature gate/)
@@ -877,6 +951,26 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("imageBytes" in (emoji || {}), false)
   assert.equal("imageBytes" in (sticker || {}), false)
 
+  const scheduledEvents = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/scheduled-events`,
+  )
+  const scheduledEventData = scheduledEvents.value.data as Record<string, unknown>
+  const scheduledEventItem = (
+    scheduledEventData.events as Array<Record<string, unknown>>
+  )[0] || {}
+  const scheduledEvent = scheduledEventItem.event as Record<string, unknown>
+  assert.equal(scheduledEvent.eventId, SCHEDULED_EVENT_ID)
+  assert.equal(scheduledEvent.subscriberCount, null)
+  assert.equal(scheduledEventData.subscriberCountsIncluded, false)
+  assert.equal(
+    (scheduledEventData.privacy as Record<string, unknown>)
+      .subscriberIdentitiesExposed,
+    false,
+  )
+  assert.equal("subscriberProfiles" in scheduledEvent, false)
+  assert.equal("coverImageHash" in scheduledEvent, false)
+
   const exactRole = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/roles/${ROLE_ID}`,
@@ -923,6 +1017,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.members, 1)
   assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.roles, 2)
+  assert.equal(calls.scheduledEvents, 1)
   assert.equal(calls.webhooks, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
@@ -1185,6 +1280,49 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     operationKey: OPERATION_KEY,
     tags: "reviewed",
   })
+
+  const scheduledEvent = promptText(await client.getPrompt({
+    arguments: {
+      action: "create",
+      auditReason: "Reviewed planning session",
+      coverImagePath: "/srv/discord-events/reviewed-cover.png",
+      description: "Reviewed public planning session",
+      entityType: "external",
+      guildId: GUILD_ID,
+      location: "Town Hall",
+      name: "Planning session",
+      operationKey: OPERATION_KEY,
+      recurrenceJson: JSON.stringify({
+        frequency: "weekly",
+        interval: 2,
+        weekday: "tuesday",
+      }),
+      scheduledEndTime: "2026-09-01T22:00:00.000Z",
+      scheduledStartTime: "2026-09-01T20:00:00.000Z",
+    },
+    name: MCP_PROMPT_NAMES.reviewScheduledEventChange,
+  }))
+  assert.deepEqual(JSON.parse(scheduledEvent.split("\n")[1] || ""), {
+    action: "create",
+    auditReason: "Reviewed planning session",
+    coverImagePath: "/srv/discord-events/reviewed-cover.png",
+    description: "Reviewed public planning session",
+    guildId: GUILD_ID,
+    hosting: { entityType: "external", location: "Town Hall" },
+    name: "Planning session",
+    operationKey: OPERATION_KEY,
+    recurrence: {
+      frequency: "weekly",
+      interval: 2,
+      weekday: "tuesday",
+    },
+    scheduledEndTime: "2026-09-01T22:00:00.000Z",
+    scheduledStartTime: "2026-09-01T20:00:00.000Z",
+  })
+  assert.match(scheduledEvent, /Call only plan_scheduled_event_change/)
+  assert.match(scheduledEvent, /Do not call execute_scheduled_event_change/)
+  assert.match(scheduledEvent, /entity-specific permission and ownership evidence/)
+  assert.match(scheduledEvent, /subscriber identity or other private field/)
 
   const permissionOverwrite = promptText(await client.getPrompt({
     arguments: {
@@ -1654,6 +1792,58 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         tags: "\ud800",
       },
       name: MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+    },
+    {
+      arguments: {
+        action: "create",
+        auditReason: "Reviewed scheduled event",
+        entityType: "external",
+        guildId: GUILD_ID,
+        location: "Town Hall",
+        name: "Planning session",
+        operationKey: OPERATION_KEY,
+        scheduledStartTime: "2026-09-01T20:00:00.000Z",
+      },
+      name: MCP_PROMPT_NAMES.reviewScheduledEventChange,
+    },
+    {
+      arguments: {
+        action: "create",
+        auditReason: "Reviewed scheduled event",
+        channelId: CHANNEL_ID,
+        entityType: "voice",
+        guildId: GUILD_ID,
+        name: "Planning session",
+        operationKey: OPERATION_KEY,
+        recurrenceJson: JSON.stringify({
+          frequency: "daily",
+          weekdays: ["monday"],
+        }),
+        scheduledStartTime: "2026-09-01T20:00:00.000Z",
+      },
+      name: MCP_PROMPT_NAMES.reviewScheduledEventChange,
+    },
+    {
+      arguments: {
+        action: "update",
+        auditReason: "Reviewed scheduled event",
+        eventId: SCHEDULED_EVENT_ID,
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewScheduledEventChange,
+    },
+    {
+      arguments: {
+        action: "transition",
+        auditReason: "Reviewed scheduled event",
+        eventId: SCHEDULED_EVENT_ID,
+        guildId: GUILD_ID,
+        name: "not accepted",
+        operationKey: OPERATION_KEY,
+        targetStatus: "active",
+      },
+      name: MCP_PROMPT_NAMES.reviewScheduledEventChange,
     },
     {
       arguments: {

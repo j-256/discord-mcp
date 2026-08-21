@@ -238,6 +238,30 @@ export interface GuildExpressionActivity {
   verification: "drift" | "match" | null
 }
 
+export type ScheduledEventActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ScheduledEventActivity {
+  action: "create" | "delete" | "transition" | "update"
+  entityType: "external" | "stage" | "voice"
+  error: string | null
+  eventId: string | null
+  guildId: string
+  id: string
+  kind: "scheduled-event-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: ScheduledEventActivityStatus
+  targetStatus: "active" | "canceled" | "completed" | null
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ChannelPermissionOverwriteActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -273,6 +297,7 @@ export type ActivityEntry =
   | MemberModerationActivity
   | MessagePinActivity
   | RoleCreationActivity
+  | ScheduledEventActivity
   | WebhookDeletionActivity
 
 export interface ActivityList {
@@ -822,6 +847,90 @@ function parseGuildExpressionActivity(
   }
 }
 
+function parseScheduledEventActivity(
+  value: unknown,
+): ScheduledEventActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "scheduled-event-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["create", "delete", "transition", "update"].includes(String(record.action))
+    || !["external", "stage", "voice"].includes(String(record.entityType))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.eventId === null || (
+      typeof record.eventId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.eventId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "active", "canceled", "completed"].includes(
+      record.targetStatus as string | null,
+    )
+    || (
+      record.action === "transition"
+        ? record.targetStatus === null
+        : record.targetStatus !== null
+    )
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.action === "create" ? record.eventId !== null : record.eventId === null
+    ))
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (["completed", "completed-with-drift"].includes(String(record.status)) && (
+      record.eventId === null
+      || record.error !== null
+      || record.verification !== (record.status === "completed" ? "match" : "drift")
+    ))
+    || (record.status === "failed" && (
+      record.error === null
+      || record.verification !== null
+      || (record.action === "create" ? record.eventId !== null : record.eventId === null)
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as ScheduledEventActivity["action"],
+    entityType: record.entityType as ScheduledEventActivity["entityType"],
+    error: record.error,
+    eventId: record.eventId,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "scheduled-event-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ScheduledEventActivityStatus,
+    targetStatus: record.targetStatus as ScheduledEventActivity["targetStatus"],
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseAttachmentMessageActivity(
   value: unknown,
 ): AttachmentMessageActivity | undefined {
@@ -983,6 +1092,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
     || parseGuildExpressionActivity(value)
+    || parseScheduledEventActivity(value)
     || parseWebhookDeletionActivity(value)
     || parseRoleCreationActivity(value)
     || parseDeletionActivity(value)

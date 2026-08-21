@@ -22,6 +22,7 @@ import {
   type MemberModerationActivity,
   type MessagePinActivity,
   type RoleCreationActivity,
+  type ScheduledEventActivity,
   type WebhookDeletionActivity,
 } from "../src/activity-log.js"
 
@@ -255,6 +256,34 @@ function guildExpression(
     planDigest: `hmac-sha256:${"a".repeat(64)}`,
     schemaVersion: 1,
     status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function scheduledEvent(
+  id: string,
+  status: ScheduledEventActivity["status"],
+): ScheduledEventActivity {
+  return {
+    action: "transition",
+    entityType: "voice",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    eventId: "300",
+    guildId: "100",
+    id,
+    kind: "scheduled-event-change",
+    operationKeyHash: `sha256:${"b".repeat(64)}`,
+    planDigest: `hmac-sha256:${"c".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    targetStatus: "active",
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -742,6 +771,76 @@ test("JSONL activity log keeps guild expression evidence content-free", async (c
       "planDigest",
       "schemaVersion",
       "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps scheduled event evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-cover-path",
+    "private-description",
+    "private-event-name",
+    "private-location",
+    "private-operation-key",
+    "private-subscriber-profile",
+  ]
+
+  await store.append(scheduledEvent("1", "pending"))
+  await store.append({
+    ...scheduledEvent("2", "completed"),
+    auditReason: privateValues[0],
+    coverImagePath: privateValues[1],
+    description: privateValues[2],
+    name: privateValues[3],
+    location: privateValues[4],
+    operationKey: privateValues[5],
+    subscriberProfile: privateValues[6],
+  } as ScheduledEventActivity)
+  await store.append({
+    ...scheduledEvent("4", "uncertain"),
+    error: "OperationStoreError",
+  })
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...scheduledEvent("3", "completed"),
+      targetStatus: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["4", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.error, "OperationStoreError")
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "entityType",
+      "error",
+      "eventId",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "targetStatus",
       "timestamp",
       "verification",
     ],

@@ -30,6 +30,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   guildChannels: "guild_channels",
   guildEmojis: "guild_emojis",
   guildRoles: "guild_roles",
+  guildScheduledEvents: "guild_scheduled_events",
   guildStickers: "guild_stickers",
 })
 
@@ -43,6 +44,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   guildChannels: "discord://guilds/{guildId}/channels",
   guildEmojis: "discord://guilds/{guildId}/emojis",
   guildRoles: "discord://guilds/{guildId}/roles",
+  guildScheduledEvents: "discord://guilds/{guildId}/scheduled-events",
   guildStickers: "discord://guilds/{guildId}/stickers",
 })
 
@@ -58,6 +60,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewMessageDeletion: "review_message_deletion",
   reviewMessagePin: "review_message_pin",
   reviewRoleCreation: "review_role_creation",
+  reviewScheduledEventChange: "review_scheduled_event_change",
   reviewWebhookDeletion: "review_webhook_deletion",
   searchGuildMessages: "search_guild_messages",
   summarizeChannel: "summarize_channel",
@@ -79,6 +82,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",
   [MCP_PROMPT_NAMES.reviewMessagePin]: "pins",
   [MCP_PROMPT_NAMES.reviewRoleCreation]: "role-creation",
+  [MCP_PROMPT_NAMES.reviewScheduledEventChange]: "scheduled-events",
   [MCP_PROMPT_NAMES.reviewWebhookDeletion]: "webhooks",
   [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",
   [MCP_PROMPT_NAMES.summarizeChannel]: "messages",
