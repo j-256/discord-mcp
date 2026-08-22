@@ -46,6 +46,7 @@ export const OPERATION_KINDS = [
   "thread-create",
   "welcome-screen-change",
   "webhook-deletion",
+  "widget-settings-change",
 ] as const
 
 export type OperationKind = typeof OPERATION_KINDS[number]

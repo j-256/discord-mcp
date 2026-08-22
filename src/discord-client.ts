@@ -33,6 +33,7 @@ import {
   StageInstanceEvidenceError,
   WelcomeScreenEvidenceError,
   WebhookEvidenceError,
+  WidgetSettingsEvidenceError,
 } from "./errors.js"
 import type {
   EmojiFileFormat,
@@ -313,6 +314,17 @@ export interface ModifyGuildWelcomeScreenInput {
   description: string | null
   enabled: boolean
   welcomeChannels: readonly ModifyGuildWelcomeScreenChannelInput[]
+}
+
+export interface DiscordGuildWidgetSettings {
+  channelId: string | null
+  enabled: boolean
+  unknownFieldCount: number
+}
+
+export interface ModifyGuildWidgetSettingsInput {
+  channelId: string | null
+  enabled: boolean
 }
 
 export interface ModifyGuildOnboardingInput {
@@ -1731,6 +1743,60 @@ const WELCOME_SCREEN_CHANNEL_INPUT_KEYS = [
   "emojiName",
 ] as const
 const WELCOME_SCREEN_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+
+const WIDGET_SETTINGS_KEYS = ["channel_id", "enabled"] as const
+const WIDGET_SETTINGS_INPUT_KEYS = ["channelId", "enabled"] as const
+
+function widgetSettingsEvidenceError(options?: ErrorOptions): WidgetSettingsEvidenceError {
+  return new WidgetSettingsEvidenceError(
+    "Discord returned invalid widget-settings evidence",
+    options,
+  )
+}
+
+function projectGuildWidgetSettings(value: unknown): DiscordGuildWidgetSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw widgetSettingsEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.enabled !== "boolean"
+    || !(record.channel_id === null || typeof record.channel_id === "string")
+  ) {
+    throw widgetSettingsEvidenceError()
+  }
+  if (typeof record.channel_id === "string") {
+    try {
+      assertPositiveSnowflake(record.channel_id, "Discord widget channel ID")
+    } catch (error) {
+      throw widgetSettingsEvidenceError({ cause: error })
+    }
+  }
+  return {
+    channelId: record.channel_id,
+    enabled: record.enabled,
+    unknownFieldCount: countUnknownFields(record, WIDGET_SETTINGS_KEYS),
+  }
+}
+
+function assertModifyGuildWidgetSettingsInput(
+  value: unknown,
+): asserts value is ModifyGuildWidgetSettingsInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord widget-settings input must be an exact object")
+  }
+  const input = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(input, WIDGET_SETTINGS_INPUT_KEYS)
+    || typeof input.enabled !== "boolean"
+    || !(input.channelId === null || typeof input.channelId === "string")
+  ) {
+    throw new RangeError("Discord widget-settings input is invalid")
+  }
+  if (typeof input.channelId === "string") {
+    assertPositiveSnowflake(input.channelId, "Discord widget channel ID")
+  }
+}
 
 function welcomeScreenEvidenceError(options?: ErrorOptions): WelcomeScreenEvidenceError {
   return new WelcomeScreenEvidenceError(
@@ -5522,6 +5588,51 @@ export class DiscordClient {
       }
       throw error
     }
+  }
+
+  async getGuildWidgetSettings(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildWidgetSettings> {
+    assertPositiveSnowflake(guildId, "Discord widget-settings guild ID")
+    const response = await this.#request<unknown>(
+      "get_guild_widget_settings",
+      `/guilds/${guildId}/widget`,
+      {
+        ...options,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildWidgetSettings(response)
+  }
+
+  async modifyGuildWidgetSettings(
+    guildId: string,
+    input: ModifyGuildWidgetSettingsInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildWidgetSettings> {
+    assertPositiveSnowflake(guildId, "Discord widget-settings guild ID")
+    assertModifyGuildWidgetSettingsInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord widget-settings audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_widget_settings",
+      `/guilds/${guildId}/widget`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          channel_id: input.channelId,
+          enabled: input.enabled,
+        },
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildWidgetSettings(response)
   }
 
   async modifyGuildWelcomeScreen(

@@ -190,6 +190,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     welcomeScreenAuditEnabled: false,
     welcomeScreenChangesEnabled: false,
     welcomeScreenGuildIds: [],
+    widgetPublicExposureEnabled: false,
+    widgetSettingsAuditEnabled: false,
+    widgetSettingsChangesEnabled: false,
+    widgetSettingsGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -483,6 +487,10 @@ test("configuration and policy require an exact administration guild and protect
     welcomeScreenAuditEnabled: false,
     welcomeScreenChangesEnabled: false,
     welcomeScreenGuildIds: [],
+    widgetPublicExposureEnabled: false,
+    widgetSettingsAuditEnabled: false,
+    widgetSettingsChangesEnabled: false,
+    widgetSettingsGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -832,6 +840,115 @@ test("configuration and policy isolate reviewed guild Welcome Screens", () => {
       DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "sometimes",
     }, { homeDirectory: "/test/home" }),
     /must be true or false/,
+  )
+})
+
+test("configuration and policy isolate reviewed authenticated widget settings", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+    DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowWidgetSettingsAudit, true)
+  assert.equal(config.allowWidgetSettingsChanges, true)
+  assert.equal(config.allowWidgetPublicExposure, true)
+  assert.deepEqual([...config.widgetSettingsGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().widgetSettingsAuditEnabled, true)
+  assert.equal(policy.describe().widgetSettingsChangesEnabled, true)
+  assert.equal(policy.describe().widgetPublicExposureEnabled, true)
+  assert.deepEqual(policy.describe().widgetSettingsGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildWidgetSettingsAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildWidgetSettingsChangeable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildWidgetPublicExposureChangeable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildWidgetSettingsAuditable(OTHER_GUILD_ID),
+    /outside the widget-settings audit scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildWidgetSettingsAuditable(GUILD_ID),
+    /widget-settings audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildWidgetSettingsAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildWidgetSettingsChangeable(GUILD_ID),
+    /widget-settings changes are disabled/,
+  )
+
+  const changesOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+    DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => changesOnly.assertGuildWidgetSettingsChangeable(GUILD_ID))
+  assert.throws(
+    () => changesOnly.assertGuildWidgetPublicExposureChangeable(GUILD_ID),
+    /widget public exposure is disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertGuildWidgetSettingsAuditable(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
+      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: Array.from(
+        { length: 101 },
+        (_, index) => String(index + 1),
+      ).join(","),
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/,
   )
 })
 
@@ -1522,6 +1639,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     welcomeScreenAuditEnabled: false,
     welcomeScreenChangesEnabled: false,
     welcomeScreenGuildIds: [],
+    widgetPublicExposureEnabled: false,
+    widgetSettingsAuditEnabled: false,
+    widgetSettingsChangesEnabled: false,
+    widgetSettingsGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,

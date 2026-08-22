@@ -61,6 +61,7 @@ type McpToolWorkflow =
   | "thread-creation"
   | "webhook-deletion"
   | "welcome-screen-change"
+  | "widget-settings-change"
 
 interface ToolCatalogMetadata {
   keywords: readonly string[]
@@ -158,6 +159,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "welcome-screen",
     workflow: "welcome-screen-change",
   },
+  execute_guild_widget_settings_change: {
+    keywords: ["channel", "configure", "execute", "exposure", "invite", "profile", "widget"],
+    toolset: "widget-settings",
+    workflow: "widget-settings-change",
+  },
   execute_poll_creation: {
     keywords: ["create", "execute", "poll", "question", "vote"],
     toolset: "polls",
@@ -235,6 +241,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_welcome_screen: {
     keywords: ["audit", "channel", "guild", "join", "read", "welcome"],
     toolset: "welcome-screen",
+  },
+  get_guild_widget_settings: {
+    keywords: ["audit", "channel", "exposure", "guild", "invite", "profile", "widget"],
+    toolset: "widget-settings",
   },
   get_automod_rule: {
     keywords: ["automod", "exact", "moderation", "policy", "rule"],
@@ -458,6 +468,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "configure", "join", "plan", "review", "welcome"],
     toolset: "welcome-screen",
     workflow: "welcome-screen-change",
+  },
+  plan_guild_widget_settings_change: {
+    keywords: ["channel", "configure", "exposure", "invite", "plan", "profile", "review", "widget"],
+    toolset: "widget-settings",
+    workflow: "widget-settings-change",
   },
   plan_poll_creation: {
     keywords: ["create", "plan", "poll", "question", "vote"],

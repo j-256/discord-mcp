@@ -112,6 +112,8 @@ export interface DiscordGuild {
   owner?: boolean
   owner_id?: string
   permissions?: string
+  widget_channel_id?: string | null
+  widget_enabled?: boolean
 }
 
 export interface DiscordGuildMember {

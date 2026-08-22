@@ -206,6 +206,8 @@ export function registerDiscordResources(
           "",
           "Welcome Screen audit requires a separate exact guild allowlist, verified connector identity, and complete bounded guild-feature, role, channel, overwrite, emoji, membership, and Welcome Screen evidence. Descriptions and Unicode emoji text are omitted by default and returned only transiently through explicit tool opt-in; unknown fields are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD evidence, the COMMUNITY guild feature, directly supported channels visible to @everyone, exact available public custom emoji or one validated Unicode grapheme, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PATCH with an audit-log reason, authoritative response validation, and a fresh full readback. Omitted ordered channel entries are deletions. Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed, same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client experience. Descriptions, Unicode emoji text, names, audit reasons, channel IDs, raw operation keys, and raw payloads are never persisted.",
           "",
+          "Authenticated widget-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD evidence, and complete bounded role, channel, overwrite, and authenticated settings evidence. It returns exact enabled and nullable channel state, @everyone visibility and invite-generation capability, optional guild-object cross-checks, explicit privacy and public-exposure projections, and unknown-field counts without channel names, invite codes or URLs, member or presence data, or raw payloads. It never calls anonymous widget JSON or image endpoints. Reviewed complete-state replacement requires an additional change toggle, a supported direct channel visible to @everyone when one is selected, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried complete PATCH with an audit-log reason, authoritative response validation, and a fresh authenticated readback. Enabling the widget or selecting a different non-null channel also requires a separate public-exposure toggle because the Server Profile, widget data, presence-bearing member summaries, and invite generation may become public. Disabling does not prove that the Server Profile returned to Private Profile, so manual restoration may be required. Same-guild uncertain outcomes fail closed, and channel names, audit reasons, channel IDs, raw operation keys, settings payloads, and raw evidence are never persisted.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Attachment messages require separate exact channel and canonical local-directory scopes. Planning performs a bounded stable read of one owned regular file and binds its bytes, path, exact message fields, reply, notifications, and complete permissions into a keyed plan. Execution requires fresh byte-matching plans, signed approval, a unique one-shot operation key, the shared anti-spam guard, pending content-free records, one non-retried multipart request, and exact message readback. It never accepts URLs or base64, persists file or message content, returns an attachment URL, retries, or rolls back.",
@@ -551,6 +553,30 @@ export function registerDiscordResources(
       () => service.getGuildWelcomeScreen(
         templateSnowflake(variables, "guildId"),
         false,
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildWidgetSettings,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildWidgetSettings, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded authenticated widget-settings audit for one exact separately allowlisted Discord guild. Returns complete management, channel-visibility, invite-generation, privacy, public-exposure, and verification-boundary evidence without channel names, invites, member or presence data, raw payloads, or anonymous endpoint calls; unknown future fields are counts only, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Authenticated Discord guild widget settings",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildWidgetSettings(
+        templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),
     ),

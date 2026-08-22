@@ -58,6 +58,7 @@ export const MCP_TOOLSET_NAMES = [
   "threads",
   "welcome-screen",
   "webhooks",
+  "widget-settings",
 ] as const
 
 export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
@@ -107,6 +108,9 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowWelcomeScreenChanges: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES",
   allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
   allowWebhookDeletions: "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
+  allowWidgetPublicExposure: "DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE",
+  allowWidgetSettingsAudit: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT",
+  allowWidgetSettingsChanges: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
   attachmentChannelIds: "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
   attachmentMaxBytes: "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
@@ -169,6 +173,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   threadParentIds: "DISCORD_MCP_THREAD_PARENT_IDS",
   welcomeScreenGuildIds: "DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS",
   webhookChannelIds: "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
+  widgetSettingsGuildIds: "DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS",
 })
 
 export const DISCORD_LIMITS = Object.freeze({
@@ -383,6 +388,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   stageInstanceChannels: 25,
   threadPageDefault: 50,
   welcomeScreenGuildAllowlist: 100,
+  widgetSettingsGuildAllowlist: 100,
 })
 
 export const STAGE_INSTANCE_ACTIONS = [

@@ -35,6 +35,7 @@ import {
   type ThreadCreationActivity,
   type WebhookDeletionActivity,
   type WelcomeScreenActivity,
+  type WidgetSettingsActivity,
 } from "../src/activity-log.js"
 
 function attachmentMessage(
@@ -452,6 +453,30 @@ function welcomeScreenChange(
     kind: "welcome-screen-change",
     operationKeyHash: `sha256:${"a".repeat(64)}`,
     planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function widgetSettingsChange(
+  id: string,
+  status: WidgetSettingsActivity["status"],
+): WidgetSettingsActivity {
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "widget-settings-change",
+    operationKeyHash: `sha256:${"c".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -1372,6 +1397,60 @@ test("JSONL activity log keeps Welcome Screen evidence content-free", async (con
     file,
     `${JSON.stringify({
       ...welcomeScreenChange("3", "completed-with-drift"),
+      verification: "match",
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps widget-settings evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-id",
+    "private-operation-key",
+  ]
+
+  await store.append(widgetSettingsChange("1", "pending"))
+  await store.append({
+    ...widgetSettingsChange("2", "completed"),
+    auditReason: privateValues[0],
+    channelId: privateValues[1],
+    enabled: true,
+    operationKey: privateValues[2],
+  } as WidgetSettingsActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...widgetSettingsChange("3", "completed-with-drift"),
       verification: "match",
     })}\n`,
     "utf8",

@@ -74,6 +74,9 @@ export interface ConnectorConfig {
   allowWelcomeScreenChanges: boolean
   allowWebhookAudit: boolean
   allowWebhookDeletions: boolean
+  allowWidgetPublicExposure: boolean
+  allowWidgetSettingsAudit: boolean
+  allowWidgetSettingsChanges: boolean
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
@@ -118,6 +121,7 @@ export interface ConnectorConfig {
   threadParentIds: ReadonlySet<string>
   welcomeScreenGuildIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
+  widgetSettingsGuildIds: ReadonlySet<string>
 }
 
 export interface ConfigOptions {
@@ -391,6 +395,11 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.welcomeScreenGuildIds,
     CONNECTOR_LIMITS.welcomeScreenGuildAllowlist,
   )
+  const widgetSettingsGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.widgetSettingsGuildIds],
+    ENVIRONMENT_NAMES.widgetSettingsGuildIds,
+    CONNECTOR_LIMITS.widgetSettingsGuildAllowlist,
+  )
   const webhookChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.webhookChannelIds],
     ENVIRONMENT_NAMES.webhookChannelIds,
@@ -419,6 +428,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
     [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
     [ENVIRONMENT_NAMES.welcomeScreenGuildIds, welcomeScreenGuildIds],
+    [ENVIRONMENT_NAMES.widgetSettingsGuildIds, widgetSettingsGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
       if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
@@ -576,6 +586,28 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowWelcomeScreenChanges} requires ${ENVIRONMENT_NAMES.allowWelcomeScreenAudit}`,
     )
   }
+  const allowWidgetSettingsAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWidgetSettingsAudit],
+    ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
+  )
+  const allowWidgetSettingsChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWidgetSettingsChanges],
+    ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
+  )
+  if (allowWidgetSettingsChanges && !allowWidgetSettingsAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowWidgetSettingsChanges} requires ${ENVIRONMENT_NAMES.allowWidgetSettingsAudit}`,
+    )
+  }
+  const allowWidgetPublicExposure = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWidgetPublicExposure],
+    ENVIRONMENT_NAMES.allowWidgetPublicExposure,
+  )
+  if (allowWidgetPublicExposure && !allowWidgetSettingsChanges) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowWidgetPublicExposure} requires ${ENVIRONMENT_NAMES.allowWidgetSettingsChanges}`,
+    )
+  }
   const allowStageInstanceAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowStageInstanceAudit],
     ENVIRONMENT_NAMES.allowStageInstanceAudit,
@@ -712,6 +744,9 @@ export function loadConnectorConfig(
     allowWelcomeScreenChanges,
     allowWebhookAudit,
     allowWebhookDeletions,
+    allowWidgetPublicExposure,
+    allowWidgetSettingsAudit,
+    allowWidgetSettingsChanges,
     auditFile: auditFile(
       environment[ENVIRONMENT_NAMES.auditFile],
       environment,
@@ -802,5 +837,6 @@ export function loadConnectorConfig(
     threadParentIds,
     welcomeScreenGuildIds,
     webhookChannelIds,
+    widgetSettingsGuildIds,
   }
 }

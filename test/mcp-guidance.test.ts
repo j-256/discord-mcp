@@ -166,6 +166,7 @@ interface GuidanceCalls {
   unexpected: number
   welcomeScreens: number
   webhooks: number
+  widgetSettings: number
 }
 
 function guidanceService(options: {
@@ -203,6 +204,7 @@ function guidanceService(options: {
     unexpected: 0,
     welcomeScreens: 0,
     webhooks: 0,
+    widgetSettings: 0,
   }
   const unexpected = async (..._arguments: unknown[]): Promise<never> => {
     calls.unexpected += 1
@@ -218,6 +220,7 @@ function guidanceService(options: {
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
     executeWelcomeScreenChange: unexpected,
+    executeWidgetSettingsChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
@@ -590,6 +593,82 @@ function guidanceService(options: {
         },
       }
     },
+    async getGuildWidgetSettings(guildId) {
+      calls.widgetSettings += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        configuration: {
+          channel: {
+            ageRestricted: false,
+            channelId: CHANNEL_ID,
+            direct: true,
+            everyoneCanCreateInvites: false,
+            everyoneCanView: true,
+            exists: true,
+            parentId: null,
+            type: 0,
+            unknownPermissionBits: "0",
+          },
+          channelId: CHANNEL_ID,
+          changeBlockedReasons: [],
+          enabled: true,
+          issues: [],
+          unknownFieldCount: 0,
+        },
+        guild: { id: guildId, name: "Private guild name" },
+        guildCrossCheck: {
+          channelIdObserved: true,
+          enabledObserved: true,
+          status: "match" as const,
+        },
+        localConstraints: {
+          guildAllowlist: 100,
+          supportedChannelTypes: [0, 2, 5, 13, 15, 16],
+        },
+        privacy: {
+          anonymousEndpoints: "not-called" as const,
+          channelNames: "omitted" as const,
+          invites: "omitted" as const,
+          memberAndPresenceData: "omitted" as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        publicExposure: {
+          anonymousInviteGenerationPotential: true,
+          anonymousWidgetDataPotential: true,
+          anonymousWidgetFetched: false as const,
+          anonymousWidgetImageFetched: false as const,
+          manualPrivateProfileRestorationMayBeRequired: false,
+          privateProfileStateObserved: false as const,
+          serverProfileVisibility: "public-by-widget" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        verificationBoundary: {
+          anonymousWidgetReadbackPerformed: false as const,
+          apiReadback: true as const,
+          freshNonMemberReviewRecommended: true,
+          privateProfileRestorationVerified: false as const,
+          privateProfileStateObserved: false as const,
+        },
+      }
+    },
     planWebhookDeletion: unexpected,
     listGuildInvites: unexpected,
     planInviteDeletion: unexpected,
@@ -813,6 +892,7 @@ function guidanceService(options: {
     planChannelMetadataChange: unexpected,
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
+    planWidgetSettingsChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -904,6 +984,10 @@ function guidanceService(options: {
         welcomeScreenAuditEnabled: false,
         welcomeScreenChangesEnabled: false,
         welcomeScreenGuildIds: [],
+        widgetPublicExposureEnabled: false,
+        widgetSettingsAuditEnabled: false,
+        widgetSettingsChangesEnabled: false,
+        widgetSettingsGuildIds: [],
       }
     },
     editOwnMessage: unexpected,
@@ -1241,6 +1325,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.unexpected
     + calls.welcomeScreens
     + calls.webhooks
+    + calls.widgetSettings
 }
 
 async function readTextResource(client: Client, uri: string) {
@@ -1365,6 +1450,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWelcomeScreen,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildWidgetSettings,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWidgetSettings,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
       },
@@ -1431,6 +1520,10 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /directly supported channels visible to @everyone/)
   assert.match(safety.text, /Omitted ordered channel entries are deletions/)
   assert.match(safety.text, /Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed/)
+  assert.match(safety.text, /Authenticated widget-settings audit requires a separate exact guild allowlist/)
+  assert.match(safety.text, /never calls anonymous widget JSON or image endpoints/)
+  assert.match(safety.text, /presence-bearing member summaries/)
+  assert.match(safety.text, /manual restoration may be required/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
@@ -1777,6 +1870,20 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     new RegExp(PRIVATE_WELCOME_SCREEN_TEXT),
   )
 
+  const widgetSettings = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/widget-settings`,
+  )
+  const widgetSettingsData = widgetSettings.value.data as Record<string, unknown>
+  const widgetSettingsPrivacy = widgetSettingsData.privacy as Record<string, unknown>
+  const widgetSettingsExposure = widgetSettingsData.publicExposure as Record<string, unknown>
+  assert.equal(widgetSettingsPrivacy.anonymousEndpoints, "not-called")
+  assert.equal(widgetSettingsPrivacy.channelNames, "omitted")
+  assert.equal(widgetSettingsPrivacy.memberAndPresenceData, "omitted")
+  assert.equal(widgetSettingsExposure.anonymousWidgetFetched, false)
+  assert.equal(widgetSettingsExposure.anonymousWidgetImageFetched, false)
+  assert.doesNotMatch(widgetSettings.text, /widget\.json|widget-image/u)
+
   const channelMetadata = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}`,
@@ -1814,6 +1921,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.invites, 1)
   assert.equal(calls.onboarding, 1)
   assert.equal(calls.welcomeScreens, 1)
+  assert.equal(calls.widgetSettings, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
@@ -2151,6 +2259,31 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(welcomeScreen, /complete ordered current and desired Welcome Screen states/)
   assert.match(welcomeScreen, /@everyone channel visibility/)
   assert.match(welcomeScreen, /uncertain same-guild predecessor/)
+
+  const widgetSettingsRequest = {
+    auditReason: "Reviewed authenticated widget settings",
+    channelId: CHANNEL_ID,
+    enabled: true,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+  }
+  const widgetSettings = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(widgetSettingsRequest) },
+    name: MCP_PROMPT_NAMES.reviewWidgetSettingsChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(widgetSettings.split("\n")[1] || ""),
+    widgetSettingsRequest,
+  )
+  assert.match(widgetSettings, /Call only plan_guild_widget_settings_change/)
+  assert.match(
+    widgetSettings,
+    /Do not call execute_guild_widget_settings_change/,
+  )
+  assert.match(widgetSettings, /complete current and desired authenticated widget settings/)
+  assert.match(widgetSettings, /public-exposure consequences and authorization/)
+  assert.match(widgetSettings, /Private Profile restoration boundary/)
+  assert.match(widgetSettings, /Anonymous widget JSON and image endpoints must remain uncalled/)
 
   const channelMetadataRequest = {
     auditReason: "Reviewed channel metadata",
@@ -2686,6 +2819,17 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         }),
       },
       name: MCP_PROMPT_NAMES.reviewWelcomeScreenChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed authenticated widget settings",
+          enabled: true,
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewWidgetSettingsChange,
     },
     {
       arguments: {

@@ -14,6 +14,7 @@ import {
   RoleConfigurationEvidenceError,
   StageInstanceEvidenceError,
   WelcomeScreenEvidenceError,
+  WidgetSettingsEvidenceError,
 } from "../src/errors.js"
 
 function channelMetadataPayload(overrides: Record<string, unknown> = {}) {
@@ -1916,6 +1917,137 @@ test("Discord client rejects malformed Welcome Screen evidence and inputs", asyn
       }],
     } as unknown as Parameters<DiscordClient["modifyGuildWelcomeScreen"]>[1], "Reviewed"),
     /channel input is invalid/,
+  )
+  assert.equal(requests, 1)
+})
+
+test("Discord client projects exact authenticated widget settings without public data", async () => {
+  let requestUrl = ""
+  let method = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requestUrl = String(input)
+      method = init?.method || "GET"
+      return jsonResponse({
+        channel_id: "200",
+        enabled: true,
+        future_field: "omitted",
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.getGuildWidgetSettings("100")
+
+  assert.equal(requestUrl, `${API_BASE_URL}/guilds/100/widget`)
+  assert.equal(method, "GET")
+  assert.deepEqual(result, {
+    channelId: "200",
+    enabled: true,
+    unknownFieldCount: 1,
+  })
+  assert.equal(records[0]?.operation, "get_guild_widget_settings")
+  assert.equal(JSON.stringify(result).includes("future_field"), false)
+})
+
+test("Discord client sends one complete non-retried widget-settings PATCH", async () => {
+  let requests = 0
+  let requestBody: unknown
+  let auditReason = ""
+  let method = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      requests += 1
+      method = init?.method || "GET"
+      auditReason = new Headers(init?.headers).get("X-Audit-Log-Reason") || ""
+      requestBody = JSON.parse(String(init?.body))
+      return jsonResponse({ channel_id: "200", enabled: true })
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildWidgetSettings("100", {
+    channelId: "200",
+    enabled: true,
+  }, "Reviewed widget / launch")
+
+  assert.equal(requests, 1)
+  assert.equal(method, "PATCH")
+  assert.equal(auditReason, "Reviewed%20widget%20%2F%20launch")
+  assert.deepEqual(requestBody, { channel_id: "200", enabled: true })
+  assert.equal(result.channelId, "200")
+
+  let sleeps = 0
+  requests = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        code: 20_016,
+        message: "rate limited",
+        retry_after: 0,
+      }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.modifyGuildWidgetSettings("100", {
+      channelId: null,
+      enabled: false,
+    }, "Reviewed"),
+    DiscordApiError,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client rejects malformed widget-settings evidence and inputs", async () => {
+  let requests = 0
+  const malformed = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ channel_id: "invalid", enabled: true })
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    malformed.getGuildWidgetSettings("100"),
+    WidgetSettingsEvidenceError,
+  )
+
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ channel_id: null, enabled: false })
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    client.modifyGuildWidgetSettings("100", {
+      channelId: "bad",
+      enabled: true,
+    }, "Reviewed"),
+    /widget channel ID/,
+  )
+  await assert.rejects(
+    client.modifyGuildWidgetSettings("100", {
+      channelId: null,
+      enabled: true,
+      future: true,
+    } as never, "Reviewed"),
+    /input is invalid/,
   )
   assert.equal(requests, 1)
 })

@@ -78,6 +78,9 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   onboardingChangePolicy: "onboarding-change-policy",
   welcomeScreenAuditPolicy: "welcome-screen-audit-policy",
   welcomeScreenChangePolicy: "welcome-screen-change-policy",
+  widgetPublicExposurePolicy: "widget-public-exposure-policy",
+  widgetSettingsAuditPolicy: "widget-settings-audit-policy",
+  widgetSettingsChangePolicy: "widget-settings-change-policy",
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
   pollAuditPolicy: "poll-audit-policy",
@@ -320,6 +323,15 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowWelcomeScreenChanges && config.welcomeScreenGuildIds.size === 0) {
     warnings.push("The Welcome Screen change toggle is enabled but replacement remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowWidgetSettingsAudit && config.widgetSettingsGuildIds.size === 0) {
+    warnings.push("The authenticated widget-settings audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowWidgetSettingsChanges && config.widgetSettingsGuildIds.size === 0) {
+    warnings.push("The authenticated widget-settings change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (config.allowWidgetPublicExposure && config.widgetSettingsGuildIds.size === 0) {
+    warnings.push("The widget public-exposure toggle is enabled but exposure-changing writes remain blocked because an exact guild allowlist is required")
+  }
   if (
     config.allowMemberRoleChanges
     && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
@@ -418,6 +430,13 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowWelcomeScreenAudit || config.allowWelcomeScreenChanges,
       "welcome-screen",
       "Welcome Screen audit and reviewed replacement",
+    ],
+    [
+      config.allowWidgetSettingsAudit
+        || config.allowWidgetSettingsChanges
+        || config.allowWidgetPublicExposure,
+      "widget-settings",
+      "Authenticated widget-settings audit and reviewed changes",
     ],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
@@ -1052,6 +1071,63 @@ export async function diagnoseConnector(
         `Reviewed guild Welcome Screen replacement is constrained to ${config.welcomeScreenGuildIds.size} exact guilds with complete-state review, signed approval, one-shot execution, and authoritative response plus API readback`,
       ))
     }
+    if (!config.allowWidgetSettingsAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetSettingsAuditPolicy,
+        "pass",
+        "Authenticated guild widget-settings audit is disabled",
+      ))
+    } else if (config.widgetSettingsGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetSettingsAuditPolicy,
+        "warn",
+        "Authenticated widget-settings audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetSettingsAuditPolicy,
+        "pass",
+        `Authenticated widget-settings audit is constrained to ${config.widgetSettingsGuildIds.size} exact guilds with bounded permission and channel evidence, unknown-field counts only, and no anonymous endpoint calls`,
+      ))
+    }
+    if (!config.allowWidgetSettingsChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetSettingsChangePolicy,
+        "pass",
+        "Reviewed authenticated widget-settings changes are disabled",
+      ))
+    } else if (config.widgetSettingsGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetSettingsChangePolicy,
+        "warn",
+        "Authenticated widget-settings changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetSettingsChangePolicy,
+        "pass",
+        `Reviewed authenticated widget-settings changes are constrained to ${config.widgetSettingsGuildIds.size} exact guilds with complete-state review, signed approval, one-shot execution, and authoritative response plus API readback`,
+      ))
+    }
+    if (!config.allowWidgetPublicExposure) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetPublicExposurePolicy,
+        "pass",
+        "Widget public-exposure authorization is disabled",
+      ))
+    } else if (config.widgetSettingsGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetPublicExposurePolicy,
+        "warn",
+        "Widget public-exposure authorization is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.widgetPublicExposurePolicy,
+        "pass",
+        `Widget public-exposure authorization is constrained to ${config.widgetSettingsGuildIds.size} exact guilds and is required only for enabling the widget or selecting a different non-null channel`,
+      ))
+    }
     if (!config.allowMemberRoleChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberRolePolicy,
@@ -1554,6 +1630,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowWelcomeScreenAudit,
     ENVIRONMENT_NAMES.allowWelcomeScreenChanges,
     ENVIRONMENT_NAMES.welcomeScreenGuildIds,
+    ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
+    ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
+    ENVIRONMENT_NAMES.allowWidgetPublicExposure,
+    ENVIRONMENT_NAMES.widgetSettingsGuildIds,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowBanAudit,

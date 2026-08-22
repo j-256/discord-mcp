@@ -209,6 +209,7 @@ function serviceFixture(overrides: {
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
   onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
   welcomeScreenOptions?: ConnectorServiceOptions["welcomeScreenOptions"]
+  widgetSettingsOptions?: ConnectorServiceOptions["widgetSettingsOptions"]
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   pollOptions?: ConnectorServiceOptions["pollOptions"]
@@ -390,6 +391,9 @@ function serviceFixture(overrides: {
     async getGuildWelcomeScreen() {
       throw new Error("Unexpected Welcome Screen lookup")
     },
+    async getGuildWidgetSettings() {
+      throw new Error("Unexpected widget-settings lookup")
+    },
     async getGuildEmoji() {
       return {
         animated: false,
@@ -488,6 +492,9 @@ function serviceFixture(overrides: {
     },
     async modifyGuildWelcomeScreen() {
       throw new Error("Unexpected Welcome Screen change")
+    },
+    async modifyGuildWidgetSettings() {
+      throw new Error("Unexpected widget-settings change")
     },
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
@@ -643,6 +650,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.welcomeScreenOptions
         ? { welcomeScreenOptions: overrides.welcomeScreenOptions }
+        : {}),
+      ...(overrides.widgetSettingsOptions
+        ? { widgetSettingsOptions: overrides.widgetSettingsOptions }
         : {}),
       ...(overrides.forumPostOptions
         ? { forumPostOptions: overrides.forumPostOptions }
@@ -1105,6 +1115,92 @@ test("service pins identity through privacy-safe reviewed Welcome Screens", asyn
   assert.equal(result.verification, "not-required")
   assert.equal(welcomeScreenReads, 3)
   assert.equal(welcomeScreenWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through authenticated reviewed widget settings", async () => {
+  const operationStore = new MemoryOperationStore()
+  let widgetSettingsReads = 0
+  let widgetSettingsWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: [],
+          owner_id: "700000000000000001",
+        }
+      },
+      async getGuildMember() {
+        return { roles: [CREATED_ROLE_ID], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "@everyone"),
+          role(CREATED_ROLE_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, "connector-role"),
+        ]
+      },
+      async getGuildWidgetSettings(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        widgetSettingsReads += 1
+        return {
+          channelId: null,
+          enabled: false,
+          unknownFieldCount: 0,
+        }
+      },
+      async modifyGuildWidgetSettings() {
+        widgetSettingsWrites += 1
+        throw new Error("Unexpected widget-settings change")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+      DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+    widgetSettingsOptions: {
+      clock: () => new Date("2026-08-22T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(47),
+      randomId: () => "activity-widget-settings",
+    },
+  })
+  const request = {
+    auditReason: "Reviewed disabled widget settings",
+    channelId: null,
+    enabled: false,
+    guildId: GUILD_ID,
+    operationKey: "widget-settings-service-attempt-0001",
+  }
+
+  await assert.rejects(
+    () => service.getGuildWidgetSettings("bad"),
+    /widget-settings guild ID/,
+  )
+  await assert.rejects(
+    () => service.planWidgetSettingsChange({ ...request, guildId: "bad" }),
+    /widget-settings guild ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildWidgetSettings(GUILD_ID)
+  const plan = await service.planWidgetSettingsChange(request)
+  const result = await service.executeWidgetSettingsChange(request, plan.digest)
+
+  assert.equal(audit.privacy.anonymousEndpoints, "not-called")
+  assert.equal(audit.publicExposure.serverProfileVisibility, "not-verifiable")
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(widgetSettingsReads, 3)
+  assert.equal(widgetSettingsWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

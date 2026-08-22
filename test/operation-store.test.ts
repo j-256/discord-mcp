@@ -145,6 +145,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const soundboard = { ...receipt(), kind: "guild-soundboard-change" as const }
   const stageInstance = { ...receipt(), kind: "stage-instance-change" as const }
   const webhook = { ...receipt(), kind: "webhook-deletion" as const }
+  const widgetSettings = { ...receipt(), kind: "widget-settings-change" as const }
 
   assert.equal((await store.reserve(channel)).created, true)
   assert.equal((await store.reserve(attachment)).created, true)
@@ -164,6 +165,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(soundboard)).created, true)
   assert.equal((await store.reserve(stageInstance)).created, true)
   assert.equal((await store.reserve(webhook)).created, true)
+  assert.equal((await store.reserve(widgetSettings)).created, true)
   assert.deepEqual(
     await store.get("attachment-message", attachment.operationKeyHash),
     attachment,
@@ -235,6 +237,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("webhook-deletion", webhook.operationKeyHash),
     webhook,
+  )
+  assert.deepEqual(
+    await store.get("widget-settings-change", widgetSettings.operationKeyHash),
+    widgetSettings,
   )
 
   const completedInvite = {

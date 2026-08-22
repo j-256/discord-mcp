@@ -269,6 +269,18 @@ import {
   WelcomeScreenService,
 } from "./welcome-screen-service.js"
 import type {
+  WidgetSettingsAuditResult,
+  WidgetSettingsChangePlan,
+  WidgetSettingsChangeRequest,
+  WidgetSettingsChangeResult,
+  WidgetSettingsServiceOptions,
+} from "./widget-settings-service.js"
+import {
+  assertWidgetSettingsGetInput,
+  normalizeWidgetSettingsChangeRequest,
+  WidgetSettingsService,
+} from "./widget-settings-service.js"
+import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
   ThreadCreationResult,
@@ -347,6 +359,7 @@ export interface DiscordServiceClient {
   getGuildMember: DiscordClient["getGuildMember"]
   getGuildOnboarding: DiscordClient["getGuildOnboarding"]
   getGuildWelcomeScreen: DiscordClient["getGuildWelcomeScreen"]
+  getGuildWidgetSettings: DiscordClient["getGuildWidgetSettings"]
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoleMemberCounts: DiscordClient["getGuildRoleMemberCounts"]
@@ -380,6 +393,7 @@ export interface DiscordServiceClient {
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
+  modifyGuildWidgetSettings: DiscordClient["modifyGuildWidgetSettings"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
@@ -497,6 +511,10 @@ export interface ConnectorServiceOptions {
   webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
   welcomeScreenOptions?: Pick<
     WelcomeScreenServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  widgetSettingsOptions?: Pick<
+    WidgetSettingsServiceOptions,
     "clock" | "planKey" | "randomId"
   >
 }
@@ -654,6 +672,7 @@ export class ConnectorService {
   readonly #threadCreationService: ThreadCreationService
   readonly #webhookService: WebhookService
   readonly #welcomeScreenService: WelcomeScreenService
+  readonly #widgetSettingsService: WidgetSettingsService
 
   constructor(options: ConnectorServiceOptions) {
     this.#config = options.config
@@ -748,6 +767,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.welcomeScreenOptions,
+    })
+    this.#widgetSettingsService = new WidgetSettingsService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.widgetSettingsOptions,
     })
     this.#messagePinService = new MessagePinService({
       activityStore: this.#activityStore,
@@ -1097,6 +1123,20 @@ export class ConnectorService {
       identity.bot.id,
       guildId,
       includeText,
+      options,
+    )
+  }
+
+  async getGuildWidgetSettings(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<WidgetSettingsAuditResult> {
+    assertWidgetSettingsGetInput(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#widgetSettingsService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
       options,
     )
   }
@@ -1715,6 +1755,20 @@ export class ConnectorService {
     )
   }
 
+  async planWidgetSettingsChange(
+    request: WidgetSettingsChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<WidgetSettingsChangePlan> {
+    normalizeWidgetSettingsChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#widgetSettingsService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildExpressionChange(
     request: GuildExpressionChangeRequest,
     options: RequestOptions = {},
@@ -2247,6 +2301,25 @@ export class ConnectorService {
     }
     const identity = await this.#verifyIdentity(options)
     return this.#welcomeScreenService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeWidgetSettingsChange(
+    request: WidgetSettingsChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WidgetSettingsChangeResult> {
+    normalizeWidgetSettingsChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord widget-settings plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#widgetSettingsService.execute(
       identity.application.id,
       identity.bot.id,
       request,

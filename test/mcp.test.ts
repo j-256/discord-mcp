@@ -6,8 +6,14 @@ import test, { type TestContext } from "node:test"
 import {
   Client,
   InMemoryTransport,
+  ReadBuffer,
+  serializeMessage,
+  specTypeSchemas,
   type ClientOptions,
+  type JSONRPCMessage,
   type Tool,
+  type Transport,
+  withInputRequired,
 } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
@@ -85,6 +91,14 @@ import type {
   WelcomeScreenConfigurationView,
   WelcomeScreenPrivacyProjection,
 } from "../src/welcome-screen-service.js"
+import type {
+  WidgetSettingsAccessEvidence,
+  WidgetSettingsAuditResult,
+  WidgetSettingsChangePlan,
+  WidgetSettingsChangeRequest,
+  WidgetSettingsConfigurationView,
+  WidgetSettingsPrivacyProjection,
+} from "../src/widget-settings-service.js"
 import type {
   PollCreationPlan,
   PollCreationRequest,
@@ -172,6 +186,8 @@ import {
   WebhookDeletionOperationConflictError,
   WelcomeScreenExecutionError,
   WelcomeScreenOperationConflictError,
+  WidgetSettingsExecutionError,
+  WidgetSettingsOperationConflictError,
 } from "../src/errors.js"
 import {
   createDiscordMcpServer,
@@ -245,6 +261,7 @@ const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
 const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
+const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
 const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
 const ONBOARDING_PROMPT_TITLE = "Choose your community path"
 const ONBOARDING_OPTION_TITLE = "Community member"
@@ -1053,6 +1070,161 @@ function welcomeScreenPlan(
     warnings: changed
       ? ["This replacement is complete and ordered"]
       : ["The complete desired Welcome Screen already matches Discord"],
+    writeRequired: changed,
+  }
+}
+
+function widgetSettingsRequest(
+  overrides: Partial<WidgetSettingsChangeRequest> = {},
+): WidgetSettingsChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    enabled: true,
+    guildId: GUILD_ID,
+    operationKey: WIDGET_SETTINGS_OPERATION_KEY,
+    ...overrides,
+  }
+}
+
+function widgetSettingsAccess(): WidgetSettingsAccessEvidence {
+  return {
+    appliedRoleIds: [GUILD_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD"],
+    effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+    manageGuild: true,
+    requiredPermission: "MANAGE_GUILD",
+    unknownPermissionBits: "0",
+    warnings: [],
+  }
+}
+
+function widgetSettingsPrivacy(): WidgetSettingsPrivacyProjection {
+  return {
+    anonymousEndpoints: "not-called",
+    channelNames: "omitted",
+    invites: "omitted",
+    memberAndPresenceData: "omitted",
+    persistence: "none",
+    rawPayloads: "omitted",
+    unknownFields: "counts-only",
+  }
+}
+
+function widgetSettingsConfiguration(
+  request: WidgetSettingsChangeRequest | null,
+): WidgetSettingsConfigurationView {
+  const channelId = request?.channelId ?? null
+  return {
+    channel: channelId === null
+      ? null
+      : {
+          ageRestricted: false,
+          channelId,
+          direct: true,
+          everyoneCanCreateInvites: false,
+          everyoneCanView: true,
+          exists: true,
+          parentId: null,
+          type: 0,
+          unknownPermissionBits: "0",
+        },
+    channelId,
+    changeBlockedReasons: [],
+    enabled: request?.enabled ?? false,
+    issues: [],
+    unknownFieldCount: 0,
+  }
+}
+
+function widgetSettingsAudit(): WidgetSettingsAuditResult {
+  const request = widgetSettingsRequest()
+  return {
+    access: widgetSettingsAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: widgetSettingsConfiguration(request),
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    guildCrossCheck: {
+      channelIdObserved: true,
+      enabledObserved: true,
+      status: "match",
+    },
+    localConstraints: {
+      guildAllowlist: 100,
+      supportedChannelTypes: [0, 2, 5, 13, 15, 16],
+    },
+    privacy: widgetSettingsPrivacy(),
+    publicExposure: {
+      anonymousInviteGenerationPotential: true,
+      anonymousWidgetDataPotential: true,
+      anonymousWidgetFetched: false,
+      anonymousWidgetImageFetched: false,
+      manualPrivateProfileRestorationMayBeRequired: false,
+      privateProfileStateObserved: false,
+      serverProfileVisibility: "public-by-widget",
+    },
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      anonymousWidgetReadbackPerformed: false,
+      apiReadback: true,
+      freshNonMemberReviewRecommended: true,
+      privateProfileRestorationVerified: false,
+      privateProfileStateObserved: false,
+    },
+  }
+}
+
+function widgetSettingsPlan(
+  request: WidgetSettingsChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): WidgetSettingsChangePlan {
+  const desired = widgetSettingsConfiguration(request)
+  const changed = effect === "change"
+  const current = changed
+    ? widgetSettingsConfiguration(null)
+    : desired
+  return {
+    access: widgetSettingsAccess(),
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-22T00:00:00.000Z",
+    current,
+    desired,
+    diff: {
+      channelChanged: current.channelId !== desired.channelId,
+      enabledChanged: current.enabled !== desired.enabled,
+    },
+    digest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    guildCrossCheck: {
+      channelIdObserved: true,
+      enabledObserved: true,
+      status: "match",
+    },
+    localConstraints: widgetSettingsAudit().localConstraints,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: widgetSettingsPrivacy(),
+    publicExposureAuthorization: {
+      required: changed && (request.enabled || request.channelId !== null),
+      satisfied: true,
+    },
+    risks: changed
+      ? ["server-profile-public", "anonymous-widget-data"]
+      : [],
+    schemaVersion: 1,
+    status: changed ? "planned" : "already-current",
+    verificationBoundary: widgetSettingsAudit().verificationBoundary,
+    warnings: changed
+      ? ["Manual Private Profile restoration may be required after disabling"]
+      : ["The complete desired authenticated widget settings already match Discord"],
     writeRequired: changed,
   }
 }
@@ -2880,6 +3052,10 @@ function fixturePolicy(): PolicyDescription {
     welcomeScreenAuditEnabled: false,
     welcomeScreenChangesEnabled: false,
     welcomeScreenGuildIds: [],
+    widgetPublicExposureEnabled: false,
+    widgetSettingsAuditEnabled: false,
+    widgetSettingsChangesEnabled: false,
+    widgetSettingsGuildIds: [],
   }
 }
 
@@ -2920,6 +3096,9 @@ function serviceFixture(overrides: {
   welcomeScreenEffect?: "change" | "none"
   welcomeScreenError?: Error
   welcomeScreenPlanDigest?: string
+  widgetSettingsEffect?: "change" | "none"
+  widgetSettingsError?: Error
+  widgetSettingsPlanDigest?: string
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
@@ -2951,6 +3130,11 @@ function serviceFixture(overrides: {
   webhookDeletionPlanDigest?: string
 } = {}) {
   const welcomeScreenCalls = {
+    execute: 0,
+    get: 0,
+    plan: 0,
+  }
+  const widgetSettingsCalls = {
     execute: 0,
     get: 0,
     plan: 0,
@@ -3111,6 +3295,25 @@ function serviceFixture(overrides: {
         verification: planned.writeRequired ? "match" : "not-required",
       }
     },
+    async executeWidgetSettingsChange(request, planDigest) {
+      if (overrides.widgetSettingsError) throw overrides.widgetSettingsError
+      widgetSettingsCalls.execute += 1
+      const planned = widgetSettingsPlan(
+        request,
+        planDigest,
+        overrides.widgetSettingsEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-widget-settings" : null,
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+        warnings: planned.warnings,
+      }
+    },
     async getGuildOnboarding(_guildId, includeText = false) {
       calls.onboardingGet += 1
       return onboardingAudit(includeText)
@@ -3118,6 +3321,10 @@ function serviceFixture(overrides: {
     async getGuildWelcomeScreen(_guildId, includeText = false) {
       welcomeScreenCalls.get += 1
       return welcomeScreenAudit(includeText)
+    },
+    async getGuildWidgetSettings() {
+      widgetSettingsCalls.get += 1
+      return widgetSettingsAudit()
     },
     async planOnboardingChange(request) {
       calls.onboardingPlan += 1
@@ -3133,6 +3340,14 @@ function serviceFixture(overrides: {
         request,
         overrides.welcomeScreenPlanDigest || DIGEST,
         overrides.welcomeScreenEffect,
+      )
+    },
+    async planWidgetSettingsChange(request) {
+      widgetSettingsCalls.plan += 1
+      return widgetSettingsPlan(
+        request,
+        overrides.widgetSettingsPlanDigest || DIGEST,
+        overrides.widgetSettingsEffect,
       )
     },
     async executeInviteDeletion(request, planDigest) {
@@ -4628,7 +4843,7 @@ function serviceFixture(overrides: {
       }
     },
   }
-  return { calls, service, welcomeScreenCalls }
+  return { calls, service, welcomeScreenCalls, widgetSettingsCalls }
 }
 
 async function connectedFixture(
@@ -4700,6 +4915,98 @@ async function connectedFixture(
   }
 }
 
+function inProcessStdioClientTransport(
+  serverInput: PassThrough,
+  serverOutput: PassThrough,
+): Transport {
+  const readBuffer = new ReadBuffer()
+  let closed = false
+  const transport: Transport = {
+    async close() {
+      if (closed) return
+      closed = true
+      serverOutput.off("data", onData)
+      serverOutput.off("end", onClose)
+      serverOutput.off("error", onError)
+      serverInput.end()
+      readBuffer.clear()
+      transport.onclose?.()
+    },
+    async send(message: JSONRPCMessage) {
+      if (closed) throw new Error("In-process stdio transport is closed")
+      serverInput.write(serializeMessage(message))
+    },
+    async start() {
+      serverOutput.on("data", onData)
+      serverOutput.on("end", onClose)
+      serverOutput.on("error", onError)
+    },
+  }
+
+  function onClose() {
+    if (closed) return
+    closed = true
+    readBuffer.clear()
+    transport.onclose?.()
+  }
+
+  function onData(chunk: Buffer) {
+    try {
+      readBuffer.append(chunk)
+      while (true) {
+        const message = readBuffer.readMessage()
+        if (message === null) return
+        transport.onmessage?.(message)
+      }
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error(String(error)))
+    }
+  }
+
+  function onError(error: Error) {
+    transport.onerror?.(error)
+  }
+
+  return transport
+}
+
+async function connectedModernStdioFixture(
+  context: TestContext,
+  serviceOverrides?: Parameters<typeof serviceFixture>[0],
+) {
+  const serviceData = serviceFixture(serviceOverrides)
+  const serverInput = new PassThrough()
+  const serverOutput = new PassThrough()
+  const handle = runDiscordMcpServer({
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    observability: new OperationalTelemetry({
+      config: loadObservabilityConfig({}, [TOKEN]),
+    }),
+    requestStateKey: new Uint8Array(32).fill(9),
+    service: serviceData.service,
+    stderr: { write: () => true },
+    stdin: serverInput,
+    stdout: serverOutput,
+  })
+  const client = new Client(
+    { name: "discord-mcp-modern-test", version: "1.0.0" },
+    {
+      capabilities: { elicitation: {} },
+      versionNegotiation: { mode: { pin: "2026-07-28" } },
+    },
+  )
+  context.after(async () => {
+    try {
+      await client.close()
+    } catch {}
+    try {
+      await handle.close()
+    } catch {}
+  })
+  await client.connect(inProcessStdioClientTransport(serverInput, serverOutput))
+  return { client, ...serviceData }
+}
+
 function structuredContent(result: { structuredContent?: unknown }): Record<string, unknown> {
   assert.ok(result.structuredContent)
   return result.structuredContent as Record<string, unknown>
@@ -4742,6 +5049,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_invite",
       "get_guild_onboarding",
       "get_guild_welcome_screen",
+      "get_guild_widget_settings",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -4790,6 +5098,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_onboarding_change",
       "plan_guild_welcome_screen_change",
       "execute_guild_welcome_screen_change",
+      "plan_guild_widget_settings_change",
+      "execute_guild_widget_settings_change",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
@@ -4832,6 +5142,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
   const onboarding = result.tools.find((tool) => tool.name === "execute_onboarding_change")
+  const widgetSettings = result.tools.find((tool) => (
+    tool.name === "execute_guild_widget_settings_change"
+  ))
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
@@ -4863,6 +5176,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     webhookDeletion,
     inviteDeletion,
     onboarding,
+    widgetSettings,
     guildExpression,
     soundboard,
     scheduledEvent,
@@ -4898,6 +5212,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_guild_invites",
     "get_guild_invite",
     "get_guild_onboarding",
+    "get_guild_widget_settings",
     "list_guild_emojis",
     "get_guild_emoji",
     "list_guild_stickers",
@@ -4918,6 +5233,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_webhook_deletion",
     "plan_invite_deletion",
     "plan_onboarding_change",
+    "plan_guild_widget_settings_change",
     "plan_guild_expression_change",
     "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
@@ -5576,6 +5892,30 @@ test("progressive discovery enables the complete reviewed Welcome Screen workflo
     [
       "plan_guild_welcome_screen_change",
       "execute_guild_welcome_screen_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed widget-settings workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_widget_settings_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_widget_settings_change",
+    "plan_guild_widget_settings_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_widget_settings_change",
+      "execute_guild_widget_settings_change",
       "discover_discord_tools",
     ],
   )
@@ -8276,6 +8616,325 @@ test("MCP Welcome Screen execution exposes uncertainty and content-free conflict
     JSON.stringify(conflictResult),
     new RegExp(WELCOME_SCREEN_DESCRIPTION),
   )
+})
+
+test("MCP widget-settings audit stays authenticated and privacy-minimized", async (context) => {
+  const { client, widgetSettingsCalls } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_widget_settings",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "get_guild_widget_settings",
+  })
+
+  const content = structuredContent(audited)
+  const privacy = content.privacy as Record<string, unknown>
+  const exposure = content.publicExposure as Record<string, unknown>
+  assert.equal(privacy.anonymousEndpoints, "not-called")
+  assert.equal(privacy.channelNames, "omitted")
+  assert.equal(privacy.memberAndPresenceData, "omitted")
+  assert.equal(exposure.anonymousWidgetFetched, false)
+  assert.equal(exposure.anonymousWidgetImageFetched, false)
+  assert.doesNotMatch(JSON.stringify(audited), /widget\.json|widget-image/u)
+  assert.equal(invalid.isError, true)
+  assert.equal(widgetSettingsCalls.get, 1)
+})
+
+test("MCP widget-settings plans preserve one exact complete state", async (context) => {
+  const { client, widgetSettingsCalls } = await connectedFixture(context)
+  const request = widgetSettingsRequest()
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_guild_widget_settings_change",
+  })
+  const cleared = await client.callTool({
+    arguments: {
+      ...request,
+      channelId: null,
+      enabled: false,
+      operationKey: "widget-clear-attempt-0001",
+    },
+    name: "plan_guild_widget_settings_change",
+  })
+  const missing = await client.callTool({
+    arguments: {
+      auditReason: request.auditReason,
+      enabled: request.enabled,
+      guildId: request.guildId,
+      operationKey: request.operationKey,
+    },
+    name: "plan_guild_widget_settings_change",
+  })
+  const extra = await client.callTool({
+    arguments: { ...request, futureField: true },
+    name: "plan_guild_widget_settings_change",
+  })
+
+  const content = structuredContent(planned)
+  const authorization = content.publicExposureAuthorization as Record<string, unknown>
+  assert.equal(content.status, "planned")
+  assert.equal(content.writeRequired, true)
+  assert.equal(content.operationKeyHash, OPERATION_KEY_HASH)
+  assert.equal(authorization.required, true)
+  assert.equal(authorization.satisfied, true)
+  assert.equal(
+    (structuredContent(cleared).desired as Record<string, unknown>).channelId,
+    null,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(planned),
+    new RegExp(WIDGET_SETTINGS_OPERATION_KEY),
+  )
+  assert.equal(missing.isError, true)
+  assert.equal(extra.isError, true)
+  assert.equal(widgetSettingsCalls.plan, 2)
+})
+
+test("MCP widget-settings execution binds approval to exposure consequences", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client, widgetSettingsCalls } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const request = widgetSettingsRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_guild_widget_settings_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(widgetSettingsCalls.plan, 1)
+  assert.equal(widgetSettingsCalls.execute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /complete authenticated Discord widget settings/)
+  assert.match(confirmationMessage, /Action-sensitive public-exposure authorization/)
+  assert.match(confirmationMessage, /presence-bearing member summaries/)
+  assert.match(confirmationMessage, /Manual Private Profile restoration/)
+  assert.match(confirmationMessage, /Anonymous widget endpoints were not called/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(WIDGET_SETTINGS_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(WIDGET_SETTINGS_OPERATION_KEY),
+  )
+})
+
+test("MCP widget-settings execution skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    ...widgetSettingsRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { widgetSettingsEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.widgetSettingsCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.widgetSettingsCalls.execute, 0)
+
+  const canceled = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "cancel" }),
+  })
+  const canceledResult = await canceled.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(canceledResult).status, "confirmation-declined")
+  assert.equal(canceled.widgetSettingsCalls.execute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.widgetSettingsCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { widgetSettingsPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.widgetSettingsCalls.execute, 0)
+})
+
+test("MCP widget-settings execution binds signed state to the exact request", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = widgetSettingsRequest()
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, planDigest: DIGEST },
+      name: "execute_guild_widget_settings_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        channelId: null,
+        enabled: false,
+        planDigest: DIGEST,
+      },
+      inputResponses: {
+        confirm_widget_settings_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_widget_settings_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.widgetSettingsCalls.execute, 0)
+})
+
+test("MCP widget-settings execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...widgetSettingsRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      widgetSettingsError: new WidgetSettingsExecutionError(
+        "Discord widget-settings outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PATCH",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/widget`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      widgetSettingsError: new WidgetSettingsExecutionError(
+        "Discord widget-settings change was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  const limitedStructured = structuredContent(limitedResult)
+  assert.equal(limitedStructured.status, "rate-limited")
+  assert.equal(
+    (limitedStructured.error as Record<string, unknown>).retryAfterMs,
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-widget-settings",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    planDigest: DIGEST,
+    status: "completed" as const,
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      widgetSettingsError: new WidgetSettingsOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_widget_settings_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(WIDGET_SETTINGS_OPERATION_KEY),
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), /private-channel/u)
 })
 
 test("MCP channel metadata reads and plans preserve exact bounded intent", async (context) => {

@@ -514,6 +514,42 @@ export class WelcomeScreenEvidenceError extends Error {
   override name = "WelcomeScreenEvidenceError"
 }
 
+export class WidgetSettingsPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord widget-settings snapshot does not match the reviewed plan")
+    this.name = "WidgetSettingsPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class WidgetSettingsOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord widget-settings operation key has already been reserved")
+    this.name = "WidgetSettingsOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class WidgetSettingsExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "WidgetSettingsExecutionError"
+    this.result = result
+  }
+}
+
+export class WidgetSettingsEvidenceError extends Error {
+  override name = "WidgetSettingsEvidenceError"
+}
+
 export class OnboardingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

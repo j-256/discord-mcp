@@ -153,6 +153,10 @@ function status(
       welcomeScreenAuditEnabled: false,
       welcomeScreenChangesEnabled: false,
       welcomeScreenGuildIds: [],
+      widgetPublicExposureEnabled: false,
+      widgetSettingsAuditEnabled: false,
+      widgetSettingsChangesEnabled: false,
+      widgetSettingsGuildIds: [],
     },
     schemaVersion: 1,
     status: "ok",
@@ -180,6 +184,7 @@ function toolService(): DiscordToolService {
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
     executeWelcomeScreenChange: unexpected,
+    executeWidgetSettingsChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
@@ -195,6 +200,7 @@ function toolService(): DiscordToolService {
     getGuildInvite: unexpected,
     getGuildOnboarding: unexpected,
     getGuildWelcomeScreen: unexpected,
+    getGuildWidgetSettings: unexpected,
     listChannelWebhooks: unexpected,
     listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
@@ -207,6 +213,7 @@ function toolService(): DiscordToolService {
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
+    planWidgetSettingsChange: unexpected,
     planGuildExpressionChange: unexpected,
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
@@ -954,6 +961,82 @@ test("doctor and setup explain privacy-safe reviewed Welcome Screens", async () 
   assert.match(setup.warnings.join("\n"), /Welcome Screen audit toggle/)
   assert.match(setup.warnings.join("\n"), /Welcome Screen change toggle/)
   assert.match(omitted.warnings.join("\n"), /welcome-screen toolset/)
+})
+
+test("doctor and setup explain authenticated reviewed widget settings", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+    DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.widgetSettingsAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.widgetSettingsChangePolicy,
+  )
+  const exposure = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.widgetPublicExposurePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /no anonymous endpoint calls/)
+  assert.match(audit?.summary || "", /unknown-field counts only/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /complete-state review/)
+  assert.match(change?.summary || "", /signed approval/)
+  assert.match(change?.summary || "", /authoritative response plus API readback/)
+  assert.equal(exposure?.status, "pass")
+  assert.match(exposure?.summary || "", /enabling the widget/)
+  assert.match(exposure?.summary || "", /different non-null channel/)
+  for (const id of [
+    DOCTOR_CHECK_IDS.widgetSettingsAuditPolicy,
+    DOCTOR_CHECK_IDS.widgetSettingsChangePolicy,
+    DOCTOR_CHECK_IDS.widgetPublicExposurePolicy,
+  ]) {
+    assert.equal(
+      warning.checks.find((entry) => entry.id === id)?.status,
+      "warn",
+    )
+  }
+  assert.match(setup.warnings.join("\n"), /widget-settings audit toggle/)
+  assert.match(setup.warnings.join("\n"), /widget-settings change toggle/)
+  assert.match(setup.warnings.join("\n"), /widget public-exposure toggle/)
+  assert.match(omitted.warnings.join("\n"), /widget-settings toolset/)
+  for (const name of [
+    ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
+    ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
+    ENVIRONMENT_NAMES.allowWidgetPublicExposure,
+    ENVIRONMENT_NAMES.widgetSettingsGuildIds,
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+  assert.doesNotMatch(JSON.stringify(enabled), /private-channel|audit reason/u)
 })
 
 test("doctor and setup explain reviewed exact-channel metadata changes", async () => {
@@ -2179,6 +2262,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_stage_instance_change",
     "review_webhook_deletion",
     "review_welcome_screen_change",
+    "review_widget_settings_change",
     "search_guild_messages",
     "summarize_channel",
   ])
@@ -2213,6 +2297,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/soundboard/{soundId}",
     "discord://guilds/{guildId}/stickers",
     "discord://guilds/{guildId}/welcome-screen",
+    "discord://guilds/{guildId}/widget-settings",
   ])
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
@@ -2223,6 +2308,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_guild_expression_change",
     "execute_guild_soundboard_change",
     "execute_guild_welcome_screen_change",
+    "execute_guild_widget_settings_change",
     "execute_invite_deletion",
     "execute_member_moderation",
     "execute_member_role_change",

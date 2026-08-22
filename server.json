@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, threads, webhooks, welcome-screen, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, threads, webhooks, welcome-screen, widget-settings, or all",
           "default": "all",
           "format": "string"
         },
@@ -600,6 +600,38 @@
         {
           "name": "DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS",
           "description": "Exact guild IDs eligible for privacy-minimized Welcome Screen inspection and reviewed complete ordered replacement",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT",
+          "description": "Enable authenticated privacy-minimized widget-settings inspection when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES",
+          "description": "Enable reviewed complete authenticated widget-settings replacement; requires widget-settings audit and its exact guild allowlist",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE",
+          "description": "Authorize reviewed widget changes that enable public exposure or select a different non-null public channel; requires widget-settings changes",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS",
+          "description": "Exact guild IDs eligible for authenticated widget-settings inspection and reviewed complete replacement",
           "format": "string"
         },
         {

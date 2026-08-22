@@ -97,6 +97,10 @@ export interface PolicyDescription {
   webhookAuditEnabled: boolean
   webhookChannelIds: string[]
   webhookDeletionsEnabled: boolean
+  widgetPublicExposureEnabled: boolean
+  widgetSettingsAuditEnabled: boolean
+  widgetSettingsChangesEnabled: boolean
+  widgetSettingsGuildIds: string[]
 }
 
 const WEBHOOK_CHANNEL_TYPES: ReadonlySet<number> = new Set([
@@ -152,6 +156,9 @@ export class ScopePolicy {
   readonly #allowWelcomeScreenChanges: boolean
   readonly #allowWebhookAudit: boolean
   readonly #allowWebhookDeletions: boolean
+  readonly #allowWidgetPublicExposure: boolean
+  readonly #allowWidgetSettingsAudit: boolean
+  readonly #allowWidgetSettingsChanges: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #attachmentChannelIds: ReadonlySet<string>
   readonly #attachmentMaxBytes: number
@@ -191,6 +198,7 @@ export class ScopePolicy {
   readonly #threadParentIds: ReadonlySet<string>
   readonly #welcomeScreenGuildIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
+  readonly #widgetSettingsGuildIds: ReadonlySet<string>
 
   constructor(config: Pick<
     ConnectorConfig,
@@ -245,6 +253,9 @@ export class ScopePolicy {
     | "allowWelcomeScreenChanges"
     | "allowWebhookAudit"
     | "allowWebhookDeletions"
+    | "allowWidgetPublicExposure"
+    | "allowWidgetSettingsAudit"
+    | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
     | "channelMetadataIds"
     | "attachmentChannelIds"
@@ -278,6 +289,7 @@ export class ScopePolicy {
     | "threadParentIds"
     | "welcomeScreenGuildIds"
     | "webhookChannelIds"
+    | "widgetSettingsGuildIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
@@ -322,6 +334,9 @@ export class ScopePolicy {
     this.#allowWelcomeScreenChanges = config.allowWelcomeScreenChanges ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
     this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
+    this.#allowWidgetPublicExposure = config.allowWidgetPublicExposure ?? false
+    this.#allowWidgetSettingsAudit = config.allowWidgetSettingsAudit ?? false
+    this.#allowWidgetSettingsChanges = config.allowWidgetSettingsChanges ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
@@ -362,6 +377,7 @@ export class ScopePolicy {
     this.#threadParentIds = config.threadParentIds ?? new Set()
     this.#welcomeScreenGuildIds = config.welcomeScreenGuildIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
+    this.#widgetSettingsGuildIds = config.widgetSettingsGuildIds ?? new Set()
   }
 
   describe(): PolicyDescription {
@@ -509,6 +525,16 @@ export class ScopePolicy {
       webhookDeletionsEnabled: this.#allowWebhookAudit
         && this.#allowWebhookDeletions
         && this.#webhookChannelIds.size > 0,
+      widgetPublicExposureEnabled: this.#allowWidgetSettingsAudit
+        && this.#allowWidgetSettingsChanges
+        && this.#allowWidgetPublicExposure
+        && this.#widgetSettingsGuildIds.size > 0,
+      widgetSettingsAuditEnabled: this.#allowWidgetSettingsAudit
+        && this.#widgetSettingsGuildIds.size > 0,
+      widgetSettingsChangesEnabled: this.#allowWidgetSettingsAudit
+        && this.#allowWidgetSettingsChanges
+        && this.#widgetSettingsGuildIds.size > 0,
+      widgetSettingsGuildIds: [...this.#widgetSettingsGuildIds].sort(),
     }
   }
 
@@ -616,6 +642,33 @@ export class ScopePolicy {
     this.assertGuildWelcomeScreenAuditable(guildId)
     if (!this.#allowWelcomeScreenChanges) {
       throw new PolicyError("Discord Welcome Screen changes are disabled by connector configuration")
+    }
+  }
+
+  assertGuildWidgetSettingsAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowWidgetSettingsAudit) {
+      throw new PolicyError("Discord widget-settings audit is disabled by connector configuration")
+    }
+    if (this.#widgetSettingsGuildIds.size === 0) {
+      throw new PolicyError("Discord widget-settings audit requires an explicit guild allowlist")
+    }
+    if (!this.#widgetSettingsGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the widget-settings audit scope`)
+    }
+  }
+
+  assertGuildWidgetSettingsChangeable(guildId: string): void {
+    this.assertGuildWidgetSettingsAuditable(guildId)
+    if (!this.#allowWidgetSettingsChanges) {
+      throw new PolicyError("Discord widget-settings changes are disabled by connector configuration")
+    }
+  }
+
+  assertGuildWidgetPublicExposureChangeable(guildId: string): void {
+    this.assertGuildWidgetSettingsChangeable(guildId)
+    if (!this.#allowWidgetPublicExposure) {
+      throw new PolicyError("Discord widget public exposure is disabled by connector configuration")
     }
   }
 
