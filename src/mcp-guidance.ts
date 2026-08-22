@@ -33,6 +33,7 @@ export type DiscordGuidanceService = Pick<
   | "listChannelWebhooks"
   | "listGuilds"
   | "listGuildExpressions"
+  | "listGuildIntegrations"
   | "listDefaultSoundboardSounds"
   | "listGuildSoundboardSounds"
   | "listGuildTemplates"

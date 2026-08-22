@@ -49,6 +49,10 @@ export interface PolicyDescription {
   guildTemplateAuditEnabled: boolean
   guildTemplateChangesEnabled: boolean
   guildTemplateGuildIds: string[]
+  integrationAuditEnabled: boolean
+  integrationDeletionsEnabled: boolean
+  integrationGuildIds: string[]
+  integrationIds: string[]
   interactionChannelIds: string[]
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -173,6 +177,8 @@ export class ScopePolicy {
   readonly #allowGuildScaffolds: boolean
   readonly #allowGuildTemplateAudit: boolean
   readonly #allowGuildTemplateChanges: boolean
+  readonly #allowIntegrationAudit: boolean
+  readonly #allowIntegrationDeletions: boolean
   readonly #allowForumPosts: boolean
   readonly #allowForumTagAudit: boolean
   readonly #allowForumTagChanges: boolean
@@ -214,6 +220,8 @@ export class ScopePolicy {
   readonly #guildExpressionGuildIds: ReadonlySet<string>
   readonly #guildExpressionRoots: readonly string[]
   readonly #guildTemplateGuildIds: ReadonlySet<string>
+  readonly #integrationGuildIds: ReadonlySet<string>
+  readonly #integrationIds: ReadonlySet<string>
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #forumTagChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
@@ -277,6 +285,8 @@ export class ScopePolicy {
     | "allowGuildExpressionChanges"
     | "allowGuildTemplateAudit"
     | "allowGuildTemplateChanges"
+    | "allowIntegrationAudit"
+    | "allowIntegrationDeletions"
     | "allowForumTagAudit"
     | "allowForumTagChanges"
     | "allowInviteAudit"
@@ -331,6 +341,8 @@ export class ScopePolicy {
     | "guildExpressionGuildIds"
     | "guildExpressionRoots"
     | "guildTemplateGuildIds"
+    | "integrationGuildIds"
+    | "integrationIds"
     | "inviteGuildIds"
     | "memberDirectoryGuildIds"
     | "memberRoleGuildIds"
@@ -401,6 +413,8 @@ export class ScopePolicy {
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowGuildTemplateAudit = config.allowGuildTemplateAudit ?? false
     this.#allowGuildTemplateChanges = config.allowGuildTemplateChanges ?? false
+    this.#allowIntegrationAudit = config.allowIntegrationAudit ?? false
+    this.#allowIntegrationDeletions = config.allowIntegrationDeletions ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowForumTagAudit = config.allowForumTagAudit ?? false
     this.#allowForumTagChanges = config.allowForumTagChanges ?? false
@@ -443,6 +457,8 @@ export class ScopePolicy {
     this.#guildExpressionGuildIds = config.guildExpressionGuildIds ?? new Set()
     this.#guildExpressionRoots = config.guildExpressionRoots ?? []
     this.#guildTemplateGuildIds = config.guildTemplateGuildIds ?? new Set()
+    this.#integrationGuildIds = config.integrationGuildIds ?? new Set()
+    this.#integrationIds = config.integrationIds ?? new Set()
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#forumTagChannelIds = config.forumTagChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
@@ -534,6 +550,14 @@ export class ScopePolicy {
         && this.#allowGuildTemplateChanges
         && this.#guildTemplateGuildIds.size > 0,
       guildTemplateGuildIds: [...this.#guildTemplateGuildIds].sort(),
+      integrationAuditEnabled: this.#allowIntegrationAudit
+        && this.#integrationGuildIds.size > 0,
+      integrationDeletionsEnabled: this.#allowIntegrationAudit
+        && this.#allowIntegrationDeletions
+        && this.#integrationGuildIds.size > 0
+        && this.#integrationIds.size > 0,
+      integrationGuildIds: [...this.#integrationGuildIds].sort(),
+      integrationIds: [...this.#integrationIds].sort(),
       forumPostChannelIds: [...this.#forumPostChannelIds].sort(),
       forumPostsEnabled: this.#allowForumPosts && this.#forumPostChannelIds.size > 0,
       forumTagAuditEnabled: this.#allowForumTagAudit && this.#forumTagChannelIds.size > 0,
@@ -814,6 +838,34 @@ export class ScopePolicy {
     this.assertGuildTemplateAuditable(guildId)
     if (!this.#allowGuildTemplateChanges) {
       throw new PolicyError("Discord guild-template changes are disabled by connector configuration")
+    }
+  }
+
+  assertGuildIntegrationAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowIntegrationAudit) {
+      throw new PolicyError("Discord integration audit is disabled by connector configuration")
+    }
+    if (this.#integrationGuildIds.size === 0) {
+      throw new PolicyError("Discord integration audit requires an explicit guild allowlist")
+    }
+    if (!this.#integrationGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the integration scope`)
+    }
+  }
+
+  assertGuildIntegrationDeletable(guildId: string, integrationId: string): void {
+    this.assertGuildIntegrationAuditable(guildId)
+    if (!this.#allowIntegrationDeletions) {
+      throw new PolicyError("Discord integration deletion is disabled by connector configuration")
+    }
+    if (this.#integrationIds.size === 0) {
+      throw new PolicyError("Discord integration deletion requires an exact integration allowlist")
+    }
+    if (!this.#integrationIds.has(integrationId)) {
+      throw new PolicyError(
+        `Discord integration ${integrationId} is outside the integration deletion scope`,
+      )
     }
   }
 
@@ -1368,28 +1420,37 @@ export class ScopePolicy {
   }
 
   assertChannelWebhookAuditable(channel: DiscordChannel): string {
+    this.assertChannelWebhookIdAuditable(channel.id)
     const guildId = this.assertChannelReadable(channel)
     if (!WEBHOOK_CHANNEL_TYPES.has(channel.type)) {
       throw new PolicyError("Discord channel type does not support webhook inventory")
     }
+    return guildId
+  }
+
+  assertChannelWebhookIdAuditable(channelId: string): void {
     if (!this.#allowWebhookAudit) {
       throw new PolicyError("Discord webhook audit is disabled by connector configuration")
     }
     if (this.#webhookChannelIds.size === 0) {
       throw new PolicyError("Discord webhook audit requires an explicit channel allowlist")
     }
-    if (!this.#webhookChannelIds.has(channel.id)) {
-      throw new PolicyError(`Discord channel ${channel.id} is outside the webhook scope`)
+    if (!this.#webhookChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the webhook scope`)
     }
-    return guildId
   }
 
   assertChannelWebhookDeletable(channel: DiscordChannel): string {
+    this.assertChannelWebhookIdDeletable(channel.id)
     const guildId = this.assertChannelWebhookAuditable(channel)
+    return guildId
+  }
+
+  assertChannelWebhookIdDeletable(channelId: string): void {
+    this.assertChannelWebhookIdAuditable(channelId)
     if (!this.#allowWebhookDeletions) {
       throw new PolicyError("Discord webhook deletion is disabled by connector configuration")
     }
-    return guildId
   }
 
   assertChannelPermissionOverwriteAllowed(channel: DiscordChannel): string {

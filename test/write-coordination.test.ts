@@ -190,10 +190,24 @@ async function claimFiles(directory: string): Promise<string[]> {
 test("write targets are strict, domain-hashed, and collection-aware", () => {
   const channel = writeResourceTarget("channel", CHANNEL_ID)
   const collection = writeGuildCollectionTarget("channels", GUILD_ID)
+  const integration = writeResourceTarget("integration", MESSAGE_ID)
+  const integrations = writeGuildCollectionTarget("integrations", GUILD_ID)
+  const webhooks = writeGuildCollectionTarget("webhooks", GUILD_ID)
 
   assert.deepEqual(channel, { id: CHANNEL_ID, kind: "channel" })
   assert.deepEqual(collection, {
     collection: "channels",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  })
+  assert.deepEqual(integration, { id: MESSAGE_ID, kind: "integration" })
+  assert.deepEqual(integrations, {
+    collection: "integrations",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  })
+  assert.deepEqual(webhooks, {
+    collection: "webhooks",
     guildId: GUILD_ID,
     kind: "guild-collection",
   })

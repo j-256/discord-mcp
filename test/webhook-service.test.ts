@@ -405,6 +405,7 @@ test("webhook policy and complete permissions fail closed before cleanup", async
     () => disabled.service.list(BOT_ID, CHANNEL_ID),
     PolicyError,
   )
+  assert.deepEqual(disabled.events, [])
 
   const deletionDisabled = fixture({
     policy: policy({ audit: true, delete: false }),
@@ -413,6 +414,7 @@ test("webhook policy and complete permissions fail closed before cleanup", async
     () => deletionDisabled.service.plan(APPLICATION_ID, BOT_ID, request()),
     /webhook deletion is disabled/,
   )
+  assert.deepEqual(deletionDisabled.events, [])
 
   const wrongScope = fixture({
     policy: policy({ webhookChannels: [OTHER_CHANNEL_ID] }),
@@ -421,6 +423,7 @@ test("webhook policy and complete permissions fail closed before cleanup", async
     () => wrongScope.service.list(BOT_ID, CHANNEL_ID),
     /outside the webhook scope/,
   )
+  assert.deepEqual(wrongScope.events, [])
 
   const thread = fixture({
     state: {

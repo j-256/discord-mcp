@@ -31,6 +31,8 @@ const OTHER_CHANNEL_ID = "200000000000000002"
 const ROLE_ID = "300000000000000001"
 const OTHER_ROLE_ID = "300000000000000002"
 const USER_ID = "400000000000000001"
+const INTEGRATION_ID = "500000000000000001"
+const OTHER_INTEGRATION_ID = "500000000000000002"
 
 function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
   return {
@@ -189,6 +191,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildTemplateAuditEnabled: false,
     guildTemplateChangesEnabled: false,
     guildTemplateGuildIds: [],
+    integrationAuditEnabled: false,
+    integrationDeletionsEnabled: false,
+    integrationGuildIds: [],
+    integrationIds: [],
     guildExpressionAuditEnabled: false,
     guildExpressionChangesEnabled: false,
     guildExpressionCreationEnabled: false,
@@ -535,6 +541,95 @@ test("configuration and policy isolate webhook audit and deletion authority", ()
   )
 })
 
+test("configuration and policy isolate integration audit and exact-ID deletion", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+    DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(config)
+
+  assert.equal(config.allowIntegrationAudit, true)
+  assert.equal(config.allowIntegrationDeletions, true)
+  assert.deepEqual([...config.integrationGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.integrationIds], [INTEGRATION_ID])
+  enabled.assertGuildIntegrationAuditable(GUILD_ID)
+  enabled.assertGuildIntegrationDeletable(GUILD_ID, INTEGRATION_ID)
+  assert.deepEqual(
+    {
+      integrationAuditEnabled: enabled.describe().integrationAuditEnabled,
+      integrationDeletionsEnabled: enabled.describe().integrationDeletionsEnabled,
+      integrationGuildIds: enabled.describe().integrationGuildIds,
+      integrationIds: enabled.describe().integrationIds,
+    },
+    {
+      integrationAuditEnabled: true,
+      integrationDeletionsEnabled: true,
+      integrationGuildIds: [GUILD_ID],
+      integrationIds: [INTEGRATION_ID],
+    },
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildIntegrationAuditable(GUILD_ID),
+    /integration audit is disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertGuildIntegrationAuditable(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  const deletionDisabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+    DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => deletionDisabled.assertGuildIntegrationDeletable(GUILD_ID, INTEGRATION_ID),
+    /integration deletion is disabled/,
+  )
+  assert.throws(
+    () => enabled.assertGuildIntegrationAuditable(OTHER_GUILD_ID),
+    /outside the configured read scope/,
+  )
+  assert.throws(
+    () => enabled.assertGuildIntegrationDeletable(GUILD_ID, OTHER_INTEGRATION_ID),
+    /outside the integration deletion scope/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+      DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_INTEGRATION_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_INTEGRATION_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_INTEGRATION_GUILD_IDS must be a subset/,
+  )
+})
+
 test("configuration and policy require an exact administration guild and protect exact users", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -607,6 +702,10 @@ test("configuration and policy require an exact administration guild and protect
     guildTemplateAuditEnabled: false,
     guildTemplateChangesEnabled: false,
     guildTemplateGuildIds: [],
+    integrationAuditEnabled: false,
+    integrationDeletionsEnabled: false,
+    integrationGuildIds: [],
+    integrationIds: [],
     guildExpressionAuditEnabled: false,
     guildExpressionChangesEnabled: false,
     guildExpressionCreationEnabled: false,
@@ -2130,6 +2229,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildTemplateAuditEnabled: false,
     guildTemplateChangesEnabled: false,
     guildTemplateGuildIds: [],
+    integrationAuditEnabled: false,
+    integrationDeletionsEnabled: false,
+    integrationGuildIds: [],
+    integrationIds: [],
     guildExpressionAuditEnabled: false,
     guildExpressionChangesEnabled: false,
     guildExpressionCreationEnabled: false,

@@ -49,6 +49,7 @@ type McpToolWorkflow =
   | "guild-expression-change"
   | "guild-soundboard-change"
   | "guild-template-change"
+  | "integration-deletion"
   | "invite-deletion"
   | "onboarding-change"
   | "poll-creation"
@@ -173,6 +174,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["capability", "delete", "execute", "guild", "metadata", "snapshot", "sync", "template"],
     toolset: "guild-templates",
     workflow: "guild-template-change",
+  },
+  execute_guild_integration_deletion: {
+    keywords: ["bot", "cleanup", "delete", "execute", "guild", "integration", "webhook"],
+    toolset: "integrations",
+    workflow: "integration-deletion",
   },
   execute_invite_deletion: {
     keywords: ["delete", "execute", "invite", "revoke"],
@@ -414,6 +420,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "credential", "guild", "inventory", "invite", "list"],
     toolset: "invites",
   },
+  list_guild_integrations: {
+    keywords: ["audit", "bot", "guild", "integration", "inventory", "oauth", "webhook"],
+    toolset: "integrations",
+  },
   list_guild_members: {
     keywords: ["cursor", "directory", "guild", "list", "member", "user"],
     toolset: "members",
@@ -538,6 +548,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "delete", "guild", "metadata", "plan", "snapshot", "sync", "template"],
     toolset: "guild-templates",
     workflow: "guild-template-change",
+  },
+  plan_guild_integration_deletion: {
+    keywords: ["bot", "cleanup", "delete", "guild", "integration", "plan", "review", "webhook"],
+    toolset: "integrations",
+    workflow: "integration-deletion",
   },
   plan_invite_deletion: {
     keywords: ["delete", "invite", "plan", "review", "revoke"],

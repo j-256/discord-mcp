@@ -518,6 +518,28 @@ export interface WebhookDeletionActivity {
   webhookId: string
 }
 
+export type IntegrationDeletionActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface IntegrationDeletionActivity {
+  associatedBotUserId: string | null
+  error: string | null
+  guildId: string
+  id: string
+  integrationId: string
+  kind: "integration-deletion"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: IntegrationDeletionActivityStatus
+  targetApplicationId: string | null
+  timestamp: string
+  verification: "match" | null
+}
+
 export type InviteDeletionActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -751,6 +773,7 @@ export type ActivityEntry =
   | GuildExpressionActivity
   | GuildTemplateActivity
   | InteractionActivity
+  | IntegrationDeletionActivity
   | InviteDeletionActivity
   | MemberModerationActivity
   | MemberRoleActivity
@@ -1952,6 +1975,72 @@ function parseWebhookDeletionActivity(
   }
 }
 
+function parseIntegrationDeletionActivity(
+  value: unknown,
+): IntegrationDeletionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "integration-deletion"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.integrationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.integrationId)
+    || !(record.targetApplicationId === null || (
+      typeof record.targetApplicationId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.targetApplicationId)
+    ))
+    || !(record.associatedBotUserId === null || (
+      typeof record.associatedBotUserId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.associatedBotUserId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    associatedBotUserId: record.associatedBotUserId as string | null,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    integrationId: record.integrationId,
+    kind: "integration-deletion",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as IntegrationDeletionActivityStatus,
+    targetApplicationId: record.targetApplicationId as string | null,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseInviteDeletionActivity(
   value: unknown,
 ): InviteDeletionActivity | undefined {
@@ -2856,6 +2945,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseWelcomeScreenActivity(value)
     || parseWidgetSettingsActivity(value)
     || parseWebhookDeletionActivity(value)
+    || parseIntegrationDeletionActivity(value)
     || parseInviteDeletionActivity(value)
     || parseOnboardingActivity(value)
     || parseMemberRoleActivity(value)

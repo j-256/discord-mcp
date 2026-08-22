@@ -23,6 +23,7 @@ import {
   type ForumTagActivity,
   type GuildExpressionActivity,
   type GuildTemplateActivity,
+  type IntegrationDeletionActivity,
   type InteractionActivity,
   type InviteDeletionActivity,
   type MemberModerationActivity,
@@ -536,6 +537,29 @@ function webhookDeletion(
         ? "drift"
         : null,
     webhookId: "300",
+  }
+}
+
+function integrationDeletion(
+  id: string,
+  status: IntegrationDeletionActivity["status"],
+): IntegrationDeletionActivity {
+  return {
+    associatedBotUserId: "500",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    integrationId: "300",
+    kind: "integration-deletion",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    targetApplicationId: "400",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -1655,6 +1679,68 @@ test("JSONL activity log keeps webhook deletion evidence credential-free", async
       "timestamp",
       "verification",
       "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps integration deletion evidence identity-safe", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-account-name",
+    "private-application-name",
+    "private-audit-reason",
+    "private-integration-name",
+    "private-operation-key",
+    "private-user-profile",
+  ]
+
+  await store.append(integrationDeletion("1", "pending"))
+  await store.append({
+    ...integrationDeletion("2", "completed"),
+    accountName: privateValues[0],
+    applicationName: privateValues[1],
+    auditReason: privateValues[2],
+    integrationName: privateValues[3],
+    operationKey: privateValues[4],
+    userProfile: privateValues[5],
+  } as IntegrationDeletionActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...integrationDeletion("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "associatedBotUserId",
+      "error",
+      "guildId",
+      "id",
+      "integrationId",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "targetApplicationId",
+      "timestamp",
+      "verification",
     ],
   )
   for (const value of privateValues) {

@@ -81,6 +81,14 @@ import type {
   GuildExpressionPrivacyProjection,
   ProjectedGuildExpression,
 } from "../src/guild-expression-service.js"
+import type {
+  IntegrationAccessEvidence,
+  IntegrationDeletionPlan,
+  IntegrationDeletionRequest,
+  IntegrationInventoryResult,
+  IntegrationPrivacyProjection,
+} from "../src/integration-service.js"
+import type { DiscordGuildIntegrationSummary } from "../src/discord-client.js"
 import {
   INVITE_OMITTED_FIELDS,
   type InviteAccessEvidence,
@@ -185,6 +193,8 @@ import {
   GuildScaffoldOperationConflictError,
   GuildTemplateExecutionError,
   GuildTemplateOperationConflictError,
+  IntegrationDeletionExecutionError,
+  IntegrationDeletionOperationConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
   InviteDeletionExecutionError,
@@ -314,6 +324,10 @@ const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
 const WEBHOOK_ID = "370000000000000001"
+const INTEGRATION_OPERATION_KEY = "integration-delete-attempt-0001"
+const INTEGRATION_ID = "375000000000000001"
+const INTEGRATION_APPLICATION_ID = "375000000000000002"
+const INTEGRATION_BOT_ID = "375000000000000003"
 const INVITE_OPERATION_KEY = "invite-delete-attempt-0001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
@@ -824,6 +838,140 @@ function webhookDeletionPlan(
     status: "planned",
     target: projectedWebhook(request.channelId),
     warnings: ["One-shot reviewed Incoming webhook deletion"],
+  }
+}
+
+function integrationAccess(): IntegrationAccessEvidence {
+  return {
+    appliedRoleIds: [GUILD_ID],
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD"],
+    effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+    manageGuild: true,
+    requiredPermission: "MANAGE_GUILD",
+    unknownPermissionBits: "0",
+  }
+}
+
+function integrationPrivacy(): IntegrationPrivacyProjection {
+  return {
+    externalAccountIdentitiesProjectedOut: true,
+    namesAndProfilesProjectedOut: true,
+    omittedFields: [
+      "account.id",
+      "account.name",
+      "application.description",
+      "application.icon",
+      "application.name",
+      "application.owner",
+      "application.team",
+      "integration.name",
+      "rawPayload",
+      "user.avatar",
+      "user.discriminator",
+      "user.email",
+      "user.globalName",
+      "user.username",
+    ],
+    persistence: "none",
+    rawPayloads: "omitted",
+  }
+}
+
+function projectedIntegration(
+  id = INTEGRATION_ID,
+): DiscordGuildIntegrationSummary {
+  return {
+    accountPresent: true,
+    applicationId: id === INTEGRATION_ID ? INTEGRATION_APPLICATION_ID : null,
+    associatedBotUserId: id === INTEGRATION_ID ? INTEGRATION_BOT_ID : null,
+    enableEmoticons: null,
+    enabled: true,
+    expireBehavior: null,
+    expireGracePeriod: null,
+    id,
+    knownScopes: id === INTEGRATION_ID ? ["bot", "identify"] : [],
+    linkedUserPresent: false,
+    revoked: null,
+    roleId: null,
+    subscriberCount: null,
+    syncedAt: null,
+    syncing: null,
+    type: id === INTEGRATION_ID ? "discord" : "twitch",
+    unknownFieldCounts: {
+      account: 0,
+      application: 0,
+      bot: 0,
+      integration: 0,
+      user: 0,
+    },
+    unknownScopeCount: 0,
+  }
+}
+
+function integrationInventory(guildId = GUILD_ID): IntegrationInventoryResult {
+  const integrations = [
+    projectedIntegration(),
+    projectedIntegration("375000000000000004"),
+  ]
+  return {
+    access: integrationAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    guild: { id: guildId, name: "Private guild name" },
+    integrations,
+    page: {
+      inventoryComplete: true,
+      returned: integrations.length,
+      safetyLimit: 50,
+    },
+    privacy: integrationPrivacy(),
+    schemaVersion: 1,
+    status: "ok",
+  }
+}
+
+function integrationDeletionPlan(
+  request: IntegrationDeletionRequest,
+  digest = DIGEST,
+): IntegrationDeletionPlan {
+  const inventory = integrationInventory(request.guildId)
+  const target = inventory.integrations.find(({ id }) => id === request.integrationId)
+    || projectedIntegration(request.integrationId)
+  return {
+    access: inventory.access,
+    acknowledgments: {
+      associatedBotKicked: request.acknowledgeAssociatedBotKicked,
+      associatedWebhooksRemoved: true,
+    },
+    action: "delete",
+    applicationId: APPLICATION_ID,
+    associatedBotMembership: {
+      present: target.associatedBotUserId !== null,
+      userId: target.associatedBotUserId,
+    },
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-22T00:00:00.000Z",
+    digest,
+    guild: inventory.guild,
+    inventory: inventory.integrations,
+    operationKeyHash: OPERATION_KEY_HASH,
+    page: {
+      inventoryComplete: true,
+      returned: inventory.integrations.length,
+      safetyLimit: 50,
+    },
+    privacy: inventory.privacy,
+    schemaVersion: 1,
+    status: "planned",
+    target,
+    warnings: [
+      "Integration deletion is permanent and Discord can remove associated webhooks",
+      "Integration deletion can kick the associated bot from the guild",
+    ],
   }
 }
 
@@ -3698,6 +3846,10 @@ function fixturePolicy(): PolicyDescription {
     guildTemplateAuditEnabled: false,
     guildTemplateChangesEnabled: false,
     guildTemplateGuildIds: [],
+    integrationAuditEnabled: false,
+    integrationDeletionsEnabled: false,
+    integrationGuildIds: [],
+    integrationIds: [],
     scheduledEventAuditEnabled: false,
     scheduledEventChangesEnabled: false,
     scheduledEventCoverChangesEnabled: false,
@@ -3809,6 +3961,8 @@ function serviceFixture(overrides: {
   guildExpressionError?: Error
   guildExpressionPlanDigest?: string
   interactionError?: Error
+  integrationDeletionError?: Error
+  integrationDeletionPlanDigest?: string
   inviteDeletionError?: Error
   inviteDeletionPlanDigest?: string
   messageContent?: string
@@ -3918,6 +4072,9 @@ function serviceFixture(overrides: {
     guildExpressionGet: 0,
     guildExpressionList: 0,
     guildExpressionPlan: 0,
+    integrationDeletionExecute: 0,
+    integrationDeletionList: 0,
+    integrationDeletionPlan: 0,
     inviteDeletionExecute: 0,
     inviteDeletionGet: 0,
     inviteDeletionList: 0,
@@ -3981,6 +4138,25 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeGuildIntegrationDeletion(request, planDigest) {
+      if (overrides.integrationDeletionError) {
+        throw overrides.integrationDeletionError
+      }
+      calls.integrationDeletionExecute += 1
+      return {
+        activityId: "activity-integration-deletion",
+        associatedBotUserId: INTEGRATION_BOT_ID,
+        guildId: request.guildId,
+        integrationId: request.integrationId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        targetApplicationId: INTEGRATION_APPLICATION_ID,
+        verifiedAbsent: true,
+        verifiedUnchanged: true,
+      }
+    },
     async executeNativeInteractionCommand(request, planDigest) {
       if (overrides.nativeInteractionCommandError) {
         throw overrides.nativeInteractionCommandError
@@ -4280,6 +4456,10 @@ function serviceFixture(overrides: {
         status: "ok",
         templates: [projectedGuildTemplate()],
       }
+    },
+    async listGuildIntegrations(guildId) {
+      calls.integrationDeletionList += 1
+      return integrationInventory(guildId)
     },
     async planInviteDeletion(request) {
       calls.inviteDeletionPlan += 1
@@ -4730,6 +4910,13 @@ function serviceFixture(overrides: {
         request,
         overrides.guildTemplatePlanDigest || DIGEST,
         overrides.guildTemplateMutation,
+      )
+    },
+    async planGuildIntegrationDeletion(request) {
+      calls.integrationDeletionPlan += 1
+      return integrationDeletionPlan(
+        request,
+        overrides.integrationDeletionPlanDigest || DIGEST,
       )
     },
     async executeWebhookDeletion(request, planDigest) {
@@ -6171,6 +6358,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_poll_answer_voters",
       "list_message_pins",
       "list_channel_webhooks",
+      "list_guild_integrations",
       "get_channel_webhook",
       "list_guild_emojis",
       "get_guild_emoji",
@@ -6205,6 +6393,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_template_change",
       "plan_webhook_deletion",
       "execute_webhook_deletion",
+      "plan_guild_integration_deletion",
+      "execute_guild_integration_deletion",
       "plan_invite_deletion",
       "execute_invite_deletion",
       "plan_onboarding_change",
@@ -6271,6 +6461,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
+  const integrationDeletion = result.tools.find((tool) => (
+    tool.name === "execute_guild_integration_deletion"
+  ))
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
   const onboarding = result.tools.find((tool) => tool.name === "execute_onboarding_change")
   const widgetSettings = result.tools.find((tool) => (
@@ -6311,6 +6504,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     messagePin,
     pollEnd,
     webhookDeletion,
+    integrationDeletion,
     inviteDeletion,
     onboarding,
     widgetSettings,
@@ -6389,6 +6583,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_poll",
     "list_poll_answer_voters",
     "list_channel_webhooks",
+    "list_guild_integrations",
     "get_channel_webhook",
     "list_guild_invites",
     "get_guild_invite",
@@ -6417,6 +6612,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_thread_creation",
     "plan_member_role_change",
     "plan_webhook_deletion",
+    "plan_guild_integration_deletion",
     "plan_invite_deletion",
     "plan_guild_template_change",
     "plan_onboarding_change",
@@ -7507,6 +7703,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     guildExpressionGet: 0,
     guildExpressionList: 0,
     guildExpressionPlan: 0,
+    integrationDeletionExecute: 0,
+    integrationDeletionList: 0,
+    integrationDeletionPlan: 0,
     inviteDeletionExecute: 0,
     inviteDeletionGet: 0,
     inviteDeletionList: 0,
@@ -9687,6 +9886,241 @@ test("MCP webhook deletion exposes uncertain and one-shot conflict outcomes safe
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(WEBHOOK_OPERATION_KEY),
+  )
+})
+
+test("MCP integration reads expose only bounded privacy-safe evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_guild_integrations",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "list_guild_integrations",
+  })
+
+  const content = structuredContent(listed)
+  const projected = (content.integrations as Array<Record<string, unknown>>)[0]
+  assert.equal(content.status, "ok")
+  assert.deepEqual(Object.keys(projected || {}).sort(), [
+    "accountPresent",
+    "applicationId",
+    "associatedBotUserId",
+    "enableEmoticons",
+    "enabled",
+    "expireBehavior",
+    "expireGracePeriod",
+    "id",
+    "knownScopes",
+    "linkedUserPresent",
+    "revoked",
+    "roleId",
+    "subscriberCount",
+    "syncedAt",
+    "syncing",
+    "type",
+    "unknownFieldCounts",
+    "unknownScopeCount",
+  ])
+  assert.equal(projected?.id, INTEGRATION_ID)
+  assert.equal(
+    (content.privacy as Record<string, unknown>).namesAndProfilesProjectedOut,
+    true,
+  )
+  assert.equal(
+    (content.page as Record<string, unknown>).inventoryComplete,
+    true,
+  )
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.integrationDeletionList, 1)
+  assert.doesNotMatch(
+    JSON.stringify(listed),
+    /private-integration|private-account|private-application|private-user/,
+  )
+})
+
+test("MCP integration deletion plans reject extra identity fields and unsafe keys", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const request = {
+    acknowledgeAssociatedBotKicked: true,
+    acknowledgeAssociatedWebhooksRemoved: true,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKey: INTEGRATION_OPERATION_KEY,
+  }
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_guild_integration_deletion",
+  })
+  const identityInput = await client.callTool({
+    arguments: {
+      ...request,
+      accountName: "private-account-name",
+    },
+    name: "plan_guild_integration_deletion",
+  })
+  const shortKey = await client.callTool({
+    arguments: { ...request, operationKey: "short" },
+    name: "plan_guild_integration_deletion",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal((content.target as Record<string, unknown>).id, INTEGRATION_ID)
+  assert.equal(
+    (content.privacy as Record<string, unknown>).externalAccountIdentitiesProjectedOut,
+    true,
+  )
+  assert.equal(identityInput.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(calls.integrationDeletionPlan, 1)
+})
+
+test("MCP integration deletion binds signed approval to exact side effects", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeAssociatedBotKicked: true,
+      acknowledgeAssociatedWebhooksRemoved: true,
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      integrationId: INTEGRATION_ID,
+      operationKey: INTEGRATION_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_guild_integration_deletion",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.integrationDeletionPlan, 1)
+  assert.equal(calls.integrationDeletionExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    INTEGRATION_ID,
+    INTEGRATION_APPLICATION_ID,
+    INTEGRATION_BOT_ID,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Integration type: discord/)
+  assert.match(confirmationMessage, /Integration role ID:/)
+  assert.match(confirmationMessage, /Integration enabled: true/)
+  assert.match(confirmationMessage, /Inventory identities:/)
+  assert.match(confirmationMessage, /Associated webhook removal acknowledged: true/)
+  assert.match(confirmationMessage, /Associated bot kick acknowledged: true/)
+  assert.match(confirmationMessage, /Bot MANAGE_GUILD: true/)
+  assert.match(confirmationMessage, /Inventory complete: true/)
+  assert.match(confirmationMessage, /Known OAuth scopes:/)
+  assert.match(confirmationMessage, /Unknown field counts:/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(INTEGRATION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(INTEGRATION_OPERATION_KEY),
+  )
+})
+
+test("MCP integration deletion stops on refusal, plan drift, uncertainty, and reuse", async (context) => {
+  const argumentsValue = {
+    acknowledgeAssociatedBotKicked: true,
+    acknowledgeAssociatedWebhooksRemoved: true,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKey: INTEGRATION_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_integration_deletion",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.integrationDeletionExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { integrationDeletionPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_integration_deletion",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.integrationDeletionExecute, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      integrationDeletionError: new IntegrationDeletionExecutionError(
+        "Discord integration deletion outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_integration_deletion",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-integration-deletion",
+    error: null,
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      integrationDeletionError:
+        new IntegrationDeletionOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_integration_deletion",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(INTEGRATION_OPERATION_KEY),
   )
 })
 

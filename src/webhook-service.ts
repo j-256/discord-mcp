@@ -644,6 +644,11 @@ export class WebhookService {
   ): Promise<WebhookStateEvidence> {
     assertSnowflake(botId, "Discord connector bot ID")
     assertSnowflake(channelId, "Discord webhook channel ID")
+    if (mode === "delete") {
+      this.#policy.assertChannelWebhookIdDeletable(channelId)
+    } else {
+      this.#policy.assertChannelWebhookIdAuditable(channelId)
+    }
     const channel = exactChannel(
       await this.#client.getChannel(channelId, options),
       channelId,

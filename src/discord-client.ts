@@ -26,6 +26,7 @@ import {
   errorMessage,
   ForumTagEvidenceError,
   GuildExpressionEvidenceError,
+  IntegrationEvidenceError,
   GuildTemplateEvidenceError,
   InviteEvidenceError,
   MemberVoiceEvidenceError,
@@ -259,6 +260,40 @@ export interface DiscordWebhookSummary {
   id: string
   name: string | null
   type: number
+}
+
+export type DiscordGuildIntegrationType =
+  | "discord"
+  | "guild_subscription"
+  | "twitch"
+  | "unknown"
+  | "youtube"
+
+export interface DiscordGuildIntegrationSummary {
+  accountPresent: true
+  applicationId: string | null
+  associatedBotUserId: string | null
+  enableEmoticons: boolean | null
+  enabled: boolean
+  expireBehavior: 0 | 1 | null
+  expireGracePeriod: number | null
+  id: string
+  knownScopes: string[]
+  linkedUserPresent: boolean
+  revoked: boolean | null
+  roleId: string | null
+  subscriberCount: number | null
+  syncedAt: string | null
+  syncing: boolean | null
+  type: DiscordGuildIntegrationType
+  unknownFieldCounts: {
+    account: number
+    application: number
+    bot: number
+    integration: number
+    user: number
+  }
+  unknownScopeCount: number
 }
 
 export interface DiscordInviteSummary {
@@ -1041,6 +1076,7 @@ interface RequestParameters extends RequestOptions {
   automaticRateLimitRetry?: boolean
   body?: unknown
   diagnosticRoute?: string
+  expectedSuccessStatus?: number
   multipartBody?: FormData
   suppressFailureCause?: boolean
 }
@@ -1135,6 +1171,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_guild_soundboard_sound",
   "delete_guild_sticker",
   "delete_guild_template",
+  "delete_guild_integration",
   "delete_stage_instance",
   "edit_original_interaction_response",
   "get_guild_auto_moderation_rule",
@@ -1150,6 +1187,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_onboarding",
   "get_guild_welcome_screen",
   "list_guild_invites",
+  "list_guild_integrations",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_guild_emojis",
@@ -2517,6 +2555,357 @@ function projectWebhook(value: unknown): DiscordWebhookSummary {
     id: record.id,
     name: record.name,
     type: record.type as number,
+  }
+}
+
+const GUILD_INTEGRATION_KEYS = [
+  "account",
+  "application",
+  "enable_emoticons",
+  "enabled",
+  "expire_behavior",
+  "expire_grace_period",
+  "id",
+  "name",
+  "revoked",
+  "role_id",
+  "scopes",
+  "subscriber_count",
+  "synced_at",
+  "syncing",
+  "type",
+  "user",
+] as const
+const GUILD_INTEGRATION_ACCOUNT_KEYS = ["id", "name"] as const
+const GUILD_INTEGRATION_APPLICATION_KEYS = [
+  "bot",
+  "description",
+  "icon",
+  "id",
+  "name",
+] as const
+const GUILD_INTEGRATION_USER_KEYS = [
+  "accent_color",
+  "avatar",
+  "avatar_decoration_data",
+  "banner",
+  "bot",
+  "collectibles",
+  "discriminator",
+  "email",
+  "flags",
+  "global_name",
+  "id",
+  "locale",
+  "mfa_enabled",
+  "premium_type",
+  "primary_guild",
+  "public_flags",
+  "system",
+  "username",
+  "verified",
+] as const
+const GUILD_INTEGRATION_TYPES: ReadonlySet<string> = new Set([
+  "discord",
+  "guild_subscription",
+  "twitch",
+  "youtube",
+])
+const KNOWN_DISCORD_OAUTH_SCOPES: ReadonlySet<string> = new Set([
+  "activities.read",
+  "activities.write",
+  "applications.builds.read",
+  "applications.builds.upload",
+  "applications.commands",
+  "applications.commands.permissions.update",
+  "applications.commands.update",
+  "applications.entitlements",
+  "applications.store.update",
+  "bot",
+  "connections",
+  "dm_channels.read",
+  "email",
+  "gdm.join",
+  "guilds",
+  "guilds.join",
+  "guilds.members.read",
+  "identify",
+  "identify.premium",
+  "messages.read",
+  "openid",
+  "relationships.read",
+  "role_connections.write",
+  "rpc",
+  "rpc.activities.write",
+  "rpc.notifications.read",
+  "rpc.voice.read",
+  "rpc.voice.write",
+  "sdk.social_layer",
+  "sdk.social_layer_presence",
+  "voice",
+  "webhook.incoming",
+])
+const INTEGRATION_TEXT_MAX_CHARACTERS = 4_096
+const INTEGRATION_SCOPE_MAX_CHARACTERS = 128
+const INTEGRATION_TYPE_MAX_CHARACTERS = 128
+const INTEGRATION_SCOPE_PATTERN = /^[a-z0-9._:-]+$/
+
+function integrationEvidenceError(cause?: unknown): IntegrationEvidenceError {
+  return new IntegrationEvidenceError(
+    "Discord returned invalid guild integration evidence",
+    cause === undefined ? undefined : { cause },
+  )
+}
+
+function integrationRecord(value: unknown): Record<string, unknown> {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || Object.keys(value).length > CONNECTOR_LIMITS.integrationObjectFields
+  ) {
+    throw integrationEvidenceError()
+  }
+  return value as Record<string, unknown>
+}
+
+function integrationProfileContainerFieldCount(value: unknown): number {
+  if (value === undefined || value === null) return 0
+  return Object.keys(integrationRecord(value)).length
+}
+
+function validateIntegrationText(
+  value: unknown,
+  nullable = false,
+  maximum = INTEGRATION_TEXT_MAX_CHARACTERS,
+): void {
+  if (value === null && nullable) return
+  if (
+    typeof value !== "string"
+    || [...value].length > maximum
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    throw integrationEvidenceError()
+  }
+  try {
+    assertValidUnicode(value, "Discord integration text")
+  } catch (error) {
+    throw integrationEvidenceError(error)
+  }
+}
+
+function integrationIdentity(
+  value: unknown,
+  requireBot = false,
+): { id: string; unknownFieldCount: number } {
+  const record = integrationRecord(value)
+  if (typeof record.id !== "string") throw integrationEvidenceError()
+  try {
+    assertPositiveSnowflake(record.id, "Discord integration user ID")
+  } catch (error) {
+    throw integrationEvidenceError(error)
+  }
+  for (const key of [
+    "avatar",
+    "banner",
+    "discriminator",
+    "email",
+    "global_name",
+    "locale",
+    "username",
+  ]) {
+    if (record[key] !== undefined) validateIntegrationText(record[key], true)
+  }
+  for (const key of ["bot", "mfa_enabled", "system", "verified"]) {
+    if (record[key] !== undefined && typeof record[key] !== "boolean") {
+      throw integrationEvidenceError()
+    }
+  }
+  if (requireBot && record.bot !== true) throw integrationEvidenceError()
+  for (const key of ["accent_color", "flags", "premium_type", "public_flags"]) {
+    if (
+      record[key] !== undefined
+      && !(key === "accent_color" && record[key] === null)
+      && (!Number.isSafeInteger(record[key]) || (record[key] as number) < 0)
+    ) {
+      throw integrationEvidenceError()
+    }
+  }
+  const nestedProfileFieldCount = [
+    "avatar_decoration_data",
+    "collectibles",
+    "primary_guild",
+  ].reduce(
+    (total, key) => total + integrationProfileContainerFieldCount(record[key]),
+    0,
+  )
+  return {
+    id: record.id,
+    unknownFieldCount:
+      countUnknownFields(record, GUILD_INTEGRATION_USER_KEYS)
+      + nestedProfileFieldCount,
+  }
+}
+
+function optionalIntegrationBoolean(value: unknown): boolean | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== "boolean") throw integrationEvidenceError()
+  return value
+}
+
+function optionalIntegrationCount(value: unknown): number | null {
+  if (value === undefined || value === null) return null
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw integrationEvidenceError()
+  }
+  return value as number
+}
+
+function optionalIntegrationTimestamp(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  if (
+    typeof value !== "string"
+    || value.length > 64
+    || !ISO_8601_TIMESTAMP_PATTERN.test(value)
+    || Number.isNaN(Date.parse(value))
+  ) {
+    throw integrationEvidenceError()
+  }
+  return new Date(value).toISOString()
+}
+
+function projectGuildIntegration(value: unknown): DiscordGuildIntegrationSummary {
+  const record = integrationRecord(value)
+  const account = integrationRecord(record.account)
+  if (
+    typeof record.id !== "string"
+    || typeof record.name !== "string"
+    || typeof record.type !== "string"
+    || typeof record.enabled !== "boolean"
+    || typeof account.id !== "string"
+    || typeof account.name !== "string"
+  ) {
+    throw integrationEvidenceError()
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord integration ID")
+    validateIntegrationText(record.name)
+    if (record.type.length < 1) throw integrationEvidenceError()
+    validateIntegrationText(record.type, false, INTEGRATION_TYPE_MAX_CHARACTERS)
+    validateIntegrationText(account.id)
+    validateIntegrationText(account.name)
+  } catch (error) {
+    if (error instanceof IntegrationEvidenceError) throw error
+    throw integrationEvidenceError(error)
+  }
+  let roleId: string | null = null
+  if (record.role_id !== undefined && record.role_id !== null) {
+    if (typeof record.role_id !== "string") throw integrationEvidenceError()
+    try {
+      assertPositiveSnowflake(record.role_id, "Discord integration role ID")
+    } catch (error) {
+      throw integrationEvidenceError(error)
+    }
+    roleId = record.role_id
+  }
+  let linkedUserPresent = false
+  let userUnknownFieldCount = 0
+  if (record.user !== undefined && record.user !== null) {
+    const user = integrationIdentity(record.user)
+    linkedUserPresent = true
+    userUnknownFieldCount = user.unknownFieldCount
+  }
+  let applicationId: string | null = null
+  let associatedBotUserId: string | null = null
+  let applicationUnknownFieldCount = 0
+  let botUnknownFieldCount = 0
+  if (record.application !== undefined && record.application !== null) {
+    const application = integrationRecord(record.application)
+    if (
+      typeof application.id !== "string"
+      || typeof application.name !== "string"
+      || typeof application.description !== "string"
+      || !(application.icon === null || typeof application.icon === "string")
+    ) {
+      throw integrationEvidenceError()
+    }
+    try {
+      assertPositiveSnowflake(application.id, "Discord integration application ID")
+      validateIntegrationText(application.name)
+      validateIntegrationText(application.description)
+      validateIntegrationText(application.icon, true)
+    } catch (error) {
+      throw integrationEvidenceError(error)
+    }
+    if (application.bot !== undefined && application.bot !== null) {
+      const bot = integrationIdentity(application.bot, true)
+      associatedBotUserId = bot.id
+      botUnknownFieldCount = bot.unknownFieldCount
+    }
+    applicationId = application.id
+    applicationUnknownFieldCount = countUnknownFields(
+      application,
+      GUILD_INTEGRATION_APPLICATION_KEYS,
+    )
+  }
+  const rawScopes = record.scopes ?? []
+  if (
+    !Array.isArray(rawScopes)
+    || rawScopes.length > CONNECTOR_LIMITS.integrationOauthScopes
+  ) {
+    throw integrationEvidenceError()
+  }
+  const scopes = new Set<string>()
+  for (const value of rawScopes) {
+    if (
+      typeof value !== "string"
+      || value.length < 1
+      || value.length > INTEGRATION_SCOPE_MAX_CHARACTERS
+      || !INTEGRATION_SCOPE_PATTERN.test(value)
+      || scopes.has(value)
+    ) {
+      throw integrationEvidenceError()
+    }
+    scopes.add(value)
+  }
+  let expireBehavior: 0 | 1 | null = null
+  if (record.expire_behavior !== undefined && record.expire_behavior !== null) {
+    if (record.expire_behavior !== 0 && record.expire_behavior !== 1) {
+      throw integrationEvidenceError()
+    }
+    expireBehavior = record.expire_behavior
+  }
+  const knownScopes = [...scopes]
+    .filter((scope) => KNOWN_DISCORD_OAUTH_SCOPES.has(scope))
+    .sort()
+  const type = GUILD_INTEGRATION_TYPES.has(record.type)
+    ? record.type as DiscordGuildIntegrationType
+    : "unknown"
+  return {
+    accountPresent: true,
+    applicationId,
+    associatedBotUserId,
+    enableEmoticons: optionalIntegrationBoolean(record.enable_emoticons),
+    enabled: record.enabled,
+    expireBehavior,
+    expireGracePeriod: optionalIntegrationCount(record.expire_grace_period),
+    id: record.id,
+    knownScopes,
+    linkedUserPresent,
+    revoked: optionalIntegrationBoolean(record.revoked),
+    roleId,
+    subscriberCount: optionalIntegrationCount(record.subscriber_count),
+    syncedAt: optionalIntegrationTimestamp(record.synced_at),
+    syncing: optionalIntegrationBoolean(record.syncing),
+    type,
+    unknownFieldCounts: {
+      account: countUnknownFields(account, GUILD_INTEGRATION_ACCOUNT_KEYS),
+      application: applicationUnknownFieldCount,
+      bot: botUnknownFieldCount,
+      integration: countUnknownFields(record, GUILD_INTEGRATION_KEYS),
+      user: userUnknownFieldCount,
+    },
+    unknownScopeCount: scopes.size - knownScopes.length,
   }
 }
 
@@ -6158,6 +6547,16 @@ export class DiscordClient {
           })
         }
 
+        if (
+          parameters.expectedSuccessStatus !== undefined
+          && response.status !== parameters.expectedSuccessStatus
+        ) {
+          throw new DiscordTransportError(
+            `Discord API ${method} ${diagnosticRoute} returned an unexpected success status`,
+            "discord-client-error",
+          )
+        }
+
         return parsedBody as T
       }
       throw new DiscordTransportError(
@@ -8248,6 +8647,53 @@ export class DiscordClient {
       throw new WebhookEvidenceError("Discord returned an invalid channel webhook inventory")
     }
     return response.map(projectWebhook)
+  }
+
+  async listGuildIntegrations(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildIntegrationSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord integration guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_integrations",
+      `/guilds/${guildId}/integrations`,
+      {
+        ...options,
+        diagnosticRoute: "/guilds/{guild.id}/integrations",
+        expectedSuccessStatus: 200,
+        suppressFailureCause: true,
+      },
+    )
+    if (!Array.isArray(response) || response.length > DISCORD_LIMITS.guildIntegrations) {
+      throw integrationEvidenceError()
+    }
+    const integrations = response.map(projectGuildIntegration)
+    const ids = new Set(integrations.map(({ id }) => id))
+    if (ids.size !== integrations.length) throw integrationEvidenceError()
+    return integrations.sort((left, right) => left.id.localeCompare(right.id))
+  }
+
+  async deleteGuildIntegration(
+    guildId: string,
+    integrationId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord integration guild ID")
+    assertPositiveSnowflake(integrationId, "Discord integration ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_integration",
+      `/guilds/${guildId}/integrations/${integrationId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/guilds/{guild.id}/integrations/{integration.id}",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async deleteWebhook(

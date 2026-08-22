@@ -549,6 +549,42 @@ export class WebhookEvidenceError extends Error {
   override name = "WebhookEvidenceError"
 }
 
+export class IntegrationDeletionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord integration snapshot does not match the reviewed deletion plan")
+    this.name = "IntegrationDeletionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class IntegrationDeletionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord integration deletion operation key has already been reserved")
+    this.name = "IntegrationDeletionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class IntegrationDeletionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "IntegrationDeletionExecutionError"
+    this.result = result
+  }
+}
+
+export class IntegrationEvidenceError extends Error {
+  override name = "IntegrationEvidenceError"
+}
+
 export class GuildExpressionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

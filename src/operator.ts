@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 10
+export const OPERATOR_REPORT_SCHEMA_VERSION = 11
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -72,6 +72,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildTemplateAuditPolicy: "guild-template-audit-policy",
   guildTemplateChangePolicy: "guild-template-change-policy",
   interactionPolicy: "interaction-policy",
+  integrationAuditPolicy: "integration-audit-policy",
+  integrationDeletionPolicy: "integration-deletion-policy",
   inviteAuditPolicy: "invite-audit-policy",
   inviteDeletionPolicy: "invite-deletion-policy",
   memberDirectoryPolicy: "member-directory-policy",
@@ -352,6 +354,15 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowInviteDeletions && config.inviteGuildIds.size === 0) {
     warnings.push("The invite-deletion toggle is enabled but deletion remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowIntegrationAudit && config.integrationGuildIds.size === 0) {
+    warnings.push("The integration-audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
+  }
+  if (
+    config.allowIntegrationDeletions
+    && (config.integrationGuildIds.size === 0 || config.integrationIds.size === 0)
+  ) {
+    warnings.push("The integration-deletion toggle is enabled but deletion remains blocked because exact guild and integration allowlists are both required")
+  }
   if (config.allowOnboardingAudit && config.onboardingGuildIds.size === 0) {
     warnings.push("The onboarding-audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
   }
@@ -484,6 +495,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Guild expression audit and changes",
     ],
     [config.allowInteractions, "interactions", "Message interactions"],
+    [
+      config.allowIntegrationAudit || config.allowIntegrationDeletions,
+      "integrations",
+      "Integration audit and reviewed deletion",
+    ],
     [
       config.allowNativeCommandChanges || config.allowNativeInteractions,
       "native-interactions",
@@ -1448,6 +1464,47 @@ export async function diagnoseConnector(
         `Reviewed Incoming-webhook deletion is constrained to ${config.webhookChannelIds.size} exact channels with one-shot execution and absence readback`,
       ))
     }
+    if (!config.allowIntegrationAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.integrationAuditPolicy,
+        "pass",
+        "Privacy-safe guild integration inventory is disabled",
+      ))
+    } else if (config.integrationGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.integrationAuditPolicy,
+        "warn",
+        "Integration-audit toggle is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.integrationAuditPolicy,
+        "pass",
+        `Privacy-safe integration inventory is constrained to ${config.integrationGuildIds.size} exact guilds with complete MANAGE_GUILD evidence`,
+      ))
+    }
+    if (!config.allowIntegrationDeletions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.integrationDeletionPolicy,
+        "pass",
+        "Reviewed guild integration deletion is disabled",
+      ))
+    } else if (
+      config.integrationGuildIds.size === 0
+      || config.integrationIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.integrationDeletionPolicy,
+        "warn",
+        "Integration deletion is enabled, but exact guild and integration allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.integrationDeletionPolicy,
+        "pass",
+        `Reviewed integration deletion is constrained to ${config.integrationGuildIds.size} exact guilds and ${config.integrationIds.size} exact integrations with explicit side-effect acknowledgments, one-shot execution, and full-inventory readback`,
+      ))
+    }
     if (!config.allowGuildExpressionAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.guildExpressionAuditPolicy,
@@ -1947,6 +2004,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowWebhookAudit,
     ENVIRONMENT_NAMES.allowWebhookDeletions,
     ENVIRONMENT_NAMES.webhookChannelIds,
+    ENVIRONMENT_NAMES.allowIntegrationAudit,
+    ENVIRONMENT_NAMES.allowIntegrationDeletions,
+    ENVIRONMENT_NAMES.integrationGuildIds,
+    ENVIRONMENT_NAMES.integrationIds,
     ENVIRONMENT_NAMES.allowGateway,
     ENVIRONMENT_NAMES.gatewayEventBufferSize,
     ENVIRONMENT_NAMES.allowNativeCommandChanges,

@@ -30,6 +30,7 @@ import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 
 export const WRITE_COORDINATION_RESOURCE_KINDS = [
   "channel",
+  "integration",
   "member",
   "message",
   "role",
@@ -42,12 +43,14 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "channels",
   "emojis",
   "invites",
+  "integrations",
   "onboarding",
   "roles",
   "scheduled-events",
   "soundboard",
   "stickers",
   "templates",
+  "webhooks",
   "welcome-screen",
   "widget-settings",
 ] as const

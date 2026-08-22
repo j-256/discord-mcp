@@ -31,6 +31,7 @@ const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
 const ROLE_ID = "500000000000000001"
+const INTEGRATION_ID = "600000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -105,6 +106,10 @@ function status(
       guildTemplateAuditEnabled: false,
       guildTemplateChangesEnabled: false,
       guildTemplateGuildIds: [],
+      integrationAuditEnabled: false,
+      integrationDeletionsEnabled: false,
+      integrationGuildIds: [],
+      integrationIds: [],
       scheduledEventAuditEnabled: false,
       scheduledEventChangesEnabled: false,
       scheduledEventCoverChangesEnabled: false,
@@ -223,6 +228,7 @@ function toolService(): DiscordToolService {
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
+    executeGuildIntegrationDeletion: unexpected,
     executeForumTagChange: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
@@ -243,6 +249,7 @@ function toolService(): DiscordToolService {
     getGuildExpression: unexpected,
     getGuildSoundboardSound: unexpected,
     listGuildTemplates: unexpected,
+    listGuildIntegrations: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getStageInstance: unexpected,
@@ -267,6 +274,7 @@ function toolService(): DiscordToolService {
     planWidgetSettingsChange: unexpected,
     planGuildExpressionChange: unexpected,
     planGuildTemplateChange: unexpected,
+    planGuildIntegrationDeletion: unexpected,
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -1036,6 +1044,75 @@ test("doctor and setup explain credential-redacted webhook audit and cleanup", a
   assert.match(setup.warnings.join("\n"), /webhook-audit toggle/)
   assert.match(setup.warnings.join("\n"), /webhook-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /webhooks toolset/)
+})
+
+test("doctor and setup explain privacy-safe integration audit and deletion", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+    DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.integrationAuditPolicy,
+  )
+  const deletion = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.integrationDeletionPolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /privacy-safe integration inventory/i)
+  assert.match(audit?.summary || "", /MANAGE_GUILD/)
+  assert.equal(deletion?.status, "pass")
+  assert.match(deletion?.summary || "", /1 exact integrations/)
+  assert.match(deletion?.summary || "", /side-effect acknowledgments/)
+  assert.match(deletion?.summary || "", /full-inventory readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.integrationAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.integrationDeletionPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /integration-audit toggle/)
+  assert.match(setup.warnings.join("\n"), /integration-deletion toggle/)
+  assert.match(omitted.warnings.join("\n"), /integrations toolset/)
+  for (const name of [
+    ENVIRONMENT_NAMES.allowIntegrationAudit,
+    ENVIRONMENT_NAMES.allowIntegrationDeletions,
+    ENVIRONMENT_NAMES.integrationGuildIds,
+    ENVIRONMENT_NAMES.integrationIds,
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
 })
 
 test("doctor and setup explain capability-safe invite audit and revocation", async () => {
@@ -2671,6 +2748,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_forum_post",
     "review_forum_tag_change",
     "review_guild_expression_change",
+    "review_guild_integration_deletion",
     "review_guild_scaffold",
     "review_guild_template_change",
     "review_invite_deletion",
@@ -2717,6 +2795,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
     "discord://guilds/{guildId}/emojis",
+    "discord://guilds/{guildId}/integrations",
     "discord://guilds/{guildId}/invites/{inviteRef}",
     "discord://guilds/{guildId}/members/{userId}",
     "discord://guilds/{guildId}/members/{userId}/voice-state",
@@ -2742,6 +2821,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_forum_tag_change",
     "execute_guild_expression_change",
+    "execute_guild_integration_deletion",
     "execute_guild_soundboard_change",
     "execute_guild_template_change",
     "execute_guild_welcome_screen_change",

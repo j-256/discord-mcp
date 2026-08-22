@@ -41,6 +41,9 @@ const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
+const INTEGRATION_ID = "365000000000000001"
+const INTEGRATION_APPLICATION_ID = "365000000000000002"
+const INTEGRATION_BOT_ID = "365000000000000003"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const GUILD_TEMPLATE_REF = `tref_hmac_sha256_${"7".repeat(64)}`
@@ -153,6 +156,7 @@ interface GuidanceCalls {
   forumTags: number
   guilds: number
   guildExpressions: number
+  integrations: number
   invites: number
   lastChannelId: string | null
   lastGuildId: string | null
@@ -196,6 +200,7 @@ function guidanceService(options: {
     forumTags: 0,
     guilds: 0,
     guildExpressions: 0,
+    integrations: 0,
     invites: 0,
     lastChannelId: null,
     lastGuildId: null,
@@ -290,6 +295,7 @@ function guidanceService(options: {
     executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
+    executeGuildIntegrationDeletion: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
@@ -303,6 +309,7 @@ function guidanceService(options: {
     planAnnouncementCrosspost: unexpected,
     planNativeInteractionCommand: unexpected,
     planGuildTemplateChange: unexpected,
+    planGuildIntegrationDeletion: unexpected,
     planThreadChange: unexpected,
     getGuildExpression: unexpected,
     async getGuildSoundboardSound(guildId, soundId) {
@@ -833,6 +840,77 @@ function guidanceService(options: {
         }],
       }
     },
+    async listGuildIntegrations(guildId) {
+      calls.integrations += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [GUILD_ID],
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guild: { id: guildId, name: "Private guild name" },
+        integrations: [{
+          accountPresent: true,
+          applicationId: INTEGRATION_APPLICATION_ID,
+          associatedBotUserId: INTEGRATION_BOT_ID,
+          enableEmoticons: null,
+          enabled: true,
+          expireBehavior: null,
+          expireGracePeriod: null,
+          id: INTEGRATION_ID,
+          knownScopes: ["bot", "identify"],
+          linkedUserPresent: false,
+          revoked: null,
+          roleId: null,
+          subscriberCount: null,
+          syncedAt: null,
+          syncing: null,
+          type: "discord" as const,
+          unknownFieldCounts: {
+            account: 0,
+            application: 0,
+            bot: 0,
+            integration: 0,
+            user: 0,
+          },
+          unknownScopeCount: 0,
+        }],
+        page: { inventoryComplete: true, returned: 1, safetyLimit: 50 },
+        privacy: {
+          externalAccountIdentitiesProjectedOut: true,
+          namesAndProfilesProjectedOut: true,
+          omittedFields: [
+            "account.id",
+            "account.name",
+            "application.description",
+            "application.icon",
+            "application.name",
+            "application.owner",
+            "application.team",
+            "integration.name",
+            "rawPayload",
+            "user.avatar",
+            "user.discriminator",
+            "user.email",
+            "user.globalName",
+            "user.username",
+          ] as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -1099,6 +1177,10 @@ function guidanceService(options: {
         guildTemplateAuditEnabled: false,
         guildTemplateChangesEnabled: false,
         guildTemplateGuildIds: [],
+        integrationAuditEnabled: false,
+        integrationDeletionsEnabled: false,
+        integrationGuildIds: [],
+        integrationIds: [],
         scheduledEventAuditEnabled: false,
         scheduledEventChangesEnabled: false,
         scheduledEventCoverChangesEnabled: false,
@@ -1628,6 +1710,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.forumTags
     + calls.guilds
     + calls.guildExpressions
+    + calls.integrations
     + calls.invites
     + calls.messages
     + calls.members
@@ -1770,6 +1853,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildEmojis,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildEmojis,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildIntegrations,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildIntegrations,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildOnboarding,
@@ -2007,6 +2094,30 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(
     (webhookData.privacy as Record<string, unknown>).credentialsProjectedOut,
     true,
+  )
+
+  const integrations = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/integrations`,
+  )
+  const integrationData = integrations.value.data as Record<string, unknown>
+  const projectedIntegration = (
+    integrationData.integrations as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(projectedIntegration?.id, INTEGRATION_ID)
+  assert.deepEqual(projectedIntegration?.knownScopes, ["bot", "identify"])
+  assert.equal(
+    (integrationData.privacy as Record<string, unknown>)
+      .externalAccountIdentitiesProjectedOut,
+    true,
+  )
+  assert.equal(
+    (integrationData.page as Record<string, unknown>).inventoryComplete,
+    true,
+  )
+  assert.doesNotMatch(
+    integrations.text,
+    /private-account|private-application|private-integration|private-user/,
   )
 
   const roles = await readJsonResource(
@@ -2351,6 +2462,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
 
   assert.equal(calls.guilds, 1)
   assert.equal(calls.guildExpressions, 2)
+  assert.equal(calls.integrations, 1)
   assert.equal(calls.invites, 1)
   assert.equal(calls.onboarding, 1)
   assert.equal(calls.welcomeScreens, 1)
@@ -2655,6 +2767,37 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(webhookDeletion, /Call only plan_webhook_deletion/)
   assert.match(webhookDeletion, /Do not call execute_webhook_deletion/)
   assert.match(webhookDeletion, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
+
+  const integrationDeletion = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgeAssociatedBotKicked: "true",
+      acknowledgeAssociatedWebhooksRemoved: "true",
+      auditReason: "Reviewed integration cleanup",
+      guildId: GUILD_ID,
+      integrationId: INTEGRATION_ID,
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewGuildIntegrationDeletion,
+  }))
+  assert.deepEqual(JSON.parse(integrationDeletion.split("\n")[1] || ""), {
+    acknowledgeAssociatedBotKicked: true,
+    acknowledgeAssociatedWebhooksRemoved: true,
+    auditReason: "Reviewed integration cleanup",
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(
+    integrationDeletion,
+    /Call only plan_guild_integration_deletion/,
+  )
+  assert.match(
+    integrationDeletion,
+    /Do not call execute_guild_integration_deletion/,
+  )
+  assert.match(integrationDeletion, /complete MANAGE_GUILD evidence/)
+  assert.match(integrationDeletion, /50-object ambiguity/)
+  assert.match(integrationDeletion, /webhook and bot consequences/)
   assert.match(webhookDeletion, /credential and private-field omissions/)
 
   const inviteDeletion = promptText(await client.getPrompt({

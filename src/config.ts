@@ -56,6 +56,8 @@ export interface ConnectorConfig {
   allowGuildScaffolds: boolean
   allowGuildTemplateAudit: boolean
   allowGuildTemplateChanges: boolean
+  allowIntegrationAudit: boolean
+  allowIntegrationDeletions: boolean
   allowInteractions: boolean
   allowInviteAudit: boolean
   allowInviteDeletions: boolean
@@ -111,6 +113,8 @@ export interface ConnectorConfig {
   guildExpressionGuildIds: ReadonlySet<string>
   guildExpressionRoots: readonly string[]
   guildTemplateGuildIds: ReadonlySet<string>
+  integrationGuildIds: ReadonlySet<string>
+  integrationIds: ReadonlySet<string>
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -474,6 +478,16 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.guildTemplateGuildIds],
     ENVIRONMENT_NAMES.guildTemplateGuildIds,
   )
+  const integrationGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.integrationGuildIds],
+    ENVIRONMENT_NAMES.integrationGuildIds,
+    CONNECTOR_LIMITS.integrationGuildAllowlist,
+  )
+  const integrationIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.integrationIds],
+    ENVIRONMENT_NAMES.integrationIds,
+    CONNECTOR_LIMITS.integrationIdAllowlist,
+  )
   const scheduledEventGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.scheduledEventGuildIds],
     ENVIRONMENT_NAMES.scheduledEventGuildIds,
@@ -514,6 +528,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
     [ENVIRONMENT_NAMES.guildTemplateGuildIds, guildTemplateGuildIds],
+    [ENVIRONMENT_NAMES.integrationGuildIds, integrationGuildIds],
     [ENVIRONMENT_NAMES.inviteGuildIds, inviteGuildIds],
     [ENVIRONMENT_NAMES.onboardingGuildIds, onboardingGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
@@ -695,6 +710,19 @@ export function loadConnectorConfig(
   if (allowGuildTemplateChanges && !allowGuildTemplateAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGuildTemplateChanges} requires ${ENVIRONMENT_NAMES.allowGuildTemplateAudit}`,
+    )
+  }
+  const allowIntegrationAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowIntegrationAudit],
+    ENVIRONMENT_NAMES.allowIntegrationAudit,
+  )
+  const allowIntegrationDeletions = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowIntegrationDeletions],
+    ENVIRONMENT_NAMES.allowIntegrationDeletions,
+  )
+  if (allowIntegrationDeletions && !allowIntegrationAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowIntegrationDeletions} requires ${ENVIRONMENT_NAMES.allowIntegrationAudit}`,
     )
   }
   const allowForumTagAudit = parseBoolean(
@@ -885,6 +913,8 @@ export function loadConnectorConfig(
     ),
     allowGuildTemplateAudit,
     allowGuildTemplateChanges,
+    allowIntegrationAudit,
+    allowIntegrationDeletions,
     allowForumPosts: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowForumPosts],
       ENVIRONMENT_NAMES.allowForumPosts,
@@ -988,6 +1018,8 @@ export function loadConnectorConfig(
       ENVIRONMENT_NAMES.guildExpressionRoots,
     ),
     guildTemplateGuildIds,
+    integrationGuildIds,
+    integrationIds,
     interactionChannelIds,
     interactionMaxWritesPerMinute: parseInteger(
       environment[ENVIRONMENT_NAMES.interactionMaxWritesPerMinute],

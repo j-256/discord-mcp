@@ -867,6 +867,30 @@ export function registerDiscordResources(
   )
 
   server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildIntegrations,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildIntegrations, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: `Bounded privacy-safe Discord integration inventory for one separately allowlisted guild. External account identities, names, descriptions, icons, profiles, raw payloads, and unknown scope values are omitted. Complete MANAGE_GUILD evidence and the ${DISCORD_LIMITS.guildIntegrations}-object completeness boundary are explicit.`,
+      mimeType: "application/json",
+      title: "Privacy-safe Discord guild integrations",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listGuildIntegrations(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
     MCP_RESOURCE_TEMPLATE_NAMES.channelAccess,
     new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelAccess, {
       list: undefined,

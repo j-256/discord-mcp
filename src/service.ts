@@ -98,7 +98,11 @@ import type {
   PollVoterPageOptions,
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
-import { ConfigurationError } from "./errors.js"
+import {
+  ConfigurationError,
+  IntegrationDeletionPlanChangedError,
+  WebhookDeletionPlanChangedError,
+} from "./errors.js"
 import type {
   ForumPostPlan,
   ForumPostRequest,
@@ -147,6 +151,17 @@ import {
   GuildTemplateService,
   normalizeGuildTemplateChangeRequest,
 } from "./guild-template-service.js"
+import type {
+  IntegrationDeletionPlan,
+  IntegrationDeletionRequest,
+  IntegrationDeletionResult,
+  IntegrationInventoryResult,
+  IntegrationServiceOptions,
+} from "./integration-service.js"
+import {
+  IntegrationService,
+  normalizeIntegrationDeletionRequest,
+} from "./integration-service.js"
 import type {
   AddReactionRequest,
   EditOwnMessageRequest,
@@ -362,7 +377,10 @@ import type {
   WebhookLookupResult,
   WebhookServiceOptions,
 } from "./webhook-service.js"
-import { WebhookService } from "./webhook-service.js"
+import {
+  normalizeWebhookDeletionRequest,
+  WebhookService,
+} from "./webhook-service.js"
 import {
   FileOperationStore,
   operationKeyHash,
@@ -421,6 +439,7 @@ export interface DiscordServiceClient {
   deleteGuildSoundboardSound: DiscordClient["deleteGuildSoundboardSound"]
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
   deleteGuildTemplate: DiscordClient["deleteGuildTemplate"]
+  deleteGuildIntegration: DiscordClient["deleteGuildIntegration"]
   deleteStageInstance: DiscordClient["deleteStageInstance"]
   deleteInvite: DiscordClient["deleteInvite"]
   deleteWebhook: DiscordClient["deleteWebhook"]
@@ -460,6 +479,7 @@ export interface DiscordServiceClient {
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
   listGuildBans: DiscordClient["listGuildBans"]
   listGuildInvites: DiscordClient["listGuildInvites"]
+  listGuildIntegrations: DiscordClient["listGuildIntegrations"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
@@ -571,6 +591,10 @@ export interface ConnectorServiceOptions {
   >
   guildTemplateOptions?: Pick<
     GuildTemplateServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  integrationOptions?: Pick<
+    IntegrationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   inviteOptions?: Pick<InviteServiceOptions, "clock" | "planKey" | "randomId">
@@ -782,6 +806,7 @@ export class ConnectorService {
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
   readonly #guildTemplateService: GuildTemplateService
+  readonly #integrationService: IntegrationService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #pollService: PollService
@@ -909,6 +934,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildTemplateOptions,
+    })
+    this.#integrationService = new IntegrationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.integrationOptions,
     })
     this.#onboardingService = new OnboardingService({
       activityStore: this.#activityStore,
@@ -1885,8 +1917,23 @@ export class ConnectorService {
     channelId: string,
     options: RequestOptions = {},
   ): Promise<WebhookInventoryResult> {
+    this.#policy.assertChannelWebhookIdAuditable(channelId)
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.list(identity.bot.id, channelId, options)
+  }
+
+  async listGuildIntegrations(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<IntegrationInventoryResult> {
+    this.#policy.assertGuildIntegrationAuditable(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#integrationService.list(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
   }
 
   async listGuildExpressions(
@@ -2011,6 +2058,7 @@ export class ConnectorService {
     webhookId: string,
     options: RequestOptions = {},
   ): Promise<WebhookLookupResult> {
+    this.#policy.assertChannelWebhookIdAuditable(channelId)
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.get(
       identity.bot.id,
@@ -2024,8 +2072,28 @@ export class ConnectorService {
     request: WebhookDeletionRequest,
     options: RequestOptions = {},
   ): Promise<WebhookDeletionPlan> {
+    normalizeWebhookDeletionRequest(request)
+    this.#policy.assertChannelWebhookIdDeletable(request.channelId)
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildIntegrationDeletion(
+    request: IntegrationDeletionRequest,
+    options: RequestOptions = {},
+  ): Promise<IntegrationDeletionPlan> {
+    normalizeIntegrationDeletionRequest(request)
+    this.#policy.assertGuildIntegrationDeletable(
+      request.guildId,
+      request.integrationId,
+    )
+    const identity = await this.#verifyIdentity(options)
+    return this.#integrationService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -2851,7 +2919,24 @@ export class ConnectorService {
     planDigest: string,
     options: RequestOptions = {},
   ): Promise<WebhookDeletionResult> {
+    normalizeWebhookDeletionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord webhook deletion plan digest is invalid")
+    }
+    this.#policy.assertChannelWebhookIdDeletable(request.channelId)
     const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#webhookService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new WebhookDeletionPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
     return this.#coordinateWrite(
       "webhook-deletion",
       request.operationKey,
@@ -2859,8 +2944,61 @@ export class ConnectorService {
       [
         writeResourceTarget("channel", request.channelId),
         writeResourceTarget("webhook", request.webhookId),
+        writeGuildCollectionTarget("webhooks", coordinationPlan.guild.id),
       ],
       () => this.#webhookService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildIntegrationDeletion(
+    request: IntegrationDeletionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<IntegrationDeletionResult> {
+    normalizeIntegrationDeletionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord integration deletion plan digest is invalid")
+    }
+    this.#policy.assertGuildIntegrationDeletable(
+      request.guildId,
+      request.integrationId,
+    )
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#integrationService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new IntegrationDeletionPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    const targets: WriteCoordinationTarget[] = [
+      writeResourceTarget("integration", request.integrationId),
+      writeGuildCollectionTarget("integrations", request.guildId),
+      writeGuildCollectionTarget("webhooks", request.guildId),
+    ]
+    if (coordinationPlan.target.associatedBotUserId !== null) {
+      targets.push(writeResourceTarget(
+        "member",
+        coordinationPlan.target.associatedBotUserId,
+      ))
+    }
+    return this.#coordinateWrite(
+      "integration-deletion",
+      request.operationKey,
+      planDigest,
+      targets,
+      () => this.#integrationService.execute(
         identity.application.id,
         identity.bot.id,
         request,

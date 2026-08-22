@@ -20,11 +20,13 @@ import {
   DISCORD_SCHEDULED_EVENT_STATUSES,
   DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS,
   type DiscordAutoModerationRuleSummary,
+  type DiscordGuildIntegrationSummary,
   type DiscordGuildTemplateSummary,
   type DiscordScheduledEventSummary,
   type DiscordSoundboardSoundSummary,
   type DiscordStageInstanceSummary,
   type DiscordThreadStateSummary,
+  type DiscordWebhookSummary,
 } from "../src/discord-client.js"
 import {
   ChannelCreationPlanChangedError,
@@ -73,6 +75,9 @@ const CREATED_ROLE_ID = "700000000000000001"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
+const INTEGRATION_ID = "905000000000000001"
+const INTEGRATION_APPLICATION_ID = "905000000000000002"
+const INTEGRATION_BOT_ID = "905000000000000003"
 const AUTOMOD_RULE_ID = "910000000000000001"
 const SCHEDULED_EVENT_ID = "930000000000000001"
 const SOUNDBOARD_SOUND_ID = "935000000000000001"
@@ -231,6 +236,7 @@ function serviceFixture(overrides: {
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   guildTemplateOptions?: ConnectorServiceOptions["guildTemplateOptions"]
+  integrationOptions?: ConnectorServiceOptions["integrationOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
@@ -357,6 +363,9 @@ function serviceFixture(overrides: {
     },
     async deleteGuildTemplate() {
       throw new Error("Unexpected guild-template deletion")
+    },
+    async deleteGuildIntegration() {
+      throw new Error("Unexpected integration deletion")
     },
     async createMessage(_channelId, input) {
       calls.createMessage += 1
@@ -534,6 +543,9 @@ function serviceFixture(overrides: {
       return []
     },
     async listGuildInvites() {
+      return []
+    },
+    async listGuildIntegrations() {
       return []
     },
     async listGuildScheduledEvents() {
@@ -754,6 +766,9 @@ function serviceFixture(overrides: {
       ...(overrides.guildTemplateOptions
         ? { guildTemplateOptions: overrides.guildTemplateOptions }
         : {}),
+      ...(overrides.integrationOptions
+        ? { integrationOptions: overrides.integrationOptions }
+        : {}),
       ...(overrides.guildExpressionOptions
         ? { guildExpressionOptions: overrides.guildExpressionOptions }
         : {}),
@@ -842,13 +857,119 @@ test("service rejects forum-tag scope before identity or channel access", async 
   assert.equal(calls.user, 0)
 })
 
+test("service rejects integration and webhook scope before identity access", async () => {
+  const { calls, service } = serviceFixture()
+  const integrationRequest = {
+    acknowledgeAssociatedBotKicked: true,
+    acknowledgeAssociatedWebhooksRemoved: true,
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKey: "integration-preflight-0001",
+  }
+  const webhookRequest = {
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    operationKey: "webhook-preflight-0001",
+    webhookId: WEBHOOK_ID,
+  }
+
+  await assert.rejects(
+    () => service.listGuildIntegrations(GUILD_ID),
+    /integration audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.planGuildIntegrationDeletion(integrationRequest),
+    /integration audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.listChannelWebhooks(CHANNEL_ID),
+    /webhook audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.planWebhookDeletion(webhookRequest),
+    /webhook audit is disabled/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+})
+
 test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
   const { service } = serviceFixture({
+    client: {
+      async getGuildMember(_guildId, userId) {
+        return {
+          roles: [],
+          user: {
+            bot: true,
+            id: userId,
+            username: userId === BOT_ID ? "connector" : "associated",
+          },
+        }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD
+            | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async listChannelWebhooks(): Promise<DiscordWebhookSummary[]> {
+        return [{
+          applicationId: null,
+          channelId: CHANNEL_ID,
+          creatorUserId: BOT_ID,
+          guildId: GUILD_ID,
+          id: WEBHOOK_ID,
+          name: "reviewed-hook",
+          type: 1,
+        }]
+      },
+      async listGuildIntegrations(): Promise<DiscordGuildIntegrationSummary[]> {
+        return [{
+          accountPresent: true,
+          applicationId: INTEGRATION_APPLICATION_ID,
+          associatedBotUserId: INTEGRATION_BOT_ID,
+          enableEmoticons: null,
+          enabled: true,
+          expireBehavior: null,
+          expireGracePeriod: null,
+          id: INTEGRATION_ID,
+          knownScopes: ["bot"],
+          linkedUserPresent: false,
+          revoked: null,
+          roleId: null,
+          subscriberCount: null,
+          syncedAt: null,
+          syncing: null,
+          type: "discord",
+          unknownFieldCounts: {
+            account: 0,
+            application: 0,
+            bot: 0,
+            integration: 0,
+            user: 0,
+          },
+          unknownScopeCount: 0,
+        }]
+      },
+    },
     environment: {
       DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
       DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
       DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+      DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+      DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+      DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+      DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+      DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
     },
     writeCoordinator,
   })
@@ -923,6 +1044,21 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     operationKey,
     templateRef: `tref_hmac_sha256_${"c".repeat(64)}`,
   }, digest))
+  const integrationRequest = {
+    acknowledgeAssociatedBotKicked: true,
+    acknowledgeAssociatedWebhooksRemoved: true,
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKey,
+  }
+  const integrationPlan = await service.planGuildIntegrationDeletion(
+    integrationRequest,
+  )
+  await captured(() => service.executeGuildIntegrationDeletion(
+    integrationRequest,
+    integrationPlan.digest,
+  ))
   await captured(() => service.executeInviteDeletion({
     auditReason: "reviewed",
     guildId: GUILD_ID,
@@ -1034,12 +1170,17 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     guildId: GUILD_ID,
     operationKey,
   }, digest))
-  await captured(() => service.executeWebhookDeletion({
+  const webhookRequest = {
     auditReason: "reviewed",
     channelId: CHANNEL_ID,
     operationKey,
     webhookId: WEBHOOK_ID,
-  }, digest))
+  }
+  const webhookPlan = await service.planWebhookDeletion(webhookRequest)
+  await captured(() => service.executeWebhookDeletion(
+    webhookRequest,
+    webhookPlan.digest,
+  ))
   await captured(() => service.executeWidgetSettingsChange({
     auditReason: "reviewed",
     channelId: null,
@@ -1049,7 +1190,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 27)
+  assert.equal(byKind.size, 28)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1095,6 +1236,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
+      "integration-deletion": [
+        { id: INTEGRATION_ID, kind: "integration" },
+        { collection: "integrations", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
+        { id: INTEGRATION_BOT_ID, kind: "member" },
+      ],
       "invite-deletion": [{
         collection: "invites",
         guildId: GUILD_ID,
@@ -1142,6 +1289,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       "webhook-deletion": [
         { id: CHANNEL_ID, kind: "channel" },
         { id: WEBHOOK_ID, kind: "webhook" },
+        { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
       ],
       "welcome-screen-change": [{
         collection: "welcome-screen",
@@ -1157,7 +1305,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   )
   for (const entry of writeCoordinator.intents) {
     assert.equal(entry.operationKeyHash, operationKeyHash(operationKey))
-    assert.equal(entry.planDigest, digest)
+    const expectedDigest = entry.kind === "integration-deletion"
+      ? integrationPlan.digest
+      : entry.kind === "webhook-deletion"
+        ? webhookPlan.digest
+        : digest
+    assert.equal(entry.planDigest, expectedDigest)
   }
   await assert.rejects(
     () => service.deleteMessages(CHANNEL_ID, [MESSAGE_ID], digest),
@@ -1173,7 +1326,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 27)
+  assert.equal(writeCoordinator.intents.length, 28)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -1387,12 +1540,145 @@ test("service verifies identity through credential-free webhook audit and cleanu
   assert.equal(result.status, "completed")
   assert.equal(result.verifiedAbsent, true)
   assert.equal(deleteCalls, 1)
-  assert.equal(inventoryCalls, 5)
+  assert.equal(inventoryCalls, 6)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "webhook-deletion")
   assert.equal(operationStore.receipt?.resourceId, WEBHOOK_ID)
+})
+
+test("service pins identity through privacy-safe integration audit and deletion", async () => {
+  const operationStore = new MemoryOperationStore()
+  let inventory: DiscordGuildIntegrationSummary[] = [{
+    accountPresent: true,
+    applicationId: INTEGRATION_APPLICATION_ID,
+    associatedBotUserId: INTEGRATION_BOT_ID,
+    enableEmoticons: null,
+    enabled: true,
+    expireBehavior: null,
+    expireGracePeriod: null,
+    id: INTEGRATION_ID,
+    knownScopes: ["bot"],
+    linkedUserPresent: false,
+    revoked: null,
+    roleId: null,
+    subscriberCount: null,
+    syncedAt: null,
+    syncing: null,
+    type: "discord",
+    unknownFieldCounts: {
+      account: 0,
+      application: 0,
+      bot: 0,
+      integration: 0,
+      user: 0,
+    },
+    unknownScopeCount: 0,
+  }, {
+    accountPresent: true,
+    applicationId: null,
+    associatedBotUserId: null,
+    enableEmoticons: true,
+    enabled: true,
+    expireBehavior: null,
+    expireGracePeriod: null,
+    id: "905000000000000004",
+    knownScopes: [],
+    linkedUserPresent: false,
+    revoked: null,
+    roleId: null,
+    subscriberCount: 4,
+    syncedAt: "2026-08-21T00:00:00.000Z",
+    syncing: false,
+    type: "twitch",
+    unknownFieldCounts: {
+      account: 0,
+      application: 0,
+      bot: 0,
+      integration: 0,
+      user: 0,
+    },
+    unknownScopeCount: 0,
+  }]
+  let deleteCalls = 0
+  let inventoryCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async deleteGuildIntegration(guildId, integrationId, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(integrationId, INTEGRATION_ID)
+        assert.equal(auditReason, "Reviewed integration cleanup")
+        deleteCalls += 1
+        inventory = inventory.filter((entry) => entry.id !== integrationId)
+      },
+      async getGuildMember(_guildId, userId) {
+        return {
+          roles: [],
+          user: {
+            bot: true,
+            id: userId,
+            username: userId === BOT_ID ? "connector" : "private-associated-bot",
+          },
+        }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, "@everyone")]
+      },
+      async listGuildIntegrations(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryCalls += 1
+        return structuredClone(inventory)
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
+      DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+      DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+    },
+    integrationOptions: {
+      clock: () => new Date("2026-08-22T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(23),
+      randomId: () => "activity-integration-deletion",
+    },
+    operationStore,
+  })
+  const request = {
+    acknowledgeAssociatedBotKicked: true,
+    acknowledgeAssociatedWebhooksRemoved: true,
+    auditReason: "Reviewed integration cleanup",
+    guildId: GUILD_ID,
+    integrationId: INTEGRATION_ID,
+    operationKey: "integration-service-attempt-0001",
+  }
+
+  const listed = await service.listGuildIntegrations(GUILD_ID)
+  const plan = await service.planGuildIntegrationDeletion(request)
+  const result = await service.executeGuildIntegrationDeletion(
+    request,
+    plan.digest,
+  )
+
+  assert.equal(listed.integrations.length, 2)
+  assert.equal(listed.privacy.namesAndProfilesProjectedOut, true)
+  assert.equal(plan.target.id, INTEGRATION_ID)
+  assert.equal(plan.associatedBotMembership.present, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.verifiedAbsent, true)
+  assert.equal(result.verifiedUnchanged, true)
+  assert.equal(deleteCalls, 1)
+  assert.equal(inventoryCalls, 5)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "integration-deletion")
+  assert.equal(operationStore.receipt?.resourceId, INTEGRATION_ID)
+  assert.doesNotMatch(
+    JSON.stringify(calls.activityEntries),
+    /Reviewed integration cleanup|private-associated-bot|integration-service-attempt/,
+  )
 })
 
 test("service pins identity through capability-safe invite audit and revocation", async () => {
