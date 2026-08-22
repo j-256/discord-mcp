@@ -43,6 +43,7 @@ type McpToolWorkflow =
   | "channel-creation"
   | "channel-metadata-change"
   | "channel-permission-overwrite"
+  | "component-message"
   | "forum-post"
   | "forum-tag-change"
   | "guild-scaffold"
@@ -110,6 +111,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["attachment", "execute", "file", "message", "send", "upload"],
     toolset: "attachments",
     workflow: "attachment-message",
+  },
+  execute_component_message: {
+    keywords: ["component", "create", "edit", "execute", "layout", "message", "v2"],
+    toolset: "interactions",
+    workflow: "component-message",
   },
   execute_automod_change: {
     keywords: ["automod", "create", "delete", "disable", "enable", "execute", "moderation", "policy", "rule", "update"],
@@ -508,6 +514,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "attachments",
     workflow: "attachment-message",
   },
+  plan_component_message: {
+    keywords: ["component", "create", "edit", "layout", "message", "plan", "review", "v2"],
+    toolset: "interactions",
+    workflow: "component-message",
+  },
   plan_channel_creation: {
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
     toolset: "channel-creation",
@@ -642,6 +653,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["cleanup", "delete", "integration", "plan", "review", "webhook"],
     toolset: "webhooks",
     workflow: "webhook-deletion",
+  },
+  preview_component_layout: {
+    keywords: ["component", "layout", "local", "message", "preview", "validate", "v2"],
+    toolset: "interactions",
+    workflow: "component-message",
   },
   read_messages: {
     keywords: ["channel", "history", "list", "message", "read"],

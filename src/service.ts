@@ -22,6 +22,18 @@ import type {
   AttachmentMessageServiceOptions,
 } from "./attachment-message-service.js"
 import { AttachmentMessageService } from "./attachment-message-service.js"
+import {
+  reviewComponentLayout,
+  type ComponentLayoutInput,
+  type ComponentLayoutReview,
+} from "./component-layout.js"
+import type {
+  ComponentMessagePlan,
+  ComponentMessageRequest,
+  ComponentMessageResult,
+  ComponentMessageServiceOptions,
+} from "./component-message-service.js"
+import { ComponentMessageService } from "./component-message-service.js"
 import type {
   AutoModerationChangeRequest,
   AutoModerationInventoryResult,
@@ -101,6 +113,7 @@ import type {
 import { DiscordClient } from "./discord-client.js"
 import {
   ConfigurationError,
+  ComponentMessagePlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
   WebhookDeletionPlanChangedError,
@@ -443,6 +456,7 @@ export interface DiscordServiceClient {
   createStageInstance: DiscordClient["createStageInstance"]
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
+  createComponentMessage: DiscordClient["createComponentMessage"]
   createMessage: DiscordClient["createMessage"]
   createPoll: DiscordClient["createPoll"]
   createThreadFromMessage: DiscordClient["createThreadFromMessage"]
@@ -465,6 +479,7 @@ export interface DiscordServiceClient {
   deleteWebhook: DiscordClient["deleteWebhook"]
   endPoll: DiscordClient["endPoll"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
+  editComponentMessage: DiscordClient["editComponentMessage"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
   getGuildForumTags: DiscordClient["getGuildForumTags"]
@@ -568,6 +583,10 @@ export interface ConnectorServiceOptions {
   >
   attachmentMessageOptions?: Pick<
     AttachmentMessageServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  componentMessageOptions?: Pick<
+    ComponentMessageServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   automodOptions?: Pick<
@@ -805,6 +824,7 @@ export class ConnectorService {
   readonly #activityStore: ActivityStore
   readonly #announcementCrosspostService: AnnouncementCrosspostService
   readonly #attachmentMessageService: AttachmentMessageService
+  readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
   readonly #channelAdministrationService: ChannelAdministrationService
@@ -923,6 +943,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.attachmentMessageOptions,
+    })
+    this.#componentMessageService = new ComponentMessageService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.componentMessageOptions,
     })
     this.#automodService = new AutoModerationService({
       activityStore: this.#activityStore,
@@ -2521,6 +2549,27 @@ export class ConnectorService {
     return this.#attachmentMessageService.plan(identity.bot.id, request, options)
   }
 
+  previewComponentLayout(
+    components: readonly ComponentLayoutInput[],
+    notifyUserIds?: readonly string[],
+  ): ComponentLayoutReview {
+    return reviewComponentLayout(components, notifyUserIds)
+  }
+
+  async planComponentMessage(
+    request: ComponentMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<ComponentMessagePlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#componentMessageService.plan(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
   async executeChannelCreation(
     request: ChannelCreationRequest,
     planDigest: string,
@@ -2865,6 +2914,50 @@ export class ConnectorService {
         planDigest,
         options,
       ),
+    )
+  }
+
+  async executeComponentMessage(
+    request: ComponentMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ComponentMessageResult> {
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord component-message plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const intent = applicationMessageContentIntent(identity.application)
+    const coordinationPlan = await this.#componentMessageService.plan(
+      identity.application.id,
+      identity.bot.id,
+      intent,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new ComponentMessagePlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    const execute = () => this.#componentMessageService.execute(
+      identity.application.id,
+      identity.bot.id,
+      intent,
+      request,
+      planDigest,
+      options,
+    )
+    if (!coordinationPlan.writeRequired) return execute()
+    const target = request.action === "create"
+      ? writeResourceTarget("channel", request.channelId)
+      : writeResourceTarget("message", request.messageId as string)
+    return this.#coordinateWrite(
+      "component-message",
+      request.operationKey,
+      planDigest,
+      [target],
+      execute,
     )
   }
 

@@ -131,6 +131,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const channel = receipt()
   const announcementCrosspost = { ...receipt(), kind: "announcement-crosspost" as const }
   const attachment = { ...receipt(), kind: "attachment-message" as const }
+  const component = { ...receipt(), kind: "component-message" as const }
   const automod = { ...receipt(), kind: "automod-change" as const }
   const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }
@@ -156,6 +157,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(channel)).created, true)
   assert.equal((await store.reserve(announcementCrosspost)).created, true)
   assert.equal((await store.reserve(attachment)).created, true)
+  assert.equal((await store.reserve(component)).created, true)
   assert.equal((await store.reserve(automod)).created, true)
   assert.equal((await store.reserve(overwrite)).created, true)
   assert.equal((await store.reserve(forum)).created, true)
@@ -184,6 +186,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("attachment-message", attachment.operationKeyHash),
     attachment,
+  )
+  assert.deepEqual(
+    await store.get("component-message", component.operationKeyHash),
+    component,
   )
   assert.deepEqual(
     await store.get("automod-change", automod.operationKeyHash),
@@ -326,7 +332,17 @@ test("file operation store rejects identity changes and divergent terminal state
       kind: "attachment-message",
       verification: "drift",
     }),
-    /attachment receipt cannot contain drift verification/,
+    /exact-message receipt cannot contain drift verification/,
+  )
+  const component = { ...receipt(), kind: "component-message" as const }
+  await store.reserve(component)
+  await assert.rejects(
+    () => store.finish({
+      ...receipt("completed"),
+      kind: "component-message",
+      verification: "drift",
+    }),
+    /exact-message receipt cannot contain drift verification/,
   )
   await store.finish(receipt("failed"))
   await assert.rejects(

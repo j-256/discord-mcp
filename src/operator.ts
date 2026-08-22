@@ -1188,7 +1188,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
         "pass",
-        "Message interactions are disabled",
+        "Message interactions and reviewed static component messages are disabled",
       ))
     } else if (config.interactionChannelIds.size === 0) {
       checks.push(check(
@@ -1200,7 +1200,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
         "pass",
-        `Message interactions are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a ${config.interactionMaxWritesPerMinute}-write rolling budget`,
+        `Message interactions and reviewed static component messages are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
       ))
     }
     if (!config.allowMemberDirectory) {
@@ -1850,17 +1850,23 @@ export async function diagnoseConnector(
         ))
         const announcementCrosspostsConfigured = config.allowAnnouncementCrossposts
           && config.announcementCrosspostChannelIds.size > 0
+        const componentMessagesConfigured = config.allowInteractions
+          && config.interactionChannelIds.size > 0
+        const contentDependentWrites = [
+          ...(announcementCrosspostsConfigured ? ["announcement crossposts"] : []),
+          ...(componentMessagesConfigured ? ["static component messages"] : []),
+        ]
         checks.push(status.application.messageContentIntent === "enabled"
           ? check(
             DOCTOR_CHECK_IDS.messageContentIntent,
             "pass",
-            "Discord application advertises Message Content intent for native search and reviewed announcement crossposts",
+            "Discord application advertises Message Content intent for native search, reviewed announcement crossposts, and reviewed static component messages",
           )
           : check(
             DOCTOR_CHECK_IDS.messageContentIntent,
-            announcementCrosspostsConfigured ? "fail" : "warn",
-            announcementCrosspostsConfigured
-              ? "Discord application lacks confirmed Message Content intent, so configured announcement crossposts are blocked"
+            contentDependentWrites.length > 0 ? "fail" : "warn",
+            contentDependentWrites.length > 0
+              ? `Discord application lacks confirmed Message Content intent, so configured ${contentDependentWrites.join(" and ")} are blocked`
               : status.application.messageContentIntent === "disabled"
                 ? "Discord application does not advertise Message Content intent; native message search may be unavailable"
                 : "Discord application did not expose enough flags to diagnose Message Content intent",
@@ -2198,6 +2204,15 @@ export async function prepareSetup(
       ...(options.profileDirectory ? { directory: options.profileDirectory } : {}),
     })
   }
+  const contentDependentWrites = [
+    ...(config.allowAnnouncementCrossposts
+      && config.announcementCrosspostChannelIds.size > 0
+      ? ["announcement crossposts"]
+      : []),
+    ...(config.allowInteractions && config.interactionChannelIds.size > 0
+      ? ["static component messages"]
+      : []),
+  ]
   return {
     applicationId: status.application.id,
     botId: status.bot.id,
@@ -2214,10 +2229,11 @@ export async function prepareSetup(
       ...policyWarnings(config),
       ...(status.application.messageContentIntent === "enabled"
         ? []
-        : [config.allowAnnouncementCrossposts
-            && config.announcementCrosspostChannelIds.size > 0
-          ? "Discord application does not advertise confirmed Message Content intent, so configured announcement crossposts are blocked"
-          : "Discord application does not advertise confirmed Message Content intent, so native search may be unavailable"]),
+        : [
+            contentDependentWrites.length > 0
+              ? `Discord application does not advertise confirmed Message Content intent, so configured ${contentDependentWrites.join(" and ")} are blocked`
+              : "Discord application does not advertise confirmed Message Content intent, so native search may be unavailable",
+          ]),
       ...(config.allowMemberDirectory
         && config.memberDirectoryGuildIds.size > 0
         && status.application.guildMembersIntent !== "enabled"
@@ -2401,6 +2417,20 @@ export async function smokeConnector(
         || tool.annotations.readOnlyHint !== false
       ) {
         throw new Error("MCP smoke check found invalid execute_attachment_message annotations")
+      }
+    }
+    if (selectedToolNames.includes("execute_component_message")) {
+      const tool = listed.tools.find((entry) => (
+        entry.name === "execute_component_message"
+      ))
+      if (
+        !tool
+        || tool.annotations?.destructiveHint !== true
+        || tool.annotations.idempotentHint !== false
+        || tool.annotations.openWorldHint !== true
+        || tool.annotations.readOnlyHint !== false
+      ) {
+        throw new Error("MCP smoke check found invalid execute_component_message annotations")
       }
     }
     if (selectedToolNames.includes("execute_forum_post")) {

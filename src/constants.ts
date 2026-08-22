@@ -656,7 +656,9 @@ export const DISCORD_MESSAGE_REFERENCE_TYPES = Object.freeze({
 export const DISCORD_MESSAGE_FLAGS = Object.freeze({
   crossposted: 1 << 0,
   ephemeral: 1 << 6,
+  isComponentsV2: 1 << 15,
   isCrosspost: 1 << 1,
+  suppressEmbeds: 1 << 2,
 })
 
 export const DISCORD_MESSAGE_TYPES = Object.freeze({

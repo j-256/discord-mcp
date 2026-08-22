@@ -12,6 +12,7 @@ import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
+import { DISCORD_MESSAGE_FLAGS } from "../src/constants.js"
 import {
   DISCORD_AUTO_MODERATION_ACTION_TYPES,
   DISCORD_AUTO_MODERATION_EVENT_TYPES,
@@ -228,6 +229,7 @@ function serviceFixture(overrides: {
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
   channelMetadataOptions?: ConnectorServiceOptions["channelMetadataOptions"]
+  componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
@@ -266,10 +268,12 @@ function serviceFixture(overrides: {
     application: 0,
     createAttachment: 0,
     createChannel: 0,
+    createComponentMessage: 0,
     createForumPost: 0,
     createMessage: 0,
     createRole: 0,
     editMessage: 0,
+    editComponentMessage: 0,
     getRole: 0,
     guildAuditLog: 0,
     guilds: 0,
@@ -315,6 +319,10 @@ function serviceFixture(overrides: {
         content: input.content ?? "",
         nonce: input.nonce,
       })
+    },
+    async createComponentMessage() {
+      calls.createComponentMessage += 1
+      throw new Error("Unexpected component-message creation")
     },
     async createGuildChannel() {
       calls.createChannel += 1
@@ -415,6 +423,10 @@ function serviceFixture(overrides: {
     },
     async deleteWebhook() {},
     async editChannelPermissionOverwrite() {},
+    async editComponentMessage() {
+      calls.editComponentMessage += 1
+      throw new Error("Unexpected component-message edit")
+    },
     async editMessage(_channelId, _messageId, input) {
       calls.editMessage += 1
       return message({
@@ -750,6 +762,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.channelMetadataOptions
         ? { channelMetadataOptions: overrides.channelMetadataOptions }
+        : {}),
+      ...(overrides.componentMessageOptions
+        ? { componentMessageOptions: overrides.componentMessageOptions }
         : {}),
       ...(overrides.attachmentMessageOptions
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
@@ -1090,6 +1105,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           GUILD_ID,
           DISCORD_PERMISSIONS.MANAGE_GUILD
             | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES
             | DISCORD_PERMISSIONS.VIEW_CHANNEL,
           "@everyone",
         )]
@@ -1140,10 +1157,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
       DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
@@ -1161,6 +1180,17 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     filePath: "/test/attachment.txt",
     operationKey,
   }, digest))
+  const componentRequest = {
+    action: "create" as const,
+    channelId: CHANNEL_ID,
+    components: [{ content: "Reviewed component", kind: "text" as const }],
+    operationKey,
+  }
+  const componentPlan = await service.planComponentMessage(componentRequest)
+  await captured(() => service.executeComponentMessage(
+    componentRequest,
+    componentPlan.digest,
+  ))
   await captured(() => service.executeAutoModerationChange({
     action: "delete",
     auditReason: "reviewed",
@@ -1367,7 +1397,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 28)
+  assert.equal(byKind.size, 29)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1376,6 +1406,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: MESSAGE_ID, kind: "message" },
       ],
       "attachment-message": [{ id: CHANNEL_ID, kind: "channel" }],
+      "component-message": [{ id: CHANNEL_ID, kind: "channel" }],
       "automod-change": [{
         collection: "automod",
         guildId: GUILD_ID,
@@ -1486,7 +1517,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       ? integrationPlan.digest
       : entry.kind === "webhook-deletion"
         ? webhookPlan.digest
-        : digest
+        : entry.kind === "component-message"
+          ? componentPlan.digest
+          : digest
     assert.equal(entry.planDigest, expectedDigest)
   }
   await assert.rejects(
@@ -1503,7 +1536,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 28)
+  assert.equal(writeCoordinator.intents.length, 29)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -3180,6 +3213,177 @@ test("service verifies identity before reviewed local-file attachment execution"
   assert.equal(persisted.includes(operationKey), false)
   assert.equal(persisted.includes(filePath), false)
   assert.equal(persisted.includes(fileContent), false)
+})
+
+test("service verifies component messages and shares the interaction limiter", async () => {
+  const operationStore = new MemoryOperationStore()
+  let created: DiscordMessage | undefined
+  const { calls, service } = serviceFixture({
+    client: {
+      async createComponentMessage(channelId, input) {
+        assert.equal(channelId, CHANNEL_ID)
+        calls.createComponentMessage += 1
+        created = message({
+          attachments: [],
+          author: bot(),
+          channel_id: CHANNEL_ID,
+          components: [{ content: "Reviewed component", id: 1, type: 10 }],
+          content: "",
+          edited_timestamp: null,
+          embeds: [],
+          flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+          mention_everyone: false,
+          mention_roles: [],
+          mentions: [],
+          nonce: input.nonce,
+          pinned: false,
+          sticker_items: [],
+          tts: false,
+          type: 0,
+        })
+        return created
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES
+            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        assert.ok(created)
+        return created
+      },
+    },
+    componentMessageOptions: {
+      clock: () => new Date("2026-08-22T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(12),
+      randomId: () => "activity-component-create",
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "1",
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    },
+    operationStore,
+  })
+  const request = {
+    action: "create" as const,
+    channelId: CHANNEL_ID,
+    components: [{ content: "Reviewed component", kind: "text" as const }],
+    operationKey: "component-service-attempt-0001",
+  }
+
+  const plan = await service.planComponentMessage(request)
+  const result = await service.executeComponentMessage(request, plan.digest)
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.messageId, MESSAGE_ID)
+  assert.equal(calls.createComponentMessage, 1)
+  assert.equal(operationStore.receipt?.kind, "component-message")
+  assert.equal(operationStore.receipt?.status, "completed")
+  await assert.rejects(
+    service.sendMessage({
+      channelId: CHANNEL_ID,
+      content: "Should share the component limiter",
+      idempotencyKey: "shared-component-limit-attempt-0001",
+    }),
+    InteractionRateLimitError,
+  )
+  assert.equal(calls.createMessage, 0)
+  const persisted = JSON.stringify(operationStore.receipt)
+  assert.equal(persisted.includes(request.operationKey), false)
+  assert.equal(persisted.includes("Reviewed component"), false)
+})
+
+test("service coordinates component edits only when the exact message changes", async () => {
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const existing = message({
+    attachments: [],
+    author: bot(),
+    components: [{ content: "Before", id: 1, type: 10 }],
+    content: "",
+    edited_timestamp: null,
+    embeds: [],
+    flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+    mention_everyone: false,
+    mention_roles: [],
+    mentions: [],
+    pinned: false,
+    sticker_items: [],
+    tts: false,
+    type: 0,
+  })
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES
+            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        return existing
+      },
+    },
+    componentMessageOptions: {
+      planKey: new Uint8Array(32).fill(13),
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    },
+    writeCoordinator,
+  })
+  const noOpRequest = {
+    action: "edit" as const,
+    channelId: CHANNEL_ID,
+    components: [{ content: "Before", kind: "text" as const }],
+    messageId: MESSAGE_ID,
+    operationKey: "component-noop-attempt-0001",
+  }
+
+  const noOpPlan = await service.planComponentMessage(noOpRequest)
+  const noOp = await service.executeComponentMessage(noOpRequest, noOpPlan.digest)
+
+  assert.equal(noOp.status, "already-current")
+  assert.equal(writeCoordinator.intents.length, 0)
+  assert.equal(calls.editComponentMessage, 0)
+
+  const editRequest = {
+    ...noOpRequest,
+    components: [{ content: "After", kind: "text" as const }],
+    operationKey: "component-edit-attempt-0001",
+  }
+  const editPlan = await service.planComponentMessage(editRequest)
+  await assert.rejects(
+    () => service.executeComponentMessage(editRequest, editPlan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "component-message",
+    operationKeyHash: operationKeyHash(editRequest.operationKey),
+    planDigest: editPlan.digest,
+    targets: [{ id: MESSAGE_ID, kind: "message" }],
+  }])
+  assert.equal(calls.editComponentMessage, 0)
 })
 
 test("service verifies identity before planning and executing exact member moderation", async () => {

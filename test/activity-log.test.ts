@@ -18,6 +18,7 @@ import {
   type ChannelCreationActivity,
   type ChannelMetadataActivity,
   type ChannelPermissionOverwriteActivity,
+  type ComponentMessageActivity,
   type DeletionActivity,
   type ForumPostActivity,
   type ForumTagActivity,
@@ -61,6 +62,28 @@ function attachmentMessage(
     operationKeyHash: `sha256:${"e".repeat(64)}`,
     planDigest: `hmac-sha256:${"f".repeat(64)}`,
     replyToMessageId: "400",
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function componentMessage(
+  id: string,
+  status: ComponentMessageActivity["status"],
+  kind: ComponentMessageActivity["kind"] = "component-message-create",
+): ComponentMessageActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status) ? "DiscordApiError.500.unknown" : null,
+    guildId: "100",
+    id,
+    kind,
+    messageId: ["completed", "uncertain"].includes(status) ? "300" : null,
+    operationKeyHash: `sha256:${"a".repeat(64)}`,
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    replyToMessageId: kind === "component-message-create" ? "400" : null,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -1391,6 +1414,43 @@ test("JSONL activity log strips all attachment and message content from attachme
   assert.doesNotMatch(
     JSON.stringify(result),
     /cdn\.discordapp|private message|private description|private digest|private\/report|private-name|private user|private-operation|sizeBytes/,
+  )
+})
+
+test("JSONL activity log strips component layouts and rejects edit replies", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...componentMessage("1", "pending"),
+    components: [{ content: "must never reach disk", type: 10 }],
+    notifyUserIds: ["private user"],
+  } as ComponentMessageActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...componentMessage("2", "completed", "component-message-edit"),
+      components: [{ content: "private component text", type: 10 }],
+      nonce: "private deterministic nonce",
+      operationKey: "private-operation-key",
+    })}\n${JSON.stringify({
+      ...componentMessage("3", "completed", "component-message-edit"),
+      replyToMessageId: "400",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|private user/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "component-message-edit")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private component|private deterministic|private-operation|components|notifyUserIds|nonce/,
   )
 })
 

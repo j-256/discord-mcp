@@ -765,6 +765,10 @@ function guidanceService(options: {
       }
     },
     planWebhookDeletion: unexpected,
+    previewComponentLayout() {
+      calls.unexpected += 1
+      throw new Error("Unexpected service call")
+    },
     listGuildInvites: unexpected,
     async listGuildTemplates(guildId) {
       calls.templates += 1
@@ -1275,6 +1279,7 @@ function guidanceService(options: {
     },
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
+    executeComponentMessage: unexpected,
     executeChannelCreation: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
@@ -1723,6 +1728,7 @@ function guidanceService(options: {
     planPollEnd: unexpected,
     planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
+    planComponentMessage: unexpected,
     planForumPost: unexpected,
     planForumTagChange: unexpected,
     planThreadCreation: unexpected,

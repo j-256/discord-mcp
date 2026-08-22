@@ -32,6 +32,7 @@ export const OPERATION_KINDS = [
   "channel-creation",
   "channel-metadata-change",
   "channel-permission-overwrite",
+  "component-message",
   "forum-post",
   "forum-tag-change",
   "guild-expression-change",
@@ -176,8 +177,11 @@ function parseReceipt(value: unknown): OperationReceipt {
   if (record.status !== "completed" && record.verification !== null) {
     throw new OperationStoreError("Incomplete Discord operation receipt contains verification state")
   }
-  if (record.kind === "attachment-message" && record.verification === "drift") {
-    throw new OperationStoreError("Discord attachment receipt cannot contain drift verification")
+  if (
+    ["attachment-message", "component-message"].includes(record.kind as string)
+    && record.verification === "drift"
+  ) {
+    throw new OperationStoreError("Discord exact-message receipt cannot contain drift verification")
   }
   return {
     activityId: record.activityId,

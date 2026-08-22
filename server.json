@@ -570,7 +570,7 @@
         },
         {
           "name": "DISCORD_MCP_ALLOW_INTERACTIONS",
-          "description": "Enable bounded sends, own-message edits, and own-reaction addition or removal in exact channels",
+          "description": "Enable bounded sends, own-message edits, own-reaction changes, and reviewed static Components V2 messages in exact channels",
           "default": "false",
           "choices": [
             "false",
@@ -579,7 +579,7 @@
         },
         {
           "name": "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
-          "description": "Exact channel or thread IDs eligible for message interactions",
+          "description": "Exact channel or thread IDs eligible for message interactions and reviewed static Components V2 messages",
           "format": "string"
         },
         {

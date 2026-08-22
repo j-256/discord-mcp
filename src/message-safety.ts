@@ -12,6 +12,14 @@ import type { DiscordMessage } from "./types.js"
 const MESSAGE_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const MESSAGE_USER_MENTION_PATTERN = /<@!?([0-9]{1,20})>/gu
 
+export function discordMentionedUserIds(content: string): string[] {
+  return [...new Set(
+    [...content.matchAll(MESSAGE_USER_MENTION_PATTERN)]
+      .map((match) => match[1])
+      .filter((value): value is string => value !== undefined),
+  )].sort()
+}
+
 export function assertDiscordSnowflake(value: string, name: string): void {
   if (typeof value !== "string" || !DISCORD_SNOWFLAKE_PATTERN.test(value)) {
     throw new RangeError(`${name} must be a Discord snowflake`)
@@ -61,11 +69,7 @@ export function canonicalDiscordNotificationUserIds(
   for (const userId of userIds) {
     assertDiscordSnowflake(userId, "Discord notification user ID")
   }
-  const visibleMentions = new Set(
-    [...content.matchAll(MESSAGE_USER_MENTION_PATTERN)]
-      .map((match) => match[1])
-      .filter((value): value is string => value !== undefined),
-  )
+  const visibleMentions = new Set(discordMentionedUserIds(content))
   for (const userId of userIds) {
     if (!visibleMentions.has(userId)) {
       throw new RangeError(

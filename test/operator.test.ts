@@ -272,6 +272,9 @@ function toolService(): DiscordToolService {
     listScheduledEvents: unexpected,
     listStageInstances: unexpected,
     planWebhookDeletion: unexpected,
+    previewComponentLayout() {
+      throw new Error("Unexpected smoke service call")
+    },
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
@@ -292,6 +295,7 @@ function toolService(): DiscordToolService {
     },
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
+    executeComponentMessage: unexpected,
     executeChannelCreation: unexpected,
     executeChannelMetadataChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
@@ -334,6 +338,7 @@ function toolService(): DiscordToolService {
     planPollEnd: unexpected,
     planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
+    planComponentMessage: unexpected,
     planChannelCreation: unexpected,
     planChannelMetadataChange: unexpected,
     planChannelPermissionOverwrite: unexpected,
@@ -460,6 +465,24 @@ test("doctor and setup explain effective interaction policy without Discord writ
     environment: environment({ DISCORD_MCP_ALLOW_INTERACTIONS: "true" }),
     service: statusProvider(),
   })
+  const missingIntent = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
+  const missingIntentSetup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
 
   const interaction = report.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.interactionPolicy,
@@ -471,6 +494,13 @@ test("doctor and setup explain effective interaction policy without Discord writ
     "warn",
   )
   assert.match(setup.warnings.join("\n"), /interaction-channel allowlist/)
+  assert.equal(
+    missingIntent.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.messageContentIntent,
+    )?.status,
+    "fail",
+  )
+  assert.match(missingIntentSetup.warnings.join("\n"), /component messages are blocked/)
 })
 
 test("doctor and setup explain reviewed attachment scope without reading files or writing to Discord", async (context) => {
@@ -2882,6 +2912,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_automod_change",
     "execute_channel_metadata_change",
     "execute_channel_permission_overwrite",
+    "execute_component_message",
     "execute_forum_tag_change",
     "execute_guild_expression_change",
     "execute_guild_integration_deletion",
@@ -2913,6 +2944,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("audit_forum_tags"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_tag_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
+  assert.equal(report.readOnlyTools.includes("preview_component_layout"), true)
+  assert.equal(report.readOnlyTools.includes("plan_component_message"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
   assert.equal(report.readOnlyTools.includes("get_member_voice_state"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_voice_change"), true)

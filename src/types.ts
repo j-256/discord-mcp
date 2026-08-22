@@ -185,6 +185,8 @@ export interface DiscordMessage {
   poll?: DiscordPoll
   reactions?: DiscordReaction[]
   referenced_message?: DiscordMessage | null
+  sticker_items?: unknown[]
+  stickers?: unknown[]
   timestamp: string
   tts?: boolean
   type: number

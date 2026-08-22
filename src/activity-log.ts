@@ -297,6 +297,28 @@ export interface AttachmentMessageActivity {
   verification: "match" | null
 }
 
+export type ComponentMessageActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ComponentMessageActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "component-message-create" | "component-message-edit"
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string
+  replyToMessageId: string | null
+  schemaVersion: number
+  status: ComponentMessageActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type AutoModerationActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -798,6 +820,7 @@ export type ActivityEntry =
   | ChannelCreationActivity
   | ChannelMetadataActivity
   | ChannelPermissionOverwriteActivity
+  | ComponentMessageActivity
   | DeletionActivity
   | ForumPostActivity
   | ForumTagActivity
@@ -2798,6 +2821,80 @@ function parseAttachmentMessageActivity(
   }
 }
 
+function parseComponentMessageActivity(
+  value: unknown,
+): ComponentMessageActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || !["component-message-create", "component-message-edit"].includes(String(record.kind))
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !(record.messageId === null || (
+      typeof record.messageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.messageId)
+    ))
+    || !(record.replyToMessageId === null || (
+      typeof record.replyToMessageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.replyToMessageId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.kind === "component-message-edit" && record.replyToMessageId !== null)
+    || (record.status === "pending" && (
+      record.messageId !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.messageId === null
+      || record.error !== null
+      || record.verification !== "match"
+    ))
+    || (record.status === "failed" && (
+      record.messageId !== null
+      || record.error === null
+      || record.verification !== null
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: record.kind as ComponentMessageActivity["kind"],
+    messageId: record.messageId,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    replyToMessageId: record.replyToMessageId,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ComponentMessageActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseForumPostActivity(value: unknown): ForumPostActivity | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
@@ -3056,6 +3153,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseGuildTemplateActivity(value)
     || parseNativeInteractionActivity(value)
     || parseAttachmentMessageActivity(value)
+    || parseComponentMessageActivity(value)
     || parseAutoModerationActivity(value)
     || parseForumPostActivity(value)
     || parseThreadCreationActivity(value)

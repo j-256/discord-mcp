@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { DISCORD_MESSAGE_FLAGS } from "../src/constants.js"
 import {
   type CreateForumPostInput,
   type CreateThreadFromMessageInput,
@@ -2872,6 +2873,242 @@ test("Discord client sends safe message, edit, and own-reaction wire contracts",
       url: `${API_BASE_URL}/channels/200/messages/300/reactions/%F0%9F%94%A5/@me`,
     },
   ])
+})
+
+test("Discord client sends exact non-retried static component-message contracts", async () => {
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({ body, method: init?.method || "GET", url: String(input) })
+      return jsonResponse({
+        author: { bot: true, id: "400", username: "bot" },
+        channel_id: "200",
+        components: body.components,
+        content: "",
+        flags: body.flags,
+        id: "300",
+        nonce: body.nonce,
+        timestamp: "2026-08-22T00:00:00.000Z",
+        type: 0,
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+  const components = [
+    { content: "# Release", type: 10 as const },
+    { divider: true, spacing: 1 as const, type: 14 as const },
+    {
+      accent_color: 0x12_AB_34,
+      components: [{ content: "Details", type: 10 as const }],
+      spoiler: false,
+      type: 17 as const,
+    },
+  ]
+
+  await client.createComponentMessage("200", {
+    allowedMentions: { parse: [], replied_user: false },
+    components,
+    nonce: "component-nonce",
+    reply: { guildId: "100", messageId: "299" },
+  })
+  await client.editComponentMessage("200", "300", {
+    allowedMentions: { replied_user: false, users: ["401"] },
+    components,
+    flags: 32_768,
+  })
+
+  assert.deepEqual(requests, [
+    {
+      body: {
+        allowed_mentions: { parse: [], replied_user: false },
+        components,
+        enforce_nonce: true,
+        flags: 32_768,
+        message_reference: {
+          channel_id: "200",
+          fail_if_not_exists: true,
+          guild_id: "100",
+          message_id: "299",
+          type: 0,
+        },
+        nonce: "component-nonce",
+      },
+      method: "POST",
+      url: `${API_BASE_URL}/channels/200/messages`,
+    },
+    {
+      body: {
+        allowed_mentions: { replied_user: false, users: ["401"] },
+        components,
+        flags: 32_768,
+      },
+      method: "PATCH",
+      url: `${API_BASE_URL}/channels/200/messages/300`,
+    },
+  ])
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "create_component_message",
+    retries: 0,
+    runs: 1,
+  }, {
+    completions: [{ outcome: "ok" }],
+    operation: "edit_component_message",
+    retries: 0,
+    runs: 1,
+  }])
+})
+
+test("Discord client keeps component content out of API and transport errors", async () => {
+  const privateText = "private component text"
+  const components = [{ content: privateText, type: 10 as const }]
+  const apiFailure = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateText }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    apiFailure.createComponentMessage("200", {
+      allowedMentions: { parse: [], replied_user: false },
+      components,
+      nonce: "component-nonce",
+    }),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.message.includes("request failed")
+      && !error.message.includes(privateText)
+    ),
+  )
+
+  const transportFailure = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateText)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transportFailure.editComponentMessage("200", "300", {
+      allowedMentions: { parse: [], replied_user: false },
+      components,
+      flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+    }),
+    (error: unknown) => (
+      error instanceof Error
+      && error.name === "DiscordTransportError"
+      && error.cause === undefined
+      && error.message.includes("request failed")
+      && !error.message.includes(privateText)
+    ),
+  )
+})
+
+test("Discord client rejects unsafe component-message wire inputs before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const allowedMentions = { parse: [] as const, replied_user: false }
+  const text = [{ content: "Hello", type: 10 as const }]
+
+  assert.throws(
+    () => client.createComponentMessage("invalid", {
+      allowedMentions,
+      components: text,
+      nonce: "nonce",
+    }),
+    /channel ID/,
+  )
+  assert.throws(
+    () => client.createComponentMessage("200", {
+      allowedMentions,
+      components: [{
+        content: "Hello",
+        custom_id: "hidden-authority",
+        type: 10,
+      }] as never,
+      nonce: "nonce",
+    }),
+    /unsupported fields: custom_id/,
+  )
+  assert.throws(
+    () => client.createComponentMessage("200", {
+      allowedMentions,
+      components: text,
+      nonce: "x".repeat(26),
+    }),
+    /nonce/,
+  )
+  assert.throws(
+    () => client.editComponentMessage("200", "300", {
+      allowedMentions,
+      components: text,
+      flags: 0,
+    }),
+    /preserve IS_COMPONENTS_V2/,
+  )
+  assert.throws(
+    () => client.editComponentMessage("200", "invalid", {
+      allowedMentions,
+      components: text,
+      flags: 32_768,
+    }),
+    /message ID/,
+  )
+  assert.equal(requests, 0)
+})
+
+test("Discord client never automatically retries component-message mutations", async () => {
+  let createRequests = 0
+  const createClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      createRequests += 1
+      return jsonResponse({ message: "temporary" }, 500)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  const input = {
+    allowedMentions: { parse: [] as const, replied_user: false },
+    components: [{ content: "Hello", type: 10 as const }],
+    nonce: "component-nonce",
+  }
+
+  await assert.rejects(
+    createClient.createComponentMessage("200", input),
+    (error: DiscordApiError) => error.status === 500,
+  )
+  assert.equal(createRequests, 1)
+
+  let editRequests = 0
+  const editClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      editRequests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    editClient.editComponentMessage("200", "300", {
+      allowedMentions: input.allowedMentions,
+      components: input.components,
+      flags: 32_768,
+    }),
+    (error: DiscordApiError) => error.status === 429,
+  )
+  assert.equal(editRequests, 1)
 })
 
 test("Discord client sends bounded encoded reaction lifecycle contracts", async () => {

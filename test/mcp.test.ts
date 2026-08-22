@@ -35,6 +35,14 @@ import type {
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
 import {
+  reviewComponentLayout,
+  type ComponentLayoutInput,
+} from "../src/component-layout.js"
+import type {
+  ComponentMessagePlan,
+  ComponentMessageRequest,
+} from "../src/component-message-service.js"
+import {
   normalizeAutoModerationChangeRequest,
   type AutoModerationChangeRequest,
   type AutoModerationPlan,
@@ -183,6 +191,8 @@ import {
   ChannelMetadataOperationConflictError,
   ChannelPermissionOverwriteExecutionError,
   ChannelPermissionOverwriteOperationConflictError,
+  ComponentMessageExecutionError,
+  ComponentMessageOperationConflictError,
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
@@ -307,6 +317,7 @@ const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
+const COMPONENT_MESSAGE_OPERATION_KEY = "component-message-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const FORUM_TAG_OPERATION_KEY = "forum-tag-attempt-0001"
 const FORUM_TAG_ID = "385000000000000001"
@@ -366,6 +377,12 @@ const SCHEDULED_EVENT_COVER_PATH = "/test/discord-mcp/reviewed-event-cover.png"
 const STAGE_INSTANCE_ID = "396000000000000001"
 const STAGE_INSTANCE_OPERATION_KEY = "stage-instance-attempt-0001"
 const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
+const COMPONENT_LAYOUT: ComponentLayoutInput[] = [{
+  accentColor: 0x58_65_F2,
+  components: [{ content: `Reviewed component for <@${USER_ID}>`, kind: "text" as const }],
+  kind: "container" as const,
+  spoiler: false,
+}]
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
@@ -2899,6 +2916,104 @@ function attachmentPlan(
   }
 }
 
+function componentMessagePlan(
+  request: ComponentMessageRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): ComponentMessagePlan {
+  const review = reviewComponentLayout(request.components, request.notifyUserIds)
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      parentId: null,
+      type: 0,
+    },
+    createdAt: "2026-08-22T00:00:00.000Z",
+    current: request.action === "edit"
+      ? {
+          flags: 32_768,
+          layout: writeRequired
+            ? [{ content: "Before", kind: "text" }]
+            : review.layout,
+          messageId: request.messageId as string,
+          parsedUserMentionIds: [],
+          pinned: false,
+          preview: writeRequired
+            ? "[1] Text Display: \"Before\""
+            : review.preview,
+          timestamp: "2026-08-22T00:00:00.000Z",
+        }
+      : null,
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    messageContentIntent: "enabled",
+    notificationUserIds: review.notificationUserIds,
+    notifyReplyAuthor: request.notifyReplyAuthor ?? false,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      appliedRoleIds: [GUILD_ID],
+      canReadMessages: true,
+      confidence: "complete",
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "SEND_MESSAGES",
+        "READ_MESSAGE_HISTORY",
+      ],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.SEND_MESSAGES
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+      ).toString(),
+      permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "SEND_MESSAGES",
+      ],
+    },
+    privacy: {
+      durableRecords: "content-free",
+      omittedFields: [
+        "attachmentUrls",
+        "componentLayouts",
+        "componentText",
+        "embeds",
+        "generatedComponentIds",
+        "mentionProfiles",
+        "nonce",
+        "notificationUserIds",
+        "parsedUserMentionIds",
+        "rawOperationKey",
+        "rawPayloads",
+        "replyAuthorId",
+      ],
+      planPersistence: "none",
+      rawPayloads: "omitted",
+    },
+    reply: request.replyToMessageId
+      ? { authorId: USER_ID, messageId: request.replyToMessageId, type: 0 }
+      : null,
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    target: {
+      counts: review.counts,
+      layout: review.layout,
+      messageId: request.messageId ?? null,
+      preview: review.preview,
+      suppressedUserMentionIds: review.suppressedUserMentionIds,
+      textCharacters: review.textCharacters,
+    },
+    warnings: review.warnings,
+    writeRequired,
+  }
+}
+
 function channelPlan(
   request: ChannelCreationRequest,
   digest = DIGEST,
@@ -3954,6 +4069,9 @@ function serviceFixture(overrides: {
   channelMetadataEffect?: "change" | "none"
   channelMetadataError?: Error
   channelMetadataPlanDigest?: string
+  componentMessageError?: Error
+  componentMessagePlanDigest?: string
+  componentMessageWriteRequired?: boolean
   forumPostError?: Error
   forumPostPlanDigest?: string
   forumTagEffect?: "change" | "none"
@@ -4066,6 +4184,9 @@ function serviceFixture(overrides: {
     channelMetadataExecute: 0,
     channelMetadataGet: 0,
     channelMetadataPlan: 0,
+    componentMessageExecute: 0,
+    componentMessagePlan: 0,
+    componentMessagePreview: 0,
     delete: 0,
     edit: 0,
     forumPostExecute: 0,
@@ -5174,6 +5295,26 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${MESSAGE_ID}`,
       }
     },
+    async executeComponentMessage(request, planDigest) {
+      if (overrides.componentMessageError) throw overrides.componentMessageError
+      calls.componentMessageExecute += 1
+      const writeRequired = overrides.componentMessageWriteRequired ?? true
+      const planned = componentMessagePlan(request, planDigest, writeRequired)
+      return {
+        action: request.action,
+        activityId: writeRequired ? "activity-component-message" : null,
+        channelId: request.channelId,
+        guildId: GUILD_ID,
+        messageId: request.messageId ?? MESSAGE_ID,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: writeRequired ? "completed" : "already-current",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId ?? MESSAGE_ID}`,
+      }
+    },
     async executeChannelCreation(request, planDigest) {
       if (overrides.channelCreationError) throw overrides.channelCreationError
       calls.channelCreationExecute += 1
@@ -6174,6 +6315,18 @@ function serviceFixture(overrides: {
         overrides.attachmentPlanDigest || DIGEST,
       )
     },
+    async planComponentMessage(request) {
+      calls.componentMessagePlan += 1
+      return componentMessagePlan(
+        request,
+        overrides.componentMessagePlanDigest || DIGEST,
+        overrides.componentMessageWriteRequired ?? true,
+      )
+    },
+    previewComponentLayout(components, notifyUserIds) {
+      calls.componentMessagePreview += 1
+      return reviewComponentLayout(components, notifyUserIds)
+    },
     async planChannelCreation(request) {
       calls.channelCreationPlan += 1
       return channelPlan(
@@ -6677,6 +6830,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_forum_post",
       "plan_thread_creation",
       "execute_thread_creation",
+      "preview_component_layout",
+      "plan_component_message",
+      "execute_component_message",
       "plan_attachment_message",
       "execute_attachment_message",
       "plan_guild_scaffold",
@@ -6757,6 +6913,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const roleConfiguration = result.tools.find((tool) => (
     tool.name === "execute_role_configuration"
   ))
+  const componentMessage = result.tools.find((tool) => (
+    tool.name === "execute_component_message"
+  ))
   for (const tool of [
     deletion,
     messagePin,
@@ -6805,6 +6964,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     readOnlyHint: false,
   })
   assert.deepEqual(forumTagChange?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(componentMessage?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
     openWorldHint: true,
@@ -6872,6 +7037,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_poll_creation",
     "plan_poll_end",
     "plan_thread_creation",
+    "plan_component_message",
     "plan_member_role_change",
     "plan_webhook_deletion",
     "plan_guild_integration_deletion",
@@ -6999,6 +7165,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(
+    listedTool(result.tools, "preview_component_layout").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  )
   const discovery = result.tools.find((tool) => (
     tool.name === "discover_discord_tools"
   ))
@@ -7321,6 +7496,32 @@ test("progressive discovery enables the complete reviewed attachment-message wor
     [
       "plan_attachment_message",
       "execute_attachment_message",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed component-message workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_component_message" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_component_message",
+    "plan_component_message",
+    "preview_component_layout",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "preview_component_layout",
+      "plan_component_message",
+      "execute_component_message",
       "discover_discord_tools",
     ],
   )
@@ -7972,6 +8173,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     channelMetadataExecute: 0,
     channelMetadataGet: 0,
     channelMetadataPlan: 0,
+    componentMessageExecute: 0,
+    componentMessagePlan: 0,
+    componentMessagePreview: 0,
     delete: 0,
     edit: 0,
     explain: 1,
@@ -9150,6 +9354,276 @@ test("MCP attachment messages expose uncertain and one-shot conflict outcomes sa
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(ATTACHMENT_OPERATION_KEY))
+})
+
+test("MCP component layout preview is local, strict, and recursively bounded", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const preview = await client.callTool({
+    arguments: {
+      components: COMPONENT_LAYOUT,
+      notifyUserIds: [USER_ID],
+    },
+    name: "preview_component_layout",
+  })
+  const rawDiscord = await client.callTool({
+    arguments: {
+      components: [{ content: "Raw", type: 10 }],
+    },
+    name: "preview_component_layout",
+  })
+  const nested = await client.callTool({
+    arguments: {
+      components: [{
+        components: [{
+          components: [{ content: "Nested", kind: "text" }],
+          kind: "container",
+        }],
+        kind: "container",
+      }],
+    },
+    name: "preview_component_layout",
+  })
+
+  assert.equal(structuredContent(preview).status, "ok")
+  assert.equal(
+    structuredContent(preview).textCharacters,
+    [...`Reviewed component for <@${USER_ID}>`].length,
+  )
+  assert.equal(rawDiscord.isError, true)
+  assert.equal(nested.isError, true)
+  assert.equal(calls.componentMessagePreview, 1)
+})
+
+test("MCP component-message planning enforces exact create and edit shapes", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const create = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_component_message",
+  })
+  const edit = await client.callTool({
+    arguments: {
+      action: "edit",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      messageId: MESSAGE_ID,
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_component_message",
+  })
+  const mixedCreate = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      messageId: MESSAGE_ID,
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_component_message",
+  })
+  const mixedEdit = await client.callTool({
+    arguments: {
+      action: "edit",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      messageId: MESSAGE_ID,
+      notifyReplyAuthor: true,
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: "plan_component_message",
+  })
+
+  assert.equal(structuredContent(create).status, "planned")
+  assert.equal(structuredContent(edit).status, "planned")
+  assert.equal(mixedCreate.isError, true)
+  assert.equal(mixedEdit.isError, true)
+  assert.equal(calls.componentMessagePlan, 2)
+})
+
+test("MCP component messages bind signed approval to the exact normalized layout", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      notifyReplyAuthor: true,
+      notifyUserIds: [USER_ID],
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: "execute_component_message",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.componentMessagePlan, 1)
+  assert.equal(calls.componentMessageExecute, 1)
+  assert.match(confirmationMessage, /Components V2 create/)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Reviewed component/)
+  assert.match(confirmationMessage, /SEND_MESSAGES/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(COMPONENT_MESSAGE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(COMPONENT_MESSAGE_OPERATION_KEY),
+  )
+})
+
+test("MCP component messages skip approval for exact no-op edits", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { componentMessageWriteRequired: false },
+  })
+  const result = await client.callTool({
+    arguments: {
+      action: "edit",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      messageId: MESSAGE_ID,
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_component_message",
+  })
+
+  assert.equal(structuredContent(result).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(calls.componentMessagePlan, 1)
+  assert.equal(calls.componentMessageExecute, 1)
+})
+
+test("MCP component messages stop on declined approval, changed plans, and safe conflicts", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_component_message",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.componentMessageExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { componentMessagePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_component_message",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.componentMessageExecute, 0)
+
+  const receipt = {
+    activityId: "activity-component-1",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept" as const,
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      componentMessageError: new ComponentMessageOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_component_message",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(COMPONENT_MESSAGE_OPERATION_KEY),
+  )
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept" as const,
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      componentMessageError: new ComponentMessageExecutionError(
+        "Discord component-message outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: COMPONENT_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_component_message",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
 })
 
 test("MCP reaction moderation accepts exact scope-specific plans", async (context) => {

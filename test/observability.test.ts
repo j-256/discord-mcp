@@ -8,6 +8,10 @@ import {
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
   ChannelCreationPlanChangedError,
+  ComponentMessageEvidenceError,
+  ComponentMessageExecutionError,
+  ComponentMessageOperationConflictError,
+  ComponentMessagePlanChangedError,
   ConfigurationError,
   DiscordApiError,
   OperationStoreError,
@@ -335,6 +339,22 @@ test("operational errors collapse to fixed categories", () => {
   )
   assert.equal(
     classifyOperationalError(new ChannelCreationExecutionError("private detail", {})),
+    "execution-error",
+  )
+  assert.equal(
+    classifyOperationalError(new ComponentMessagePlanChangedError("expected", "actual")),
+    "plan-changed",
+  )
+  assert.equal(
+    classifyOperationalError(new ComponentMessageOperationConflictError({})),
+    "idempotency-conflict",
+  )
+  assert.equal(
+    classifyOperationalError(new ComponentMessageEvidenceError("private detail")),
+    "identity-error",
+  )
+  assert.equal(
+    classifyOperationalError(new ComponentMessageExecutionError("private detail", {})),
     "execution-error",
   )
   assert.equal(

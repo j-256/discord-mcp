@@ -8,6 +8,7 @@ import {
   DISCORD_API_BASE_URL,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
+  DISCORD_MESSAGE_FLAGS,
   GUILD_TEMPLATE_LIMITS,
   INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
@@ -20,6 +21,10 @@ import {
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_USER_AGENT,
 } from "./constants.js"
+import {
+  assertCompiledComponentLayout,
+  type DiscordStaticComponent,
+} from "./component-layout.js"
 import {
   AutoModerationEvidenceError,
   ChannelMetadataEvidenceError,
@@ -919,6 +924,16 @@ export interface CreateMessageInput {
   }
 }
 
+export interface CreateComponentMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  components: readonly DiscordStaticComponent[]
+  nonce: string
+  reply?: {
+    guildId: string
+    messageId: string
+  }
+}
+
 export interface CreatePollInput {
   allowMultiselect: boolean
   answers: ReadonlyArray<{
@@ -1053,6 +1068,12 @@ export interface EditMessageInput {
   content: string
 }
 
+export interface EditComponentMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  components: readonly DiscordStaticComponent[]
+  flags: number
+}
+
 export interface ModifyGuildMemberTimeoutInput {
   communicationDisabledUntil: string | null
 }
@@ -1167,6 +1188,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "add_own_reaction",
   "add_thread_member",
   "crosspost_message",
+  "create_component_message",
   "create_guild_auto_moderation_rule",
   "create_interaction_response",
   "create_immediate_interaction_response",
@@ -1186,6 +1208,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_all_message_reactions_for_emoji",
   "delete_own_reaction",
   "delete_user_reaction",
+  "edit_component_message",
   "edit_original_interaction_response",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
@@ -9029,6 +9052,50 @@ export class DiscordClient {
     })
   }
 
+  createComponentMessage(
+    channelId: string,
+    input: CreateComponentMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord component-message channel ID")
+    assertCompiledComponentLayout(input.components)
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertAllowedMentions(input.allowedMentions)
+    if (input.reply) {
+      assertSearchSnowflake(input.reply.guildId, "Discord component-message reply guild ID")
+      assertSearchSnowflake(input.reply.messageId, "Discord component-message reply message ID")
+    }
+    const messageReference = input.reply
+      ? {
+          channel_id: channelId,
+          fail_if_not_exists: true,
+          guild_id: input.reply.guildId,
+          message_id: input.reply.messageId,
+          type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+        }
+      : undefined
+    return this.#request(
+      "create_component_message",
+      `/channels/${channelId}/messages`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: input.allowedMentions,
+          components: input.components,
+          enforce_nonce: true,
+          flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+          ...(messageReference ? { message_reference: messageReference } : {}),
+          nonce: input.nonce,
+        },
+      },
+    )
+  }
+
   createPoll(
     channelId: string,
     input: CreatePollInput,
@@ -9162,6 +9229,41 @@ export class DiscordClient {
         content: input.content,
       },
     })
+  }
+
+  editComponentMessage(
+    channelId: string,
+    messageId: string,
+    input: EditComponentMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord component-message channel ID")
+    assertSearchSnowflake(messageId, "Discord component-message message ID")
+    assertCompiledComponentLayout(input.components)
+    if (
+      !Number.isSafeInteger(input.flags)
+      || input.flags < 0
+      || input.flags > 0xFF_FF_FF_FF
+      || (input.flags & DISCORD_MESSAGE_FLAGS.isComponentsV2) === 0
+    ) {
+      throw new RangeError(
+        "Discord component-message edit flags must preserve IS_COMPONENTS_V2",
+      )
+    }
+    assertAllowedMentions(input.allowedMentions)
+    return this.#request(
+      "edit_component_message",
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: input.allowedMentions,
+          components: input.components,
+          flags: input.flags,
+        },
+      },
+    )
   }
 
   async addOwnReaction(

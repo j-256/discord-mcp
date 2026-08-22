@@ -163,6 +163,42 @@ export class AttachmentMessageExecutionError extends Error {
   }
 }
 
+export class ComponentMessageEvidenceError extends Error {
+  override name = "ComponentMessageEvidenceError"
+}
+
+export class ComponentMessagePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord component-message snapshot does not match the reviewed plan")
+    this.name = "ComponentMessagePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ComponentMessageOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord component-message operation key has already been reserved")
+    this.name = "ComponentMessageOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ComponentMessageExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ComponentMessageExecutionError"
+    this.result = result
+  }
+}
+
 export class ChannelCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string
