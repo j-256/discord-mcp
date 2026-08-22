@@ -24,6 +24,7 @@ import {
   ChannelMetadataEvidenceError,
   DiscordApiError,
   errorMessage,
+  ForumTagEvidenceError,
   GuildExpressionEvidenceError,
   GuildTemplateEvidenceError,
   InviteEvidenceError,
@@ -161,6 +162,34 @@ export interface DiscordChannelMetadata {
   topic: string | null
   type: number
   unknownFieldCount: number
+}
+
+export interface DiscordForumTagSummary {
+  emojiId: string | null
+  emojiName: string | null
+  id: string
+  moderated: boolean
+  name: string
+  unknownFieldCount: number
+}
+
+export interface DiscordForumTagState {
+  flags: number
+  guildId: string
+  id: string
+  permissionOverwriteUnknownFieldCount: number
+  permissionOverwrites: DiscordPermissionOverwrite[]
+  tags: DiscordForumTagSummary[]
+  type: number
+  unknownFieldCount: number
+}
+
+export interface ModifyForumTagInput {
+  emojiId: string | null
+  emojiName: string | null
+  id?: string
+  moderated: boolean
+  name: string
 }
 
 export interface DiscordThreadStateSummary {
@@ -1110,6 +1139,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "edit_original_interaction_response",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
+  "get_forum_tags",
   "get_guild_soundboard_sound",
   "get_guild_sticker",
   "get_guild_voice_state",
@@ -1128,6 +1158,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_stickers",
   "list_guild_templates",
   "modify_guild_emoji",
+  "modify_forum_tags",
   "modify_guild_soundboard_sound",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
@@ -1269,6 +1300,20 @@ const MODIFY_CHANNEL_METADATA_KEYS: ReadonlySet<string> = new Set([
   "rateLimitPerUser",
   "topic",
 ])
+const FORUM_TAG_RESPONSE_KEYS = [
+  "emoji_id",
+  "emoji_name",
+  "id",
+  "moderated",
+  "name",
+] as const
+const MODIFY_FORUM_TAG_KEYS = [
+  "emojiId",
+  "emojiName",
+  "id",
+  "moderated",
+  "name",
+] as const
 
 function inviteEvidenceError(): InviteEvidenceError {
   return new InviteEvidenceError("Discord returned an invalid guild invite inventory")
@@ -3865,6 +3910,192 @@ function projectGuildChannelMetadata(
       .filter((key) => !CHANNEL_METADATA_RESPONSE_KEYS.has(key)).length
       + projectedOverwrites.unknownFieldCount,
   }
+}
+
+function forumTagEvidenceError(options?: ErrorOptions): ForumTagEvidenceError {
+  return new ForumTagEvidenceError(
+    "Discord returned invalid forum-tag evidence",
+    options,
+  )
+}
+
+function assertForumTagName(
+  value: unknown,
+  description: string,
+): asserts value is string {
+  if (
+    typeof value !== "string"
+    || [...value].length > DISCORD_LIMITS.forumTagNameCharacters
+    || CHANNEL_NAME_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(
+      `${description} must contain 0-${DISCORD_LIMITS.forumTagNameCharacters} characters without controls`,
+    )
+  }
+  assertValidUnicode(value, description)
+}
+
+function assertForumTagEmojiName(
+  value: unknown,
+  description: string,
+): asserts value is string | null {
+  if (value === null) return
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > CONNECTOR_LIMITS.interactionEmojiCharacters
+    || POLL_EMOJI_CONTROL_OR_SPACE_PATTERN.test(value)
+  ) {
+    throw new RangeError(`${description} is invalid`)
+  }
+  assertValidUnicode(value, description)
+  const graphemes = [
+    ...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(value),
+  ]
+  if (graphemes.length !== 1 || !POLL_EMOJI_CODE_POINT_PATTERN.test(value)) {
+    throw new RangeError(`${description} must be one Unicode emoji grapheme`)
+  }
+}
+
+function projectForumTag(value: unknown): DiscordForumTagSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw forumTagEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const emojiId = record.emoji_id ?? null
+  const emojiName = record.emoji_name ?? null
+  try {
+    assertPositiveSnowflake(record.id as string, "Discord forum tag ID")
+    assertForumTagName(record.name, "Discord forum tag name")
+    if (typeof record.moderated !== "boolean") {
+      throw new RangeError("Discord forum tag moderation state is invalid")
+    }
+    if (!(emojiId === null || typeof emojiId === "string")) {
+      throw new RangeError("Discord forum tag custom emoji ID is invalid")
+    }
+    if (typeof emojiId === "string") {
+      assertPositiveSnowflake(emojiId, "Discord forum tag custom emoji ID")
+    }
+    assertForumTagEmojiName(emojiName, "Discord forum tag Unicode emoji")
+    if (emojiId !== null && emojiName !== null) {
+      throw new RangeError("Discord forum tag emoji fields conflict")
+    }
+  } catch (error) {
+    throw forumTagEvidenceError({ cause: error })
+  }
+  return {
+    emojiId,
+    emojiName,
+    id: record.id as string,
+    moderated: record.moderated as boolean,
+    name: record.name as string,
+    unknownFieldCount: countUnknownFields(record, FORUM_TAG_RESPONSE_KEYS),
+  }
+}
+
+function projectGuildForumTagState(
+  value: unknown,
+  expectedChannelId: string,
+): DiscordForumTagState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw forumTagEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(record.id as string, "Discord forum channel ID")
+    assertPositiveSnowflake(record.guild_id as string, "Discord forum guild ID")
+    if (
+      record.id !== expectedChannelId
+      || record.type !== DISCORD_CHANNEL_TYPES.forum
+      || !Array.isArray(record.available_tags)
+      || record.available_tags.length > DISCORD_LIMITS.forumAvailableTags
+    ) {
+      throw new RangeError("Discord forum channel identity or tag inventory is invalid")
+    }
+    const flags = record.flags ?? 0
+    if (!Number.isSafeInteger(flags) || (flags as number) < 0) {
+      throw new RangeError("Discord forum channel flags are invalid")
+    }
+    const tags = record.available_tags.map(projectForumTag)
+    if (new Set(tags.map((tag) => tag.id)).size !== tags.length) {
+      throw new RangeError("Discord forum tag IDs must be unique")
+    }
+    const projectedOverwrites = projectChannelMetadataOverwrites(
+      record.permission_overwrites,
+    )
+    return {
+      flags: flags as number,
+      guildId: record.guild_id as string,
+      id: expectedChannelId,
+      permissionOverwriteUnknownFieldCount: projectedOverwrites.unknownFieldCount,
+      permissionOverwrites: projectedOverwrites.overwrites,
+      tags,
+      type: DISCORD_CHANNEL_TYPES.forum,
+      unknownFieldCount: countUnknownFields(
+        record,
+        [...CHANNEL_METADATA_RESPONSE_KEYS],
+      ),
+    }
+  } catch (error) {
+    if (error instanceof ForumTagEvidenceError) throw error
+    throw forumTagEvidenceError({ cause: error })
+  }
+}
+
+function forumTagBody(tags: readonly ModifyForumTagInput[]): Record<string, unknown> {
+  if (
+    !Array.isArray(tags)
+    || tags.length > DISCORD_LIMITS.forumAvailableTags
+  ) {
+    throw new RangeError("Discord forum tags must be a bounded array")
+  }
+  const ids = new Set<string>()
+  let tagsWithoutIds = 0
+  const availableTags = tags.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new RangeError("Discord forum tag input must be an exact object")
+    }
+    const record = value as unknown as Record<string, unknown>
+    if (
+      !hasOnlyKeys(record, MODIFY_FORUM_TAG_KEYS)
+      || !Object.hasOwn(record, "emojiId")
+      || !Object.hasOwn(record, "emojiName")
+      || !Object.hasOwn(record, "moderated")
+      || !Object.hasOwn(record, "name")
+      || typeof value.moderated !== "boolean"
+      || !(value.emojiId === null || typeof value.emojiId === "string")
+    ) {
+      throw new RangeError("Discord forum tag input is invalid")
+    }
+    assertForumTagName(value.name, "Discord forum tag name")
+    assertForumTagEmojiName(value.emojiName, "Discord forum tag Unicode emoji")
+    if (value.id === undefined) {
+      tagsWithoutIds += 1
+    } else {
+      assertPositiveSnowflake(value.id, "Discord forum tag ID")
+      if (ids.has(value.id)) {
+        throw new RangeError("Discord forum tag IDs must be unique")
+      }
+      ids.add(value.id)
+    }
+    if (typeof value.emojiId === "string") {
+      assertPositiveSnowflake(value.emojiId, "Discord forum tag custom emoji ID")
+    }
+    if (value.emojiId !== null && value.emojiName !== null) {
+      throw new RangeError("Discord forum tag emoji fields conflict")
+    }
+    return {
+      ...(value.id === undefined ? {} : { id: value.id }),
+      emoji_id: value.emojiId,
+      emoji_name: value.emojiName,
+      moderated: value.moderated,
+      name: value.name,
+    }
+  })
+  if (tagsWithoutIds > 1) {
+    throw new RangeError("Discord forum tag input may create at most one tag")
+  }
+  return { available_tags: availableTags }
 }
 
 function threadGovernanceEvidenceError(options?: ErrorOptions): ThreadGovernanceEvidenceError {
@@ -7955,6 +8186,49 @@ export class DiscordClient {
       },
     )
     return projectGuildChannelMetadata(response, channelId)
+  }
+
+  async getGuildForumTags(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordForumTagState> {
+    assertPositiveSnowflake(channelId, "Discord forum channel ID")
+    const response = await this.#request<unknown>(
+      "get_forum_tags",
+      `/channels/${channelId}`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildForumTagState(response, channelId)
+  }
+
+  async modifyGuildForumTags(
+    channelId: string,
+    tags: readonly ModifyForumTagInput[],
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordForumTagState> {
+    assertPositiveSnowflake(channelId, "Discord forum channel ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord forum-tag audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_forum_tags",
+      `/channels/${channelId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: forumTagBody(tags),
+        diagnosticRoute: "/channels/{channel.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildForumTagState(response, channelId)
   }
 
   async listChannelWebhooks(

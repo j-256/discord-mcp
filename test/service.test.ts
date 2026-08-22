@@ -227,6 +227,7 @@ function serviceFixture(overrides: {
   client?: Partial<DiscordServiceClient>
   environment?: NodeJS.ProcessEnv
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
+  forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   guildTemplateOptions?: ConnectorServiceOptions["guildTemplateOptions"]
@@ -402,6 +403,9 @@ function serviceFixture(overrides: {
     },
     async getChannel() {
       return overrides.channel || channel()
+    },
+    async getGuildForumTags() {
+      throw new Error("Unexpected forum-tag lookup")
     },
     async getGuildChannelMetadata() {
       throw new Error("Unexpected channel metadata lookup")
@@ -594,6 +598,9 @@ function serviceFixture(overrides: {
     async modifyThreadState() {
       throw new Error("Unexpected thread-state change")
     },
+    async modifyGuildForumTags() {
+      throw new Error("Unexpected forum-tag change")
+    },
     async modifyGuildChannelMetadata() {
       throw new Error("Unexpected channel metadata change")
     },
@@ -738,6 +745,9 @@ function serviceFixture(overrides: {
       ...(overrides.forumPostOptions
         ? { forumPostOptions: overrides.forumPostOptions }
         : {}),
+      ...(overrides.forumTagOptions
+        ? { forumTagOptions: overrides.forumTagOptions }
+        : {}),
       ...(overrides.guildScaffoldOptions
         ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
         : {}),
@@ -810,9 +820,38 @@ test("service rejects a token for the wrong pinned bot before data access", asyn
   assert.equal(calls.guilds, 0)
 })
 
+test("service rejects forum-tag scope before identity or channel access", async () => {
+  const { calls, service } = serviceFixture()
+
+  await assert.rejects(
+    () => service.auditForumTags(CHANNEL_ID),
+    /forum-tag audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.planForumTagChange({
+      action: "delete",
+      auditReason: "reviewed",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: "forum-tag-preflight-0001",
+      tagId: CREATED_ROLE_ID,
+    }),
+    /forum-tag audit is disabled/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+})
+
 test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
-  const { service } = serviceFixture({ writeCoordinator })
+  const { service } = serviceFixture({
+    environment: {
+      DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
+      DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
+      DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+    },
+    writeCoordinator,
+  })
   const digest = `hmac-sha256:${"a".repeat(64)}`
   const operationKey = "coordination-operation-0001"
   const captured = async (operation: () => Promise<unknown>) => {
@@ -860,6 +899,14 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     content: "reviewed content",
     name: "reviewed post",
     operationKey,
+  }, digest))
+  await captured(() => service.executeForumTagChange({
+    action: "delete",
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey,
+    tagId: CREATED_ROLE_ID,
   }, digest))
   await captured(() => service.executeGuildExpressionChange({
     action: "delete",
@@ -1002,7 +1049,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 26)
+  assert.equal(byKind.size, 27)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1029,6 +1076,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: CREATED_ROLE_ID, kind: "role" },
       ],
       "forum-post": [{ id: CHANNEL_ID, kind: "channel" }],
+      "forum-tag-change": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
       "guild-expression-change": [{
         collection: "emojis",
         guildId: GUILD_ID,
@@ -1122,7 +1173,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 26)
+  assert.equal(writeCoordinator.intents.length, 27)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

@@ -57,6 +57,13 @@ import type {
   ForumPostRequest,
 } from "../src/forum-post-service.js"
 import type {
+  ForumTagAuditResult,
+  ForumTagChangePlan,
+  ForumTagChangeRequest,
+  ForumTagObservedState,
+  PlannedForumTagView,
+} from "../src/forum-tag-service.js"
+import type {
   GuildScaffoldPlan,
   GuildScaffoldRequest,
 } from "../src/guild-scaffold-service.js"
@@ -170,6 +177,8 @@ import {
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
+  ForumTagExecutionError,
+  ForumTagOperationConflictError,
   GuildExpressionExecutionError,
   GuildExpressionOperationConflictError,
   GuildScaffoldExecutionError,
@@ -286,6 +295,9 @@ const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
+const FORUM_TAG_OPERATION_KEY = "forum-tag-attempt-0001"
+const FORUM_TAG_ID = "385000000000000001"
+const CREATED_FORUM_TAG_ID = "385000000000000002"
 const THREAD_CREATION_OPERATION_KEY = "thread-create-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
@@ -1507,6 +1519,173 @@ function channelMetadataPlan(
     status: changes.length > 0 ? "planned" : "already-current",
     warnings: ["Discord guild and channel text is untrusted"],
     writeRequired: changes.length > 0,
+  }
+}
+
+function forumTagObserved(
+  tags: PlannedForumTagView[] = [{
+    emoji: { kind: "unicode", unicodeEmoji: "📌" },
+    id: FORUM_TAG_ID,
+    moderated: false,
+    name: "Support",
+    position: 0,
+    unknownFieldCount: 0,
+  }],
+): ForumTagObservedState {
+  const observedTags = tags.map((tag) => ({
+    ...tag,
+    id: tag.id || CREATED_FORUM_TAG_ID,
+  }))
+  return {
+    channel: {
+      flags: 0,
+      guildId: GUILD_ID,
+      id: CHANNEL_ID,
+      permissionOverwriteUnknownFieldCount: 0,
+      type: 15,
+      unknownFieldCount: 0,
+    },
+    inventory: {
+      returned: observedTags.length,
+      safetyLimit: 20,
+      unknownTagFields: 0,
+    },
+    tags: observedTags,
+  }
+}
+
+function forumTagAudit(): ForumTagAuditResult {
+  return {
+    ...forumTagObserved(),
+    access: {
+      appliedRoleIds: [GUILD_ID],
+      authorizedForChange: true,
+      botAdministrator: false,
+      botGuildOwner: false,
+      complete: true,
+      effectivePermissionNames: ["VIEW_CHANNEL", "MANAGE_CHANNELS"],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+      ).toString(),
+      manageChannels: true,
+      requiredPermissions: ["VIEW_CHANNEL"],
+      unknownPermissionBits: "0",
+      viewChannel: true,
+    },
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    limitations: ["Discord does not expose bounded tag-use counts"],
+    privacy: {
+      persistence: "content-free-activity-only",
+      rawPayloads: "omitted",
+      tagText: "included-in-transient-results",
+      unknownFields: "counts-only",
+    },
+    schemaVersion: 1,
+    status: "ok",
+  }
+}
+
+function forumTagPlan(
+  request: ForumTagChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ForumTagChangePlan {
+  const current = forumTagObserved()
+  const target = request.action === "create"
+    ? effect === "none" ? current.tags[0] as ForumTagObservedState["tags"][number] : null
+    : current.tags.find(({ id }) => id === request.tagId) || current.tags[0]!
+  const targetId = target?.id
+  let desiredTags: PlannedForumTagView[] = current.tags.map((tag) => ({ ...tag }))
+  if (effect === "change" && request.action === "create") {
+    desiredTags = [...desiredTags, {
+      emoji: request.unicodeEmoji
+        ? { kind: "unicode", unicodeEmoji: request.unicodeEmoji }
+        : { kind: "none" },
+      id: null,
+      moderated: request.moderated ?? false,
+      name: request.name,
+      position: desiredTags.length,
+      unknownFieldCount: 0,
+    }]
+  } else if (effect === "change" && request.action === "delete") {
+    desiredTags = desiredTags.filter(({ id }) => id !== targetId)
+      .map((tag, position) => ({ ...tag, position }))
+  } else if (effect === "change" && request.action === "update-metadata") {
+    desiredTags = desiredTags.map((tag) => tag.id === targetId
+      ? {
+          ...tag,
+          ...(request.moderated !== undefined ? { moderated: request.moderated } : {}),
+          ...(request.name !== undefined ? { name: request.name } : {}),
+          ...(Object.hasOwn(request, "unicodeEmoji")
+            ? {
+                emoji: request.unicodeEmoji
+                  ? { kind: "unicode" as const, unicodeEmoji: request.unicodeEmoji }
+                  : { kind: "none" as const },
+              }
+            : {}),
+        }
+      : tag)
+  }
+  return {
+    access: {
+      appliedRoleIds: [GUILD_ID],
+      authorizedForChange: true,
+      botAdministrator: false,
+      botGuildOwner: false,
+      complete: true,
+      effectivePermissionNames: ["VIEW_CHANNEL", "MANAGE_CHANNELS"],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+      ).toString(),
+      manageChannels: true,
+      requiredPermissions: ["MANAGE_CHANNELS", "VIEW_CHANNEL"],
+      unknownPermissionBits: "0",
+      viewChannel: true,
+    },
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    channel: current.channel,
+    createdAt: "2026-08-22T18:00:00.000Z",
+    currentInventory: current.inventory,
+    currentTags: current.tags,
+    desiredInventory: {
+      returned: desiredTags.length,
+      safetyLimit: 20,
+      unknownTagFields: 0,
+    },
+    desiredTags,
+    digest,
+    guild: { id: request.guildId },
+    impact: {
+      activeThreadsEnumerated: false,
+      tagUsage: request.action === "delete"
+        ? "unknown-unavailable"
+        : "not-applicable",
+    },
+    localLimits: {
+      customEmojiIntroduction: false,
+      forumTags: 20,
+      mediaChannels: false,
+      nameCharacters: 20,
+      reorder: false,
+    },
+    mutation: effect === "none" ? "none" : request.action,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: {
+      persistence: "content-free-activity-only",
+      rawPayloads: "omitted",
+      tagText: "included-in-transient-results",
+      unknownFields: "counts-only",
+    },
+    risks: ["One non-retried full available_tags PATCH"],
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    target,
+    warnings: ["Discord tag text is untrusted"],
+    writeRequired: effect !== "none",
   }
 }
 
@@ -3504,6 +3683,9 @@ function fixturePolicy(): PolicyDescription {
     deletionsEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
+    forumTagAuditEnabled: false,
+    forumTagChangesEnabled: false,
+    forumTagChannelIds: [],
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
@@ -3615,6 +3797,9 @@ function serviceFixture(overrides: {
   channelMetadataPlanDigest?: string
   forumPostError?: Error
   forumPostPlanDigest?: string
+  forumTagEffect?: "change" | "none"
+  forumTagError?: Error
+  forumTagPlanDigest?: string
   guildScaffoldError?: Error
   guildScaffoldPlanDigest?: string
   guildTemplateError?: Error
@@ -3721,6 +3906,9 @@ function serviceFixture(overrides: {
     edit: 0,
     forumPostExecute: 0,
     forumPostPlan: 0,
+    forumTagAudit: 0,
+    forumTagExecute: 0,
+    forumTagPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     guildTemplateExecute: 0,
@@ -3918,6 +4106,10 @@ function serviceFixture(overrides: {
     async getChannel(channelId) {
       calls.channelMetadataGet += 1
       return channelMetadataRead(channelId)
+    },
+    async auditForumTags() {
+      calls.forumTagAudit += 1
+      return forumTagAudit()
     },
     async planChannelMetadataChange(request) {
       calls.channelMetadataPlan += 1
@@ -4739,6 +4931,33 @@ function serviceFixture(overrides: {
         verification: "match",
       }
     },
+    async executeForumTagChange(request, planDigest) {
+      if (overrides.forumTagError) throw overrides.forumTagError
+      calls.forumTagExecute += 1
+      const planned = forumTagPlan(
+        request,
+        planDigest,
+        overrides.forumTagEffect,
+      )
+      const tagId = request.action === "create"
+        ? planned.target?.id || CREATED_FORUM_TAG_ID
+        : request.tagId
+      return {
+        action: request.action,
+        activityId: planned.writeRequired ? "activity-forum-tag" : null,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        observed: forumTagObserved(planned.desiredTags),
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        tagId,
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
     async executeThreadCreation(request, planDigest) {
       if (overrides.threadCreationError) throw overrides.threadCreationError
       calls.threadCreationExecute += 1
@@ -5551,6 +5770,14 @@ function serviceFixture(overrides: {
         overrides.forumPostPlanDigest || DIGEST,
       )
     },
+    async planForumTagChange(request) {
+      calls.forumTagPlan += 1
+      return forumTagPlan(
+        request,
+        overrides.forumTagPlanDigest || DIGEST,
+        overrides.forumTagEffect,
+      )
+    },
     async planThreadCreation(request) {
       calls.threadCreationPlan += 1
       return threadCreationPlan(
@@ -5913,6 +6140,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_guilds",
       "list_channels",
       "get_channel",
+      "audit_forum_tags",
       "list_roles",
       "get_role",
       "get_guild_member",
@@ -5997,6 +6225,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_stage_instance_change",
       "plan_channel_metadata_change",
       "execute_channel_metadata_change",
+      "plan_forum_tag_change",
+      "execute_forum_tag_change",
       "plan_channel_permission_overwrite",
       "execute_channel_permission_overwrite",
       "plan_channel_creation",
@@ -6035,6 +6265,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const guildTemplateChange = result.tools.find((tool) => (
     tool.name === "execute_guild_template_change"
+  ))
+  const forumTagChange = result.tools.find((tool) => (
+    tool.name === "execute_forum_tag_change"
   ))
   const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
@@ -6117,6 +6350,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(forumTagChange?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
   assert.deepEqual(
     listedTool(result.tools, "respond_to_discord_interaction").annotations,
     {
@@ -6166,6 +6405,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_scheduled_events",
     "get_scheduled_event",
     "get_channel",
+    "audit_forum_tags",
+    "plan_forum_tag_change",
     "plan_channel_metadata_change",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
@@ -6550,6 +6791,30 @@ test("progressive discovery enables the complete reviewed forum-post workflow", 
     [
       "plan_forum_post",
       "execute_forum_post",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed forum-tag workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_forum_tag_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_forum_tag_change",
+    "plan_forum_tag_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_forum_tag_change",
+      "execute_forum_tag_change",
       "discover_discord_tools",
     ],
   )
@@ -7230,6 +7495,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     explain: 1,
     forumPostExecute: 0,
     forumPostPlan: 0,
+    forumTagAudit: 0,
+    forumTagExecute: 0,
+    forumTagPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     guildTemplateExecute: 0,
@@ -13056,6 +13324,321 @@ test("MCP channel creation exposes uncertain and one-shot conflict outcomes", as
   assert.deepEqual(
     (structuredContent(completedConflictResult).error as Record<string, unknown>).receipt,
     receipt,
+  )
+})
+
+test("MCP forum-tag tools expose bounded audit and exact action schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { channelId: CHANNEL_ID },
+    name: "audit_forum_tags",
+  })
+  const created = await client.callTool({
+    arguments: {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      moderated: true,
+      name: "Escalated",
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      unicodeEmoji: "🚨",
+    },
+    name: "plan_forum_tag_change",
+  })
+  const updated = await client.callTool({
+    arguments: {
+      action: "update-metadata",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      tagId: FORUM_TAG_ID,
+      unicodeEmoji: null,
+    },
+    name: "plan_forum_tag_change",
+  })
+  const deleted = await client.callTool({
+    arguments: {
+      action: "delete",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      tagId: FORUM_TAG_ID,
+    },
+    name: "plan_forum_tag_change",
+  })
+  const emptyUpdate = await client.callTool({
+    arguments: {
+      action: "update-metadata",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      tagId: FORUM_TAG_ID,
+    },
+    name: "plan_forum_tag_change",
+  })
+  const customEmoji = await client.callTool({
+    arguments: {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      name: "Custom",
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      unicodeEmoji: `<:private:${EMOJI_ID}>`,
+    },
+    name: "plan_forum_tag_change",
+  })
+
+  assert.equal(structuredContent(audited).status, "ok")
+  assert.deepEqual(
+    (structuredContent(audited).inventory as Record<string, unknown>).returned,
+    1,
+  )
+  assert.equal(structuredContent(created).mutation, "create")
+  assert.equal(structuredContent(updated).mutation, "update-metadata")
+  assert.equal(structuredContent(deleted).mutation, "delete")
+  assert.equal(emptyUpdate.isError, true)
+  assert.equal(customEmoji.isError, true)
+  assert.equal(calls.forumTagAudit, 1)
+  assert.equal(calls.forumTagPlan, 3)
+})
+
+test("MCP forum-tag changes bind signed approval to the exact ordered replacement", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      moderated: true,
+      name: "Escalated",
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      planDigest: DIGEST,
+      unicodeEmoji: "🚨",
+    },
+    name: "execute_forum_tag_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).tagId, CREATED_FORUM_TAG_ID)
+  assert.equal(calls.forumTagPlan, 1)
+  assert.equal(calls.forumTagExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    FORUM_TAG_ID,
+    "Escalated",
+    "🚨",
+    AUDIT_REASON,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Current ordered tags/)
+  assert.match(confirmationMessage, /Desired ordered tags/)
+  assert.match(confirmationMessage, /Deletion impact evidence/)
+  assert.match(confirmationMessage, /VIEW_CHANNEL: true/)
+  assert.match(confirmationMessage, /MANAGE_CHANNELS: true/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.match(confirmationMessage, /one non-retried full available_tags PATCH/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(FORUM_TAG_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(FORUM_TAG_OPERATION_KEY),
+  )
+})
+
+test("MCP forum-tag no-ops skip approval while refusal and plan drift stop writes", async (context) => {
+  const createArguments = {
+    action: "create",
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    name: "Support",
+    operationKey: FORUM_TAG_OPERATION_KEY,
+    planDigest: DIGEST,
+    unicodeEmoji: "📌",
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { forumTagEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: createArguments,
+    name: "execute_forum_tag_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.forumTagExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "delete",
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: FORUM_TAG_OPERATION_KEY,
+      planDigest: DIGEST,
+      tagId: FORUM_TAG_ID,
+    },
+    name: "execute_forum_tag_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.forumTagExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { forumTagPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: createArguments,
+    name: "execute_forum_tag_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.forumTagExecute, 0)
+})
+
+test("MCP forum-tag signed state distinguishes omitted metadata from null", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        action: "update-metadata",
+        auditReason: AUDIT_REASON,
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        name: "Escalated",
+        operationKey: FORUM_TAG_OPERATION_KEY,
+        planDigest: DIGEST,
+        tagId: FORUM_TAG_ID,
+      },
+      name: "execute_forum_tag_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        action: "update-metadata",
+        auditReason: AUDIT_REASON,
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        name: "Escalated",
+        operationKey: FORUM_TAG_OPERATION_KEY,
+        planDigest: DIGEST,
+        tagId: FORUM_TAG_ID,
+        unicodeEmoji: null,
+      },
+      inputResponses: {
+        confirm_forum_tag_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_forum_tag_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.forumTagExecute, 0)
+})
+
+test("MCP forum-tag changes expose uncertain and content-free conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: FORUM_TAG_OPERATION_KEY,
+    planDigest: DIGEST,
+    tagId: FORUM_TAG_ID,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      forumTagError: new ForumTagExecutionError(
+        "Discord forum-tag outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_forum_tag_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-forum-tag",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    resourceId: FORUM_TAG_ID,
+    status: "completed",
+    timestamp: "2026-08-22T18:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      forumTagError: new ForumTagOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_forum_tag_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(FORUM_TAG_OPERATION_KEY),
   )
 })
 

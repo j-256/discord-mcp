@@ -107,6 +107,18 @@ import type {
 } from "./forum-post-service.js"
 import { ForumPostService } from "./forum-post-service.js"
 import type {
+  ForumTagAuditResult,
+  ForumTagChangePlan,
+  ForumTagChangeRequest,
+  ForumTagChangeResult,
+  ForumTagServiceOptions,
+} from "./forum-tag-service.js"
+import {
+  assertForumTagChannelId,
+  ForumTagService,
+  normalizeForumTagChangeRequest,
+} from "./forum-tag-service.js"
+import type {
   GuildExpressionChangeRequest,
   GuildExpressionInventoryResult,
   GuildExpressionKind,
@@ -416,6 +428,7 @@ export interface DiscordServiceClient {
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
+  getGuildForumTags: DiscordClient["getGuildForumTags"]
   getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
@@ -464,6 +477,7 @@ export interface DiscordServiceClient {
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
   modifyThreadState: DiscordClient["modifyThreadState"]
+  modifyGuildForumTags: DiscordClient["modifyGuildForumTags"]
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
@@ -533,6 +547,10 @@ export interface ConnectorServiceOptions {
   deletionOptions?: Pick<DeletionServiceOptions, "clock" | "planKey" | "randomId">
   forumPostOptions?: Pick<
     ForumPostServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  forumTagOptions?: Pick<
+    ForumTagServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   guildScaffoldOptions?: Pick<
@@ -760,6 +778,7 @@ export class ConnectorService {
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
+  readonly #forumTagService: ForumTagService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
   readonly #guildTemplateService: GuildTemplateService
@@ -833,6 +852,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelMetadataOptions,
+    })
+    this.#forumTagService = new ForumTagService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.forumTagOptions,
     })
     this.#deletionService = new DeletionService({
       activityStore: this.#activityStore,
@@ -1179,6 +1205,21 @@ export class ConnectorService {
     assertChannelMetadataChannelId(channelId)
     await this.#verifyIdentity(options)
     return this.#channelMetadataService.get(channelId, options)
+  }
+
+  async auditForumTags(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<ForumTagAuditResult> {
+    assertForumTagChannelId(channelId)
+    this.#policy.assertForumTagAuditConfigured(channelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#forumTagService.audit(
+      identity.application.id,
+      identity.bot.id,
+      channelId,
+      options,
+    )
   }
 
   async listRoles(guildId: string, options: RequestOptions = {}) {
@@ -2150,6 +2191,21 @@ export class ConnectorService {
     )
   }
 
+  async planForumTagChange(
+    request: ForumTagChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ForumTagChangePlan> {
+    normalizeForumTagChangeRequest(request)
+    this.#policy.assertForumTagChangeConfigured(request.channelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#forumTagService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberModeration(
     request: MemberModerationRequest,
     options: RequestOptions = {},
@@ -2368,6 +2424,35 @@ export class ConnectorService {
         writeGuildCollectionTarget("channels", request.guildId),
       ],
       () => this.#channelMetadataService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeForumTagChange(
+    request: ForumTagChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ForumTagChangeResult> {
+    normalizeForumTagChangeRequest(request)
+    this.#policy.assertForumTagChangeConfigured(request.channelId)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord forum-tag plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "forum-tag-change",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeGuildCollectionTarget("channels", request.guildId),
+      ],
+      () => this.#forumTagService.execute(
         identity.application.id,
         identity.bot.id,
         request,

@@ -10,6 +10,7 @@ export * from "./mcp-guidance-catalog.js"
 
 export type DiscordGuidanceService = Pick<
   ConnectorService,
+  | "auditForumTags"
   | "explainChannelAccess"
   | "getChannel"
   | "getGuildMember"

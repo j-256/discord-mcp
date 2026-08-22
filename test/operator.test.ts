@@ -90,6 +90,9 @@ function status(
       deletionsEnabled: false,
       forumPostChannelIds: [],
       forumPostsEnabled: false,
+      forumTagAuditEnabled: false,
+      forumTagChangesEnabled: false,
+      forumTagChannelIds: [],
       gatewayEnabled: false,
       gatewayEventBufferSize: 100,
       guildScaffoldGuildIds: [],
@@ -211,6 +214,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    auditForumTags: unexpected,
     executeAnnouncementCrosspost: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
@@ -219,6 +223,7 @@ function toolService(): DiscordToolService {
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
+    executeForumTagChange: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
@@ -234,6 +239,7 @@ function toolService(): DiscordToolService {
     getThreadMembership: unexpected,
     getThreadState: unexpected,
     planThreadChange: unexpected,
+    planForumTagChange: unexpected,
     getGuildExpression: unexpected,
     getGuildSoundboardSound: unexpected,
     listGuildTemplates: unexpected,
@@ -621,6 +627,64 @@ test("doctor and setup explain reviewed forum-post scope without Discord writes"
   )
   assert.match(setup.warnings.join("\n"), /forum-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /forum-posts toolset/)
+})
+
+test("doctor and setup explain exact forum-tag scope without Discord writes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
+    DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
+    DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
+    DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.forumTagAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.forumTagChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact stable forums/)
+  assert.match(audit?.summary || "", /no post enumeration/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /one non-retried replacement/)
+  assert.match(change?.summary || "", /fresh readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.forumTagAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.forumTagChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /stable-forum allowlist/)
+  assert.match(omitted.warnings.join("\n"), /forum-tags toolset/)
 })
 
 test("doctor and setup explain reviewed thread-creation scope without Discord writes", async () => {
@@ -2605,6 +2669,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_channel_metadata_change",
     "review_channel_permission_overwrite",
     "review_forum_post",
+    "review_forum_tag_change",
     "review_guild_expression_change",
     "review_guild_scaffold",
     "review_guild_template_change",
@@ -2643,6 +2708,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://channels/{channelId}",
     "discord://channels/{channelId}/access",
+    "discord://channels/{channelId}/forum-tags",
     "discord://channels/{channelId}/messages/{messageId}",
     "discord://channels/{channelId}/permission-overwrites",
     "discord://channels/{channelId}/webhooks",
@@ -2674,6 +2740,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_automod_change",
     "execute_channel_metadata_change",
     "execute_channel_permission_overwrite",
+    "execute_forum_tag_change",
     "execute_guild_expression_change",
     "execute_guild_soundboard_change",
     "execute_guild_template_change",
@@ -2698,6 +2765,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
+  assert.equal(report.readOnlyTools.includes("audit_forum_tags"), true)
+  assert.equal(report.readOnlyTools.includes("plan_forum_tag_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
   assert.equal(report.readOnlyTools.includes("get_member_voice_state"), true)

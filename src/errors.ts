@@ -231,6 +231,42 @@ export class ChannelMetadataEvidenceError extends Error {
   override name = "ChannelMetadataEvidenceError"
 }
 
+export class ForumTagPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord forum-tag snapshot does not match the reviewed plan")
+    this.name = "ForumTagPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ForumTagOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord forum-tag operation key has already been reserved")
+    this.name = "ForumTagOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ForumTagExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ForumTagExecutionError"
+    this.result = result
+  }
+}
+
+export class ForumTagEvidenceError extends Error {
+  override name = "ForumTagEvidenceError"
+}
+
 export class ForumPostPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

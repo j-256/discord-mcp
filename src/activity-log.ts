@@ -12,6 +12,7 @@ import {
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
   DISCORD_SNOWFLAKE_PATTERN,
+  FORUM_TAG_ACTIONS,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
   INVITE_REFERENCE_PATTERN,
   MEMBER_ROLE_ACTIONS,
@@ -23,6 +24,7 @@ import {
   THREAD_CHANGE_ACTIONS,
   THREAD_CREATION_MODES,
   type ChannelCreationKind,
+  type ForumTagAction,
   type MemberModerationAction,
   type MemberRoleAction,
   type MemberVoiceAction,
@@ -714,6 +716,28 @@ export interface ChannelMetadataActivity {
   verification: "drift" | "match" | null
 }
 
+export type ForumTagActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ForumTagActivity {
+  action: ForumTagAction
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "forum-tag-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: ForumTagActivityStatus
+  tagId: string | null
+  timestamp: string
+  verification: "match" | null
+}
+
 export type ActivityEntry =
   | AnnouncementCrosspostActivity
   | AttachmentMessageActivity
@@ -723,6 +747,7 @@ export type ActivityEntry =
   | ChannelPermissionOverwriteActivity
   | DeletionActivity
   | ForumPostActivity
+  | ForumTagActivity
   | GuildExpressionActivity
   | GuildTemplateActivity
   | InteractionActivity
@@ -1796,6 +1821,74 @@ function parseChannelMetadataActivity(
   }
 }
 
+function parseForumTagActivity(
+  value: unknown,
+): ForumTagActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const action = record.action as ForumTagAction
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "forum-tag-change"
+    || !FORUM_TAG_ACTIONS.includes(action)
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !(record.tagId === null || (
+      typeof record.tagId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.tagId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (action === "create" && (
+      record.status === "completed" ? record.tagId === null : record.tagId !== null
+    ))
+    || (action !== "create" && record.tagId === null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action,
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "forum-tag-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ForumTagActivityStatus,
+    tagId: record.tagId as string | null,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseWebhookDeletionActivity(
   value: unknown,
 ): WebhookDeletionActivity | undefined {
@@ -2754,6 +2847,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseStageInstanceActivity(value)
     || parseChannelCreationActivity(value)
     || parseChannelMetadataActivity(value)
+    || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
     || parseGuildExpressionActivity(value)

@@ -220,6 +220,8 @@ export function registerDiscordResources(
           "",
           "Channel metadata reads use an exact strict projection for supported non-thread guild channels, return only type-applicable settings plus parent, position, overwrite count, and unknown-field count, and persist nothing. Changes require a separate feature toggle and exact channel allowlist, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and a fresh exact GET readback. Omitted settings are preserved; null or empty topic clears the topic. Deletion, moves, reordering, type conversion, overwrite replacement, forum-tag replacement, thread mutation, retry, and rollback are unsupported. Same-channel uncertain outcomes fail closed, and names, topics, audit reasons, raw operation keys, and raw payloads are never persisted.",
           "",
+          "Forum-tag audit requires a separate exact stable-forum allowlist and complete VIEW_CHANNEL evidence. It returns the complete bounded ordered inventory transiently, preserves existing custom emoji IDs, reports unknown channel and tag fields only as counts, fails closed on unknown permission-overwrite fields, never enumerates posts or threads, and never persists tag text. Reviewed create, exact metadata update, and exact-ID deletion require an additional toggle, complete MANAGE_CHANNELS evidence, a fresh full-inventory keyed plan, signed approval, durable channel coordination and one-shot reservation, pending content-free activity, one non-retried full available_tags PATCH, strict response validation, and a fresh complete readback. Deletion usage is unavailable and explicit, while media channels, custom emoji introduction, fuzzy names, raw replacement, reordering, retry, and rollback are unsupported. Same-channel uncertain outcomes remain quarantined for operator review.",
+          "",
           "Forum-post creation requires a separate exact forum-channel allowlist. Planning checks the exact public forum type, complete permission-overwrite and bot permission evidence, exact available tag IDs, required and moderated tag rules, settings, notifications, and a keyed one-shot intent. Execution requires a fresh matching plan, signed approval, the shared anti-spam guard, durable reservation and pending content-free activity, one non-retried create request, and exact thread plus starter-message readback. It never persists the title, content, tags, notification users, audit reason, or raw operation key and never edits, deletes, retries, or rolls back the post.",
           "",
           "Guild scaffolds are additive-only and require a dedicated exact guild allowlist. One bounded plan reviews the verified application and bot identity, complete role inventory, visible channel inventory, symbolic parent graph, collisions, capacities, role hierarchy, requested permission subsets, guild permissions, parent-category permissions, durable content-free checkpoints, and the ready execution frontier. Each approved execution runs only the reviewed bounded frontier with non-retried single-resource writes and exact readbacks. A newly created category forces a fresh plan before child creation. Resumes keep the same operation key, survive process restarts, and fail closed on pending, failed, uncertain, or drifting checkpoints. Scaffolds never persist names, topics, audit reasons, or raw operation keys and never edit, move, assign, delete, retry, roll back, or create permission overwrites.",
@@ -810,6 +812,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.getChannel(
+        templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelForumTags,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelForumTags, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded ordered tag inventory for one exact separately allowlisted stable Discord forum. Tag text and emoji are transient untrusted data, unknown channel and tag fields are counts only, unknown permission-overwrite fields fail closed, posts and threads are not enumerated, raw payloads are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Exact Discord forum tags",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditForumTags(
         templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),

@@ -179,6 +179,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     deletionsEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
+    forumTagAuditEnabled: false,
+    forumTagChangesEnabled: false,
+    forumTagChannelIds: [],
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
@@ -594,6 +597,9 @@ test("configuration and policy require an exact administration guild and protect
     deletionsEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
+    forumTagAuditEnabled: false,
+    forumTagChangesEnabled: false,
+    forumTagChannelIds: [],
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
@@ -1609,6 +1615,79 @@ test("configuration and policy isolate forum posts to exact readable channels", 
   assert.deepEqual(enabled.describe().forumPostChannelIds, [CHANNEL_ID])
 })
 
+test("configuration and policy separate exact stable-forum tag audit from changes", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT/,
+  )
+
+  const forum = channel({ type: DISCORD_CHANNEL_TYPES.forum })
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertForumTagAuditable(forum),
+    /forum-tag audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
+    DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.equal(auditOnly.assertForumTagAuditable(forum), GUILD_ID)
+  assert.throws(
+    () => auditOnly.assertForumTagChangeable(forum),
+    /forum-tag changes are disabled/,
+  )
+  assert.throws(
+    () => auditOnly.assertForumTagAuditable(channel({ type: 16 })),
+    /requires an exact forum channel/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
+    DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
+    DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabled.assertForumTagAuditable(forum), GUILD_ID)
+  assert.equal(enabled.assertForumTagChangeable(forum), GUILD_ID)
+  assert.throws(
+    () => enabled.assertForumTagAuditable(channel({
+      id: OTHER_CHANNEL_ID,
+      type: DISCORD_CHANNEL_TYPES.forum,
+    })),
+    /outside the forum-tag scope/,
+  )
+  assert.equal(enabled.describe().forumTagAuditEnabled, true)
+  assert.equal(enabled.describe().forumTagChangesEnabled, true)
+  assert.deepEqual(enabled.describe().forumTagChannelIds, [CHANNEL_ID])
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertForumTagAuditable(forum),
+    /requires an explicit channel allowlist/,
+  )
+})
+
 test("configuration and policy isolate thread creation to exact readable parents", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -2041,6 +2120,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     deletionsEnabled: true,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
+    forumTagAuditEnabled: false,
+    forumTagChangesEnabled: false,
+    forumTagChannelIds: [],
     gatewayEnabled: false,
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],

@@ -44,6 +44,7 @@ type McpToolWorkflow =
   | "channel-metadata-change"
   | "channel-permission-overwrite"
   | "forum-post"
+  | "forum-tag-change"
   | "guild-scaffold"
   | "guild-expression-change"
   | "guild-soundboard-change"
@@ -85,6 +86,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   add_reaction: {
     keywords: ["emoji", "react", "reaction"],
     toolset: "interactions",
+  },
+  audit_forum_tags: {
+    keywords: ["audit", "forum", "tag"],
+    toolset: "forum-tags",
   },
   audit_channel_role_access: {
     keywords: ["access", "audit", "channel", "matrix", "permissions", "role"],
@@ -133,6 +138,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "execute", "forum", "post", "thread"],
     toolset: "forum-posts",
     workflow: "forum-post",
+  },
+  execute_forum_tag_change: {
+    keywords: ["create", "delete", "execute", "forum", "metadata", "tag", "update"],
+    toolset: "forum-tags",
+    workflow: "forum-tag-change",
   },
   execute_thread_creation: {
     keywords: ["create", "execute", "private", "public", "thread"],
@@ -493,6 +503,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "forum", "plan", "post", "review", "thread"],
     toolset: "forum-posts",
     workflow: "forum-post",
+  },
+  plan_forum_tag_change: {
+    keywords: ["create", "delete", "forum", "metadata", "plan", "review", "tag", "update"],
+    toolset: "forum-tags",
+    workflow: "forum-tag-change",
   },
   plan_thread_creation: {
     keywords: ["create", "plan", "private", "public", "review", "thread"],

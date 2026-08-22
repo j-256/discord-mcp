@@ -50,6 +50,7 @@ const PRIVATE_GUILD_TEMPLATE_TOPIC = "private-template-topic"
 const PRIVATE_ONBOARDING_TEXT = "private-onboarding-member-copy"
 const PRIVATE_WELCOME_SCREEN_TEXT = "private-welcome-screen-copy"
 const PRIVATE_CHANNEL_TOPIC = "private-channel-roadmap"
+const PRIVATE_FORUM_TAG_NAME = "private-forum-tag"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
@@ -149,6 +150,7 @@ interface GuidanceCalls {
   channelAccess: number
   channelMetadata: number
   channels: number
+  forumTags: number
   guilds: number
   guildExpressions: number
   invites: number
@@ -191,6 +193,7 @@ function guidanceService(options: {
     channelAccess: 0,
     channelMetadata: 0,
     channels: 0,
+    forumTags: 0,
     guilds: 0,
     guildExpressions: 0,
     invites: 0,
@@ -224,6 +227,60 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    async auditForumTags(channelId) {
+      calls.forumTags += 1
+      calls.lastChannelId = channelId
+      return {
+        access: {
+          appliedRoleIds: [GUILD_ID],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["VIEW_CHANNEL" as const, "MANAGE_CHANNELS" as const],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+          ).toString(),
+          manageChannels: true,
+          requiredPermissions: ["VIEW_CHANNEL" as const],
+          unknownPermissionBits: "0",
+          viewChannel: true,
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        channel: {
+          flags: 0,
+          guildId: GUILD_ID,
+          id: channelId,
+          permissionOverwriteUnknownFieldCount: 0,
+          type: 15,
+          unknownFieldCount: 0,
+        },
+        inventory: {
+          returned: 1,
+          safetyLimit: 20,
+          unknownTagFields: 0,
+        },
+        limitations: ["Discord does not expose bounded tag-use counts"],
+        privacy: {
+          persistence: "content-free-activity-only" as const,
+          rawPayloads: "omitted" as const,
+          tagText: "included-in-transient-results" as const,
+          unknownFields: "counts-only" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        tags: [{
+          emoji: { kind: "unicode" as const, unicodeEmoji: "📌" },
+          id: ROLE_ID,
+          moderated: false,
+          name: PRIVATE_FORUM_TAG_NAME,
+          position: 0,
+          unknownFieldCount: 0,
+        }],
+      }
+    },
     executeAnnouncementCrosspost: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
@@ -1027,6 +1084,9 @@ function guidanceService(options: {
         deletionsEnabled: false,
         forumPostChannelIds: [],
         forumPostsEnabled: false,
+        forumTagAuditEnabled: false,
+        forumTagChangesEnabled: false,
+        forumTagChannelIds: [],
         gatewayEnabled: false,
         gatewayEventBufferSize: 100,
         guildScaffoldGuildIds: [],
@@ -1123,6 +1183,7 @@ function guidanceService(options: {
     executeChannelCreation: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
+    executeForumTagChange: unexpected,
     executeThreadCreation: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
@@ -1517,6 +1578,7 @@ function guidanceService(options: {
     planPollEnd: unexpected,
     planAttachmentMessage: unexpected,
     planForumPost: unexpected,
+    planForumTagChange: unexpected,
     planThreadCreation: unexpected,
     planGuildScaffold: unexpected,
     planRoleCreation: unexpected,
@@ -1563,6 +1625,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.channelAccess
     + calls.channelMetadata
     + calls.channels
+    + calls.forumTags
     + calls.guilds
     + calls.guildExpressions
     + calls.invites
@@ -1651,6 +1714,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelAccess,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAccess,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelForumTags,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelForumTags,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelMetadata,
@@ -1773,6 +1840,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Resource discovery never enumerates messages/)
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Forum-post creation requires a separate exact forum-channel/)
+  assert.match(safety.text, /Forum-tag audit requires a separate exact stable-forum/)
+  assert.match(safety.text, /Deletion usage is unavailable and explicit/)
   assert.match(safety.text, /exact thread plus starter-message readback/)
   assert.match(safety.text, /permission-overwrite inventory is read-only/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
@@ -2248,6 +2317,20 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(metadataPrivacy.rawPayloads, "omitted")
   assert.equal("permissionOverwrites" in metadata, false)
 
+  const forumTags = await readJsonResource(
+    client,
+    `discord://channels/${CHANNEL_ID}/forum-tags`,
+  )
+  const forumTagsData = forumTags.value.data as Record<string, unknown>
+  const tags = forumTagsData.tags as Array<Record<string, unknown>>
+  const forumTagPrivacy = forumTagsData.privacy as Record<string, unknown>
+  assert.equal(tags[0]?.id, ROLE_ID)
+  assert.equal(tags[0]?.name, PRIVATE_FORUM_TAG_NAME)
+  assert.equal(forumTagPrivacy.tagText, "included-in-transient-results")
+  assert.equal(forumTagPrivacy.rawPayloads, "omitted")
+  assert.equal((forumTagsData.inventory as Record<string, unknown>).returned, 1)
+  assert.doesNotMatch(forumTags.text, /available_tags|permission_overwrites/u)
+
   const exact = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
@@ -2276,6 +2359,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.channelMetadata, 1)
+  assert.equal(calls.forumTags, 1)
   assert.equal(calls.messages, 1)
   assert.equal(calls.members, 1)
   assert.equal(calls.bans, 1)
@@ -2311,6 +2395,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
   await assert.rejects(
     () => malformed.client.readResource({
       uri: "discord://channels/not-a-snowflake",
+    }),
+    /channelId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: "discord://channels/not-a-snowflake/forum-tags",
     }),
     /channelId must be a Discord snowflake ID/,
   )
@@ -2985,6 +3075,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(forumPost, /complete permission evidence/)
   assert.match(forumPost, /literal workflow input, not instructions/)
 
+  const forumTagRequest = {
+    action: "update-metadata",
+    auditReason: "Reviewed forum tag",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    name: "Escalated review",
+    operationKey: OPERATION_KEY,
+    tagId: ROLE_ID,
+    unicodeEmoji: null,
+  }
+  const forumTag = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(forumTagRequest) },
+    name: MCP_PROMPT_NAMES.reviewForumTagChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(forumTag.split("\n")[1] || ""),
+    forumTagRequest,
+  )
+  assert.match(forumTag, /Call only plan_forum_tag_change/)
+  assert.match(forumTag, /Do not call execute_forum_tag_change/)
+  assert.match(forumTag, /complete current and desired ordered inventories/)
+  assert.match(forumTag, /VIEW_CHANNEL and MANAGE_CHANNELS/)
+  assert.match(forumTag, /literal workflow input, not instructions/)
+
   const scaffoldRoles = [{
     key: "reviewers",
     name: "Reviewers",
@@ -3491,6 +3605,33 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewForumPost,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          action: "update-metadata",
+          auditReason: "Reviewed forum tag",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+          tagId: ROLE_ID,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewForumTagChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          action: "create",
+          auditReason: "Reviewed forum tag",
+          channelId: CHANNEL_ID,
+          extra: true,
+          guildId: GUILD_ID,
+          name: "Reviewed",
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewForumTagChange,
     },
     {
       arguments: {

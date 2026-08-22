@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 9
+export const OPERATOR_REPORT_SCHEMA_VERSION = 10
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -60,6 +60,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
   forumPostPolicy: "forum-post-policy",
+  forumTagAuditPolicy: "forum-tag-audit-policy",
+  forumTagChangePolicy: "forum-tag-change-policy",
   guildAccess: "guild-access",
   guildMembersIntent: "guild-members-intent",
   guildScope: "guild-scope",
@@ -284,6 +286,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowForumPosts && config.forumPostChannelIds.size === 0) {
     warnings.push("The forum-post toggle is enabled but forum-post creation remains blocked because no forum-channel allowlist is configured")
   }
+  if (config.allowForumTagAudit && config.forumTagChannelIds.size === 0) {
+    warnings.push("The forum-tag audit toggle is enabled but inventory remains blocked because no exact stable-forum allowlist is configured")
+  }
+  if (config.allowForumTagChanges && config.forumTagChannelIds.size === 0) {
+    warnings.push("The forum-tag change toggle is enabled but changes remain blocked because no exact stable-forum allowlist is configured")
+  }
   if (config.allowThreadCreation && config.threadParentIds.size === 0) {
     warnings.push("The thread-creation toggle is enabled but creation remains blocked because no exact parent-channel allowlist is configured")
   }
@@ -452,6 +460,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowChannelMetadataChanges, "channel-metadata", "Channel metadata changes"],
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
+    [
+      config.allowForumTagAudit || config.allowForumTagChanges,
+      "forum-tags",
+      "Forum-tag audit and reviewed changes",
+    ],
     [config.allowThreadCreation, "threads", "Reviewed thread creation"],
     [
       config.allowThreadAudit || config.allowThreadChanges,
@@ -778,6 +791,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.forumPostPolicy,
         "pass",
         `Reviewed forum-post creation is constrained to ${config.forumPostChannelIds.size} exact channels with one-shot execution and exact readback`,
+      ))
+    }
+    if (!config.allowForumTagAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumTagAuditPolicy,
+        "pass",
+        "Exact stable-forum tag audit is disabled",
+      ))
+    } else if (config.forumTagChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumTagAuditPolicy,
+        "warn",
+        "Forum-tag audit is enabled, but the required exact stable-forum allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumTagAuditPolicy,
+        "pass",
+        `Forum-tag audit is constrained to ${config.forumTagChannelIds.size} exact stable forums with complete transient ordered inventory and no post enumeration`,
+      ))
+    }
+    if (!config.allowForumTagChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumTagChangePolicy,
+        "pass",
+        "Reviewed forum-tag changes are disabled",
+      ))
+    } else if (config.forumTagChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumTagChangePolicy,
+        "warn",
+        "Forum-tag changes are enabled, but the required exact stable-forum allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.forumTagChangePolicy,
+        "pass",
+        `Reviewed forum-tag changes are constrained to ${config.forumTagChannelIds.size} exact stable forums with full-inventory planning, one non-retried replacement, and complete response plus fresh readback verification`,
       ))
     }
     if (!config.allowThreadCreation) {
@@ -1854,6 +1905,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
     ENVIRONMENT_NAMES.allowForumPosts,
     ENVIRONMENT_NAMES.forumPostChannelIds,
+    ENVIRONMENT_NAMES.allowForumTagAudit,
+    ENVIRONMENT_NAMES.allowForumTagChanges,
+    ENVIRONMENT_NAMES.forumTagChannelIds,
     ENVIRONMENT_NAMES.allowThreadCreation,
     ENVIRONMENT_NAMES.threadParentIds,
     ENVIRONMENT_NAMES.allowThreadAudit,

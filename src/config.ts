@@ -48,6 +48,8 @@ export interface ConnectorConfig {
   allowChannelMetadataChanges: boolean
   allowDeletions: boolean
   allowForumPosts: boolean
+  allowForumTagAudit: boolean
+  allowForumTagChanges: boolean
   allowGateway: boolean
   allowGuildExpressionAudit: boolean
   allowGuildExpressionChanges: boolean
@@ -103,6 +105,7 @@ export interface ConnectorConfig {
   expectedApplicationId: string | undefined
   expectedBotId: string | undefined
   forumPostChannelIds: ReadonlySet<string>
+  forumTagChannelIds: ReadonlySet<string>
   gatewayEventBufferSize: number
   guildScaffoldGuildIds: ReadonlySet<string>
   guildExpressionGuildIds: ReadonlySet<string>
@@ -374,6 +377,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.forumPostChannelIds],
     ENVIRONMENT_NAMES.forumPostChannelIds,
   )
+  const forumTagChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.forumTagChannelIds],
+    ENVIRONMENT_NAMES.forumTagChannelIds,
+  )
   const threadParentIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.threadParentIds],
     ENVIRONMENT_NAMES.threadParentIds,
@@ -535,6 +542,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.channelMetadataIds, channelMetadataIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
+    [ENVIRONMENT_NAMES.forumTagChannelIds, forumTagChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
     [ENVIRONMENT_NAMES.memberVoiceChannelIds, memberVoiceChannelIds],
     [ENVIRONMENT_NAMES.nativeInteractionChannelIds, nativeInteractionChannelIds],
@@ -687,6 +695,19 @@ export function loadConnectorConfig(
   if (allowGuildTemplateChanges && !allowGuildTemplateAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGuildTemplateChanges} requires ${ENVIRONMENT_NAMES.allowGuildTemplateAudit}`,
+    )
+  }
+  const allowForumTagAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowForumTagAudit],
+    ENVIRONMENT_NAMES.allowForumTagAudit,
+  )
+  const allowForumTagChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowForumTagChanges],
+    ENVIRONMENT_NAMES.allowForumTagChanges,
+  )
+  if (allowForumTagChanges && !allowForumTagAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowForumTagChanges} requires ${ENVIRONMENT_NAMES.allowForumTagAudit}`,
     )
   }
   const allowScheduledEventAudit = parseBoolean(
@@ -868,6 +889,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowForumPosts],
       ENVIRONMENT_NAMES.allowForumPosts,
     ),
+    allowForumTagAudit,
+    allowForumTagChanges,
     allowInteractions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowInteractions],
       ENVIRONMENT_NAMES.allowInteractions,
@@ -950,6 +973,7 @@ export function loadConnectorConfig(
     expectedApplicationId,
     expectedBotId,
     forumPostChannelIds,
+    forumTagChannelIds,
     gatewayEventBufferSize: parseInteger(
       environment[ENVIRONMENT_NAMES.gatewayEventBufferSize],
       ENVIRONMENT_NAMES.gatewayEventBufferSize,

@@ -28,6 +28,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
 
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelAccess: "channel_access",
+  channelForumTags: "channel_forum_tags",
   channelMetadata: "channel_metadata",
   channelPermissionOverwrites: "channel_permission_overwrites",
   channelStageInstance: "channel_stage_instance",
@@ -56,6 +57,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
 
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelAccess: "discord://channels/{channelId}/access",
+  channelForumTags: "discord://channels/{channelId}/forum-tags",
   channelMetadata: "discord://channels/{channelId}",
   channelPermissionOverwrites: "discord://channels/{channelId}/permission-overwrites",
   channelStageInstance: "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
@@ -96,6 +98,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewChannelMetadataChange: "review_channel_metadata_change",
   reviewChannelPermissionOverwrite: "review_channel_permission_overwrite",
   reviewForumPost: "review_forum_post",
+  reviewForumTagChange: "review_forum_tag_change",
   reviewGuildExpressionChange: "review_guild_expression_change",
   reviewGuildTemplateChange: "review_guild_template_change",
   reviewSoundboardChange: "review_soundboard_change",
@@ -134,6 +137,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewChannelMetadataChange]: "channel-metadata",
   [MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite]: "permission-overwrites",
   [MCP_PROMPT_NAMES.reviewForumPost]: "forum-posts",
+  [MCP_PROMPT_NAMES.reviewForumTagChange]: "forum-tags",
   [MCP_PROMPT_NAMES.reviewGuildExpressionChange]: "guild-expressions",
   [MCP_PROMPT_NAMES.reviewGuildTemplateChange]: "guild-templates",
   [MCP_PROMPT_NAMES.reviewSoundboardChange]: "soundboard",

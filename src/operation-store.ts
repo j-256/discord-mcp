@@ -33,6 +33,7 @@ export const OPERATION_KINDS = [
   "channel-metadata-change",
   "channel-permission-overwrite",
   "forum-post",
+  "forum-tag-change",
   "guild-expression-change",
   "guild-scaffold",
   "guild-template-change",

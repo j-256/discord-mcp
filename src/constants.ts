@@ -34,6 +34,7 @@ export const MCP_TOOLSET_NAMES = [
   "connector",
   "deletion",
   "forum-posts",
+  "forum-tags",
   "gateway",
   "guild-expressions",
   "guild-scaffolds",
@@ -68,6 +69,14 @@ export const MCP_TOOLSET_NAMES = [
 
 export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
 
+export const FORUM_TAG_ACTIONS = [
+  "create",
+  "delete",
+  "update-metadata",
+] as const
+
+export type ForumTagAction = typeof FORUM_TAG_ACTIONS[number]
+
 export const ENVIRONMENT_NAMES = Object.freeze({
   adminGuildIds: "DISCORD_MCP_ADMIN_GUILD_IDS",
   announcementCrosspostChannelIds: "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
@@ -83,6 +92,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowChannelMetadataChanges: "DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES",
   allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
   allowForumPosts: "DISCORD_MCP_ALLOW_FORUM_POSTS",
+  allowForumTagAudit: "DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT",
+  allowForumTagChanges: "DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES",
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowGuildExpressionAudit: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
   allowGuildExpressionChanges: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
@@ -139,6 +150,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   channelMetadataIds: "DISCORD_MCP_CHANNEL_METADATA_IDS",
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
   forumPostChannelIds: "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
+  forumTagChannelIds: "DISCORD_MCP_FORUM_TAG_CHANNEL_IDS",
   gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   guildScaffoldGuildIds: "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
   guildExpressionGuildIds: "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
@@ -242,6 +254,7 @@ export const DISCORD_LIMITS = Object.freeze({
   guildMessageSearch: 25,
   forumAppliedTags: 5,
   forumAvailableTags: 20,
+  forumTagNameCharacters: 20,
   guildRoles: 250,
   guildEmojis: 1_000,
   guildFeatureCharacters: 100,

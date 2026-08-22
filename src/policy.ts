@@ -34,6 +34,9 @@ export interface PolicyDescription {
   deletionsEnabled: boolean
   forumPostChannelIds: string[]
   forumPostsEnabled: boolean
+  forumTagAuditEnabled: boolean
+  forumTagChangesEnabled: boolean
+  forumTagChannelIds: string[]
   gatewayEnabled: boolean
   gatewayEventBufferSize: number
   guildScaffoldGuildIds: string[]
@@ -171,6 +174,8 @@ export class ScopePolicy {
   readonly #allowGuildTemplateAudit: boolean
   readonly #allowGuildTemplateChanges: boolean
   readonly #allowForumPosts: boolean
+  readonly #allowForumTagAudit: boolean
+  readonly #allowForumTagChanges: boolean
   readonly #allowRoleCreation: boolean
   readonly #allowRoleConfiguration: boolean
   readonly #allowScheduledEventAudit: boolean
@@ -210,6 +215,7 @@ export class ScopePolicy {
   readonly #guildExpressionRoots: readonly string[]
   readonly #guildTemplateGuildIds: ReadonlySet<string>
   readonly #forumPostChannelIds: ReadonlySet<string>
+  readonly #forumTagChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
   readonly #memberRoleGuildIds: ReadonlySet<string>
@@ -271,6 +277,8 @@ export class ScopePolicy {
     | "allowGuildExpressionChanges"
     | "allowGuildTemplateAudit"
     | "allowGuildTemplateChanges"
+    | "allowForumTagAudit"
+    | "allowForumTagChanges"
     | "allowInviteAudit"
     | "allowInviteDeletions"
     | "allowMemberDirectory"
@@ -336,6 +344,7 @@ export class ScopePolicy {
     | "nativeInteractionTtlSeconds"
     | "nativeInteractionUserIds"
     | "forumPostChannelIds"
+    | "forumTagChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
     | "onboardingGuildIds"
@@ -393,6 +402,8 @@ export class ScopePolicy {
     this.#allowGuildTemplateAudit = config.allowGuildTemplateAudit ?? false
     this.#allowGuildTemplateChanges = config.allowGuildTemplateChanges ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
+    this.#allowForumTagAudit = config.allowForumTagAudit ?? false
+    this.#allowForumTagChanges = config.allowForumTagChanges ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
@@ -433,6 +444,7 @@ export class ScopePolicy {
     this.#guildExpressionRoots = config.guildExpressionRoots ?? []
     this.#guildTemplateGuildIds = config.guildTemplateGuildIds ?? new Set()
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
+    this.#forumTagChannelIds = config.forumTagChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
     this.#memberRoleGuildIds = config.memberRoleGuildIds ?? new Set()
@@ -524,6 +536,11 @@ export class ScopePolicy {
       guildTemplateGuildIds: [...this.#guildTemplateGuildIds].sort(),
       forumPostChannelIds: [...this.#forumPostChannelIds].sort(),
       forumPostsEnabled: this.#allowForumPosts && this.#forumPostChannelIds.size > 0,
+      forumTagAuditEnabled: this.#allowForumTagAudit && this.#forumTagChannelIds.size > 0,
+      forumTagChangesEnabled: this.#allowForumTagAudit
+        && this.#allowForumTagChanges
+        && this.#forumTagChannelIds.size > 0,
+      forumTagChannelIds: [...this.#forumTagChannelIds].sort(),
       interactionChannelIds: [...this.#interactionChannelIds].sort(),
       interactionMaxWritesPerMinute: this.#interactionMaxWritesPerMinute,
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
@@ -1211,6 +1228,40 @@ export class ScopePolicy {
     if (!this.#channelMetadataIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the channel-metadata scope`)
     }
+    return guildId
+  }
+
+  assertForumTagAuditConfigured(channelId: string): void {
+    if (!this.#allowForumTagAudit) {
+      throw new PolicyError("Discord forum-tag audit is disabled by connector configuration")
+    }
+    if (this.#forumTagChannelIds.size === 0) {
+      throw new PolicyError("Discord forum-tag audit requires an explicit channel allowlist")
+    }
+    if (!this.#forumTagChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the forum-tag scope`)
+    }
+  }
+
+  assertForumTagChangeConfigured(channelId: string): void {
+    this.assertForumTagAuditConfigured(channelId)
+    if (!this.#allowForumTagChanges) {
+      throw new PolicyError("Discord forum-tag changes are disabled by connector configuration")
+    }
+  }
+
+  assertForumTagAuditable(channel: DiscordChannel): string {
+    this.assertForumTagAuditConfigured(channel.id)
+    const guildId = this.assertChannelReadable(channel)
+    if (channel.type !== DISCORD_CHANNEL_TYPES.forum) {
+      throw new PolicyError("Discord forum-tag scope requires an exact forum channel")
+    }
+    return guildId
+  }
+
+  assertForumTagChangeable(channel: DiscordChannel): string {
+    this.assertForumTagChangeConfigured(channel.id)
+    const guildId = this.assertForumTagAuditable(channel)
     return guildId
   }
 
