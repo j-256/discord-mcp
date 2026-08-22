@@ -36,6 +36,9 @@ import {
   InteractionRateLimitError,
   OperationStoreError,
   PolicyError,
+  WriteCoordinationConflictError,
+  WriteCoordinationQuarantinedError,
+  WriteCoordinationStateError,
 } from "./errors.js"
 import {
   DISCORD_REST_OPERATIONS,
@@ -56,6 +59,9 @@ export type OperationalErrorCategory =
   | "audit-error"
   | "cancelled"
   | "configuration-error"
+  | "coordination-conflict"
+  | "coordination-quarantined"
+  | "coordination-state-error"
   | "discord-client-error"
   | "discord-rate-limited"
   | "discord-server-error"
@@ -254,6 +260,11 @@ export function classifyOperationalError(error: unknown): OperationalErrorCatego
   ) return "plan-changed"
   if (error instanceof PolicyError) return "policy-error"
   if (error instanceof ConfigurationError) return "configuration-error"
+  if (error instanceof WriteCoordinationConflictError) return "coordination-conflict"
+  if (error instanceof WriteCoordinationQuarantinedError) {
+    return "coordination-quarantined"
+  }
+  if (error instanceof WriteCoordinationStateError) return "coordination-state-error"
   if (error instanceof AuditLogError || error instanceof OperationStoreError) {
     return "audit-error"
   }

@@ -197,6 +197,9 @@ import {
   WelcomeScreenOperationConflictError,
   WidgetSettingsExecutionError,
   WidgetSettingsOperationConflictError,
+  WriteCoordinationConflictError,
+  WriteCoordinationQuarantinedError,
+  WriteCoordinationStateError,
 } from "../src/errors.js"
 import {
   createDiscordMcpServer,
@@ -4870,6 +4873,18 @@ function serviceFixture(overrides: {
         policy: fixturePolicy(),
         schemaVersion: 1,
         status: "ok",
+        writeCoordination: {
+          coverage: "receipt-backed-single-step-reviewed-writes",
+          excludedWorkflows: [
+            "guild-scaffold",
+            "legacy-member-moderation",
+            "legacy-message-deletion",
+            "ordinary-message-interactions",
+          ],
+          localFilesystemRequired: true,
+          mode: "durable-exact-target",
+          sharedStateRootRequired: true,
+        },
       }
     },
     async listActivity() {
@@ -7069,6 +7084,34 @@ test("progressive audit-log discovery reveals only the requested exact read", as
     (await client.listTools()).tools.map(({ name }) => name),
     ["get_guild_audit_entry", "discover_discord_tools"],
   )
+})
+
+test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
+  const { client } = await connectedFixture(context)
+
+  const status = structuredContent(await client.callTool({
+    arguments: {},
+    name: "get_connector_status",
+  }))
+  assert.deepEqual(status.writeCoordination, {
+    coverage: "receipt-backed-single-step-reviewed-writes",
+    excludedWorkflows: [
+      "guild-scaffold",
+      "legacy-member-moderation",
+      "legacy-message-deletion",
+      "ordinary-message-interactions",
+    ],
+    localFilesystemRequired: true,
+    mode: "durable-exact-target",
+    sharedStateRootRequired: true,
+  })
+
+  const resource = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+  const content = resource.contents[0]
+  assert.ok(content && "text" in content)
+  if (!content || !("text" in content)) throw new Error("Expected safety text")
+  assert.match(content.text, /durable exact target claims/)
+  assert.match(content.text, /Guild scaffolds, legacy deletion and member moderation/)
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {
@@ -9679,6 +9722,51 @@ test("MCP channel metadata execution exposes uncertainty and content-free confli
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(CHANNEL_METADATA_OPERATION_KEY),
+  )
+
+  const claimId = `claim_${"c".repeat(32)}`
+  for (const coordination of [
+    {
+      error: new WriteCoordinationConflictError(claimId),
+      status: "coordination-conflict",
+    },
+    {
+      error: new WriteCoordinationQuarantinedError(claimId),
+      status: "coordination-quarantined",
+    },
+  ]) {
+    const fixture = await connectedFixture(context, {
+      elicitationHandler: approve,
+      serviceOverrides: { channelMetadataError: coordination.error },
+    })
+    const result = await fixture.client.callTool({
+      arguments: argumentsValue,
+      name: "execute_channel_metadata_change",
+    })
+    const structured = structuredContent(result)
+    assert.equal(structured.status, coordination.status)
+    assert.equal(
+      (structured.error as Record<string, unknown>).claimId,
+      claimId,
+    )
+    assert.match(JSON.stringify(result), new RegExp(claimId))
+  }
+
+  const stateError = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelMetadataError: new WriteCoordinationStateError(
+        "Discord write coordination state is unavailable",
+      ),
+    },
+  })
+  const stateResult = await stateError.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_metadata_change",
+  })
+  assert.equal(
+    structuredContent(stateResult).status,
+    "coordination-state-error",
   )
 })
 

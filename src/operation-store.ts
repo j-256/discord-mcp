@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto"
+import { constants } from "node:fs"
+import type { BigIntStats } from "node:fs"
 import {
   lstat,
   mkdir,
   mkdtemp,
   open,
-  readFile,
   rename,
   rm,
 } from "node:fs/promises"
@@ -243,40 +244,91 @@ function receiptStem(kind: OperationKind, hash: string): string {
 }
 
 async function readReceiptFile(file: string): Promise<OperationReceipt | undefined> {
-  let metadata
+  let before: BigIntStats
   try {
-    metadata = await lstat(file)
+    before = await lstat(file, { bigint: true })
   } catch (error) {
     if (isNodeError(error, "ENOENT")) return undefined
     throw new OperationStoreError("Unable to inspect Discord operation receipt", { cause: error })
   }
   if (
-    !metadata.isFile()
-    || metadata.isSymbolicLink()
-    || metadata.nlink !== 1
-    || (metadata.mode & 0o077) !== 0
-    || metadata.size < 2
-    || metadata.size > CONNECTOR_LIMITS.operationReceiptBytes
-    || (typeof process.getuid === "function" && metadata.uid !== process.getuid())
+    !before.isFile()
+    || before.isSymbolicLink()
+    || before.nlink !== 1n
+    || (before.mode & 0o077n) !== 0n
+    || before.size < 2n
+    || before.size > BigInt(CONNECTOR_LIMITS.operationReceiptBytes)
+    || (
+      typeof process.getuid === "function"
+      && before.uid !== BigInt(process.getuid())
+    )
   ) {
     throw new OperationStoreError("Discord operation receipt is not a private regular file")
   }
-  let text: string
+  let handle
   try {
-    text = await readFile(file, "utf8")
-  } catch (error) {
-    throw new OperationStoreError("Unable to read Discord operation receipt", { cause: error })
-  }
-  const lines = text.split("\n").filter((line) => line.length > 0)
-  if (lines.length !== 1 || !text.endsWith("\n")) {
-    throw new OperationStoreError("Discord operation receipt is not one complete record")
-  }
-  try {
-    return parseReceipt(JSON.parse(lines[0] as string) as unknown)
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0
+    handle = await open(file, constants.O_RDONLY | noFollow)
+    const opened = await handle.stat({ bigint: true })
+    if (
+      !opened.isFile()
+      || opened.isSymbolicLink()
+      || opened.nlink !== 1n
+      || (opened.mode & 0o077n) !== 0n
+      || opened.size < 2n
+      || opened.size > BigInt(CONNECTOR_LIMITS.operationReceiptBytes)
+      || (
+        typeof process.getuid === "function"
+        && opened.uid !== BigInt(process.getuid())
+      )
+      || opened.dev !== before.dev
+      || opened.ino !== before.ino
+    ) {
+      throw new OperationStoreError(
+        "Discord operation receipt changed while it was opened",
+      )
+    }
+    const bytes = await handle.readFile()
+    const afterRead = await handle.stat({ bigint: true })
+    const afterPath = await lstat(file, { bigint: true })
+    if (
+      bytes.byteLength !== Number(opened.size)
+      || !sameReceiptMetadata(opened, afterRead)
+      || !sameReceiptMetadata(afterRead, afterPath)
+    ) {
+      throw new OperationStoreError(
+        "Discord operation receipt changed while it was read",
+      )
+    }
+    const text = bytes.toString("utf8")
+    const lines = text.split("\n")
+    if (lines.length !== 2 || !lines[0] || lines[1] !== "") {
+      throw new OperationStoreError("Discord operation receipt is not one complete record")
+    }
+    try {
+      return parseReceipt(JSON.parse(lines[0]) as unknown)
+    } catch (error) {
+      if (error instanceof OperationStoreError) throw error
+      throw new OperationStoreError("Discord operation receipt is not valid JSON", { cause: error })
+    }
   } catch (error) {
     if (error instanceof OperationStoreError) throw error
-    throw new OperationStoreError("Discord operation receipt is not valid JSON", { cause: error })
+    throw new OperationStoreError("Unable to read Discord operation receipt", { cause: error })
+  } finally {
+    await handle?.close().catch(() => undefined)
   }
+}
+
+function sameReceiptMetadata(left: BigIntStats, right: BigIntStats): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.size === right.size
+    && left.ctimeNs === right.ctimeNs
+    && left.mtimeNs === right.mtimeNs
 }
 
 async function syncDirectory(directory: string): Promise<void> {

@@ -9,6 +9,9 @@ import {
   DiscordApiError,
   OperationStoreError,
   PolicyError,
+  WriteCoordinationConflictError,
+  WriteCoordinationQuarantinedError,
+  WriteCoordinationStateError,
 } from "../src/errors.js"
 import {
   loadObservabilityConfig,
@@ -322,6 +325,18 @@ test("operational errors collapse to fixed categories", () => {
   assert.equal(
     classifyOperationalError(new OperationStoreError("private detail")),
     "audit-error",
+  )
+  assert.equal(
+    classifyOperationalError(new WriteCoordinationConflictError("claim_00000000000000000000000000000000")),
+    "coordination-conflict",
+  )
+  assert.equal(
+    classifyOperationalError(new WriteCoordinationQuarantinedError("claim_00000000000000000000000000000000")),
+    "coordination-quarantined",
+  )
+  assert.equal(
+    classifyOperationalError(new WriteCoordinationStateError("private detail")),
+    "coordination-state-error",
   )
   assert.equal(classifyOperationalError(new RangeError("private detail")), "validation-error")
   assert.equal(classifyOperationalError(new DOMException("private detail", "AbortError")), "cancelled")

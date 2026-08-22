@@ -327,9 +327,19 @@ import type {
 import { WebhookService } from "./webhook-service.js"
 import {
   FileOperationStore,
+  operationKeyHash,
   operationReceiptDirectory,
+  type OperationKind,
   type OperationStore,
 } from "./operation-store.js"
+import {
+  FileWriteCoordinator,
+  writeCoordinationDirectory,
+  writeGuildCollectionTarget,
+  writeResourceTarget,
+  type WriteCoordinationTarget,
+  type WriteCoordinator,
+} from "./write-coordination.js"
 import type {
   DiscordApplication,
   DiscordChannel,
@@ -553,6 +563,7 @@ export interface ConnectorServiceOptions {
     WelcomeScreenServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  writeCoordinator?: WriteCoordinator
   widgetSettingsOptions?: Pick<
     WidgetSettingsServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -714,6 +725,7 @@ export class ConnectorService {
   readonly #threadGovernanceService: ThreadGovernanceService
   readonly #webhookService: WebhookService
   readonly #welcomeScreenService: WelcomeScreenService
+  readonly #writeCoordinator: WriteCoordinator
   readonly #widgetSettingsService: WidgetSettingsService
 
   constructor(options: ConnectorServiceOptions) {
@@ -726,6 +738,10 @@ export class ConnectorService {
     this.#activityStore = options.activityStore || new JsonlActivityLog(options.config.auditFile)
     const operationStore = options.operationStore || new FileOperationStore(
       operationReceiptDirectory(options.config.auditFile),
+    )
+    this.#writeCoordinator = options.writeCoordinator || new FileWriteCoordinator(
+      writeCoordinationDirectory(options.config.auditFile),
+      operationStore,
     )
     const interactionClock = options.interactionOptions?.clock || (() => new Date())
     const interactionLimiter = options.interactionOptions?.limiter || new InteractionLimiter({
@@ -988,6 +1004,24 @@ export class ConnectorService {
     return this.#identityPromise
   }
 
+  #coordinateWrite<T>(
+    kind: OperationKind,
+    operationKey: string,
+    planDigest: string,
+    targets: readonly WriteCoordinationTarget[],
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord reviewed-write plan digest is invalid")
+    }
+    return this.#writeCoordinator.run({
+      kind,
+      operationKeyHash: operationKeyHash(operationKey),
+      planDigest,
+      targets,
+    }, operation)
+  }
+
   async getStatus(options: RequestOptions = {}) {
     const identity = await this.#verifyIdentity(options)
     const guilds = await this.#client.listCurrentUserGuilds({
@@ -1014,6 +1048,18 @@ export class ConnectorService {
       policy: this.describePolicy(),
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
+      writeCoordination: {
+        coverage: "receipt-backed-single-step-reviewed-writes",
+        excludedWorkflows: [
+          "guild-scaffold",
+          "legacy-member-moderation",
+          "legacy-message-deletion",
+          "ordinary-message-interactions",
+        ],
+        localFilesystemRequired: true,
+        mode: "durable-exact-target",
+        sharedStateRootRequired: true,
+      },
     }
   }
 
@@ -2157,11 +2203,22 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<ChannelCreationResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#channelAdministrationService.execute(
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "channel-creation",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeGuildCollectionTarget("channels", request.guildId),
+        ...(request.parentId
+          ? [writeResourceTarget("channel", request.parentId)]
+          : []),
+      ],
+      () => this.#channelAdministrationService.execute(
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2175,12 +2232,21 @@ export class ConnectorService {
       throw new RangeError("Discord channel metadata plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#channelMetadataService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "channel-metadata-change",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeGuildCollectionTarget("channels", request.guildId),
+      ],
+      () => this.#channelMetadataService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2190,11 +2256,17 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<RoleCreationResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#roleAdministrationService.execute(
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "role-creation",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("roles", request.guildId)],
+      () => this.#roleAdministrationService.execute(
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2208,12 +2280,21 @@ export class ConnectorService {
       throw new RangeError("Discord role-configuration plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#roleConfigurationService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "role-configuration",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("role", request.roleId),
+        writeGuildCollectionTarget("roles", request.guildId),
+      ],
+      () => this.#roleConfigurationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2223,12 +2304,21 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<MemberRoleChangeResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#memberRoleService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "member-role-change",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("member", request.userId),
+        writeResourceTarget("role", request.roleId),
+      ],
+      () => this.#memberRoleService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2242,12 +2332,18 @@ export class ConnectorService {
       throw new RangeError("Discord member voice plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#memberVoiceService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "member-voice-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("member", request.userId)],
+      () => this.#memberVoiceService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2261,12 +2357,28 @@ export class ConnectorService {
       throw new RangeError("Discord thread-governance plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#threadGovernanceService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "thread-governance-change",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("channel", request.threadId),
+        ...(["add-member", "remove-member"].includes(request.action)
+          ? [writeResourceTarget(
+            "member",
+            (request as Extract<ThreadChangeRequest, {
+              action: "add-member" | "remove-member"
+            }>).userId,
+          )]
+          : []),
+      ],
+      () => this.#threadGovernanceService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2291,11 +2403,17 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<ForumPostResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#forumPostService.execute(
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "forum-post",
+      request.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("channel", request.channelId)],
+      () => this.#forumPostService.execute(
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2309,12 +2427,18 @@ export class ConnectorService {
       throw new RangeError("Discord thread-creation plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#threadCreationService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "thread-create",
+      request.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("channel", request.parentChannelId)],
+      () => this.#threadCreationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2328,12 +2452,18 @@ export class ConnectorService {
       throw new RangeError("Discord poll-creation plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#pollService.executeCreation(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "poll-create",
+      request.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("channel", request.channelId)],
+      () => this.#pollService.executeCreation(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2347,12 +2477,21 @@ export class ConnectorService {
       throw new RangeError("Discord poll-end plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#pollService.executeEnd(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "poll-end",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget("message", request.messageId),
+      ],
+      () => this.#pollService.executeEnd(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2362,11 +2501,17 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<AttachmentMessageResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#attachmentMessageService.execute(
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "attachment-message",
+      request.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("channel", request.channelId)],
+      () => this.#attachmentMessageService.execute(
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2400,12 +2545,21 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<MessagePinResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#messagePinService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "message-pin",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget("message", request.messageId),
+      ],
+      () => this.#messagePinService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2415,12 +2569,21 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<WebhookDeletionResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#webhookService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "webhook-deletion",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget("webhook", request.webhookId),
+      ],
+      () => this.#webhookService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2434,12 +2597,18 @@ export class ConnectorService {
       throw new RangeError("Discord invite deletion plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#inviteService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "invite-deletion",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("invites", request.guildId)],
+      () => this.#inviteService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2453,12 +2622,18 @@ export class ConnectorService {
       throw new RangeError("Discord onboarding plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#onboardingService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "onboarding-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("onboarding", request.guildId)],
+      () => this.#onboardingService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2472,12 +2647,18 @@ export class ConnectorService {
       throw new RangeError("Discord Welcome Screen plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#welcomeScreenService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "welcome-screen-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("welcome-screen", request.guildId)],
+      () => this.#welcomeScreenService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2491,12 +2672,18 @@ export class ConnectorService {
       throw new RangeError("Discord widget-settings plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#widgetSettingsService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "widget-settings-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("widget-settings", request.guildId)],
+      () => this.#widgetSettingsService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2506,12 +2693,21 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<GuildExpressionResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#guildExpressionService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "guild-expression-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget(
+        request.kind === "emoji" ? "emojis" : "stickers",
+        request.guildId,
+      )],
+      () => this.#guildExpressionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2521,12 +2717,18 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<ScheduledEventResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#scheduledEventService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "scheduled-event-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("scheduled-events", request.guildId)],
+      () => this.#scheduledEventService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2540,12 +2742,18 @@ export class ConnectorService {
       throw new RangeError("Discord soundboard plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#soundboardService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "guild-soundboard-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("soundboard", request.guildId)],
+      () => this.#soundboardService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2559,12 +2767,18 @@ export class ConnectorService {
       throw new RangeError("Discord Stage-instance plan digest is invalid")
     }
     const identity = await this.#verifyIdentity(options)
-    return this.#stageInstanceService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "stage-instance-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("channel", request.channelId)],
+      () => this.#stageInstanceService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2574,12 +2788,18 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<AutoModerationResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#automodService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "automod-change",
+      request.operationKey,
       planDigest,
-      options,
+      [writeGuildCollectionTarget("automod", request.guildId)],
+      () => this.#automodService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 
@@ -2589,12 +2809,24 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<ChannelPermissionOverwriteResult> {
     const identity = await this.#verifyIdentity(options)
-    return this.#permissionOverwriteService.execute(
-      identity.application.id,
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "channel-permission-overwrite",
+      request.operationKey,
       planDigest,
-      options,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget(
+          request.targetType === "role" ? "role" : "member",
+          request.targetId,
+        ),
+      ],
+      () => this.#permissionOverwriteService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 

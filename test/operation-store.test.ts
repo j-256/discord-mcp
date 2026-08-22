@@ -313,6 +313,11 @@ test("file operation store fails closed on malformed, linked, and public receipt
     () => store.get("channel-creation", pending.operationKeyHash),
     /valid JSON/,
   )
+  await writeFile(pendingPath, `${JSON.stringify(pending)}\n\n`, { mode: 0o600 })
+  await assert.rejects(
+    () => store.get("channel-creation", pending.operationKeyHash),
+    /one complete record/,
+  )
 
   await rm(pendingPath)
   await symlink(join(root, "missing"), pendingPath)

@@ -191,6 +191,9 @@ import {
   WidgetSettingsExecutionError,
   WidgetSettingsOperationConflictError,
   WidgetSettingsPlanChangedError,
+  WriteCoordinationConflictError,
+  WriteCoordinationQuarantinedError,
+  WriteCoordinationStateError,
   errorMessage,
   redactText,
 } from "./errors.js"
@@ -5098,6 +5101,17 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
   if (error instanceof PollOperationConflictError) status = "operation-key-conflict"
   if (error instanceof InteractionConflictError) status = "idempotency-conflict"
   if (error instanceof InteractionRateLimitError) status = "rate-limited"
+  if (error instanceof WriteCoordinationConflictError) {
+    details.claimId = error.claimId
+    status = "coordination-conflict"
+  }
+  if (error instanceof WriteCoordinationQuarantinedError) {
+    details.claimId = error.claimId
+    status = "coordination-quarantined"
+  }
+  if (error instanceof WriteCoordinationStateError) {
+    status = "coordination-state-error"
+  }
   return {
     error: {
       ...details,
@@ -8139,7 +8153,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "get_connector_status",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Verify the configured Discord application and bot identity, count the first guild page, and report effective connector scope without reading messages.",
+      description: "Verify the configured Discord application and bot identity, count the first guild page, and report effective connector scope plus the durable reviewed-write coordination boundary without reading messages.",
       inputSchema: emptyInputSchema,
       outputSchema: toolOutputSchema,
       title: "Get Discord connector status",

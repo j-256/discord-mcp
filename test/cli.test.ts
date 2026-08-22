@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import {
@@ -162,6 +165,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async diagnose() {
       return doctorReport()
     },
+    async listCoordination() {
+      return { claims: [], schemaVersion: 1, status: "ok" }
+    },
     async listProfiles() {
       return [profile]
     },
@@ -170,6 +176,14 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async prepareSetup() {
       return setupReport()
+    },
+    async resolveCoordination(_environment, claimId) {
+      return {
+        claimId,
+        releasedTargetCount: 1,
+        schemaVersion: 1,
+        status: "resolved",
+      }
     },
     async restoreProfile(name) {
       return { name, trashId: "0000000000000-restored" }
@@ -196,6 +210,24 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     check: true,
     command: "catalog",
     json: true,
+  })
+  assert.deepEqual(parseCliArguments(["coordination", "list", "--json"]), {
+    action: "list",
+    command: "coordination",
+    json: true,
+  })
+  assert.deepEqual(parseCliArguments([
+    "coordination",
+    "resolve",
+    `claim_${"a".repeat(32)}`,
+    "--confirm",
+    `claim_${"a".repeat(32)}`,
+  ]), {
+    action: "resolve",
+    claimId: `claim_${"a".repeat(32)}`,
+    command: "coordination",
+    confirmation: `claim_${"a".repeat(32)}`,
+    json: false,
   })
   assert.deepEqual(parseCliArguments(["doctor", "--online", "--json"]), {
     command: "doctor",
@@ -292,6 +324,11 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(() => parseCliArguments(["smoke", "--other"]), /Unknown option/)
   assert.throws(() => parseCliArguments(["catalog", "--json"]), /requires --check/)
   assert.throws(() => parseCliArguments(["catalog", "--check", "--check"]), /only once/)
+  assert.throws(() => parseCliArguments(["coordination"]), /requires list or resolve/)
+  assert.throws(
+    () => parseCliArguments(["coordination", "resolve", `claim_${"a".repeat(32)}`]),
+    /requires --confirm/,
+  )
 })
 
 test("CLI defaults to the stdio server without writing normal output", async () => {
@@ -359,6 +396,102 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
   assert.match(textOutput.value(), /Execution guard: CATALOG_ONLY/)
   assert.match(textOutput.value(), /Credentials required: no/)
   assert.deepEqual(JSON.parse(jsonOutput.value()), catalogReport())
+})
+
+test("CLI inspects and resolves coordination without credentials or Discord access", async () => {
+  const claimId = `claim_${"a".repeat(32)}`
+  const environment = { DISCORD_MCP_AUDIT_FILE: "/test/discord-mcp-cli-activity.jsonl" }
+  const events: string[] = []
+  const listOutput = outputStream()
+  const resolveOutput = outputStream()
+  const coordinationDependencies = dependencies({
+    async listCoordination(receivedEnvironment) {
+      assert.equal(receivedEnvironment, environment)
+      events.push("list")
+      return {
+        claims: [{
+          claimId,
+          createdAt: "2026-08-22T00:00:00.000Z",
+          kind: "channel-metadata-change",
+          operationKeyHash: `sha256:${"b".repeat(64)}`,
+          ownerPid: 1234,
+          ownerState: "dead",
+          planDigest: `hmac-sha256:${"c".repeat(64)}`,
+          publishedTargetCount: 1,
+          receiptState: "pending",
+          schemaVersion: 1,
+          state: "review-required",
+          targets: [{ id: CHANNEL_ID, kind: "channel" }],
+        }],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async resolveCoordination(receivedEnvironment, receivedClaimId, confirmation) {
+      assert.equal(receivedEnvironment, environment)
+      assert.equal(receivedClaimId, claimId)
+      assert.equal(confirmation, claimId)
+      events.push("resolve")
+      return {
+        claimId,
+        releasedTargetCount: 1,
+        schemaVersion: 1,
+        status: "resolved",
+      }
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["coordination", "list"],
+    dependencies: coordinationDependencies,
+    environment,
+    stdout: listOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["coordination", "resolve", claimId, "--confirm", claimId, "--json"],
+    dependencies: coordinationDependencies,
+    environment,
+    stdout: resolveOutput.stream,
+  }), 0)
+
+  assert.match(listOutput.value(), new RegExp(`${claimId}: review-required`))
+  assert.match(listOutput.value(), /Receipt: pending/)
+  assert.deepEqual(JSON.parse(resolveOutput.value()), {
+    claimId,
+    releasedTargetCount: 1,
+    schemaVersion: 1,
+    status: "resolved",
+  })
+  assert.deepEqual(events, ["list", "resolve"])
+})
+
+test("CLI default coordination inspection needs no credential or connector configuration", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-cli-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const claimId = `claim_${"f".repeat(32)}`
+  const environment = {
+    DISCORD_MCP_AUDIT_FILE: join(root, "activity.jsonl"),
+  }
+
+  assert.equal(await runCli({
+    args: ["coordination", "list", "--json"],
+    environment,
+    stdout: stdout.stream,
+  }), 0)
+  assert.deepEqual(JSON.parse(stdout.value()), {
+    claims: [],
+    schemaVersion: 1,
+    status: "ok",
+  })
+  assert.equal(await runCli({
+    args: ["coordination", "resolve", claimId, "--confirm", claimId],
+    environment,
+    stderr: stderr.stream,
+  }), 1)
+  assert.match(stderr.value(), /Discord write claim was not found/)
+  assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
 
 test("CLI returns diagnostic failure while preserving secret-free JSON", async () => {

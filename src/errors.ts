@@ -94,6 +94,39 @@ export class OperationStoreError extends Error {
   override name = "OperationStoreError"
 }
 
+export class WriteCoordinationStateError extends Error {
+  override name = "WriteCoordinationStateError"
+}
+
+export class WriteCoordinationConflictError extends Error {
+  readonly claimId: string
+
+  constructor(claimId: string) {
+    super(
+      `Reviewed Discord write claim ${claimId} already owns at least one required target; inspect it with discord-mcp coordination list`,
+    )
+    this.name = "WriteCoordinationConflictError"
+    this.claimId = claimId
+  }
+}
+
+export class WriteCoordinationQuarantinedError extends Error {
+  readonly claimId: string
+
+  constructor(claimId: string, options?: ErrorOptions) {
+    super(
+      `Reviewed Discord write claim ${claimId} is quarantined because its outcome is not safely settled; inspect Discord and run discord-mcp coordination list`,
+      options,
+    )
+    this.name = "WriteCoordinationQuarantinedError"
+    this.claimId = claimId
+  }
+}
+
+export class WriteCoordinationResolutionError extends Error {
+  override name = "WriteCoordinationResolutionError"
+}
+
 export class ProfileError extends Error {
   override name = "ProfileError"
 }

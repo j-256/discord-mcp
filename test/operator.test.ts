@@ -169,6 +169,18 @@ function status(
     },
     schemaVersion: 1,
     status: "ok",
+    writeCoordination: {
+      coverage: "receipt-backed-single-step-reviewed-writes",
+      excludedWorkflows: [
+        "guild-scaffold",
+        "legacy-member-moderation",
+        "legacy-message-deletion",
+        "ordinary-message-interactions",
+      ],
+      localFilesystemRequired: true,
+      mode: "durable-exact-target",
+      sharedStateRootRequired: true,
+    },
   }
 }
 

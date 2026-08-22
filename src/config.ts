@@ -262,13 +262,26 @@ function parseOwnedRoots(
 
 function defaultAuditFile(environment: NodeJS.ProcessEnv, homeDirectory: string): string {
   const stateRoot = environment.XDG_STATE_HOME?.trim()
-  return join(stateRoot || join(homeDirectory, ".local", "state"), "discord-mcp", "activity.jsonl")
+  const root = stateRoot && isAbsolute(stateRoot)
+    ? stateRoot
+    : join(homeDirectory, ".local", "state")
+  return join(root, "discord-mcp", "activity.jsonl")
 }
 
 function auditFile(value: string | undefined, environment: NodeJS.ProcessEnv, homeDirectory: string): string {
-  if (!value?.trim()) return defaultAuditFile(environment, homeDirectory)
-  const normalized = value.trim()
-  return isAbsolute(normalized) ? normalized : resolve(normalized)
+  const selected = value?.trim() || defaultAuditFile(environment, homeDirectory)
+  return resolve(selected)
+}
+
+export function resolveConnectorAuditFile(
+  environment: NodeJS.ProcessEnv = process.env,
+  options: ConfigOptions = {},
+): string {
+  return auditFile(
+    environment[ENVIRONMENT_NAMES.auditFile],
+    environment,
+    options.homeDirectory || homedir(),
+  )
 }
 
 export function loadConnectorConfig(
@@ -815,11 +828,7 @@ export function loadConnectorConfig(
     allowWidgetPublicExposure,
     allowWidgetSettingsAudit,
     allowWidgetSettingsChanges,
-    auditFile: auditFile(
-      environment[ENVIRONMENT_NAMES.auditFile],
-      environment,
-      options.homeDirectory || homedir(),
-    ),
+    auditFile: resolveConnectorAuditFile(environment, options),
     attachmentChannelIds,
     attachmentMaxBytes: parseInteger(
       environment[ENVIRONMENT_NAMES.attachmentMaxBytes],

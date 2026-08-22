@@ -10,9 +10,14 @@ import {
   CONNECTOR_VERSION,
   ENVIRONMENT_NAMES,
 } from "./constants.js"
+import { resolveConnectorAuditFile } from "./config.js"
 import { ConfigurationError, errorMessage, redactText } from "./errors.js"
 import { isMainModule } from "./entrypoint.js"
 import { runDiscordMcpServer } from "./mcp.js"
+import {
+  FileOperationStore,
+  operationReceiptDirectory,
+} from "./operation-store.js"
 import {
   diagnoseConnector,
   OPERATOR_REPORT_SCHEMA_VERSION,
@@ -37,9 +42,16 @@ import {
   type ProfileLocationOptions,
   type TrashedProfile,
 } from "./profile.js"
+import {
+  FileWriteCoordinator,
+  writeCoordinationDirectory,
+  type WriteCoordinationList,
+  type WriteCoordinationResolution,
+} from "./write-coordination.js"
 
 const CLI_COMMANDS = Object.freeze([
   "catalog",
+  "coordination",
   "doctor",
   "help",
   "profile",
@@ -53,6 +65,18 @@ type CliCommand = typeof CLI_COMMANDS[number]
 
 export type ParsedCliArguments =
   | { check: boolean; command: "catalog"; json: boolean }
+  | {
+    action: "list"
+    command: "coordination"
+    json: boolean
+  }
+  | {
+    action: "resolve"
+    claimId: string
+    command: "coordination"
+    confirmation: string
+    json: boolean
+  }
   | { command: "doctor"; json: boolean; online: boolean; profileName?: string }
   | { command: "help"; topic: CliCommand | undefined }
   | {
@@ -96,9 +120,15 @@ export interface CliDependencies {
   }): unknown
   checkCatalog(): Promise<DiscordCatalogCheckReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
+  listCoordination(environment: NodeJS.ProcessEnv): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
+  resolveCoordination(
+    environment: NodeJS.ProcessEnv,
+    claimId: string,
+    confirmation: string,
+  ): Promise<WriteCoordinationResolution>
   restoreProfile(name: string, options: ProfileLocationOptions): Promise<TrashedProfile>
   serve(options: {
     environment: NodeJS.ProcessEnv
@@ -124,9 +154,23 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   catalog: runDiscordMcpCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
+  listCoordination: async (environment) => {
+    const auditFile = resolveConnectorAuditFile(environment)
+    return new FileWriteCoordinator(
+      writeCoordinationDirectory(auditFile),
+      new FileOperationStore(operationReceiptDirectory(auditFile)),
+    ).list()
+  },
   listProfiles,
   loadProfile,
   prepareSetup,
+  resolveCoordination: async (environment, claimId, confirmation) => {
+    const auditFile = resolveConnectorAuditFile(environment)
+    return new FileWriteCoordinator(
+      writeCoordinationDirectory(auditFile),
+      new FileOperationStore(operationReceiptDirectory(auditFile)),
+    ).resolve(claimId, confirmation)
+  },
   restoreProfile,
   serve: runDiscordMcpServer,
   smoke: smokeConnector,
@@ -295,6 +339,58 @@ function parseProfileCommand(
   }
 }
 
+function parseCoordinationCommand(
+  args: readonly string[],
+): Extract<ParsedCliArguments, { command: "coordination" }> {
+  const action = args[0]
+  if (!action || !["list", "resolve"].includes(action)) {
+    throw new ConfigurationError("coordination requires list or resolve")
+  }
+  if (action === "list") {
+    const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
+    return { action, command: "coordination", json: options.has("--json") }
+  }
+  const claimId = args[1]
+  if (!claimId || claimId.startsWith("--")) {
+    throw new ConfigurationError("coordination resolve requires a claim ID")
+  }
+  let confirmation: string | undefined
+  let json = false
+  const seen = new Set<string>()
+  for (let index = 2; index < args.length; index += 1) {
+    const argument = args[index]
+    if (argument !== "--confirm" && argument !== "--json") {
+      throw new ConfigurationError(`Unknown option ${argument || ""}`)
+    }
+    if (seen.has(argument)) {
+      throw new ConfigurationError(`Option ${argument} may be provided only once`)
+    }
+    seen.add(argument)
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) {
+      throw new ConfigurationError("Option --confirm requires a value")
+    }
+    confirmation = value
+    index += 1
+  }
+  if (confirmation === undefined) {
+    throw new ConfigurationError(
+      "coordination resolve requires --confirm CLAIM_ID",
+    )
+  }
+  return {
+    action: "resolve",
+    claimId,
+    command: "coordination",
+    confirmation,
+    json,
+  }
+}
+
 export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (args.length === 0) return { command: "serve" }
   const command = args[0]
@@ -350,6 +446,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
     }
     return { check, command, json }
   }
+  if (command === "coordination") return parseCoordinationCommand(rest)
   if (command === "setup") return parseSetupOptions(rest)
   if (command === "profile") return parseProfileCommand(rest)
   const options = parseProfileSelectionOptions(rest, new Set(["--json"]))
@@ -366,6 +463,17 @@ function helpText(topic: CliCommand | undefined): string {
   }
   if (topic === "doctor") {
     return "Usage: discord-mcp doctor [--profile NAME] [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access."
+  }
+  if (topic === "coordination") {
+    return [
+      "Usage: discord-mcp coordination <action> [options]",
+      "",
+      "Actions:",
+      "  list [--json]",
+      "  resolve CLAIM_ID --confirm CLAIM_ID [--json]",
+      "",
+      "Inspect content-free reviewed-write claims without credentials or Discord access. Stop the owning process and inspect Discord before resolving a claim that requires review.",
+    ].join("\n")
   }
   if (topic === "setup") {
     return "Usage: discord-mcp setup [--profile NAME [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot, optionally save a non-secret profile, and print a credential-free portable stdio launch descriptor."
@@ -395,6 +503,7 @@ function helpText(topic: CliCommand | undefined): string {
     "",
     "Commands:",
     "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
+    "  coordination  Inspect or resolve durable reviewed-write claims",
     "  serve    Run the stdio MCP server (default)",
     "  setup    Verify the bot and generate safe client configuration",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
@@ -428,6 +537,31 @@ function renderDoctor(report: DoctorReport): string {
     lines.push(`${entry.status.toUpperCase()} ${entry.id}: ${entry.summary}`)
   }
   return lines.join("\n")
+}
+
+function renderCoordinationList(report: WriteCoordinationList): string {
+  if (report.claims.length === 0) {
+    return "No active Discord write coordination claims"
+  }
+  return report.claims.map((claim) => [
+    `${claim.claimId}: ${claim.state}`,
+    `  Operation: ${claim.kind}`,
+    `  Owner: PID ${claim.ownerPid} (${claim.ownerState})`,
+    `  Receipt: ${claim.receiptState}`,
+    `  Created: ${claim.createdAt}`,
+    `  Targets: ${JSON.stringify(claim.targets)}`,
+  ].join("\n")).join("\n")
+}
+
+function renderCoordinationResolution(report: WriteCoordinationResolution): string {
+  const result = report.status === "resolved"
+    ? `Resolved Discord write claim ${report.claimId}`
+    : `Discord write claim ${report.claimId} was already resolved`
+  return [
+    result,
+    `Released targets: ${report.releasedTargetCount}`,
+    "The immutable operation receipt and operation-key reservation were not removed.",
+  ].join("\n")
 }
 
 function renderSetup(report: SetupReport): string {
@@ -592,6 +726,25 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           runtimeEnvironment,
         )
         return report.status === "error" ? 1 : 0
+      }
+      case "coordination": {
+        const report = parsed.action === "list"
+          ? await dependencies.listCoordination(environment)
+          : await dependencies.resolveCoordination(
+            environment,
+            parsed.claimId,
+            parsed.confirmation,
+          )
+        safeWrite(
+          stdout,
+          parsed.json
+            ? jsonReport(report)
+            : parsed.action === "list"
+              ? renderCoordinationList(report as WriteCoordinationList)
+              : renderCoordinationResolution(report as WriteCoordinationResolution),
+          environment,
+        )
+        return 0
       }
       case "help":
         safeWrite(stdout, helpText(parsed.topic), environment)

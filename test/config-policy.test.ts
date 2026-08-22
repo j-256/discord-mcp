@@ -10,7 +10,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { loadConnectorConfig } from "../src/config.js"
+import {
+  loadConnectorConfig,
+  resolveConnectorAuditFile,
+} from "../src/config.js"
 import {
   CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
@@ -46,6 +49,22 @@ test("configuration requires the dedicated Discord bot token", () => {
       error instanceof ConfigurationError
       && /DISCORD_BOT_TOKEN is required/.test(error.message)
     ),
+  )
+})
+
+test("credential-free activity-state resolution is absolute and lexical-canonical", () => {
+  assert.equal(
+    resolveConnectorAuditFile(
+      { XDG_STATE_HOME: "relative-state" },
+      { homeDirectory: "/test/home" },
+    ),
+    "/test/home/.local/state/discord-mcp/activity.jsonl",
+  )
+  assert.equal(
+    resolveConnectorAuditFile({
+      DISCORD_MCP_AUDIT_FILE: "/test/state/../shared/activity.jsonl",
+    }),
+    "/test/shared/activity.jsonl",
   )
 })
 

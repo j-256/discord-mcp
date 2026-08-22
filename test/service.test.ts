@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import {
   mkdtemp,
+  readdir,
   realpath,
   rm,
   writeFile,
@@ -25,6 +26,7 @@ import {
   type DiscordThreadStateSummary,
 } from "../src/discord-client.js"
 import {
+  ChannelCreationPlanChangedError,
   ConfigurationError,
   DiscordApiError,
   InteractionRateLimitError,
@@ -35,6 +37,7 @@ import type {
   OperationReceipt,
   OperationStore,
 } from "../src/operation-store.js"
+import { operationKeyHash } from "../src/operation-store.js"
 import {
   ConnectorService,
   type ConnectorServiceOptions,
@@ -49,6 +52,10 @@ import type {
   DiscordRole,
   DiscordUser,
 } from "../src/types.js"
+import type {
+  WriteCoordinationIntent,
+  WriteCoordinator,
+} from "../src/write-coordination.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
@@ -69,6 +76,22 @@ const AUTOMOD_RULE_ID = "910000000000000001"
 const SCHEDULED_EVENT_ID = "930000000000000001"
 const SOUNDBOARD_SOUND_ID = "935000000000000001"
 const STAGE_INSTANCE_ID = "940000000000000001"
+
+const PASSTHROUGH_WRITE_COORDINATOR: WriteCoordinator = {
+  run(_intent, operation) {
+    return operation()
+  },
+}
+
+class CapturingWriteCoordinator implements WriteCoordinator {
+  readonly intents: WriteCoordinationIntent[] = []
+  readonly stop = new Error("coordination-captured")
+
+  async run<T>(intent: WriteCoordinationIntent): Promise<T> {
+    this.intents.push(intent)
+    throw this.stop
+  }
+}
 
 class MemoryOperationStore implements OperationStore {
   receipt: OperationReceipt | undefined
@@ -223,6 +246,8 @@ function serviceFixture(overrides: {
   threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
   threadGovernanceOptions?: ConnectorServiceOptions["threadGovernanceOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
+  useDefaultWriteCoordinator?: boolean
+  writeCoordinator?: WriteCoordinator
 } = {}) {
   const calls = {
     activityAppends: 0,
@@ -638,6 +663,9 @@ function serviceFixture(overrides: {
       activityStore,
       client,
       config,
+      ...(overrides.useDefaultWriteCoordinator
+        ? {}
+        : { writeCoordinator: overrides.writeCoordinator || PASSTHROUGH_WRITE_COORDINATOR }),
       ...(overrides.channelAdministrationOptions
         ? { channelAdministrationOptions: overrides.channelAdministrationOptions }
         : {}),
@@ -750,7 +778,412 @@ test("service rejects a token for the wrong pinned bot before data access", asyn
   assert.equal(calls.guilds, 0)
 })
 
+test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const { service } = serviceFixture({ writeCoordinator })
+  const digest = `hmac-sha256:${"a".repeat(64)}`
+  const operationKey = "coordination-operation-0001"
+  const captured = async (operation: () => Promise<unknown>) => {
+    await assert.rejects(operation, (error: unknown) => error === writeCoordinator.stop)
+  }
+
+  await captured(() => service.executeAttachmentMessage({
+    channelId: CHANNEL_ID,
+    filePath: "/test/attachment.txt",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeAutoModerationChange({
+    action: "delete",
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    ruleId: AUTOMOD_RULE_ID,
+  }, digest))
+  await captured(() => service.executeChannelCreation({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    kind: "text",
+    name: "reviewed-channel",
+    operationKey,
+    parentId: CHANNEL_ID,
+  }, digest))
+  await captured(() => service.executeChannelMetadataChange({
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    name: "reviewed-channel",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeChannelPermissionOverwrite({
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    mode: "delete",
+    operationKey,
+    targetId: CREATED_ROLE_ID,
+    targetType: "role",
+  }, digest))
+  await captured(() => service.executeForumPost({
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    content: "reviewed content",
+    name: "reviewed post",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeGuildExpressionChange({
+    action: "delete",
+    auditReason: "reviewed",
+    expressionId: AUTOMOD_RULE_ID,
+    guildId: GUILD_ID,
+    kind: "emoji",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeInviteDeletion({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    inviteRef: `iref_hmac_sha256_${"b".repeat(64)}`,
+    operationKey,
+  }, digest))
+  await captured(() => service.executeMemberRoleChange({
+    action: "add",
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    roleId: CREATED_ROLE_ID,
+    userId: MEMBER_USER_ID,
+  }, digest))
+  await captured(() => service.executeMemberVoiceChange({
+    action: "move",
+    auditReason: "reviewed",
+    destinationChannelId: OTHER_CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey,
+    userId: MEMBER_USER_ID,
+  }, digest))
+  await captured(() => service.executeMessagePin({
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    desiredState: "pinned",
+    messageId: MESSAGE_ID,
+    operationKey,
+  }, digest))
+  await captured(() => service.executeOnboardingChange({
+    auditReason: "reviewed",
+    defaultChannelIds: [],
+    enabled: false,
+    guildId: GUILD_ID,
+    mode: "default",
+    operationKey,
+    prompts: [],
+  }, digest))
+  await captured(() => service.executePollCreation({
+    answers: [{ text: "One" }, { text: "Two" }],
+    channelId: CHANNEL_ID,
+    operationKey,
+    question: "Reviewed?",
+  }, digest))
+  await captured(() => service.executePollEnd({
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    operationKey,
+  }, digest))
+  await captured(() => service.executeRoleCreation({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    name: "reviewed-role",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeRoleConfiguration({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    name: "reviewed-role",
+    operationKey,
+    roleId: CREATED_ROLE_ID,
+  }, digest))
+  await captured(() => service.executeScheduledEventChange({
+    action: "delete",
+    auditReason: "reviewed",
+    eventId: SCHEDULED_EVENT_ID,
+    guildId: GUILD_ID,
+    operationKey,
+  }, digest))
+  await captured(() => service.executeSoundboardChange({
+    action: "delete",
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    soundId: SOUNDBOARD_SOUND_ID,
+  }, digest))
+  await captured(() => service.executeStageInstanceChange({
+    action: "end",
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey,
+  }, digest))
+  await captured(() => service.executeThreadCreation({
+    auditReason: "reviewed",
+    mode: "standalone-public",
+    name: "reviewed-thread",
+    operationKey,
+    parentChannelId: CHANNEL_ID,
+  }, digest))
+  await captured(() => service.executeThreadChange({
+    action: "add-member",
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    threadId: THREAD_ID,
+    userId: MEMBER_USER_ID,
+  }, digest))
+  await captured(() => service.executeWelcomeScreenChange({
+    auditReason: "reviewed",
+    channels: [],
+    description: null,
+    enabled: false,
+    guildId: GUILD_ID,
+    operationKey,
+  }, digest))
+  await captured(() => service.executeWebhookDeletion({
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    operationKey,
+    webhookId: WEBHOOK_ID,
+  }, digest))
+  await captured(() => service.executeWidgetSettingsChange({
+    auditReason: "reviewed",
+    channelId: null,
+    enabled: false,
+    guildId: GUILD_ID,
+    operationKey,
+  }, digest))
+
+  const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
+  assert.equal(byKind.size, 24)
+  assert.deepEqual(
+    Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
+    {
+      "attachment-message": [{ id: CHANNEL_ID, kind: "channel" }],
+      "automod-change": [{
+        collection: "automod",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "channel-creation": [
+        { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+        { id: CHANNEL_ID, kind: "channel" },
+      ],
+      "channel-metadata-change": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
+      "channel-permission-overwrite": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: CREATED_ROLE_ID, kind: "role" },
+      ],
+      "forum-post": [{ id: CHANNEL_ID, kind: "channel" }],
+      "guild-expression-change": [{
+        collection: "emojis",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "guild-soundboard-change": [{
+        collection: "soundboard",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "invite-deletion": [{
+        collection: "invites",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "member-role-change": [
+        { id: MEMBER_USER_ID, kind: "member" },
+        { id: CREATED_ROLE_ID, kind: "role" },
+      ],
+      "member-voice-change": [{ id: MEMBER_USER_ID, kind: "member" }],
+      "message-pin": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: MESSAGE_ID, kind: "message" },
+      ],
+      "onboarding-change": [{
+        collection: "onboarding",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "poll-create": [{ id: CHANNEL_ID, kind: "channel" }],
+      "poll-end": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: MESSAGE_ID, kind: "message" },
+      ],
+      "role-configuration": [
+        { id: CREATED_ROLE_ID, kind: "role" },
+        { collection: "roles", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
+      "role-creation": [{
+        collection: "roles",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "scheduled-event-change": [{
+        collection: "scheduled-events",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "stage-instance-change": [{ id: CHANNEL_ID, kind: "channel" }],
+      "thread-create": [{ id: CHANNEL_ID, kind: "channel" }],
+      "thread-governance-change": [
+        { id: THREAD_ID, kind: "channel" },
+        { id: MEMBER_USER_ID, kind: "member" },
+      ],
+      "webhook-deletion": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: WEBHOOK_ID, kind: "webhook" },
+      ],
+      "welcome-screen-change": [{
+        collection: "welcome-screen",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "widget-settings-change": [{
+        collection: "widget-settings",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+    },
+  )
+  for (const entry of writeCoordinator.intents) {
+    assert.equal(entry.operationKeyHash, operationKeyHash(operationKey))
+    assert.equal(entry.planDigest, digest)
+  }
+  await assert.rejects(
+    () => service.deleteMessages(CHANNEL_ID, [MESSAGE_ID], digest),
+    (error: unknown) => error !== writeCoordinator.stop,
+  )
+  await assert.rejects(
+    () => service.executeChannelCreation({
+      auditReason: "reviewed",
+      guildId: GUILD_ID,
+      kind: "category",
+      name: "invalid-digest",
+      operationKey,
+    }, "invalid"),
+    /reviewed-write plan digest is invalid/,
+  )
+  assert.equal(writeCoordinator.intents.length, 24)
+})
+
+test("distinct connector facades coordinate through one production state root", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-service-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const auditFile = join(root, "activity.jsonl")
+  let created: DiscordChannel | undefined
+  let createCalls = 0
+  let releaseCreate: (() => void) | undefined
+  let reportCreateStarted: (() => void) | undefined
+  const createStarted = new Promise<void>((resolvePromise) => {
+    reportCreateStarted = resolvePromise
+  })
+  const createRelease = new Promise<void>((resolvePromise) => {
+    releaseCreate = resolvePromise
+  })
+  const client: Partial<DiscordServiceClient> = {
+    async createGuildChannel(guildId, input) {
+      assert.equal(guildId, GUILD_ID)
+      createCalls += 1
+      created = channel({
+        id: CREATED_CHANNEL_ID,
+        name: input.name,
+        parent_id: null,
+        permission_overwrites: [],
+        type: 4,
+      })
+      reportCreateStarted?.()
+      await createRelease
+      return created
+    },
+    async getChannel(channelId) {
+      assert.equal(channelId, CREATED_CHANNEL_ID)
+      if (!created) throw new Error("created channel is unavailable")
+      return created
+    },
+    async getGuild() {
+      return { ...guild(), owner_id: "700000000000000001" }
+    },
+    async getGuildChannels() {
+      return created ? [created] : []
+    },
+    async getGuildMember() {
+      return { roles: [], user: bot() }
+    },
+    async getGuildRoles() {
+      return [role(
+        GUILD_ID,
+        DISCORD_PERMISSIONS.MANAGE_CHANNELS | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+        "@everyone",
+      )]
+    },
+  }
+  const shared = {
+    channelAdministrationOptions: {
+      clock: () => new Date("2026-08-22T03:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(7),
+      randomId: () => "activity-shared-channel-create",
+    },
+    client,
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+      DISCORD_MCP_AUDIT_FILE: auditFile,
+      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+    },
+    useDefaultWriteCoordinator: true,
+  } satisfies Parameters<typeof serviceFixture>[0]
+  const first = serviceFixture(shared).service
+  const second = serviceFixture(shared).service
+  const firstRequest = {
+    auditReason: "Reviewed first category",
+    guildId: GUILD_ID,
+    kind: "category" as const,
+    name: "First category",
+    operationKey: "shared-channel-create-attempt-0001",
+  }
+  const secondRequest = {
+    auditReason: "Reviewed second category",
+    guildId: GUILD_ID,
+    kind: "category" as const,
+    name: "Second category",
+    operationKey: "shared-channel-create-attempt-0002",
+  }
+  const [firstPlan, secondPlan] = await Promise.all([
+    first.planChannelCreation(firstRequest),
+    second.planChannelCreation(secondRequest),
+  ])
+
+  const running = first.executeChannelCreation(firstRequest, firstPlan.digest)
+  await Promise.race([
+    createStarted,
+    running.then(() => {
+      throw new Error("first coordinated write completed before mutation started")
+    }),
+  ])
+  const queued = assert.rejects(
+    () => second.executeChannelCreation(secondRequest, secondPlan.digest),
+    ChannelCreationPlanChangedError,
+  )
+  await new Promise<void>((resolvePromise) => setImmediate(resolvePromise))
+  assert.equal(createCalls, 1)
+  releaseCreate?.()
+  assert.equal((await running).status, "completed")
+  await queued
+  assert.equal(createCalls, 1)
+  assert.deepEqual(
+    await readdir(`${auditFile}.coordination/claims`),
+    [],
+  )
+})
+
 test("service verifies bot identity before delegating safe message interactions", async () => {
+  const writeCoordinator = new CapturingWriteCoordinator()
   const { calls, service } = serviceFixture({
     environment: {
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
@@ -759,6 +1192,7 @@ test("service verifies bot identity before delegating safe message interactions"
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
     },
+    writeCoordinator,
   })
 
   const sent = await service.sendMessage({
@@ -778,6 +1212,7 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.user, 1)
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 1)
+  assert.deepEqual(writeCoordinator.intents, [])
 })
 
 test("service verifies identity through credential-free webhook audit and cleanup", async () => {
@@ -2039,6 +2474,7 @@ test("service verifies identity before planning and executing exact member moder
   const targetId = "700000000000000002"
   const botRoleId = "800000000000000001"
   const targetRoleId = "800000000000000002"
+  const writeCoordinator = new CapturingWriteCoordinator()
   const { calls, service } = serviceFixture({
     client: {
       async getGuild() {
@@ -2068,6 +2504,7 @@ test("service verifies identity before planning and executing exact member moder
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
     },
+    writeCoordinator,
   })
   const request = {
     action: "kick" as const,
@@ -2084,6 +2521,7 @@ test("service verifies identity before planning and executing exact member moder
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.removeMember, 1)
+  assert.deepEqual(writeCoordinator.intents, [])
 })
 
 test("service pins identity through reviewed exact member-role changes", async () => {
@@ -2523,6 +2961,7 @@ test("service verifies identity before reviewed additive channel creation", asyn
 
 test("service verifies identity before an exact guild-scaffold no-op", async () => {
   const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
   const { calls, service } = serviceFixture({
     client: {
       async getGuildChannels() {
@@ -2555,6 +2994,7 @@ test("service verifies identity before an exact guild-scaffold no-op", async () 
       randomId: () => "activity-guild-scaffold",
     },
     operationStore,
+    writeCoordinator,
   })
   const request = {
     auditReason: "Reviewed exact existing scaffold",
@@ -2574,6 +3014,7 @@ test("service verifies identity before an exact guild-scaffold no-op", async () 
   assert.equal(calls.createChannel, 0)
   assert.equal(calls.createRole, 0)
   assert.equal(operationStore.receipt, undefined)
+  assert.deepEqual(writeCoordinator.intents, [])
 })
 
 test("service pins identity through native poll audit and reviewed creation", async () => {
@@ -3224,6 +3665,18 @@ test("service verifies identity once and reports scope without message reads", a
   assert.equal(status.application.messageContentIntent, "enabled")
   assert.equal(status.bot.id, BOT_ID)
   assert.equal(status.guildPage.accessible, 1)
+  assert.deepEqual(status.writeCoordination, {
+    coverage: "receipt-backed-single-step-reviewed-writes",
+    excludedWorkflows: [
+      "guild-scaffold",
+      "legacy-member-moderation",
+      "legacy-message-deletion",
+      "ordinary-message-interactions",
+    ],
+    localFilesystemRequired: true,
+    mode: "durable-exact-target",
+    sharedStateRootRequired: true,
+  })
   assert.equal(guilds.guilds[0]?.id, GUILD_ID)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
