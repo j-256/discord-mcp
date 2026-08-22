@@ -75,6 +75,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS: "true",
     DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
     DISCORD_MCP_ALLOW_DELETIONS: "TRUE",
     DISCORD_MCP_ALLOW_INTERACTIONS: "true",
@@ -82,6 +83,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
     DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
     DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_BOT_ID: "300000000000000002",
     DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
@@ -105,6 +107,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.mentionUserIds], [USER_ID])
   assert.deepEqual([...config.protectedUserIds], [USER_ID])
   assert.equal(config.allowAdministration, true)
+  assert.equal(config.allowAnnouncementCrossposts, true)
+  assert.deepEqual([...config.announcementCrosspostChannelIds], [CHANNEL_ID])
   assert.equal(config.allowAttachments, false)
   assert.equal(config.allowBanAudit, true)
   assert.deepEqual([...config.banAuditGuildIds], [GUILD_ID])
@@ -153,6 +157,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
   assert.deepEqual(new ScopePolicy(config).describe(), {
     administrationEnabled: false,
     administrationGuildIds: [],
+    announcementCrosspostChannelIds: [],
+    announcementCrosspostsEnabled: false,
     allowedChannelIds: [],
     allowedGuildIds: [],
     attachmentChannelIds: [],
@@ -459,6 +465,8 @@ test("configuration and policy require an exact administration guild and protect
   assert.deepEqual(policy.describe(), {
     administrationEnabled: true,
     administrationGuildIds: [GUILD_ID],
+    announcementCrosspostChannelIds: [],
+    announcementCrosspostsEnabled: false,
     allowedChannelIds: [],
     allowedGuildIds: [],
     attachmentChannelIds: [],
@@ -1566,6 +1574,59 @@ test("configuration and policy isolate pin management to exact readable channels
   assert.deepEqual(enabled.describe().pinChannelIds, [CHANNEL_ID])
 })
 
+test("configuration and policy isolate announcement crossposts to exact readable channels", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertChannelAnnouncementCrosspostable(channel({
+      type: DISCORD_CHANNEL_TYPES.announcement,
+    })),
+    /announcement crossposts are disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS: "true",
+    DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  const announcement = channel({ type: DISCORD_CHANNEL_TYPES.announcement })
+  assert.equal(enabledConfig.allowAnnouncementCrossposts, true)
+  assert.deepEqual(
+    [...enabledConfig.announcementCrosspostChannelIds],
+    [CHANNEL_ID],
+  )
+  assert.equal(
+    enabled.assertChannelAnnouncementCrosspostable(announcement),
+    GUILD_ID,
+  )
+  assert.throws(
+    () => enabled.assertChannelAnnouncementCrosspostable(channel({
+      id: OTHER_CHANNEL_ID,
+      type: DISCORD_CHANNEL_TYPES.announcement,
+    })),
+    /outside the announcement-crosspost scope/,
+  )
+  assert.equal(enabled.describe().announcementCrosspostsEnabled, true)
+  assert.deepEqual(
+    enabled.describe().announcementCrosspostChannelIds,
+    [CHANNEL_ID],
+  )
+})
+
 test("configuration and policy separate poll audit, voter, creation, and ending authority", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1776,6 +1837,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
   assert.deepEqual(policy.describe(), {
     administrationEnabled: false,
     administrationGuildIds: [],
+    announcementCrosspostChannelIds: [],
+    announcementCrosspostsEnabled: false,
     allowedChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
     allowedGuildIds: [GUILD_ID],
     attachmentChannelIds: [],

@@ -2,6 +2,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  AnnouncementCrosspostExecutionError,
+  AnnouncementCrosspostOperationConflictError,
+  AnnouncementCrosspostPlanChangedError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
   ChannelCreationPlanChangedError,
@@ -310,6 +313,18 @@ test("operational telemetry still shuts down after a final flush failure", async
 
 test("operational errors collapse to fixed categories", () => {
   assert.equal(classifyOperationalError(new PolicyError("private detail")), "policy-error")
+  assert.equal(
+    classifyOperationalError(new AnnouncementCrosspostPlanChangedError("expected", "actual")),
+    "plan-changed",
+  )
+  assert.equal(
+    classifyOperationalError(new AnnouncementCrosspostOperationConflictError({})),
+    "idempotency-conflict",
+  )
+  assert.equal(
+    classifyOperationalError(new AnnouncementCrosspostExecutionError("private detail", {})),
+    "execution-error",
+  )
   assert.equal(
     classifyOperationalError(new ChannelCreationPlanChangedError("expected", "actual")),
     "plan-changed",

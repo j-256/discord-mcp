@@ -37,6 +37,7 @@ const MCP_DISCOVERY_DETAILS = [
 
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
 type McpToolWorkflow =
+  | "announcement-crosspost"
   | "attachment-message"
   | "automod-change"
   | "channel-creation"
@@ -105,6 +106,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["automod", "create", "delete", "disable", "enable", "execute", "moderation", "policy", "rule", "update"],
     toolset: "automod",
     workflow: "automod-change",
+  },
+  execute_announcement_crosspost: {
+    keywords: ["announcement", "crosspost", "execute", "message", "publish"],
+    toolset: "announcement-crossposts",
+    workflow: "announcement-crosspost",
   },
   execute_channel_creation: {
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
@@ -437,6 +443,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["automod", "create", "delete", "disable", "enable", "moderation", "plan", "policy", "review", "rule", "update"],
     toolset: "automod",
     workflow: "automod-change",
+  },
+  plan_announcement_crosspost: {
+    keywords: ["announcement", "crosspost", "message", "plan", "publish", "review"],
+    toolset: "announcement-crossposts",
+    workflow: "announcement-crosspost",
   },
   plan_attachment_message: {
     keywords: ["attachment", "file", "message", "plan", "review", "upload"],

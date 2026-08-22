@@ -42,11 +42,12 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 7
+export const OPERATOR_REPORT_SCHEMA_VERSION = 8
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
+  announcementCrosspostPolicy: "announcement-crosspost-policy",
   applicationIdentity: "application-identity",
   attachmentPolicy: "attachment-policy",
   automodAuditPolicy: "automod-audit-policy",
@@ -248,6 +249,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowDeletions && config.deleteChannelIds.size === 0) {
     warnings.push("The deletion toggle is enabled but deletion remains blocked because no deletion-channel allowlist is configured")
+  }
+  if (
+    config.allowAnnouncementCrossposts
+    && config.announcementCrosspostChannelIds.size === 0
+  ) {
+    warnings.push("The announcement-crosspost toggle is enabled but crossposting remains blocked because no exact announcement-channel allowlist is configured")
   }
   if (config.allowPinManagement && config.pinChannelIds.size === 0) {
     warnings.push("The message-pin toggle is enabled but pin management remains blocked because no pin-channel allowlist is configured")
@@ -480,6 +487,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Member voice audit and reviewed changes",
     ],
     [config.allowPinManagement, "pins", "Message pin management"],
+    [
+      config.allowAnnouncementCrossposts,
+      "announcement-crossposts",
+      "Announcement crossposts",
+    ],
     [
       config.allowPollAudit
         || config.allowPollCreation
@@ -822,6 +834,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.messagePinPolicy,
         "pass",
         `Reviewed message pin management is constrained to ${config.pinChannelIds.size} exact channels with one-shot execution and exact state plus review-snapshot readback`,
+      ))
+    }
+    if (!config.allowAnnouncementCrossposts) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
+        "pass",
+        "Reviewed announcement crossposts are disabled",
+      ))
+    } else if (config.announcementCrosspostChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
+        "warn",
+        "Announcement-crosspost toggle is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
+        "pass",
+        `Reviewed announcement crossposts are constrained to ${config.announcementCrosspostChannelIds.size} exact channels with authorship-sensitive permission proof, one-shot execution, and strict response plus readback verification`,
       ))
     }
     if (!config.allowPollAudit) {
@@ -1577,18 +1608,22 @@ export async function diagnoseConnector(
             ? `Verified application ${status.application.id}, bot ${status.bot.id}, and ${status.guildPage.inScope} in-scope guilds on the first page`
             : `Verified application ${status.application.id} and bot ${status.bot.id}, but no accessible guilds are in local scope`,
         ))
+        const announcementCrosspostsConfigured = config.allowAnnouncementCrossposts
+          && config.announcementCrosspostChannelIds.size > 0
         checks.push(status.application.messageContentIntent === "enabled"
           ? check(
             DOCTOR_CHECK_IDS.messageContentIntent,
             "pass",
-            "Discord application advertises Message Content intent for native search",
+            "Discord application advertises Message Content intent for native search and reviewed announcement crossposts",
           )
           : check(
             DOCTOR_CHECK_IDS.messageContentIntent,
-            "warn",
-            status.application.messageContentIntent === "disabled"
-              ? "Discord application does not advertise Message Content intent; native message search may be unavailable"
-              : "Discord application did not expose enough flags to diagnose Message Content intent",
+            announcementCrosspostsConfigured ? "fail" : "warn",
+            announcementCrosspostsConfigured
+              ? "Discord application lacks confirmed Message Content intent, so configured announcement crossposts are blocked"
+              : status.application.messageContentIntent === "disabled"
+                ? "Discord application does not advertise Message Content intent; native message search may be unavailable"
+                : "Discord application did not expose enough flags to diagnose Message Content intent",
           ))
         if (!config.allowMemberDirectory || config.memberDirectoryGuildIds.size === 0) {
           checks.push(check(
@@ -1725,6 +1760,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.deleteChannelIds,
     ENVIRONMENT_NAMES.allowPinManagement,
     ENVIRONMENT_NAMES.pinChannelIds,
+    ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
+    ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
     ENVIRONMENT_NAMES.allowPollAudit,
     ENVIRONMENT_NAMES.allowPollVoterAudit,
     ENVIRONMENT_NAMES.allowPollCreation,
@@ -1916,7 +1953,10 @@ export async function prepareSetup(
       ...policyWarnings(config),
       ...(status.application.messageContentIntent === "enabled"
         ? []
-        : ["Discord application does not advertise confirmed Message Content intent, so native search may be unavailable"]),
+        : [config.allowAnnouncementCrossposts
+            && config.announcementCrosspostChannelIds.size > 0
+          ? "Discord application does not advertise confirmed Message Content intent, so configured announcement crossposts are blocked"
+          : "Discord application does not advertise confirmed Message Content intent, so native search may be unavailable"]),
       ...(config.allowMemberDirectory
         && config.memberDirectoryGuildIds.size > 0
         && status.application.guildMembersIntent !== "enabled"

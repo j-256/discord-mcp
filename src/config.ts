@@ -32,9 +32,11 @@ import {
 
 export interface ConnectorConfig {
   adminGuildIds: ReadonlySet<string>
+  announcementCrosspostChannelIds: ReadonlySet<string>
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
+  allowAnnouncementCrossposts: boolean
   allowAttachments: boolean
   allowAutomodAudit: boolean
   allowAutomodChanges: boolean
@@ -326,6 +328,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.attachmentChannelIds],
     ENVIRONMENT_NAMES.attachmentChannelIds,
   )
+  const announcementCrosspostChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.announcementCrosspostChannelIds],
+    ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
+  )
   const automodAlertChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.automodAlertChannelIds],
     ENVIRONMENT_NAMES.automodAlertChannelIds,
@@ -488,6 +494,7 @@ export function loadConnectorConfig(
   }
 
   for (const [name, channelIds] of [
+    [ENVIRONMENT_NAMES.announcementCrosspostChannelIds, announcementCrosspostChannelIds],
     [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
     [ENVIRONMENT_NAMES.automodAlertChannelIds, automodAlertChannelIds],
     [ENVIRONMENT_NAMES.channelMetadataIds, channelMetadataIds],
@@ -731,11 +738,16 @@ export function loadConnectorConfig(
 
   return {
     adminGuildIds,
+    announcementCrosspostChannelIds,
     allowedChannelIds,
     allowedGuildIds,
     allowAdministration: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowAdministration],
       ENVIRONMENT_NAMES.allowAdministration,
+    ),
+    allowAnnouncementCrossposts: parseBoolean(
+      environment[ENVIRONMENT_NAMES.allowAnnouncementCrossposts],
+      ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
     ),
     allowAttachments: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowAttachments],

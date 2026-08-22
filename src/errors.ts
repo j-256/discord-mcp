@@ -403,6 +403,38 @@ export class MessagePinExecutionError extends Error {
   }
 }
 
+export class AnnouncementCrosspostPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord message snapshot does not match the reviewed announcement-crosspost plan")
+    this.name = "AnnouncementCrosspostPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class AnnouncementCrosspostOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord announcement-crosspost operation key has already been reserved")
+    this.name = "AnnouncementCrosspostOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class AnnouncementCrosspostExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AnnouncementCrosspostExecutionError"
+    this.result = result
+  }
+}
+
 export class WebhookDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

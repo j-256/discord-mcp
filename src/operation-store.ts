@@ -25,6 +25,7 @@ import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 export const OPERATION_KEY_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
 
 export const OPERATION_KINDS = [
+  "announcement-crosspost",
   "attachment-message",
   "automod-change",
   "channel-creation",

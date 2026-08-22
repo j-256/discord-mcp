@@ -79,6 +79,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 export const MCP_PROMPT_NAMES = Object.freeze({
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
+  reviewAnnouncementCrosspost: "review_announcement_crosspost",
   reviewInviteDeletion: "review_invite_deletion",
   reviewOnboardingChange: "review_onboarding_change",
   reviewWelcomeScreenChange: "review_welcome_screen_change",
@@ -114,6 +115,7 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.inspectGuildBan]: "bans",
+  [MCP_PROMPT_NAMES.reviewAnnouncementCrosspost]: "announcement-crossposts",
   [MCP_PROMPT_NAMES.reviewInviteDeletion]: "invites",
   [MCP_PROMPT_NAMES.reviewOnboardingChange]: "onboarding",
   [MCP_PROMPT_NAMES.reviewWelcomeScreenChange]: "welcome-screen",

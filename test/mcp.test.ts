@@ -26,6 +26,10 @@ import {
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
 import type {
+  AnnouncementCrosspostPlan,
+  AnnouncementCrosspostRequest,
+} from "../src/announcement-crosspost-service.js"
+import type {
   AttachmentMessagePlan,
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
@@ -144,6 +148,8 @@ import type {
 } from "../src/soundboard-service.js"
 import {
   AdministrationExecutionError,
+  AnnouncementCrosspostExecutionError,
+  AnnouncementCrosspostOperationConflictError,
   AttachmentMessageExecutionError,
   AttachmentMessageOperationConflictError,
   AutoModerationExecutionError,
@@ -265,6 +271,7 @@ const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const THREAD_CREATION_OPERATION_KEY = "thread-create-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
+const ANNOUNCEMENT_CROSSPOST_OPERATION_KEY = "announcement-crosspost-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
 const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
 const POLL_QUESTION = "Which release theme should we choose?"
@@ -453,6 +460,68 @@ function messagePinPlan(
       pinned: desiredPinned,
     },
     warnings: ["One-shot reviewed message pin change"],
+  }
+}
+
+function announcementCrosspostPlan(
+  request: AnnouncementCrosspostRequest,
+  digest = DIGEST,
+  action: "crosspost" | "none" = "crosspost",
+): AnnouncementCrosspostPlan {
+  const crossposted = action === "none"
+  return {
+    action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: normalizeChannel(rawChannel({
+      id: request.channelId,
+      type: 5,
+    })),
+    createdAt: "2026-08-22T00:00:00.000Z",
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    message: {
+      attachmentFilenames: ["private-file.txt"],
+      author: {
+        bot: false,
+        globalName: null,
+        id: USER_ID,
+        username: "private-member",
+      },
+      contentLength: 20,
+      contentPreview: "private announcement",
+      crossposted,
+      editedTimestamp: null,
+      flags: crossposted ? 1 : 0,
+      id: request.messageId,
+      jumpUrl: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+      timestamp: "2026-08-22T00:00:00.000Z",
+      truncated: false,
+      type: 0,
+    },
+    messageContentIntent: "enabled",
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      authorship: "other",
+      canReadMessages: true,
+      confidence: "complete",
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.MANAGE_MESSAGES
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.SEND_MESSAGES
+        | DISCORD_PERMISSIONS.VIEW_CHANNEL
+      ).toString(),
+      manageMessages: true,
+      permissionSourceChannelId: request.channelId,
+      readMessageHistory: true,
+      sendMessages: true,
+      viewChannel: true,
+    },
+    schemaVersion: 1,
+    status: action === "none" ? "already-crossposted" : "planned",
+    target: { crossposted: true },
+    warnings: ["Follower destinations are unavailable"],
   }
 }
 
@@ -3228,6 +3297,8 @@ function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
     administrationGuildIds: [],
+    announcementCrosspostChannelIds: [],
+    announcementCrosspostsEnabled: false,
     allowedChannelIds: [],
     allowedGuildIds: [],
     attachmentChannelIds: [],
@@ -3332,6 +3403,9 @@ function fixturePolicy(): PolicyDescription {
 function serviceFixture(overrides: {
   administrationError?: Error
   activityError?: Error
+  announcementCrosspostAction?: "crosspost" | "none"
+  announcementCrosspostError?: Error
+  announcementCrosspostPlanDigest?: string
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -3424,6 +3498,8 @@ function serviceFixture(overrides: {
     administrationPlan: 0,
     attachmentExecute: 0,
     attachmentPlan: 0,
+    announcementCrosspostExecute: 0,
+    announcementCrosspostPlan: 0,
     autoModerationExecute: 0,
     autoModerationGet: 0,
     autoModerationList: 0,
@@ -4465,6 +4541,33 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
       }
     },
+    async executeAnnouncementCrosspost(request, planDigest) {
+      if (overrides.announcementCrosspostError) {
+        throw overrides.announcementCrosspostError
+      }
+      calls.announcementCrosspostExecute += 1
+      const planned = announcementCrosspostPlan(
+        request,
+        planDigest,
+        overrides.announcementCrosspostAction,
+      )
+      return {
+        activityId: planned.action === "none"
+          ? null
+          : "activity-announcement-crosspost",
+        channelId: request.channelId,
+        guildId: GUILD_ID,
+        messageId: request.messageId,
+        observedCrossposted: true,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackSnapshotMatched: true,
+        responseSnapshotMatched: true,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-crossposted" : "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+      }
+    },
     async executePollCreation(request, planDigest) {
       if (overrides.pollCreationError) throw overrides.pollCreationError
       calls.pollCreationExecute += 1
@@ -5204,6 +5307,14 @@ function serviceFixture(overrides: {
         overrides.messagePinAction,
       )
     },
+    async planAnnouncementCrosspost(request) {
+      calls.announcementCrosspostPlan += 1
+      return announcementCrosspostPlan(
+        request,
+        overrides.announcementCrosspostPlanDigest || DIGEST,
+        overrides.announcementCrosspostAction,
+      )
+    },
     async planPollCreation(request) {
       calls.pollCreationPlan += 1
       return pollCreationPlan(
@@ -5550,6 +5661,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "delete_messages",
       "plan_message_pin",
       "execute_message_pin",
+      "plan_announcement_crosspost",
+      "execute_announcement_crosspost",
       "plan_webhook_deletion",
       "execute_webhook_deletion",
       "plan_invite_deletion",
@@ -5602,6 +5715,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
+  const announcementCrosspost = result.tools.find((tool) => (
+    tool.name === "execute_announcement_crosspost"
+  ))
   const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
@@ -5665,6 +5781,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       readOnlyHint: false,
     })
   }
+  assert.deepEqual(announcementCrosspost?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
   const administrationPlan = result.tools.find((tool) => (
     tool.name === "plan_member_moderation"
   ))
@@ -5698,6 +5820,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_channel_metadata_change",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
+    "plan_announcement_crosspost",
     "plan_poll_creation",
     "plan_poll_end",
     "plan_thread_creation",
@@ -6273,6 +6396,30 @@ test("progressive discovery enables the complete reviewed message-pin workflow",
   )
 })
 
+test("progressive discovery enables the complete reviewed announcement-crosspost workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_announcement_crosspost" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_announcement_crosspost",
+    "plan_announcement_crosspost",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_announcement_crosspost",
+      "execute_announcement_crosspost",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed poll-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -6711,6 +6858,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     auditRoles: 0,
     administrationExecute: 0,
     administrationPlan: 0,
+    announcementCrosspostExecute: 0,
+    announcementCrosspostPlan: 0,
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
@@ -7634,6 +7783,43 @@ test("MCP attachment messages expose uncertain and one-shot conflict outcomes sa
   })
   assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
 
+  const rateLimited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      announcementCrosspostError: new AnnouncementCrosspostExecutionError(
+        "Discord rejected the announcement crosspost before execution",
+        { status: "failed" },
+        {
+          cause: new DiscordApiError({
+            message: "Discord rate limit",
+            method: "POST",
+            retryAfterMs: 1_500,
+            route: "/channels/{channel.id}/messages/{message.id}/crosspost",
+            status: 429,
+          }),
+        },
+      ),
+    },
+  })
+  const rateLimitedResult = await rateLimited.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+  assert.equal(
+    structuredContent(rateLimitedResult).status,
+    "announcement-crosspost-failed",
+  )
+  assert.equal(
+    (structuredContent(rateLimitedResult).error as Record<string, unknown>)
+      .retryAfterMs,
+    1_500,
+  )
+
   const receipt = {
     activityId: "activity-attachment-1",
     error: null,
@@ -7907,6 +8093,209 @@ test("MCP message pins expose uncertain and one-shot conflict outcomes safely", 
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(MESSAGE_PIN_OPERATION_KEY),
+  )
+})
+
+test("MCP announcement crossposts validate exact reviewed plan inputs", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+    },
+    name: "plan_announcement_crosspost",
+  })
+  const invalidChannel = await client.callTool({
+    arguments: {
+      channelId: "bad",
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+    },
+    name: "plan_announcement_crosspost",
+  })
+  const shortKey = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: "short",
+    },
+    name: "plan_announcement_crosspost",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(invalidChannel.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(calls.announcementCrosspostPlan, 1)
+})
+
+test("MCP announcement crossposts bind signed approval to exact irreversible fanout", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.announcementCrosspostPlan, 1)
+  assert.equal(calls.announcementCrosspostExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Authorship class: other/)
+  assert.match(confirmationMessage, /Message Content intent: enabled/)
+  assert.match(confirmationMessage, /SEND_MESSAGES: true/)
+  assert.match(confirmationMessage, /MANAGE_MESSAGES: true/)
+  assert.match(confirmationMessage, /fanout can cross the source guild boundary/)
+  assert.match(confirmationMessage, /cannot roll back/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(ANNOUNCEMENT_CROSSPOST_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ANNOUNCEMENT_CROSSPOST_OPERATION_KEY),
+  )
+})
+
+test("MCP announcement crossposts skip no-op confirmation and stop on refusal or drift", async (context) => {
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { announcementCrosspostAction: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-crossposted")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.announcementCrosspostExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.announcementCrosspostExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      announcementCrosspostPlanDigest: DIFFERENT_DIGEST,
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.announcementCrosspostExecute, 0)
+})
+
+test("MCP announcement crossposts expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      announcementCrosspostError: new AnnouncementCrosspostExecutionError(
+        "Discord announcement-crosspost outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-announcement-crosspost",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      announcementCrosspostError:
+        new AnnouncementCrosspostOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: ANNOUNCEMENT_CROSSPOST_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_announcement_crosspost",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(ANNOUNCEMENT_CROSSPOST_OPERATION_KEY),
   )
 })
 

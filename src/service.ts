@@ -3,6 +3,13 @@ import type {
   ActivityStore,
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
+import type {
+  AnnouncementCrosspostPlan,
+  AnnouncementCrosspostRequest,
+  AnnouncementCrosspostResult,
+  AnnouncementCrosspostServiceOptions,
+} from "./announcement-crosspost-service.js"
+import { AnnouncementCrosspostService } from "./announcement-crosspost-service.js"
 import {
   GuildAuditLogService,
   type GetGuildAuditEntryOptions,
@@ -356,6 +363,7 @@ export interface DiscordServiceClient {
   addGuildMemberRole: DiscordClient["addGuildMemberRole"]
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
+  crosspostMessage: DiscordClient["crosspostMessage"]
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildAutoModerationRule: DiscordClient["createGuildAutoModerationRule"]
   createGuildChannel: DiscordClient["createGuildChannel"]
@@ -472,6 +480,10 @@ export interface ConnectorServiceOptions {
     "clock" | "planKey" | "randomId"
   >
   activityStore?: ActivityStore
+  announcementCrosspostOptions?: Pick<
+    AnnouncementCrosspostServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   attachmentMessageOptions?: Pick<
     AttachmentMessageServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -692,6 +704,7 @@ function normalizedGuildChannel(channel: DiscordChannel, guildId: string) {
 export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
+  readonly #announcementCrosspostService: AnnouncementCrosspostService
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
@@ -748,6 +761,13 @@ export class ConnectorService {
       clock: () => interactionClock().getTime(),
       maxWritesPerMinute: options.config.interactionMaxWritesPerMinute,
       minWriteIntervalMs: options.config.interactionMinWriteIntervalMs,
+    })
+    this.#announcementCrosspostService = new AnnouncementCrosspostService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.announcementCrosspostOptions,
     })
     this.#administrationService = new AdministrationService({
       activityStore: this.#activityStore,
@@ -1713,6 +1733,20 @@ export class ConnectorService {
     )
   }
 
+  async planAnnouncementCrosspost(
+    request: AnnouncementCrosspostRequest,
+    options: RequestOptions = {},
+  ): Promise<AnnouncementCrosspostPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#announcementCrosspostService.plan(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
   async listChannelWebhooks(
     channelId: string,
     options: RequestOptions = {},
@@ -2556,6 +2590,31 @@ export class ConnectorService {
       () => this.#messagePinService.execute(
         identity.application.id,
         identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeAnnouncementCrosspost(
+    request: AnnouncementCrosspostRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<AnnouncementCrosspostResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "announcement-crosspost",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget("message", request.messageId),
+      ],
+      () => this.#announcementCrosspostService.execute(
+        identity.application.id,
+        identity.bot.id,
+        applicationMessageContentIntent(identity.application),
         request,
         planDigest,
         options,

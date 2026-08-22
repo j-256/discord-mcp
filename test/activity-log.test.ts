@@ -12,6 +12,7 @@ import test from "node:test"
 
 import {
   JsonlActivityLog,
+  type AnnouncementCrosspostActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
   type ChannelCreationActivity,
@@ -415,6 +416,30 @@ function messagePin(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function announcementCrosspost(
+  id: string,
+  status: AnnouncementCrosspostActivity["status"],
+): AnnouncementCrosspostActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "announcement-crosspost",
+    messageId: "300",
+    operationKeyHash: `sha256:${"5".repeat(64)}`,
+    planDigest: `hmac-sha256:${"6".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : null,
   }
 }
 
@@ -1302,6 +1327,44 @@ test("JSONL activity log keeps message pin evidence content-free", async (contex
   assert.doesNotMatch(
     JSON.stringify(result),
     /private audit|private author|private channel|private message|private-operation/,
+  )
+})
+
+test("JSONL activity log keeps announcement-crosspost evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...announcementCrosspost("1", "pending"),
+    content: "must-not-persist",
+    followerChannels: ["must-never-reach-disk"],
+  } as AnnouncementCrosspostActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...announcementCrosspost("2", "completed"),
+      authorName: "private author",
+      channelName: "private channel",
+      content: "private announcement",
+      operationKey: "private-operation-key",
+    })}\n${JSON.stringify({
+      ...announcementCrosspost("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must-not-persist|must-never-reach-disk/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "announcement-crosspost")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private author|private channel|private announcement|private-operation/,
   )
 })
 

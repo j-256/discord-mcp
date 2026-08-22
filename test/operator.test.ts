@@ -68,6 +68,8 @@ function status(
     policy: {
       administrationEnabled: false,
       administrationGuildIds: [],
+      announcementCrosspostChannelIds: [],
+      announcementCrosspostsEnabled: false,
       allowedChannelIds: [CHANNEL_ID],
       allowedGuildIds: [GUILD_ID],
       attachmentChannelIds: [],
@@ -198,6 +200,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    executeAnnouncementCrosspost: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
@@ -213,6 +216,7 @@ function toolService(): DiscordToolService {
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
+    planAnnouncementCrosspost: unexpected,
     getThreadMembership: unexpected,
     getThreadState: unexpected,
     planThreadChange: unexpected,
@@ -756,6 +760,81 @@ test("doctor and setup explain reviewed message-pin scope without Discord writes
   )
   assert.match(setup.warnings.join("\n"), /pin-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /pins toolset/)
+})
+
+test("doctor and setup enforce reviewed announcement-crosspost prerequisites", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS: "true",
+    DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+  const missingIntent = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
+  const missingIntentSetup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
+
+  const policy = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
+  )
+  assert.equal(policy?.status, "pass")
+  assert.match(policy?.summary || "", /authorship-sensitive permission proof/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /announcement-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /announcement-crossposts toolset/)
+  assert.equal(
+    missingIntent.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.messageContentIntent,
+    )?.status,
+    "fail",
+  )
+  assert.equal(missingIntent.status, "error")
+  assert.match(missingIntentSetup.warnings.join("\n"), /crossposts are blocked/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
+    "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
 })
 
 test("doctor and setup explain native poll privacy and reviewed write scope", async () => {
@@ -2388,6 +2467,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.promptNames, [
     "find_guild_members",
     "inspect_guild_ban",
+    "review_announcement_crosspost",
     "review_attachment_message",
     "review_automod_change",
     "review_channel_creation",
@@ -2454,6 +2534,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
     "edit_own_message",
+    "execute_announcement_crosspost",
     "execute_automod_change",
     "execute_channel_metadata_change",
     "execute_channel_permission_overwrite",

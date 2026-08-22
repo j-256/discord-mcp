@@ -218,6 +218,7 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    executeAnnouncementCrosspost: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
@@ -234,6 +235,7 @@ function guidanceService(options: {
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
+    planAnnouncementCrosspost: unexpected,
     planThreadChange: unexpected,
     getGuildExpression: unexpected,
     async getGuildSoundboardSound(guildId, soundId) {
@@ -909,6 +911,8 @@ function guidanceService(options: {
       return {
         administrationEnabled: false,
         administrationGuildIds: [],
+        announcementCrosspostChannelIds: [],
+        announcementCrosspostsEnabled: false,
         allowedChannelIds: [CHANNEL_ID],
         allowedGuildIds: [GUILD_ID],
         attachmentChannelIds: [],
@@ -2365,6 +2369,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(messagePin, /Call only plan_message_pin/)
   assert.match(messagePin, /Do not call execute_message_pin/)
   assert.match(messagePin, /PIN_MESSAGES/)
+
+  const announcementCrosspost = promptText(await client.getPrompt({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewAnnouncementCrosspost,
+  }))
+  assert.deepEqual(
+    JSON.parse(announcementCrosspost.split("\n")[1] || ""),
+    {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      operationKey: OPERATION_KEY,
+    },
+  )
+  assert.match(announcementCrosspost, /Call only plan_announcement_crosspost/)
+  assert.match(
+    announcementCrosspost,
+    /Do not call execute_announcement_crosspost/,
+  )
+  assert.match(announcementCrosspost, /Message Content intent/)
+  assert.match(announcementCrosspost, /unknown follower fanout/)
 
   const webhookDeletion = promptText(await client.getPrompt({
     arguments: {

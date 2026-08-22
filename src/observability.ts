@@ -22,6 +22,9 @@ import {
 import {
   AdministrationExecutionError,
   AdministrationPlanChangedError,
+  AnnouncementCrosspostExecutionError,
+  AnnouncementCrosspostOperationConflictError,
+  AnnouncementCrosspostPlanChangedError,
   AuditLogError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
@@ -255,6 +258,7 @@ export function classifyOperationalError(error: unknown): OperationalErrorCatego
   }
   if (
     error instanceof AdministrationPlanChangedError
+    || error instanceof AnnouncementCrosspostPlanChangedError
     || error instanceof ChannelCreationPlanChangedError
     || error instanceof DeletionPlanChangedError
   ) return "plan-changed"
@@ -270,12 +274,14 @@ export function classifyOperationalError(error: unknown): OperationalErrorCatego
   }
   if (
     error instanceof ChannelCreationOperationConflictError
+    || error instanceof AnnouncementCrosspostOperationConflictError
     || error instanceof InteractionConflictError
   ) return "idempotency-conflict"
   if (error instanceof InteractionIdentityError) return "identity-error"
   if (error instanceof InteractionRateLimitError) return "local-rate-limited"
   if (
     error instanceof AdministrationExecutionError
+    || error instanceof AnnouncementCrosspostExecutionError
     || error instanceof ChannelCreationExecutionError
     || error instanceof DeletionExecutionError
     || error instanceof InteractionExecutionError

@@ -879,6 +879,48 @@ test("Discord client validates pin mutations and never retries their rate limits
   assert.equal(sleeps, 0)
 })
 
+test("Discord client crossposts one exact message without a body or automatic retry", async () => {
+  const requests: Array<{
+    body: RequestInit["body"]
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.crosspostMessage("200", "300"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+
+  assert.deepEqual(requests, [{
+    body: undefined,
+    method: "POST",
+    reason: null,
+    url: `${API_BASE_URL}/channels/200/messages/300/crosspost`,
+  }])
+  assert.equal(sleeps, 0)
+  assert.throws(() => client.crosspostMessage("bad", "300"), /channel ID/)
+  assert.throws(() => client.crosspostMessage("200", "bad"), /message ID/)
+})
+
 test("Discord client sends exact permission-overwrite routes and encoded reasons", async () => {
   const requests: Array<{
     body: unknown

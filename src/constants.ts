@@ -24,6 +24,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 
 export const MCP_TOOLSET_NAMES = [
   "activity",
+  "announcement-crossposts",
   "attachments",
   "audit-logs",
   "automod",
@@ -67,9 +68,11 @@ export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
 
 export const ENVIRONMENT_NAMES = Object.freeze({
   adminGuildIds: "DISCORD_MCP_ADMIN_GUILD_IDS",
+  announcementCrosspostChannelIds: "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
   allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
+  allowAnnouncementCrossposts: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
   allowAttachments: "DISCORD_MCP_ALLOW_ATTACHMENTS",
   allowAutomodAudit: "DISCORD_MCP_ALLOW_AUTOMOD_AUDIT",
   allowAutomodChanges: "DISCORD_MCP_ALLOW_AUTOMOD_CHANGES",
@@ -560,6 +563,16 @@ export const DISCORD_CHANNEL_FLAGS = Object.freeze({
 })
 
 export const DISCORD_MESSAGE_REFERENCE_TYPES = Object.freeze({
+  default: 0,
+  forward: 1,
+})
+
+export const DISCORD_MESSAGE_FLAGS = Object.freeze({
+  crossposted: 1 << 0,
+  isCrosspost: 1 << 1,
+})
+
+export const DISCORD_MESSAGE_TYPES = Object.freeze({
   default: 0,
 })
 

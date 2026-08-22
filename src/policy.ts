@@ -12,6 +12,8 @@ import type { DiscordChannel, DiscordGuild } from "./types.js"
 export interface PolicyDescription {
   administrationEnabled: boolean
   administrationGuildIds: string[]
+  announcementCrosspostChannelIds: string[]
+  announcementCrosspostsEnabled: boolean
   allowedChannelIds: string[]
   allowedGuildIds: string[]
   attachmentChannelIds: string[]
@@ -126,6 +128,7 @@ export class ScopePolicy {
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
+  readonly #allowAnnouncementCrossposts: boolean
   readonly #allowAttachments: boolean
   readonly #allowAutomodAudit: boolean
   readonly #allowAutomodChanges: boolean
@@ -173,6 +176,7 @@ export class ScopePolicy {
   readonly #allowWidgetSettingsAudit: boolean
   readonly #allowWidgetSettingsChanges: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
+  readonly #announcementCrosspostChannelIds: ReadonlySet<string>
   readonly #attachmentChannelIds: ReadonlySet<string>
   readonly #attachmentMaxBytes: number
   readonly #attachmentRoots: readonly string[]
@@ -234,6 +238,7 @@ export class ScopePolicy {
     | "protectedUserIds"
   > & Partial<Pick<
     ConnectorConfig,
+    | "allowAnnouncementCrossposts"
     | "allowAttachments"
     | "allowAutomodAudit"
     | "allowAutomodChanges"
@@ -279,6 +284,7 @@ export class ScopePolicy {
     | "allowWidgetSettingsAudit"
     | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
+    | "announcementCrosspostChannelIds"
     | "channelMetadataIds"
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
@@ -322,6 +328,7 @@ export class ScopePolicy {
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
+    this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
     this.#allowAttachments = config.allowAttachments ?? false
     this.#allowAutomodAudit = config.allowAutomodAudit ?? false
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
@@ -369,6 +376,7 @@ export class ScopePolicy {
     this.#allowWidgetSettingsAudit = config.allowWidgetSettingsAudit ?? false
     this.#allowWidgetSettingsChanges = config.allowWidgetSettingsChanges ?? false
     this.#deleteChannelIds = config.deleteChannelIds
+    this.#announcementCrosspostChannelIds = config.announcementCrosspostChannelIds ?? new Set()
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
     this.#attachmentRoots = config.attachmentRoots ?? []
@@ -420,6 +428,9 @@ export class ScopePolicy {
     return {
       administrationEnabled: this.#allowAdministration && this.#adminGuildIds.size > 0,
       administrationGuildIds: [...this.#adminGuildIds].sort(),
+      announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
+      announcementCrosspostsEnabled: this.#allowAnnouncementCrossposts
+        && this.#announcementCrosspostChannelIds.size > 0,
       allowedChannelIds: [...this.#allowedChannelIds].sort(),
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
       attachmentChannelIds: [...this.#attachmentChannelIds].sort(),
@@ -1100,6 +1111,26 @@ export class ScopePolicy {
     }
     if (!this.#interactionChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the interaction scope`)
+    }
+    return guildId
+  }
+
+  assertChannelAnnouncementCrosspostable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowAnnouncementCrossposts) {
+      throw new PolicyError(
+        "Discord announcement crossposts are disabled by connector configuration",
+      )
+    }
+    if (this.#announcementCrosspostChannelIds.size === 0) {
+      throw new PolicyError(
+        "Discord announcement crossposts require an explicit channel allowlist",
+      )
+    }
+    if (!this.#announcementCrosspostChannelIds.has(channel.id)) {
+      throw new PolicyError(
+        `Discord channel ${channel.id} is outside the announcement-crosspost scope`,
+      )
     }
     return guildId
   }

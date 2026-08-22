@@ -278,6 +278,9 @@ function serviceFixture(overrides: {
       calls.addReaction += 1
     },
     async bulkDeleteMessages() {},
+    async crosspostMessage() {
+      throw new Error("unexpected")
+    },
     async createGuildBan() {},
     async createForumPost() {
       calls.createForumPost += 1
@@ -866,6 +869,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     messageId: MESSAGE_ID,
     operationKey,
   }, digest))
+  await captured(() => service.executeAnnouncementCrosspost({
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    operationKey,
+  }, digest))
   await captured(() => service.executeOnboardingChange({
     auditReason: "reviewed",
     defaultChannelIds: [],
@@ -958,10 +966,14 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 24)
+  assert.equal(byKind.size, 25)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
+      "announcement-crosspost": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: MESSAGE_ID, kind: "message" },
+      ],
       "attachment-message": [{ id: CHANNEL_ID, kind: "channel" }],
       "automod-change": [{
         collection: "automod",
@@ -1069,7 +1081,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 24)
+  assert.equal(writeCoordinator.intents.length, 25)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

@@ -1054,6 +1054,7 @@ type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
   "add_thread_member",
+  "crosspost_message",
   "create_guild_auto_moderation_rule",
   "create_guild_emoji",
   "create_guild_soundboard_sound",
@@ -7637,6 +7638,25 @@ export class DiscordClient {
     options: RequestOptions = {},
   ): Promise<DiscordMessage> {
     return this.#request("get_message", `/channels/${channelId}/messages/${messageId}`, options)
+  }
+
+  crosspostMessage(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord announcement-crosspost channel ID")
+    assertSearchSnowflake(messageId, "Discord announcement-crosspost message ID")
+    return this.#request(
+      "crosspost_message",
+      `/channels/${channelId}/messages/${messageId}/crosspost`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/crosspost",
+        suppressFailureCause: true,
+      },
+    )
   }
 
   listPollAnswerVoters(
