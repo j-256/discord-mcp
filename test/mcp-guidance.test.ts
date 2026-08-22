@@ -37,6 +37,7 @@ import type {
 const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
+const SECOND_CHANNEL_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const ROLE_ID = "350000000000000001"
@@ -315,6 +316,8 @@ function guidanceService(options: {
     executeReactionModeration: unexpected,
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
+    executeWebhookChange: unexpected,
+    executeWebhookCreation: unexpected,
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planNativeInteractionCommand: unexpected,
@@ -764,6 +767,8 @@ function guidanceService(options: {
         },
       }
     },
+    planWebhookChange: unexpected,
+    planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
     previewComponentLayout() {
       calls.unexpected += 1
@@ -1267,6 +1272,8 @@ function guidanceService(options: {
         threadParentIds: [],
         webhookAuditEnabled: false,
         webhookChannelIds: [],
+        webhookChangesEnabled: false,
+        webhookCreationEnabled: false,
         webhookDeletionsEnabled: false,
         welcomeScreenAuditEnabled: false,
         welcomeScreenChangesEnabled: false,
@@ -2025,7 +2032,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /complete role-member counts|complete member-count readback/)
   assert.match(safety.text, /permission changes with unknown bits/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
-  assert.match(safety.text, /Creation, execution, editing, credential-authenticated tools/)
+  assert.match(safety.text, /Creation, rename or same-guild move, and deletion each require/)
+  assert.match(safety.text, /Creation validates and discards the returned credential/)
+  assert.match(safety.text, /Message delivery, credential-authenticated actions/)
   assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
   assert.match(safety.text, /Raw invite codes and URLs are bearer capabilities/)
   assert.match(safety.text, /full-inventory absence readback/)
@@ -2875,6 +2884,50 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   )
   assert.match(announcementCrosspost, /Message Content intent/)
   assert.match(announcementCrosspost, /unknown follower fanout/)
+
+  const webhookCreation = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed webhook creation",
+      channelId: CHANNEL_ID,
+      name: "Deploy relay",
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewWebhookCreation,
+  }))
+  assert.deepEqual(JSON.parse(webhookCreation.split("\n")[1] || ""), {
+    auditReason: "Reviewed webhook creation",
+    channelId: CHANNEL_ID,
+    name: "Deploy relay",
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(webhookCreation, /Call only plan_webhook_creation/)
+  assert.match(webhookCreation, /Do not call execute_webhook_creation/)
+  assert.match(webhookCreation, /validates and discards the returned bearer credential/)
+  assert.match(webhookCreation, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
+
+  const webhookChange = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed webhook move",
+      channelId: CHANNEL_ID,
+      destinationChannelId: SECOND_CHANNEL_ID,
+      name: "Renamed relay",
+      operationKey: OPERATION_KEY,
+      webhookId: WEBHOOK_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewWebhookChange,
+  }))
+  assert.deepEqual(JSON.parse(webhookChange.split("\n")[1] || ""), {
+    auditReason: "Reviewed webhook move",
+    channelId: CHANNEL_ID,
+    destinationChannelId: SECOND_CHANNEL_ID,
+    name: "Renamed relay",
+    operationKey: OPERATION_KEY,
+    webhookId: WEBHOOK_ID,
+  })
+  assert.match(webhookChange, /Call only plan_webhook_change/)
+  assert.match(webhookChange, /Do not call execute_webhook_change/)
+  assert.match(webhookChange, /preserves the existing bearer credential/)
+  assert.match(webhookChange, /source and optional destination inventories/)
 
   const webhookDeletion = promptText(await client.getPrompt({
     arguments: {
@@ -3986,6 +4039,24 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewMessagePin,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed webhook creation",
+        channelId: CHANNEL_ID,
+        name: "Discord relay",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewWebhookCreation,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed webhook change",
+        channelId: CHANNEL_ID,
+        operationKey: OPERATION_KEY,
+        webhookId: WEBHOOK_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewWebhookChange,
     },
     {
       arguments: {

@@ -92,6 +92,8 @@ export interface ConnectorConfig {
   allowWelcomeScreenAudit: boolean
   allowWelcomeScreenChanges: boolean
   allowWebhookAudit: boolean
+  allowWebhookChanges: boolean
+  allowWebhookCreation: boolean
   allowWebhookDeletions: boolean
   allowWidgetPublicExposure: boolean
   allowWidgetSettingsAudit: boolean
@@ -678,13 +680,24 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowWebhookAudit],
     ENVIRONMENT_NAMES.allowWebhookAudit,
   )
+  const allowWebhookChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWebhookChanges],
+    ENVIRONMENT_NAMES.allowWebhookChanges,
+  )
+  const allowWebhookCreation = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWebhookCreation],
+    ENVIRONMENT_NAMES.allowWebhookCreation,
+  )
   const allowWebhookDeletions = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowWebhookDeletions],
     ENVIRONMENT_NAMES.allowWebhookDeletions,
   )
-  if (allowWebhookDeletions && !allowWebhookAudit) {
+  if (
+    (allowWebhookChanges || allowWebhookCreation || allowWebhookDeletions)
+    && !allowWebhookAudit
+  ) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowWebhookDeletions} requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
+      `Enabling webhook creation, changes, or deletion requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
     )
   }
   const allowInviteAudit = parseBoolean(
@@ -1006,6 +1019,8 @@ export function loadConnectorConfig(
     allowWelcomeScreenAudit,
     allowWelcomeScreenChanges,
     allowWebhookAudit,
+    allowWebhookChanges,
+    allowWebhookCreation,
     allowWebhookDeletions,
     allowWidgetPublicExposure,
     allowWidgetSettingsAudit,

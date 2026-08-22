@@ -138,6 +138,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowWelcomeScreenAudit: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT",
   allowWelcomeScreenChanges: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES",
   allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
+  allowWebhookChanges: "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
+  allowWebhookCreation: "DISCORD_MCP_ALLOW_WEBHOOK_CREATION",
   allowWebhookDeletions: "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
   allowWidgetPublicExposure: "DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE",
   allowWidgetSettingsAudit: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT",

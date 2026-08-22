@@ -69,6 +69,8 @@ type McpToolWorkflow =
   | "thread-creation"
   | "thread-governance-change"
   | "webhook-deletion"
+  | "webhook-change"
+  | "webhook-creation"
   | "welcome-screen-change"
   | "widget-settings-change"
 
@@ -271,6 +273,16 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["cleanup", "delete", "execute", "integration", "webhook"],
     toolset: "webhooks",
     workflow: "webhook-deletion",
+  },
+  execute_webhook_change: {
+    keywords: ["channel", "execute", "move", "name", "rename", "update", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-change",
+  },
+  execute_webhook_creation: {
+    keywords: ["create", "credential", "execute", "incoming", "integration", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-creation",
   },
   explain_channel_access: {
     keywords: ["access", "permissions", "read", "view"],
@@ -658,6 +670,16 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["cleanup", "delete", "integration", "plan", "review", "webhook"],
     toolset: "webhooks",
     workflow: "webhook-deletion",
+  },
+  plan_webhook_change: {
+    keywords: ["channel", "move", "name", "plan", "rename", "review", "update", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-change",
+  },
+  plan_webhook_creation: {
+    keywords: ["create", "credential", "incoming", "integration", "plan", "review", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-creation",
   },
   preview_component_layout: {
     keywords: ["component", "layout", "local", "message", "preview", "validate", "v2"],

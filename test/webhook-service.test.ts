@@ -228,6 +228,9 @@ function fixture(options: {
   }
   const operationStore = new MemoryOperationStore(events)
   const client: WebhookServiceOptions["client"] = {
+    async createWebhook() {
+      throw new Error("unexpected webhook creation")
+    },
     async deleteWebhook(_webhookId, reason) {
       events.push(`write:delete:${reason}`)
       state.mutationStarted?.()
@@ -258,6 +261,9 @@ function fixture(options: {
       return state.deleted
         ? state.inventory.filter((entry) => entry.id !== WEBHOOK_ID)
         : state.inventory
+    },
+    async modifyWebhook() {
+      throw new Error("unexpected webhook change")
     },
   }
   const service = new WebhookService({

@@ -715,6 +715,24 @@
           ]
         },
         {
+          "name": "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
+          "description": "Enable reviewed exact Incoming-webhook rename and same-guild move operations; requires webhook audit and its exact channel allowlist",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_WEBHOOK_CREATION",
+          "description": "Enable reviewed Incoming-webhook creation with credential projection; requires webhook audit and its exact channel allowlist",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
           "description": "Enable reviewed exact Incoming-webhook deletion; requires webhook audit and its exact channel allowlist",
           "default": "false",
@@ -725,7 +743,7 @@
         },
         {
           "name": "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
-          "description": "Exact direct guild-channel IDs eligible for credential-redacted webhook audit and reviewed cleanup",
+          "description": "Exact direct guild-channel IDs eligible for credential-redacted webhook audit and reviewed creation, rename, move, or deletion",
           "format": "string"
         },
         {

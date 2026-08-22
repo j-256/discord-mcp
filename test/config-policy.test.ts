@@ -279,6 +279,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookChangesEnabled: false,
+    webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
   })
 
@@ -452,31 +454,41 @@ test("configuration rejects deletion channels outside a read channel allowlist",
   )
 })
 
-test("configuration and policy isolate webhook audit and deletion authority", () => {
+test("configuration and policy isolate webhook audit and administration authority", () => {
   const config = loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
     DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
     DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
   }, { homeDirectory: "/test/home" })
   const enabled = new ScopePolicy(config)
 
   assert.equal(config.allowWebhookAudit, true)
+  assert.equal(config.allowWebhookChanges, true)
+  assert.equal(config.allowWebhookCreation, true)
   assert.equal(config.allowWebhookDeletions, true)
   assert.deepEqual([...config.webhookChannelIds], [CHANNEL_ID])
   assert.equal(enabled.assertChannelWebhookAuditable(channel()), GUILD_ID)
+  assert.equal(enabled.assertChannelWebhookChangeable(channel()), GUILD_ID)
+  assert.equal(enabled.assertChannelWebhookCreatable(channel()), GUILD_ID)
   assert.equal(enabled.assertChannelWebhookDeletable(channel()), GUILD_ID)
   assert.deepEqual(
     {
       webhookAuditEnabled: enabled.describe().webhookAuditEnabled,
       webhookChannelIds: enabled.describe().webhookChannelIds,
+      webhookChangesEnabled: enabled.describe().webhookChangesEnabled,
+      webhookCreationEnabled: enabled.describe().webhookCreationEnabled,
       webhookDeletionsEnabled: enabled.describe().webhookDeletionsEnabled,
     },
     {
       webhookAuditEnabled: true,
       webhookChannelIds: [CHANNEL_ID],
+      webhookChangesEnabled: true,
+      webhookCreationEnabled: true,
       webhookDeletionsEnabled: true,
     },
   )
@@ -509,6 +521,14 @@ test("configuration and policy isolate webhook audit and deletion authority", ()
     /webhook deletion is disabled/,
   )
   assert.throws(
+    () => deletionDisabled.assertChannelWebhookChangeable(channel()),
+    /webhook changes are disabled/,
+  )
+  assert.throws(
+    () => deletionDisabled.assertChannelWebhookCreatable(channel()),
+    /webhook creation is disabled/,
+  )
+  assert.throws(
     () => enabled.assertChannelWebhookAuditable(channel({ id: OTHER_CHANNEL_ID })),
     /outside the webhook scope/,
   )
@@ -527,6 +547,19 @@ test("configuration and policy isolate webhook audit and deletion authority", ()
     }, { homeDirectory: "/test/home" }),
     /requires DISCORD_MCP_ALLOW_WEBHOOK_AUDIT/,
   )
+  for (const toggle of [
+    "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
+    "DISCORD_MCP_ALLOW_WEBHOOK_CREATION",
+  ]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        [toggle]: "true",
+        DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+      }, { homeDirectory: "/test/home" }),
+      /requires DISCORD_MCP_ALLOW_WEBHOOK_AUDIT/,
+    )
+  }
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
@@ -793,6 +826,8 @@ test("configuration and policy require an exact administration guild and protect
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookChangesEnabled: false,
+    webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
   })
 })
@@ -2323,6 +2358,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookChangesEnabled: false,
+    webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
   })
 })

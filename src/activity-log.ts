@@ -556,6 +556,41 @@ export interface WebhookDeletionActivity {
   webhookId: string
 }
 
+export type WebhookCreationActivityStatus = WebhookDeletionActivityStatus
+
+export interface WebhookCreationActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "webhook-creation"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: WebhookCreationActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+  webhookId: string | null
+}
+
+export type WebhookChangeActivityStatus = WebhookDeletionActivityStatus
+
+export interface WebhookChangeActivity {
+  channelId: string
+  destinationChannelId: string | null
+  error: string | null
+  guildId: string
+  id: string
+  kind: "webhook-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: WebhookChangeActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+  webhookId: string
+}
+
 export type IntegrationDeletionActivityStatus =
   | "completed"
   | "failed"
@@ -858,6 +893,8 @@ export type ActivityEntry =
   | ThreadCreationActivity
   | ThreadGovernanceActivity
   | WelcomeScreenActivity
+  | WebhookChangeActivity
+  | WebhookCreationActivity
   | WebhookDeletionActivity
   | WidgetSettingsActivity
 
@@ -2193,6 +2230,142 @@ function parseWebhookDeletionActivity(
   }
 }
 
+function parseWebhookCreationActivity(
+  value: unknown,
+): WebhookCreationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "webhook-creation"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !(record.webhookId === null || (
+      typeof record.webhookId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.webhookId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+      || record.webhookId !== null
+    ))
+    || (record.status === "completed" && (
+      record.verification !== "match"
+      || typeof record.webhookId !== "string"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.verification !== "drift"
+      || typeof record.webhookId !== "string"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "webhook-creation",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as WebhookCreationActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+    webhookId: record.webhookId as string | null,
+  }
+}
+
+function parseWebhookChangeActivity(
+  value: unknown,
+): WebhookChangeActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "webhook-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !(record.destinationChannelId === null || (
+      typeof record.destinationChannelId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.destinationChannelId)
+    ))
+    || typeof record.webhookId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.webhookId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    channelId: record.channelId,
+    destinationChannelId: record.destinationChannelId as string | null,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "webhook-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as WebhookChangeActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+    webhookId: record.webhookId,
+  }
+}
+
 function parseIntegrationDeletionActivity(
   value: unknown,
 ): IntegrationDeletionActivity | undefined {
@@ -3326,6 +3499,8 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseSoundboardActivity(value)
     || parseWelcomeScreenActivity(value)
     || parseWidgetSettingsActivity(value)
+    || parseWebhookCreationActivity(value)
+    || parseWebhookChangeActivity(value)
     || parseWebhookDeletionActivity(value)
     || parseIntegrationDeletionActivity(value)
     || parseReactionModerationActivity(value)

@@ -128,6 +128,8 @@ export interface PolicyDescription {
   welcomeScreenGuildIds: string[]
   webhookAuditEnabled: boolean
   webhookChannelIds: string[]
+  webhookChangesEnabled: boolean
+  webhookCreationEnabled: boolean
   webhookDeletionsEnabled: boolean
   widgetPublicExposureEnabled: boolean
   widgetSettingsAuditEnabled: boolean
@@ -202,6 +204,8 @@ export class ScopePolicy {
   readonly #allowWelcomeScreenAudit: boolean
   readonly #allowWelcomeScreenChanges: boolean
   readonly #allowWebhookAudit: boolean
+  readonly #allowWebhookChanges: boolean
+  readonly #allowWebhookCreation: boolean
   readonly #allowWebhookDeletions: boolean
   readonly #allowWidgetPublicExposure: boolean
   readonly #allowWidgetSettingsAudit: boolean
@@ -331,6 +335,8 @@ export class ScopePolicy {
     | "allowWelcomeScreenAudit"
     | "allowWelcomeScreenChanges"
     | "allowWebhookAudit"
+    | "allowWebhookChanges"
+    | "allowWebhookCreation"
     | "allowWebhookDeletions"
     | "allowWidgetPublicExposure"
     | "allowWidgetSettingsAudit"
@@ -444,6 +450,8 @@ export class ScopePolicy {
     this.#allowWelcomeScreenAudit = config.allowWelcomeScreenAudit ?? false
     this.#allowWelcomeScreenChanges = config.allowWelcomeScreenChanges ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
+    this.#allowWebhookChanges = config.allowWebhookChanges ?? false
+    this.#allowWebhookCreation = config.allowWebhookCreation ?? false
     this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
     this.#allowWidgetPublicExposure = config.allowWidgetPublicExposure ?? false
     this.#allowWidgetSettingsAudit = config.allowWidgetSettingsAudit ?? false
@@ -708,6 +716,12 @@ export class ScopePolicy {
       webhookAuditEnabled: this.#allowWebhookAudit
         && this.#webhookChannelIds.size > 0,
       webhookChannelIds: [...this.#webhookChannelIds].sort(),
+      webhookChangesEnabled: this.#allowWebhookAudit
+        && this.#allowWebhookChanges
+        && this.#webhookChannelIds.size > 0,
+      webhookCreationEnabled: this.#allowWebhookAudit
+        && this.#allowWebhookCreation
+        && this.#webhookChannelIds.size > 0,
       webhookDeletionsEnabled: this.#allowWebhookAudit
         && this.#allowWebhookDeletions
         && this.#webhookChannelIds.size > 0,
@@ -1495,6 +1509,30 @@ export class ScopePolicy {
     this.assertChannelWebhookIdDeletable(channel.id)
     const guildId = this.assertChannelWebhookAuditable(channel)
     return guildId
+  }
+
+  assertChannelWebhookChangeable(channel: DiscordChannel): string {
+    this.assertChannelWebhookIdChangeable(channel.id)
+    return this.assertChannelWebhookAuditable(channel)
+  }
+
+  assertChannelWebhookIdChangeable(channelId: string): void {
+    this.assertChannelWebhookIdAuditable(channelId)
+    if (!this.#allowWebhookChanges) {
+      throw new PolicyError("Discord webhook changes are disabled by connector configuration")
+    }
+  }
+
+  assertChannelWebhookCreatable(channel: DiscordChannel): string {
+    this.assertChannelWebhookIdCreatable(channel.id)
+    return this.assertChannelWebhookAuditable(channel)
+  }
+
+  assertChannelWebhookIdCreatable(channelId: string): void {
+    this.assertChannelWebhookIdAuditable(channelId)
+    if (!this.#allowWebhookCreation) {
+      throw new PolicyError("Discord webhook creation is disabled by connector configuration")
+    }
   }
 
   assertChannelWebhookIdDeletable(channelId: string): void {

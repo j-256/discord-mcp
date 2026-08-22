@@ -57,6 +57,8 @@ export const OPERATION_KINDS = [
   "thread-create",
   "thread-governance-change",
   "welcome-screen-change",
+  "webhook-change",
+  "webhook-creation",
   "webhook-deletion",
   "widget-settings-change",
 ] as const

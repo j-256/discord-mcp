@@ -115,6 +115,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   threadChangePolicy: "thread-change-policy",
   threadCreationPolicy: "thread-creation-policy",
   webhookAuditPolicy: "webhook-audit-policy",
+  webhookChangePolicy: "webhook-change-policy",
+  webhookCreationPolicy: "webhook-creation-policy",
   webhookDeletionPolicy: "webhook-deletion-policy",
 })
 
@@ -419,6 +421,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowWebhookAudit && config.webhookChannelIds.size === 0) {
     warnings.push("The webhook-audit toggle is enabled but inventory remains blocked because an exact channel allowlist is required")
   }
+  if (config.allowWebhookChanges && config.webhookChannelIds.size === 0) {
+    warnings.push("The webhook-change toggle is enabled but changes remain blocked because an exact channel allowlist is required")
+  }
+  if (config.allowWebhookCreation && config.webhookChannelIds.size === 0) {
+    warnings.push("The webhook-creation toggle is enabled but creation remains blocked because an exact channel allowlist is required")
+  }
   if (config.allowWebhookDeletions && config.webhookChannelIds.size === 0) {
     warnings.push("The webhook-deletion toggle is enabled but deletion remains blocked because an exact channel allowlist is required")
   }
@@ -584,9 +592,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Stage instance audit and reviewed lifecycle",
     ],
     [
-      config.allowWebhookAudit || config.allowWebhookDeletions,
+      config.allowWebhookAudit
+        || config.allowWebhookChanges
+        || config.allowWebhookCreation
+        || config.allowWebhookDeletions,
       "webhooks",
-      "Webhook audit and cleanup",
+      "Webhook audit and administration",
     ],
   ] as const) {
     if (enabled && !config.mcpToolsets.has(toolset)) {
@@ -1516,6 +1527,44 @@ export async function diagnoseConnector(
         `Reviewed Incoming-webhook deletion is constrained to ${config.webhookChannelIds.size} exact channels with one-shot execution and absence readback`,
       ))
     }
+    if (!config.allowWebhookCreation) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookCreationPolicy,
+        "pass",
+        "Reviewed Incoming-webhook creation is disabled",
+      ))
+    } else if (config.webhookChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookCreationPolicy,
+        "warn",
+        "Webhook-creation toggle is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookCreationPolicy,
+        "pass",
+        `Reviewed Incoming-webhook creation is constrained to ${config.webhookChannelIds.size} exact channels with credential projection, one-shot execution, and complete inventory readback`,
+      ))
+    }
+    if (!config.allowWebhookChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookChangePolicy,
+        "pass",
+        "Reviewed Incoming-webhook metadata changes are disabled",
+      ))
+    } else if (config.webhookChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookChangePolicy,
+        "warn",
+        "Webhook-change toggle is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookChangePolicy,
+        "pass",
+        `Reviewed Incoming-webhook rename and same-guild move operations are constrained to ${config.webhookChannelIds.size} exact channels with one-shot execution and complete inventory readback`,
+      ))
+    }
     if (!config.allowIntegrationAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.integrationAuditPolicy,
@@ -2063,6 +2112,8 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.memberVoiceGuildIds,
     ENVIRONMENT_NAMES.memberVoiceChannelIds,
     ENVIRONMENT_NAMES.allowWebhookAudit,
+    ENVIRONMENT_NAMES.allowWebhookChanges,
+    ENVIRONMENT_NAMES.allowWebhookCreation,
     ENVIRONMENT_NAMES.allowWebhookDeletions,
     ENVIRONMENT_NAMES.webhookChannelIds,
     ENVIRONMENT_NAMES.allowIntegrationAudit,

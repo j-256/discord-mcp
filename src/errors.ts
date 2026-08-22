@@ -581,6 +581,70 @@ export class WebhookDeletionExecutionError extends Error {
   }
 }
 
+export class WebhookCreationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord webhook snapshot does not match the reviewed creation plan")
+    this.name = "WebhookCreationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class WebhookCreationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord webhook creation operation key has already been reserved")
+    this.name = "WebhookCreationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class WebhookCreationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "WebhookCreationExecutionError"
+    this.result = result
+  }
+}
+
+export class WebhookChangePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord webhook snapshot does not match the reviewed metadata-change plan")
+    this.name = "WebhookChangePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class WebhookChangeOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord webhook change operation key has already been reserved")
+    this.name = "WebhookChangeOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class WebhookChangeExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "WebhookChangeExecutionError"
+    this.result = result
+  }
+}
+
 export class WebhookEvidenceError extends Error {
   override name = "WebhookEvidenceError"
 }

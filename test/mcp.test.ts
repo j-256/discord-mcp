@@ -244,6 +244,10 @@ import {
   ThreadCreationOperationConflictError,
   ThreadGovernanceExecutionError,
   ThreadGovernanceOperationConflictError,
+  WebhookChangeExecutionError,
+  WebhookChangeOperationConflictError,
+  WebhookCreationExecutionError,
+  WebhookCreationOperationConflictError,
   WebhookDeletionExecutionError,
   WebhookDeletionOperationConflictError,
   WelcomeScreenExecutionError,
@@ -298,6 +302,10 @@ import type {
 } from "../src/thread-governance-service.js"
 import type {
   ProjectedWebhook,
+  WebhookChangePlan,
+  WebhookChangeRequest,
+  WebhookCreationPlan,
+  WebhookCreationRequest,
   WebhookDeletionPlan,
   WebhookDeletionRequest,
   WebhookPermissionEvidence,
@@ -345,6 +353,8 @@ const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
+const WEBHOOK_CHANGE_OPERATION_KEY = "webhook-change-attempt-0001"
+const WEBHOOK_CREATION_OPERATION_KEY = "webhook-create-attempt-0001"
 const WEBHOOK_ID = "370000000000000001"
 const INTEGRATION_OPERATION_KEY = "integration-delete-attempt-0001"
 const INTEGRATION_ID = "375000000000000001"
@@ -910,6 +920,91 @@ function webhookDeletionPlan(
     status: "planned",
     target: projectedWebhook(request.channelId),
     warnings: ["One-shot reviewed Incoming webhook deletion"],
+  }
+}
+
+function webhookEndpoint(
+  channelId: string,
+  webhooks: ProjectedWebhook[],
+) {
+  return {
+    channel: webhookChannel(channelId),
+    inventory: {
+      returned: webhooks.length,
+      safetyLimit: 15,
+    },
+    permission: webhookPermission(channelId),
+    webhooks,
+  }
+}
+
+function webhookCreationPlan(
+  request: WebhookCreationRequest,
+  digest = DIGEST,
+): WebhookCreationPlan {
+  return {
+    action: "create",
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-22T00:00:00.000Z",
+    desired: {
+      channelId: request.channelId,
+      name: request.name,
+      type: "incoming",
+    },
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: webhookPrivacy(),
+    risks: ["Creation adds a durable bearer capability"],
+    schemaVersion: 1,
+    source: webhookEndpoint(request.channelId, [projectedWebhook(request.channelId)]),
+    status: "planned",
+    warnings: ["The credential is projected out inside the REST client"],
+  }
+}
+
+function webhookChangePlan(
+  request: WebhookChangeRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): WebhookChangePlan {
+  const current = projectedWebhook(request.channelId)
+  const destinationChannelId = request.destinationChannelId ?? request.channelId
+  const desired = {
+    ...current,
+    channelId: destinationChannelId,
+    name: request.name ?? current.name,
+  }
+  const requestedFields = [
+    ...(request.destinationChannelId !== undefined ? ["channelId" as const] : []),
+    ...(request.name !== undefined ? ["name" as const] : []),
+  ]
+  const changedFields = writeRequired ? requestedFields : []
+  return {
+    action: "update",
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields,
+    createdAt: "2026-08-22T00:00:00.000Z",
+    current,
+    desired: writeRequired ? desired : current,
+    destination: writeRequired && destinationChannelId !== request.channelId
+      ? webhookEndpoint(destinationChannelId, [])
+      : null,
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: webhookPrivacy(),
+    requestedFields,
+    risks: ["Existing bearer credentials remain active after a move"],
+    schemaVersion: 1,
+    source: webhookEndpoint(request.channelId, [current]),
+    status: writeRequired ? "planned" : "already-current",
+    warnings: ["Credentials never enter MCP data"],
+    writeRequired,
   }
 }
 
@@ -4092,6 +4187,8 @@ function fixturePolicy(): PolicyDescription {
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookChangesEnabled: false,
+    webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
     welcomeScreenAuditEnabled: false,
     welcomeScreenChangesEnabled: false,
@@ -4199,6 +4296,11 @@ function serviceFixture(overrides: {
   threadGovernanceWriteRequired?: boolean
   webhookDeletionError?: Error
   webhookDeletionPlanDigest?: string
+  webhookChangeError?: Error
+  webhookChangePlanDigest?: string
+  webhookChangeWriteRequired?: boolean
+  webhookCreationError?: Error
+  webhookCreationPlanDigest?: string
 } = {}) {
   const welcomeScreenCalls = {
     execute: 0,
@@ -4325,6 +4427,10 @@ function serviceFixture(overrides: {
     webhookDeletionGet: 0,
     webhookDeletionList: 0,
     webhookDeletionPlan: 0,
+    webhookChangeExecute: 0,
+    webhookChangePlan: 0,
+    webhookCreationExecute: 0,
+    webhookCreationPlan: 0,
   }
   const reactionModerationPlan = (
     request: Parameters<DiscordToolService["planReactionModeration"]>[0],
@@ -5201,6 +5307,54 @@ function serviceFixture(overrides: {
         overrides.integrationDeletionPlanDigest || DIGEST,
       )
     },
+    async executeWebhookCreation(request, planDigest) {
+      if (overrides.webhookCreationError) throw overrides.webhookCreationError
+      calls.webhookCreationExecute += 1
+      const created = {
+        ...projectedWebhook(request.channelId),
+        name: request.name,
+      }
+      return {
+        activityId: "activity-webhook-creation",
+        channelId: request.channelId,
+        created,
+        guildId: GUILD_ID,
+        inventoryMatched: true,
+        observed: created,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true as const,
+        schemaVersion: 1,
+        status: "completed" as const,
+      }
+    },
+    async executeWebhookChange(request, planDigest) {
+      if (overrides.webhookChangeError) throw overrides.webhookChangeError
+      calls.webhookChangeExecute += 1
+      const plan = webhookChangePlan(
+        request,
+        planDigest,
+        overrides.webhookChangeWriteRequired ?? true,
+      )
+      return {
+        activityId: plan.writeRequired ? "activity-webhook-change" : null,
+        channelId: request.channelId,
+        destinationChannelId: plan.desired.channelId,
+        guildId: GUILD_ID,
+        inventoryMatched: true,
+        observed: plan.desired,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: plan.writeRequired,
+        schemaVersion: 1,
+        sourceTargetAbsent: plan.writeRequired
+          && plan.desired.channelId !== request.channelId,
+        status: plan.writeRequired ? "completed" as const : "already-current" as const,
+        webhookId: request.webhookId,
+      }
+    },
     async executeWebhookDeletion(request, planDigest) {
       if (overrides.webhookDeletionError) throw overrides.webhookDeletionError
       calls.webhookDeletionExecute += 1
@@ -5246,6 +5400,21 @@ function serviceFixture(overrides: {
       return webhookDeletionPlan(
         request,
         overrides.webhookDeletionPlanDigest || DIGEST,
+      )
+    },
+    async planWebhookChange(request) {
+      calls.webhookChangePlan += 1
+      return webhookChangePlan(
+        request,
+        overrides.webhookChangePlanDigest || DIGEST,
+        overrides.webhookChangeWriteRequired ?? true,
+      )
+    },
+    async planWebhookCreation(request) {
+      calls.webhookCreationPlan += 1
+      return webhookCreationPlan(
+        request,
+        overrides.webhookCreationPlanDigest || DIGEST,
       )
     },
     async addReaction(input) {
@@ -6883,6 +7052,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_native_interaction_command",
       "plan_guild_template_change",
       "execute_guild_template_change",
+      "plan_webhook_creation",
+      "execute_webhook_creation",
+      "plan_webhook_change",
+      "execute_webhook_change",
       "plan_webhook_deletion",
       "execute_webhook_deletion",
       "plan_guild_integration_deletion",
@@ -6962,6 +7135,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     tool.name === "execute_forum_tag_change"
   ))
   const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
+  const webhookChange = result.tools.find((tool) => tool.name === "execute_webhook_change")
+  const webhookCreation = result.tools.find((tool) => tool.name === "execute_webhook_creation")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
   const integrationDeletion = result.tools.find((tool) => (
     tool.name === "execute_guild_integration_deletion"
@@ -7010,6 +7185,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     reactionModeration,
     removeOwnReaction,
     pollEnd,
+    webhookChange,
     webhookDeletion,
     integrationDeletion,
     inviteDeletion,
@@ -7058,6 +7234,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     readOnlyHint: false,
   })
   assert.deepEqual(componentMessage?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(webhookCreation?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
     openWorldHint: true,
@@ -7127,6 +7309,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_thread_creation",
     "plan_component_message",
     "plan_member_role_change",
+    "plan_webhook_change",
+    "plan_webhook_creation",
     "plan_webhook_deletion",
     "plan_guild_integration_deletion",
     "plan_invite_deletion",
@@ -7892,6 +8076,54 @@ test("progressive discovery enables the complete reviewed webhook-deletion workf
   )
 })
 
+test("progressive discovery enables the complete reviewed webhook-creation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_webhook_creation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_webhook_creation",
+    "plan_webhook_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_webhook_creation",
+      "execute_webhook_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed webhook-change workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_webhook_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_webhook_change",
+    "plan_webhook_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_webhook_change",
+      "execute_webhook_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed invite-deletion workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -8363,6 +8595,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     webhookDeletionGet: 0,
     webhookDeletionList: 0,
     webhookDeletionPlan: 0,
+    webhookChangeExecute: 0,
+    webhookChangePlan: 0,
+    webhookCreationExecute: 0,
+    webhookCreationPlan: 0,
   })
 })
 
@@ -11036,6 +11272,373 @@ test("MCP webhook reads expose only bounded credential-redacted evidence", async
   assert.equal(invalid.isError, true)
   assert.equal(calls.webhookDeletionList, 1)
   assert.equal(calls.webhookDeletionGet, 1)
+})
+
+test("MCP webhook administration plans are strict and credential-free", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const creation = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    name: "Deploy relay",
+    operationKey: WEBHOOK_CREATION_OPERATION_KEY,
+  }
+  const change = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    destinationChannelId: PARENT_ID,
+    name: "Renamed relay",
+    operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+    webhookId: WEBHOOK_ID,
+  }
+  const plannedCreation = await client.callTool({
+    arguments: creation,
+    name: "plan_webhook_creation",
+  })
+  const plannedChange = await client.callTool({
+    arguments: change,
+    name: "plan_webhook_change",
+  })
+  const credentialInput = await client.callTool({
+    arguments: { ...creation, token: "credential-must-be-rejected" },
+    name: "plan_webhook_creation",
+  })
+  const reservedName = await client.callTool({
+    arguments: { ...creation, name: "Discord relay" },
+    name: "plan_webhook_creation",
+  })
+  const emptyChange = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "plan_webhook_change",
+  })
+
+  const creationContent = structuredContent(plannedCreation)
+  const changeContent = structuredContent(plannedChange)
+  assert.equal(creationContent.status, "planned")
+  assert.equal(
+    (creationContent.privacy as Record<string, unknown>).credentialsProjectedOut,
+    true,
+  )
+  assert.deepEqual(
+    (changeContent as { changedFields: unknown }).changedFields,
+    ["channelId", "name"],
+  )
+  assert.equal(credentialInput.isError, true)
+  assert.equal(reservedName.isError, true)
+  assert.equal(emptyChange.isError, true)
+  assert.equal(calls.webhookCreationPlan, 1)
+  assert.equal(calls.webhookChangePlan, 1)
+})
+
+test("MCP webhook creation binds signed approval to complete credential-free evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      name: "Deploy relay",
+      operationKey: WEBHOOK_CREATION_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_webhook_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.webhookCreationPlan, 1)
+  assert.equal(calls.webhookCreationExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    WEBHOOK_ID,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Desired webhook name: "Deploy relay"/)
+  assert.match(confirmationMessage, /Source webhook inventory: 1 of 15/)
+  assert.match(confirmationMessage, /bot MANAGE_WEBHOOKS: true/i)
+  assert.match(confirmationMessage, /bearer credential/i)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(WEBHOOK_CREATION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(WEBHOOK_CREATION_OPERATION_KEY),
+  )
+})
+
+test("MCP webhook changes bind approval to source and destination evidence and skip no-ops", async (context) => {
+  let confirmationMessage = ""
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const argumentsValue = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    destinationChannelId: PARENT_ID,
+    name: "Renamed relay",
+    operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+    planDigest: DIGEST,
+    webhookId: WEBHOOK_ID,
+  }
+  const result = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_webhook_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(changed.calls.webhookChangePlan, 1)
+  assert.equal(changed.calls.webhookChangeExecute, 1)
+  assert.match(confirmationMessage, /Requested fields: \["channelId","name"\]/)
+  assert.match(confirmationMessage, /Source exact credential-redacted webhooks:/)
+  assert.match(confirmationMessage, /Destination exact credential-redacted webhooks:/)
+  assert.match(confirmationMessage, new RegExp(PARENT_ID))
+  assert.match(confirmationMessage, new RegExp(WEBHOOK_ID))
+  assert.doesNotMatch(confirmationMessage, new RegExp(WEBHOOK_CHANGE_OPERATION_KEY))
+
+  const noOp = await connectedFixture(context, {
+    serviceOverrides: { webhookChangeWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      name: "Private webhook name",
+      operationKey: "webhook-change-noop-0001",
+      planDigest: DIGEST,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "execute_webhook_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOp.calls.webhookChangeExecute, 1)
+})
+
+test("MCP webhook administration signed state rejects changed intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const creationRequest = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    name: "Deploy relay",
+    operationKey: WEBHOOK_CREATION_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const creationInitial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: creationRequest,
+      name: "execute_webhook_creation",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(creationInitial.resultType, "input_required")
+  const changedCreation = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...creationRequest, name: "Different relay" },
+      inputResponses: {
+        confirm_webhook_creation: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_webhook_creation",
+      requestState: creationInitial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changedCreation).status, "confirmation-invalid")
+
+  const changeRequest = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    destinationChannelId: PARENT_ID,
+    operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+    planDigest: DIGEST,
+    webhookId: WEBHOOK_ID,
+  }
+  const changeInitial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: changeRequest,
+      name: "execute_webhook_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(changeInitial.resultType, "input_required")
+  const changedDestination = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...changeRequest, destinationChannelId: CHANNEL_ID },
+      inputResponses: {
+        confirm_webhook_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_webhook_change",
+      requestState: changeInitial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changedDestination).status, "confirmation-invalid")
+  assert.equal(fixture.calls.webhookCreationExecute, 0)
+  assert.equal(fixture.calls.webhookChangeExecute, 0)
+})
+
+test("MCP webhook administration stops on refusal, plan drift, uncertainty, and key reuse", async (context) => {
+  const creationArguments = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    name: "Deploy relay",
+    operationKey: WEBHOOK_CREATION_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: creationArguments,
+    name: "execute_webhook_creation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.webhookCreationExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { webhookChangePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      name: "Renamed relay",
+      operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+      planDigest: DIGEST,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "execute_webhook_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.webhookChangeExecute, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      webhookCreationError: new WebhookCreationExecutionError(
+        "Discord webhook creation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: creationArguments,
+    name: "execute_webhook_creation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const uncertainChange = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      webhookChangeError: new WebhookChangeExecutionError(
+        "Discord webhook change outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainChangeResult = await uncertainChange.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      name: "Renamed relay",
+      operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+      planDigest: DIGEST,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "execute_webhook_change",
+  })
+  assert.equal(structuredContent(uncertainChangeResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-webhook-change",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+    webhookId: WEBHOOK_ID,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      webhookChangeError: new WebhookChangeOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      name: "Renamed relay",
+      operationKey: WEBHOOK_CHANGE_OPERATION_KEY,
+      planDigest: DIGEST,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "execute_webhook_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(WEBHOOK_CHANGE_OPERATION_KEY))
+
+  const creationConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      webhookCreationError: new WebhookCreationOperationConflictError(receipt),
+    },
+  })
+  const creationConflictResult = await creationConflict.client.callTool({
+    arguments: creationArguments,
+    name: "execute_webhook_creation",
+  })
+  assert.equal(
+    structuredContent(creationConflictResult).status,
+    "operation-key-conflict",
+  )
+  assert.doesNotMatch(
+    JSON.stringify(creationConflictResult),
+    new RegExp(WEBHOOK_CREATION_OPERATION_KEY),
+  )
 })
 
 test("MCP webhook deletion plans reject credentials and unsafe operation keys", async (context) => {

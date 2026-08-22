@@ -275,6 +275,15 @@ export interface DiscordWebhookSummary {
   type: number
 }
 
+export interface CreateWebhookInput {
+  name: string
+}
+
+export interface ModifyWebhookInput {
+  channelId?: string
+  name?: string
+}
+
 export type DiscordGuildIntegrationType =
   | "discord"
   | "guild_subscription"
@@ -806,6 +815,12 @@ const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const CHANNEL_TOPIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const ROLE_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const EXPRESSION_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const WEBHOOK_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const WEBHOOK_FORBIDDEN_NAME_PATTERN = /(?:clyde|discord)/iu
+const WEBHOOK_REPEATED_WHITESPACE_PATTERN = /\s{2,}/u
+const WEBHOOK_TOKEN_CHARACTERS = 2_048
+const CREATE_WEBHOOK_INPUT_KEYS = ["name"] as const
+const MODIFY_WEBHOOK_INPUT_KEYS = ["channelId", "name"] as const
 const POLL_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const POLL_EMOJI_CONTROL_OR_SPACE_PATTERN = /[\u0000-\u0020\u007F]/u
 const POLL_EMOJI_CODE_POINT_PATTERN = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3)/u
@@ -1197,6 +1212,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_guild_sticker",
   "create_guild_template",
   "create_stage_instance",
+  "create_webhook",
   "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
   "delete_guild_soundboard_sound",
@@ -1240,6 +1256,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_template",
   "modify_guild_member_voice",
   "modify_thread_state",
+  "modify_webhook",
   "modify_stage_instance",
   "modify_guild_onboarding",
   "modify_guild_welcome_screen",
@@ -2593,6 +2610,43 @@ function projectWebhook(value: unknown): DiscordWebhookSummary {
     name: record.name,
     type: record.type as number,
   }
+}
+
+function assertWebhookNameInput(value: unknown): asserts value is string {
+  if (
+    typeof value !== "string"
+    || [...value].length < 1
+    || [...value].length > DISCORD_LIMITS.webhookNameCharacters
+    || value !== value.trim()
+    || WEBHOOK_REPEATED_WHITESPACE_PATTERN.test(value)
+    || WEBHOOK_NAME_CONTROL_PATTERN.test(value)
+    || WEBHOOK_FORBIDDEN_NAME_PATTERN.test(value)
+  ) {
+    throw new RangeError("Discord webhook name is invalid")
+  }
+  assertValidUnicode(value, "Discord webhook name")
+}
+
+function projectCreatedWebhook(
+  value: unknown,
+  channelId: string,
+): DiscordWebhookSummary {
+  const projected = projectWebhook(value)
+  const record = value as Record<string, unknown>
+  if (
+    projected.type !== 1
+    || projected.channelId !== channelId
+    || projected.guildId === null
+    || typeof record.token !== "string"
+    || record.token.length < 1
+    || record.token.length > WEBHOOK_TOKEN_CHARACTERS
+    || /\s|[\u0000-\u001F\u007F]/u.test(record.token)
+  ) {
+    throw new WebhookEvidenceError(
+      "Discord returned an invalid Incoming webhook creation result",
+    )
+  }
+  return projected
 }
 
 const GUILD_INTEGRATION_KEYS = [
@@ -8701,6 +8755,87 @@ export class DiscordClient {
       throw new WebhookEvidenceError("Discord returned an invalid channel webhook inventory")
     }
     return response.map(projectWebhook)
+  }
+
+  async createWebhook(
+    channelId: string,
+    input: CreateWebhookInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordWebhookSummary> {
+    assertPositiveSnowflake(channelId, "Discord webhook channel ID")
+    if (
+      !input
+      || typeof input !== "object"
+      || Array.isArray(input)
+      || !hasOnlyKeys(input as unknown as Record<string, unknown>, CREATE_WEBHOOK_INPUT_KEYS)
+    ) {
+      throw new RangeError("Discord webhook creation must be an exact object")
+    }
+    assertWebhookNameInput(input.name)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "create_webhook",
+      `/channels/${channelId}/webhooks`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { name: input.name },
+        diagnosticRoute: "/channels/{channel.id}/webhooks",
+        suppressFailureCause: true,
+      },
+    )
+    return projectCreatedWebhook(response, channelId)
+  }
+
+  async modifyWebhook(
+    webhookId: string,
+    input: ModifyWebhookInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordWebhookSummary> {
+    assertPositiveSnowflake(webhookId, "Discord webhook ID")
+    if (
+      !input
+      || typeof input !== "object"
+      || Array.isArray(input)
+      || !hasOnlyKeys(input as unknown as Record<string, unknown>, MODIFY_WEBHOOK_INPUT_KEYS)
+    ) {
+      throw new RangeError("Discord webhook modification must be an exact object")
+    }
+    const body: Record<string, unknown> = {}
+    if (input.name !== undefined) {
+      assertWebhookNameInput(input.name)
+      body.name = input.name
+    }
+    if (input.channelId !== undefined) {
+      assertPositiveSnowflake(input.channelId, "Discord webhook destination channel ID")
+      body.channel_id = input.channelId
+    }
+    if (Object.keys(body).length === 0) {
+      throw new RangeError("Discord webhook modification requires a name or destination channel")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_webhook",
+      `/webhooks/${webhookId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body,
+        diagnosticRoute: "/webhooks/{webhook.id}",
+        suppressFailureCause: true,
+      },
+    )
+    const projected = projectWebhook(response)
+    if (projected.id !== webhookId) {
+      throw new WebhookEvidenceError(
+        "Discord returned a different webhook than the modified target",
+      )
+    }
+    return projected
   }
 
   async listGuildIntegrations(

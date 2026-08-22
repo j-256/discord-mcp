@@ -314,6 +314,9 @@ function serviceFixture(overrides: {
       calls.createForumPost += 1
       throw new Error("Unexpected forum-post creation")
     },
+    async createWebhook() {
+      throw new Error("Unexpected webhook creation")
+    },
     async createAttachmentMessage(_channelId, input) {
       calls.createAttachment += 1
       return message({
@@ -620,6 +623,9 @@ function serviceFixture(overrides: {
     },
     async modifyGuildWidgetSettings() {
       throw new Error("Unexpected widget-settings change")
+    },
+    async modifyWebhook() {
+      throw new Error("Unexpected webhook modification")
     },
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
@@ -948,6 +954,22 @@ test("service rejects integration and webhook scope before identity access", asy
     () => service.planWebhookDeletion(webhookRequest),
     /webhook audit is disabled/,
   )
+  await assert.rejects(
+    () => service.planWebhookCreation({
+      auditReason: "reviewed",
+      channelId: CHANNEL_ID,
+      name: "reviewed-hook",
+      operationKey: "webhook-create-preflight-0001",
+    }),
+    /webhook audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.planWebhookChange({
+      ...webhookRequest,
+      name: "renamed-hook",
+    }),
+    /webhook audit is disabled/,
+  )
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
 })
@@ -1175,6 +1197,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+      DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
+      DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
       DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
@@ -1411,6 +1435,33 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     webhookRequest,
     webhookPlan.digest,
   ))
+  const webhookCreationRequest = {
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    name: "reviewed-hook",
+    operationKey,
+  }
+  const webhookCreationPlan = await service.planWebhookCreation(
+    webhookCreationRequest,
+  )
+  await captured(() => service.executeWebhookCreation(
+    webhookCreationRequest,
+    webhookCreationPlan.digest,
+  ))
+  const webhookChangeRequest = {
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    name: "renamed-hook",
+    operationKey,
+    webhookId: WEBHOOK_ID,
+  }
+  const webhookChangePlan = await service.planWebhookChange(
+    webhookChangeRequest,
+  )
+  await captured(() => service.executeWebhookChange(
+    webhookChangeRequest,
+    webhookChangePlan.digest,
+  ))
   await captured(() => service.executeWidgetSettingsChange({
     auditReason: "reviewed",
     channelId: null,
@@ -1420,7 +1471,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 30)
+  assert.equal(byKind.size, 32)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1523,6 +1574,15 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: WEBHOOK_ID, kind: "webhook" },
         { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
       ],
+      "webhook-creation": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
+      "webhook-change": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: WEBHOOK_ID, kind: "webhook" },
+        { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
       "welcome-screen-change": [{
         collection: "welcome-screen",
         guildId: GUILD_ID,
@@ -1541,6 +1601,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       ? integrationPlan.digest
       : entry.kind === "webhook-deletion"
         ? webhookPlan.digest
+        : entry.kind === "webhook-creation"
+          ? webhookCreationPlan.digest
+          : entry.kind === "webhook-change"
+            ? webhookChangePlan.digest
         : entry.kind === "message-deletion"
           ? deletionPlan.digest
           : entry.kind === "component-message"
@@ -1558,7 +1622,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 30)
+  assert.equal(writeCoordinator.intents.length, 32)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -1830,7 +1894,7 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.deepEqual(writeCoordinator.intents, [])
 })
 
-test("service verifies identity through credential-free webhook audit and cleanup", async () => {
+test("service verifies identity through credential-safe webhook administration", async () => {
   const operationStore = new MemoryOperationStore()
   let inventory = [{
     applicationId: APPLICATION_ID,

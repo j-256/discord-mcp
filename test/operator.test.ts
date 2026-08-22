@@ -182,6 +182,8 @@ function status(
       threadParentIds: [],
       webhookAuditEnabled: false,
       webhookChannelIds: [],
+      webhookChangesEnabled: false,
+      webhookCreationEnabled: false,
       webhookDeletionsEnabled: false,
       welcomeScreenAuditEnabled: false,
       welcomeScreenChangesEnabled: false,
@@ -242,6 +244,8 @@ function toolService(): DiscordToolService {
     executeReactionModeration: unexpected,
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
+    executeWebhookChange: unexpected,
+    executeWebhookCreation: unexpected,
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planNativeInteractionCommand: unexpected,
@@ -270,6 +274,8 @@ function toolService(): DiscordToolService {
     listAutoModerationRules: unexpected,
     listScheduledEvents: unexpected,
     listStageInstances: unexpected,
+    planWebhookChange: unexpected,
+    planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
     previewComponentLayout() {
       throw new Error("Unexpected smoke service call")
@@ -1078,9 +1084,11 @@ test("doctor and setup explain native poll privacy and reviewed write scope", as
   }
 })
 
-test("doctor and setup explain credential-redacted webhook audit and cleanup", async () => {
+test("doctor and setup explain credential-safe reviewed webhook administration", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
     DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
     DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
   })
@@ -1090,6 +1098,8 @@ test("doctor and setup explain credential-redacted webhook audit and cleanup", a
   })
   const warningEnvironment = environment({
     DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
+    DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
     DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
   })
   const warning = await diagnoseConnector({
@@ -1114,12 +1124,24 @@ test("doctor and setup explain credential-redacted webhook audit and cleanup", a
   const deletion = enabled.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.webhookDeletionPolicy,
   )
+  const creation = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.webhookCreationPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.webhookChangePolicy,
+  )
   assert.equal(audit?.status, "pass")
   assert.match(audit?.summary || "", /credential-redacted webhook inventory/i)
   assert.match(audit?.summary || "", /1 exact channels/)
   assert.equal(deletion?.status, "pass")
   assert.match(deletion?.summary || "", /Incoming-webhook deletion/)
   assert.match(deletion?.summary || "", /one-shot execution and absence readback/)
+  assert.equal(creation?.status, "pass")
+  assert.match(creation?.summary || "", /Incoming-webhook creation/)
+  assert.match(creation?.summary || "", /credential projection/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /rename and same-guild move/)
+  assert.match(change?.summary || "", /complete inventory readback/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.webhookAuditPolicy,
@@ -1132,9 +1154,32 @@ test("doctor and setup explain credential-redacted webhook audit and cleanup", a
     )?.status,
     "warn",
   )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.webhookCreationPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.webhookChangePolicy,
+    )?.status,
+    "warn",
+  )
   assert.match(setup.warnings.join("\n"), /webhook-audit toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-change toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-creation toggle/)
   assert.match(setup.warnings.join("\n"), /webhook-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /webhooks toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
+    "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
+    "DISCORD_MCP_ALLOW_WEBHOOK_CREATION",
+    "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
+    "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
 })
 
 test("doctor and setup explain privacy-safe integration audit and deletion", async () => {
@@ -2857,6 +2902,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_soundboard_change",
     "review_stage_instance_change",
     "review_thread_change",
+    "review_webhook_change",
+    "review_webhook_creation",
     "review_webhook_deletion",
     "review_welcome_screen_change",
     "review_widget_settings_change",
@@ -2933,6 +2980,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_scheduled_event_change",
     "execute_stage_instance_change",
     "execute_thread_change",
+    "execute_webhook_change",
+    "execute_webhook_creation",
     "execute_webhook_deletion",
     "remove_own_reaction",
   ])

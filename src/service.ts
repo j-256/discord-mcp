@@ -122,6 +122,8 @@ import {
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
+  WebhookChangePlanChangedError,
+  WebhookCreationPlanChangedError,
   WebhookDeletionPlanChangedError,
 } from "./errors.js"
 import type {
@@ -409,6 +411,12 @@ import {
   ThreadGovernanceService,
 } from "./thread-governance-service.js"
 import type {
+  WebhookChangePlan,
+  WebhookChangeRequest,
+  WebhookChangeResult,
+  WebhookCreationPlan,
+  WebhookCreationRequest,
+  WebhookCreationResult,
   WebhookDeletionPlan,
   WebhookDeletionRequest,
   WebhookDeletionResult,
@@ -417,6 +425,8 @@ import type {
   WebhookServiceOptions,
 } from "./webhook-service.js"
 import {
+  normalizeWebhookChangeRequest,
+  normalizeWebhookCreationRequest,
   normalizeWebhookDeletionRequest,
   WebhookService,
 } from "./webhook-service.js"
@@ -472,6 +482,7 @@ export interface DiscordServiceClient {
   createPoll: DiscordClient["createPoll"]
   createThreadFromMessage: DiscordClient["createThreadFromMessage"]
   createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
+  createWebhook: DiscordClient["createWebhook"]
   deleteAllMessageReactions: DiscordClient["deleteAllMessageReactions"]
   deleteAllMessageReactionsForEmoji: DiscordClient["deleteAllMessageReactionsForEmoji"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
@@ -544,6 +555,7 @@ export interface DiscordServiceClient {
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
   modifyThreadState: DiscordClient["modifyThreadState"]
+  modifyWebhook: DiscordClient["modifyWebhook"]
   modifyGuildForumTags: DiscordClient["modifyGuildForumTags"]
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
@@ -2201,6 +2213,39 @@ export class ConnectorService {
     )
   }
 
+  async planWebhookCreation(
+    request: WebhookCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookCreationPlan> {
+    normalizeWebhookCreationRequest(request)
+    this.#policy.assertChannelWebhookIdCreatable(request.channelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookService.planCreation(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planWebhookChange(
+    request: WebhookChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookChangePlan> {
+    normalizeWebhookChangeRequest(request)
+    this.#policy.assertChannelWebhookIdChangeable(request.channelId)
+    if (request.destinationChannelId !== undefined) {
+      this.#policy.assertChannelWebhookIdChangeable(request.destinationChannelId)
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookService.planChange(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildIntegrationDeletion(
     request: IntegrationDeletionRequest,
     options: RequestOptions = {},
@@ -3258,6 +3303,108 @@ export class ConnectorService {
         writeGuildCollectionTarget("webhooks", coordinationPlan.guild.id),
       ],
       () => this.#webhookService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeWebhookCreation(
+    request: WebhookCreationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookCreationResult> {
+    normalizeWebhookCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord webhook creation plan digest is invalid")
+    }
+    this.#policy.assertChannelWebhookIdCreatable(request.channelId)
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#webhookService.planCreation(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new WebhookCreationPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    return this.#coordinateWrite(
+      "webhook-creation",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeGuildCollectionTarget("webhooks", coordinationPlan.guild.id),
+      ],
+      () => this.#webhookService.executeCreation(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeWebhookChange(
+    request: WebhookChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookChangeResult> {
+    normalizeWebhookChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord webhook change plan digest is invalid")
+    }
+    this.#policy.assertChannelWebhookIdChangeable(request.channelId)
+    if (request.destinationChannelId !== undefined) {
+      this.#policy.assertChannelWebhookIdChangeable(request.destinationChannelId)
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#webhookService.planChange(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new WebhookChangePlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#webhookService.executeChange(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    const targets = [
+      writeResourceTarget("channel", request.channelId),
+      writeResourceTarget("webhook", request.webhookId),
+      writeGuildCollectionTarget("webhooks", coordinationPlan.guild.id),
+    ]
+    if (coordinationPlan.desired.channelId !== request.channelId) {
+      targets.push(writeResourceTarget(
+        "channel",
+        coordinationPlan.desired.channelId,
+      ))
+    }
+    return this.#coordinateWrite(
+      "webhook-change",
+      request.operationKey,
+      planDigest,
+      targets,
+      () => this.#webhookService.executeChange(
         identity.application.id,
         identity.bot.id,
         request,

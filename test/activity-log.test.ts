@@ -43,6 +43,8 @@ import {
   type StageInstanceActivity,
   type ThreadCreationActivity,
   type ThreadGovernanceActivity,
+  type WebhookChangeActivity,
+  type WebhookCreationActivity,
   type WebhookDeletionActivity,
   type WelcomeScreenActivity,
   type WidgetSettingsActivity,
@@ -576,6 +578,61 @@ function webhookDeletion(
     guildId: "100",
     id,
     kind: "webhook-deletion",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+    webhookId: "300",
+  }
+}
+
+function webhookCreation(
+  id: string,
+  status: WebhookCreationActivity["status"],
+): WebhookCreationActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "webhook-creation",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+    webhookId: ["completed", "completed-with-drift"].includes(status)
+      ? "300"
+      : null,
+  }
+}
+
+function webhookChange(
+  id: string,
+  status: WebhookChangeActivity["status"],
+): WebhookChangeActivity {
+  return {
+    channelId: "200",
+    destinationChannelId: "201",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "webhook-change",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
     schemaVersion: 1,
@@ -1850,6 +1907,74 @@ test("JSONL activity log keeps webhook deletion evidence credential-free", async
     Object.keys(result.entries[0] || {}).sort(),
     [
       "channelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+      "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps webhook creation and changes credential-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-operation-key",
+    "private-webhook-name",
+    "private-webhook-secret",
+    "private-webhook-url",
+  ]
+
+  await store.append(webhookCreation("1", "pending"))
+  await store.append({
+    ...webhookCreation("2", "completed"),
+    auditReason: privateValues[0],
+    operationKey: privateValues[1],
+    name: privateValues[2],
+    token: privateValues[3],
+    url: privateValues[4],
+  } as WebhookCreationActivity)
+  await store.append({
+    ...webhookChange("3", "completed-with-drift"),
+    auditReason: privateValues[0],
+    operationKey: privateValues[1],
+    name: privateValues[2],
+    token: privateValues[3],
+    url: privateValues[4],
+  } as WebhookChangeActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...webhookCreation("4", "completed"),
+      webhookId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["3", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "channelId",
+      "destinationChannelId",
       "error",
       "guildId",
       "id",

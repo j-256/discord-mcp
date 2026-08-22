@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto"
 
 import type {
   ActivityStore,
+  WebhookChangeActivity,
+  WebhookChangeActivityStatus,
+  WebhookCreationActivity,
+  WebhookCreationActivityStatus,
   WebhookDeletionActivity,
   WebhookDeletionActivityStatus,
 } from "./activity-log.js"
@@ -14,16 +18,25 @@ import {
 } from "./constants.js"
 import {
   encodeDiscordAuditReason,
+  type CreateWebhookInput,
   type DiscordClient,
   type DiscordWebhookSummary,
+  type ModifyWebhookInput,
 } from "./discord-client.js"
 import {
   DiscordApiError,
+  WebhookChangeExecutionError,
+  WebhookChangeOperationConflictError,
+  WebhookChangePlanChangedError,
+  WebhookCreationExecutionError,
+  WebhookCreationOperationConflictError,
+  WebhookCreationPlanChangedError,
   WebhookDeletionExecutionError,
   WebhookDeletionOperationConflictError,
   WebhookDeletionPlanChangedError,
   WebhookEvidenceError,
 } from "./errors.js"
+import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
   type OperationStore,
@@ -68,6 +81,9 @@ export type WebhookType = "application" | "channel-follower" | "incoming"
 const DISCORD_EPOCH_MS = 1_420_070_400_000n
 const STATE_UNAVAILABLE = "webhook-state-unavailable"
 const REQUIRED_PERMISSIONS = ["MANAGE_WEBHOOKS", "VIEW_CHANNEL"] as const
+const WEBHOOK_FORBIDDEN_NAME_PATTERN = /(?:clyde|discord)/iu
+const WEBHOOK_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const WEBHOOK_REPEATED_WHITESPACE_PATTERN = /\s{2,}/u
 const WEBHOOK_TYPE_NAMES: Readonly<Record<number, WebhookType>> = Object.freeze({
   [WEBHOOK_TYPES.application]: "application",
   [WEBHOOK_TYPES.channelFollower]: "channel-follower",
@@ -82,6 +98,34 @@ export interface WebhookDeletionRequest {
   operationKey: string
   webhookId: string
 }
+
+export interface WebhookCreationRequest {
+  auditReason: string
+  channelId: string
+  name: string
+  operationKey: string
+}
+
+export interface NormalizedWebhookCreationRequest extends WebhookCreationRequest {
+  operationKeyHash: string
+}
+
+export interface WebhookChangeRequest {
+  auditReason: string
+  channelId: string
+  destinationChannelId?: string
+  name?: string
+  operationKey: string
+  webhookId: string
+}
+
+export interface NormalizedWebhookChangeRequest extends WebhookChangeRequest {
+  operationKeyHash: string
+  requestedFields: WebhookChangeField[]
+}
+
+export const WEBHOOK_CHANGE_FIELDS = ["channelId", "name"] as const
+export type WebhookChangeField = typeof WEBHOOK_CHANGE_FIELDS[number]
 
 export interface NormalizedWebhookDeletionRequest extends WebhookDeletionRequest {
   operationKeyHash: string
@@ -178,14 +222,109 @@ export interface WebhookDeletionResult {
   webhookId: string
 }
 
+export interface WebhookAdministrationEndpoint {
+  channel: WebhookChannelProjection
+  inventory: {
+    returned: number
+    safetyLimit: number
+  }
+  permission: WebhookPermissionEvidence
+  webhooks: ProjectedWebhook[]
+}
+
+export interface WebhookCreationPlan {
+  action: "create"
+  applicationId: string
+  auditReason: string
+  botId: string
+  createdAt: string
+  desired: {
+    channelId: string
+    name: string
+    type: "incoming"
+  }
+  digest: string
+  guild: {
+    id: string
+    name: string
+  }
+  operationKeyHash: string
+  privacy: WebhookPrivacyProjection
+  risks: string[]
+  schemaVersion: number
+  source: WebhookAdministrationEndpoint
+  status: "planned"
+  warnings: string[]
+}
+
+export interface WebhookCreationResult {
+  activityId: string
+  channelId: string
+  created: ProjectedWebhook
+  guildId: string
+  inventoryMatched: boolean
+  observed: ProjectedWebhook | null
+  operationKeyHash: string
+  planDigest: string
+  readbackMatched: boolean
+  responseMatched: true
+  schemaVersion: number
+  status: "completed" | "completed-with-drift"
+}
+
+export interface WebhookChangePlan {
+  action: "update"
+  applicationId: string
+  auditReason: string
+  botId: string
+  changedFields: WebhookChangeField[]
+  createdAt: string
+  current: ProjectedWebhook
+  desired: ProjectedWebhook
+  destination: WebhookAdministrationEndpoint | null
+  digest: string
+  guild: {
+    id: string
+    name: string
+  }
+  operationKeyHash: string
+  privacy: WebhookPrivacyProjection
+  requestedFields: WebhookChangeField[]
+  risks: string[]
+  schemaVersion: number
+  source: WebhookAdministrationEndpoint
+  status: "already-current" | "planned"
+  warnings: string[]
+  writeRequired: boolean
+}
+
+export interface WebhookChangeResult {
+  activityId: string | null
+  channelId: string
+  destinationChannelId: string
+  guildId: string
+  inventoryMatched: boolean
+  observed: ProjectedWebhook | null
+  operationKeyHash: string
+  planDigest: string
+  readbackMatched: boolean
+  responseMatched: boolean
+  schemaVersion: number
+  sourceTargetAbsent: boolean
+  status: "already-current" | "completed" | "completed-with-drift"
+  webhookId: string
+}
+
 export interface WebhookServiceClient extends Pick<
   DiscordClient,
+  | "createWebhook"
   | "deleteWebhook"
   | "getChannel"
   | "getGuild"
   | "getGuildMember"
   | "getGuildRoles"
   | "listChannelWebhooks"
+  | "modifyWebhook"
 > {}
 
 export interface WebhookServiceOptions {
@@ -245,6 +384,94 @@ export function normalizeWebhookDeletionRequest(
     channelId: request.channelId,
     operationKey: request.operationKey,
     operationKeyHash: operationKeyHash(request.operationKey),
+    webhookId: request.webhookId,
+  }
+}
+
+export function normalizeWebhookName(value: unknown): string {
+  if (
+    typeof value !== "string"
+    || [...value].length < 1
+    || [...value].length > DISCORD_LIMITS.webhookNameCharacters
+    || value !== value.trim()
+    || WEBHOOK_REPEATED_WHITESPACE_PATTERN.test(value)
+    || WEBHOOK_NAME_CONTROL_PATTERN.test(value)
+    || WEBHOOK_FORBIDDEN_NAME_PATTERN.test(value)
+  ) {
+    throw new RangeError("Discord webhook name is invalid")
+  }
+  try {
+    encodeURIComponent(value)
+  } catch (error) {
+    throw new RangeError("Discord webhook name must contain valid Unicode", {
+      cause: error,
+    })
+  }
+  return value
+}
+
+export function normalizeWebhookCreationRequest(
+  request: WebhookCreationRequest,
+): NormalizedWebhookCreationRequest {
+  if (!request || typeof request !== "object") {
+    throw new RangeError("Discord webhook creation request must be an object")
+  }
+  assertSnowflake(request.channelId, "Discord webhook channel ID")
+  if (typeof request.auditReason !== "string") {
+    throw new RangeError("Discord webhook creation audit reason must be a string")
+  }
+  encodeDiscordAuditReason(request.auditReason)
+  return {
+    auditReason: request.auditReason,
+    channelId: request.channelId,
+    name: normalizeWebhookName(request.name),
+    operationKey: request.operationKey,
+    operationKeyHash: operationKeyHash(request.operationKey),
+  }
+}
+
+export function normalizeWebhookChangeRequest(
+  request: WebhookChangeRequest,
+): NormalizedWebhookChangeRequest {
+  if (!request || typeof request !== "object") {
+    throw new RangeError("Discord webhook change request must be an object")
+  }
+  assertSnowflake(request.channelId, "Discord webhook source channel ID")
+  assertSnowflake(request.webhookId, "Discord webhook ID")
+  if (typeof request.auditReason !== "string") {
+    throw new RangeError("Discord webhook change audit reason must be a string")
+  }
+  encodeDiscordAuditReason(request.auditReason)
+  let name: string | undefined
+  if (request.name !== undefined) {
+    name = normalizeWebhookName(request.name)
+  }
+  let destinationChannelId: string | undefined
+  if (request.destinationChannelId !== undefined) {
+    assertSnowflake(
+      request.destinationChannelId,
+      "Discord webhook destination channel ID",
+    )
+    destinationChannelId = request.destinationChannelId
+  }
+  const requestedFields = WEBHOOK_CHANGE_FIELDS.filter((field) => (
+    field === "channelId"
+      ? destinationChannelId !== undefined
+      : name !== undefined
+  ))
+  if (requestedFields.length === 0) {
+    throw new RangeError(
+      "Discord webhook change requires a name or destination channel ID",
+    )
+  }
+  return {
+    auditReason: request.auditReason,
+    channelId: request.channelId,
+    ...(destinationChannelId !== undefined ? { destinationChannelId } : {}),
+    ...(name !== undefined ? { name } : {}),
+    operationKey: request.operationKey,
+    operationKeyHash: operationKeyHash(request.operationKey),
+    requestedFields,
     webhookId: request.webhookId,
   }
 }
@@ -503,6 +730,61 @@ function permissionEvidence(
   }
 }
 
+function administrationEndpoint(
+  state: WebhookStateEvidence,
+): WebhookAdministrationEndpoint {
+  return {
+    channel: projectChannel(state.channel, state.guildId),
+    inventory: {
+      returned: state.webhooks.length,
+      safetyLimit: DISCORD_LIMITS.webhooksPerChannel,
+    },
+    permission: permissionEvidence(state.permissions),
+    webhooks: state.webhooks,
+  }
+}
+
+function stateDigestSnapshot(state: WebhookStateEvidence) {
+  return {
+    botMember: {
+      roles: [...state.botMember.roles].sort(),
+      userId: state.botMember.user?.id ?? null,
+    },
+    channel: {
+      guildId: state.guildId,
+      id: state.channel.id,
+      name: state.channel.name,
+      overwrites: overwriteSnapshot(state.channel),
+      parentId: state.channel.parent_id ?? null,
+      type: state.channel.type,
+    },
+    guild: {
+      id: state.guildId,
+      name: state.guild.name,
+    },
+    permissions: state.permissions.effectivePermissions,
+    roles: relevantRoleSnapshot(state.roles, state.permissions.appliedRoleIds),
+    webhooks: state.webhooks,
+  }
+}
+
+function sameWebhookInventory(
+  left: readonly ProjectedWebhook[],
+  right: readonly ProjectedWebhook[],
+): boolean {
+  return stableString(left) === stableString(right)
+}
+
+function sortedWebhookInventory(
+  inventory: readonly ProjectedWebhook[],
+): ProjectedWebhook[] {
+  return [...inventory].sort((left, right) => {
+    const leftId = BigInt(left.webhookId)
+    const rightId = BigInt(right.webhookId)
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+  })
+}
+
 function safeErrorCode(error: unknown): string {
   if (error instanceof DiscordApiError) {
     return `DiscordApiError.${error.status}.${error.code ?? "unknown"}`
@@ -576,9 +858,122 @@ function operationReceipt(options: {
   }
 }
 
+function creationActivityEntry(options: {
+  activityId: string
+  error?: string | null
+  guildId: string
+  plan: WebhookCreationPlan
+  request: NormalizedWebhookCreationRequest
+  status: WebhookCreationActivityStatus
+  timestamp: string
+  verification?: "drift" | "match" | null
+  webhookId?: string | null
+}): WebhookCreationActivity {
+  return {
+    channelId: options.request.channelId,
+    error: options.error ?? null,
+    guildId: options.guildId,
+    id: options.activityId,
+    kind: "webhook-creation",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    schemaVersion: SCHEMA_VERSION,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+    webhookId: options.webhookId ?? null,
+  }
+}
+
+function creationReceipt(options: {
+  activityId: string
+  error?: string | null
+  guildId: string
+  plan: WebhookCreationPlan
+  request: NormalizedWebhookCreationRequest
+  status: OperationReceipt["status"]
+  timestamp: string
+  verification?: "drift" | "match" | null
+  webhookId?: string | null
+}): OperationReceipt {
+  return {
+    activityId: options.activityId,
+    error: options.error ?? null,
+    guildId: options.guildId,
+    kind: "webhook-creation",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    resourceId: options.status === "completed" || options.status === "uncertain"
+      ? options.webhookId ?? null
+      : null,
+    schemaVersion: 1,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
+function changeActivityEntry(options: {
+  activityId: string
+  error?: string | null
+  guildId: string
+  plan: WebhookChangePlan
+  request: NormalizedWebhookChangeRequest
+  status: WebhookChangeActivityStatus
+  timestamp: string
+  verification?: "drift" | "match" | null
+}): WebhookChangeActivity {
+  return {
+    channelId: options.request.channelId,
+    destinationChannelId: options.request.destinationChannelId ?? null,
+    error: options.error ?? null,
+    guildId: options.guildId,
+    id: options.activityId,
+    kind: "webhook-change",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    schemaVersion: SCHEMA_VERSION,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+    webhookId: options.request.webhookId,
+  }
+}
+
+function changeReceipt(options: {
+  activityId: string
+  error?: string | null
+  guildId: string
+  plan: WebhookChangePlan
+  request: NormalizedWebhookChangeRequest
+  status: OperationReceipt["status"]
+  timestamp: string
+  verification?: "drift" | "match" | null
+}): OperationReceipt {
+  return {
+    activityId: options.activityId,
+    error: options.error ?? null,
+    guildId: options.guildId,
+    kind: "webhook-change",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    resourceId: options.status === "pending" || options.status === "failed"
+      ? null
+      : options.request.webhookId,
+    schemaVersion: 1,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
 function uncertainExecution(error: unknown): boolean {
   if (
-    !(error instanceof WebhookDeletionExecutionError)
+    !(
+      error instanceof WebhookChangeExecutionError
+      || error instanceof WebhookCreationExecutionError
+      || error instanceof WebhookDeletionExecutionError
+    )
     || !error.result
     || typeof error.result !== "object"
     || !("status" in error.result)
@@ -589,7 +984,7 @@ function uncertainExecution(error: unknown): boolean {
 async function withTargetLock<T>(
   key: string,
   operation: () => Promise<T>,
-  priorUncertainError: () => WebhookDeletionExecutionError,
+  priorUncertainError: () => Error,
 ): Promise<T> {
   const prior = WEBHOOK_TARGET_LOCKS.get(key)
     ?? Promise.resolve("settled" as const)
@@ -763,6 +1158,248 @@ export class WebhookService {
     }
   }
 
+  async #buildCreationPlan(
+    applicationId: string,
+    botId: string,
+    request: NormalizedWebhookCreationRequest,
+    options: RequestOptions,
+  ): Promise<WebhookCreationPlan> {
+    assertSnowflake(applicationId, "Discord connector application ID")
+    assertSnowflake(botId, "Discord connector bot ID")
+    this.#policy.assertChannelWebhookIdCreatable(request.channelId)
+    const existingReceipt = await this.#operationStore.get(
+      "webhook-creation",
+      request.operationKeyHash,
+    )
+    if (existingReceipt) {
+      throw new WebhookCreationOperationConflictError(receiptView(existingReceipt))
+    }
+    const state = await this.#state(botId, request.channelId, "audit", options)
+    this.#policy.assertChannelWebhookCreatable(state.channel)
+    if (state.webhooks.length >= DISCORD_LIMITS.webhooksPerChannel) {
+      throw new WebhookEvidenceError(
+        "Discord webhook creation is blocked because the exact channel inventory is full",
+      )
+    }
+    const privacy = privacyProjection()
+    const risks = [
+      "Creation adds a durable bearer capability that can post through Discord independently of the bot token",
+      "Anyone who obtains the webhook token outside this connector can post until the webhook is deleted",
+      "A transport failure after Discord accepts the request can leave an unverified created webhook",
+    ]
+    const warnings = [
+      ...(state.permissions.administrator
+        ? ["Discord connector bot has ADMINISTRATOR; replace it with narrowly scoped VIEW_CHANNEL and MANAGE_WEBHOOKS permissions"]
+        : []),
+      "The created token and execution URL are validated and projected out inside the REST client and never enter MCP data or persistent state",
+      "Webhook names and channel names are untrusted Discord data and are never persisted by this workflow",
+      "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
+      "Webhook message delivery is not supported by this tool surface and is not enabled by creation",
+    ]
+    const digest = reviewedPlanDigest(this.#planKey, {
+      applicationId,
+      botId,
+      desired: {
+        channelId: request.channelId,
+        name: request.name,
+        type: "incoming",
+      },
+      privacy,
+      request,
+      risks,
+      source: stateDigestSnapshot(state),
+      warnings,
+    })
+    return {
+      action: "create",
+      applicationId,
+      auditReason: request.auditReason,
+      botId,
+      createdAt: this.#clock().toISOString(),
+      desired: {
+        channelId: request.channelId,
+        name: request.name,
+        type: "incoming",
+      },
+      digest,
+      guild: {
+        id: state.guildId,
+        name: state.guild.name,
+      },
+      operationKeyHash: request.operationKeyHash,
+      privacy,
+      risks,
+      schemaVersion: SCHEMA_VERSION,
+      source: administrationEndpoint(state),
+      status: "planned",
+      warnings,
+    }
+  }
+
+  planCreation(
+    applicationId: string,
+    botId: string,
+    request: WebhookCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookCreationPlan> {
+    return this.#buildCreationPlan(
+      applicationId,
+      botId,
+      normalizeWebhookCreationRequest(request),
+      options,
+    )
+  }
+
+  async #buildChangePlan(
+    applicationId: string,
+    botId: string,
+    request: NormalizedWebhookChangeRequest,
+    options: RequestOptions,
+  ): Promise<WebhookChangePlan> {
+    assertSnowflake(applicationId, "Discord connector application ID")
+    assertSnowflake(botId, "Discord connector bot ID")
+    this.#policy.assertChannelWebhookIdChangeable(request.channelId)
+    const existingReceipt = await this.#operationStore.get(
+      "webhook-change",
+      request.operationKeyHash,
+    )
+    if (existingReceipt) {
+      throw new WebhookChangeOperationConflictError(receiptView(existingReceipt))
+    }
+    const sourceState = await this.#state(
+      botId,
+      request.channelId,
+      "audit",
+      options,
+    )
+    this.#policy.assertChannelWebhookChangeable(sourceState.channel)
+    const current = sourceState.webhooks.find(
+      (webhook) => webhook.webhookId === request.webhookId,
+    )
+    if (!current) {
+      throw new WebhookEvidenceError(
+        "Discord webhook is absent from the exact source channel inventory",
+      )
+    }
+    if (current.type !== "incoming") {
+      throw new WebhookEvidenceError(
+        "Discord webhook changes are limited to Incoming webhooks",
+      )
+    }
+    const destinationChannelId = request.destinationChannelId
+      ?? request.channelId
+    let destinationState = sourceState
+    if (destinationChannelId !== request.channelId) {
+      this.#policy.assertChannelWebhookIdChangeable(destinationChannelId)
+      destinationState = await this.#state(
+        botId,
+        destinationChannelId,
+        "audit",
+        options,
+      )
+      this.#policy.assertChannelWebhookChangeable(destinationState.channel)
+      if (destinationState.guildId !== sourceState.guildId) {
+        throw new WebhookEvidenceError(
+          "Discord webhook moves must stay within the exact source guild",
+        )
+      }
+      if (destinationState.webhooks.some(
+        (webhook) => webhook.webhookId === request.webhookId,
+      )) {
+        throw new WebhookEvidenceError(
+          "Discord returned the same webhook in both source and destination inventories",
+        )
+      }
+      if (destinationState.webhooks.length >= DISCORD_LIMITS.webhooksPerChannel) {
+        throw new WebhookEvidenceError(
+          "Discord webhook move is blocked because the destination inventory is full",
+        )
+      }
+    }
+    const desired: ProjectedWebhook = {
+      ...current,
+      channelId: destinationChannelId,
+      name: request.name ?? current.name,
+    }
+    const changedFields = WEBHOOK_CHANGE_FIELDS.filter((field) => (
+      field === "channelId"
+        ? desired.channelId !== current.channelId
+        : desired.name !== current.name
+    ))
+    const privacy = privacyProjection()
+    const risks = [
+      ...(changedFields.includes("channelId")
+        ? [
+            "Moving a webhook redirects future deliveries made with its existing token to the destination channel",
+            "External systems can continue using the same bearer credential after the move",
+          ]
+        : []),
+      "Another administrator can change or delete the webhook during the final non-atomic inventory-to-mutation window",
+    ]
+    const warnings = [
+      ...(sourceState.permissions.administrator || destinationState.permissions.administrator
+        ? ["Discord connector bot has ADMINISTRATOR; replace it with narrowly scoped VIEW_CHANNEL and MANAGE_WEBHOOKS permissions"]
+        : []),
+      "Webhook tokens, execution URLs, avatars, creator profiles, source objects, and raw payloads never enter MCP data or persistent state",
+      "Guild, channel, and webhook names are untrusted Discord data and are never persisted by this workflow",
+      "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
+    ]
+    const digest = reviewedPlanDigest(this.#planKey, {
+      applicationId,
+      botId,
+      desired,
+      destination: destinationChannelId === request.channelId
+        ? null
+        : stateDigestSnapshot(destinationState),
+      privacy,
+      request,
+      risks,
+      source: stateDigestSnapshot(sourceState),
+      warnings,
+    })
+    return {
+      action: "update",
+      applicationId,
+      auditReason: request.auditReason,
+      botId,
+      changedFields,
+      createdAt: this.#clock().toISOString(),
+      current,
+      desired,
+      destination: destinationChannelId === request.channelId
+        ? null
+        : administrationEndpoint(destinationState),
+      digest,
+      guild: {
+        id: sourceState.guildId,
+        name: sourceState.guild.name,
+      },
+      operationKeyHash: request.operationKeyHash,
+      privacy,
+      requestedFields: request.requestedFields,
+      risks,
+      schemaVersion: SCHEMA_VERSION,
+      source: administrationEndpoint(sourceState),
+      status: changedFields.length === 0 ? "already-current" : "planned",
+      warnings,
+      writeRequired: changedFields.length > 0,
+    }
+  }
+
+  planChange(
+    applicationId: string,
+    botId: string,
+    request: WebhookChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookChangePlan> {
+    return this.#buildChangePlan(
+      applicationId,
+      botId,
+      normalizeWebhookChangeRequest(request),
+      options,
+    )
+  }
+
   async #buildPlan(
     applicationId: string,
     botId: string,
@@ -796,7 +1433,7 @@ export class WebhookService {
       "Discord deletion is keyed only by webhook ID; keep MANAGE_WEBHOOKS denied outside scope and prevent concurrent administration because another administrator can move the webhook during the final non-atomic inventory-to-delete window",
       "Webhook tokens, URLs, avatars, creator profiles, and source objects are projected out and never enter the MCP result",
       "Guild, channel, and webhook names are untrusted Discord data and are never persisted by this workflow",
-      "Same-target serialization is process-local; do not run multiple connector processes with overlapping webhook-deletion scope",
+      "Execution serializes the exact webhook in process, while the production facade coordinates its channel, webhook, and guild collection across connector processes sharing the activity-state root",
       "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
     ]
     const digest = reviewedPlanDigest(this.#planKey, {
@@ -862,6 +1499,625 @@ export class WebhookService {
     )
   }
 
+  executeCreation(
+    applicationId: string,
+    botId: string,
+    request: WebhookCreationRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookCreationResult> {
+    const normalized = normalizeWebhookCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord webhook creation plan digest is invalid")
+    }
+    return withTargetLock(
+      `channel:${normalized.channelId}`,
+      () => this.#executeCreationNormalized(
+        applicationId,
+        botId,
+        normalized,
+        expectedDigest,
+        options,
+      ),
+      () => new WebhookCreationExecutionError(
+        "Discord webhook creation was blocked because a prior same-channel operation ended with an uncertain outcome",
+        {
+          channelId: normalized.channelId,
+          operationKeyHash: normalized.operationKeyHash,
+          planDigest: expectedDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+        },
+      ),
+    )
+  }
+
+  async #executeCreationNormalized(
+    applicationId: string,
+    botId: string,
+    request: NormalizedWebhookCreationRequest,
+    expectedDigest: string,
+    options: RequestOptions,
+  ): Promise<WebhookCreationResult> {
+    let plan: WebhookCreationPlan
+    try {
+      plan = await this.#buildCreationPlan(applicationId, botId, request, options)
+    } catch (error) {
+      if (
+        error instanceof WebhookEvidenceError
+        || error instanceof DiscordApiError && error.status === 404
+      ) {
+        throw new WebhookCreationPlanChangedError(expectedDigest, STATE_UNAVAILABLE)
+      }
+      throw error
+    }
+    if (plan.digest !== expectedDigest) {
+      throw new WebhookCreationPlanChangedError(expectedDigest, plan.digest)
+    }
+    const baseResult = {
+      channelId: request.channelId,
+      guildId: plan.guild.id,
+      operationKeyHash: request.operationKeyHash,
+      planDigest: plan.digest,
+      schemaVersion: SCHEMA_VERSION,
+    }
+    const activityId = this.#randomId()
+    const reservation = await this.#operationStore.reserve(creationReceipt({
+      activityId,
+      guildId: plan.guild.id,
+      plan,
+      request,
+      status: "pending",
+      timestamp: this.#clock().toISOString(),
+    }))
+    if (!reservation.created) {
+      throw new WebhookCreationOperationConflictError(receiptView(reservation.receipt))
+    }
+    try {
+      await this.#activityStore.append(creationActivityEntry({
+        activityId,
+        guildId: plan.guild.id,
+        plan,
+        request,
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      }))
+    } catch (error) {
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(creationReceipt({
+          activityId,
+          error: safeErrorCode(error),
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status: "failed",
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      throw new WebhookCreationExecutionError(
+        "Discord webhook creation was blocked because pending activity could not be recorded",
+        {
+          ...baseResult,
+          activityId,
+          error: safeErrorCode(error),
+          operationRecordError,
+          status: "blocked-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+
+    let created: ProjectedWebhook | null = null
+    let inventoryMatched: boolean | null = null
+    let observed: ProjectedWebhook | null = null
+    let readbackMatched: boolean | null = null
+    try {
+      const input: CreateWebhookInput = { name: request.name }
+      const response = await this.#client.createWebhook(
+        request.channelId,
+        input,
+        request.auditReason,
+        options,
+      )
+      created = projectedWebhook(response, request.channelId, plan.guild.id)
+      if (created.type !== "incoming" || created.name !== request.name) {
+        throw new WebhookEvidenceError(
+          "Discord returned webhook creation state that does not match the request",
+        )
+      }
+      const readback = exactWebhookInventory(
+        await this.#client.listChannelWebhooks(request.channelId, options),
+        request.channelId,
+        plan.guild.id,
+      )
+      observed = readback.find(
+        (webhook) => webhook.webhookId === created?.webhookId,
+      ) ?? null
+      readbackMatched = observed !== null
+        && stableString(observed) === stableString(created)
+      inventoryMatched = sameWebhookInventory(
+        readback,
+        sortedWebhookInventory([...plan.source.webhooks, created]),
+      )
+    } catch (error) {
+      const status = created === null
+        && error instanceof DiscordApiError
+        && error.status >= 400
+        && error.status < 500
+        && error.status !== 429
+        ? "failed"
+        : "uncertain"
+      const errorCode = safeErrorCode(error)
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(creationReceipt({
+          activityId,
+          error: errorCode,
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+          webhookId: created?.webhookId ?? null,
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(creationActivityEntry({
+          activityId,
+          error: errorCode,
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+          webhookId: created?.webhookId ?? null,
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new WebhookCreationExecutionError(
+        "Discord webhook creation did not complete with a verified successful outcome",
+        {
+          ...baseResult,
+          activityId,
+          activityRecordError,
+          error: errorCode,
+          inventoryMatched,
+          observed,
+          operationRecordError,
+          readbackMatched,
+          retryAfterMs: error instanceof DiscordApiError
+            ? error.retryAfterMs ?? null
+            : null,
+          status,
+          webhookId: created?.webhookId ?? null,
+        },
+        { cause: error },
+      )
+    }
+
+    const verification = readbackMatched && inventoryMatched ? "match" : "drift"
+    const status = verification === "match" ? "completed" : "completed-with-drift"
+    const result: WebhookCreationResult = {
+      ...baseResult,
+      activityId,
+      created,
+      inventoryMatched,
+      observed,
+      readbackMatched,
+      responseMatched: true,
+      status,
+    }
+    try {
+      await this.#operationStore.finish(creationReceipt({
+        activityId,
+        guildId: plan.guild.id,
+        plan,
+        request,
+        status: "completed",
+        timestamp: this.#clock().toISOString(),
+        verification,
+        webhookId: created.webhookId,
+      }))
+    } catch (error) {
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(creationActivityEntry({
+          activityId,
+          error: safeErrorCode(error),
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+          verification,
+          webhookId: created.webhookId,
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new WebhookCreationExecutionError(
+        "Discord webhook creation completed but the operation receipt failed",
+        {
+          ...result,
+          activityRecordError,
+          operationRecordError: safeErrorCode(error),
+          status: "completed-operation-record-failed",
+        },
+        { cause: error },
+      )
+    }
+    try {
+      await this.#activityStore.append(creationActivityEntry({
+        activityId,
+        guildId: plan.guild.id,
+        plan,
+        request,
+        status,
+        timestamp: this.#clock().toISOString(),
+        verification,
+        webhookId: created.webhookId,
+      }))
+    } catch (error) {
+      throw new WebhookCreationExecutionError(
+        "Discord webhook creation completed but the final activity record failed",
+        {
+          ...result,
+          activityRecordError: safeErrorCode(error),
+          status: "completed-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+    return result
+  }
+
+  executeChange(
+    applicationId: string,
+    botId: string,
+    request: WebhookChangeRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookChangeResult> {
+    const normalized = normalizeWebhookChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord webhook change plan digest is invalid")
+    }
+    return withTargetLock(
+      `webhook:${normalized.webhookId}`,
+      () => this.#executeChangeNormalized(
+        applicationId,
+        botId,
+        normalized,
+        expectedDigest,
+        options,
+      ),
+      () => new WebhookChangeExecutionError(
+        "Discord webhook change was blocked because a prior same-target operation ended with an uncertain outcome",
+        {
+          channelId: normalized.channelId,
+          destinationChannelId: normalized.destinationChannelId
+            ?? normalized.channelId,
+          operationKeyHash: normalized.operationKeyHash,
+          planDigest: expectedDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+          webhookId: normalized.webhookId,
+        },
+      ),
+    )
+  }
+
+  async #executeChangeNormalized(
+    applicationId: string,
+    botId: string,
+    request: NormalizedWebhookChangeRequest,
+    expectedDigest: string,
+    options: RequestOptions,
+  ): Promise<WebhookChangeResult> {
+    let plan: WebhookChangePlan
+    try {
+      plan = await this.#buildChangePlan(applicationId, botId, request, options)
+    } catch (error) {
+      if (
+        error instanceof WebhookEvidenceError
+        || error instanceof DiscordApiError && error.status === 404
+      ) {
+        throw new WebhookChangePlanChangedError(expectedDigest, STATE_UNAVAILABLE)
+      }
+      throw error
+    }
+    if (plan.digest !== expectedDigest) {
+      throw new WebhookChangePlanChangedError(expectedDigest, plan.digest)
+    }
+    const destinationChannelId = plan.desired.channelId
+    const baseResult = {
+      channelId: request.channelId,
+      destinationChannelId,
+      guildId: plan.guild.id,
+      operationKeyHash: request.operationKeyHash,
+      planDigest: plan.digest,
+      schemaVersion: SCHEMA_VERSION,
+      webhookId: request.webhookId,
+    }
+    if (!plan.writeRequired) {
+      return {
+        ...baseResult,
+        activityId: null,
+        inventoryMatched: true,
+        observed: plan.current,
+        readbackMatched: true,
+        responseMatched: false,
+        sourceTargetAbsent: false,
+        status: "already-current",
+      }
+    }
+    const activityId = this.#randomId()
+    const reservation = await this.#operationStore.reserve(changeReceipt({
+      activityId,
+      guildId: plan.guild.id,
+      plan,
+      request,
+      status: "pending",
+      timestamp: this.#clock().toISOString(),
+    }))
+    if (!reservation.created) {
+      throw new WebhookChangeOperationConflictError(receiptView(reservation.receipt))
+    }
+    try {
+      await this.#activityStore.append(changeActivityEntry({
+        activityId,
+        guildId: plan.guild.id,
+        plan,
+        request,
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      }))
+    } catch (error) {
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(changeReceipt({
+          activityId,
+          error: safeErrorCode(error),
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status: "failed",
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      throw new WebhookChangeExecutionError(
+        "Discord webhook change was blocked because pending activity could not be recorded",
+        {
+          ...baseResult,
+          activityId,
+          error: safeErrorCode(error),
+          operationRecordError,
+          status: "blocked-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+
+    let inventoryMatched: boolean | null = null
+    let mutationAccepted = false
+    let observed: ProjectedWebhook | null = null
+    let readbackMatched: boolean | null = null
+    let responseMatched = false
+    let sourceTargetAbsent: boolean | null = null
+    try {
+      const input: ModifyWebhookInput = {
+        ...(plan.changedFields.includes("channelId")
+          ? { channelId: destinationChannelId }
+          : {}),
+        ...(plan.changedFields.includes("name") && plan.desired.name !== null
+          ? { name: plan.desired.name }
+          : {}),
+      }
+      const response = await this.#client.modifyWebhook(
+        request.webhookId,
+        input,
+        request.auditReason,
+        options,
+      )
+      mutationAccepted = true
+      const projected = projectedWebhook(
+        response,
+        destinationChannelId,
+        plan.guild.id,
+      )
+      responseMatched = stableString(projected) === stableString(plan.desired)
+      if (!responseMatched) {
+        throw new WebhookEvidenceError(
+          "Discord returned webhook metadata that does not match the requested change",
+        )
+      }
+      const [sourceReadback, destinationReadback] = await Promise.all([
+        this.#client.listChannelWebhooks(request.channelId, options),
+        destinationChannelId === request.channelId
+          ? Promise.resolve(null)
+          : this.#client.listChannelWebhooks(destinationChannelId, options),
+      ])
+      const sourceInventory = exactWebhookInventory(
+        sourceReadback,
+        request.channelId,
+        plan.guild.id,
+      )
+      const destinationInventory = destinationReadback === null
+        ? sourceInventory
+        : exactWebhookInventory(
+            destinationReadback,
+            destinationChannelId,
+            plan.guild.id,
+          )
+      observed = destinationInventory.find(
+        (webhook) => webhook.webhookId === request.webhookId,
+      ) ?? null
+      readbackMatched = observed !== null
+        && stableString(observed) === stableString(plan.desired)
+      if (destinationChannelId === request.channelId) {
+        sourceTargetAbsent = false
+        const expected = sortedWebhookInventory(plan.source.webhooks.map(
+          (webhook) => webhook.webhookId === request.webhookId
+            ? plan.desired
+            : webhook,
+        ))
+        inventoryMatched = sameWebhookInventory(sourceInventory, expected)
+      } else {
+        sourceTargetAbsent = !sourceInventory.some(
+          (webhook) => webhook.webhookId === request.webhookId,
+        )
+        const expectedSource = plan.source.webhooks.filter(
+          (webhook) => webhook.webhookId !== request.webhookId,
+        )
+        const expectedDestination = sortedWebhookInventory([
+          ...(plan.destination?.webhooks ?? []),
+          plan.desired,
+        ])
+        inventoryMatched = sourceTargetAbsent
+          && sameWebhookInventory(sourceInventory, expectedSource)
+          && sameWebhookInventory(destinationInventory, expectedDestination)
+      }
+    } catch (error) {
+      const status = !mutationAccepted
+        && error instanceof DiscordApiError
+        && error.status >= 400
+        && error.status < 500
+        && error.status !== 429
+        ? "failed"
+        : "uncertain"
+      const errorCode = safeErrorCode(error)
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(changeReceipt({
+          activityId,
+          error: errorCode,
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(changeActivityEntry({
+          activityId,
+          error: errorCode,
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new WebhookChangeExecutionError(
+        "Discord webhook change did not complete with a verified successful outcome",
+        {
+          ...baseResult,
+          activityId,
+          activityRecordError,
+          error: errorCode,
+          inventoryMatched,
+          observed,
+          operationRecordError,
+          readbackMatched,
+          responseMatched,
+          retryAfterMs: error instanceof DiscordApiError
+            ? error.retryAfterMs ?? null
+            : null,
+          sourceTargetAbsent,
+          status,
+        },
+        { cause: error },
+      )
+    }
+
+    const verification = readbackMatched && inventoryMatched ? "match" : "drift"
+    const status = verification === "match" ? "completed" : "completed-with-drift"
+    const result: WebhookChangeResult = {
+      ...baseResult,
+      activityId,
+      inventoryMatched,
+      observed,
+      readbackMatched,
+      responseMatched,
+      sourceTargetAbsent,
+      status,
+    }
+    try {
+      await this.#operationStore.finish(changeReceipt({
+        activityId,
+        guildId: plan.guild.id,
+        plan,
+        request,
+        status: "completed",
+        timestamp: this.#clock().toISOString(),
+        verification,
+      }))
+    } catch (error) {
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(changeActivityEntry({
+          activityId,
+          error: safeErrorCode(error),
+          guildId: plan.guild.id,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+          verification,
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new WebhookChangeExecutionError(
+        "Discord webhook change completed but the operation receipt failed",
+        {
+          ...result,
+          activityRecordError,
+          operationRecordError: safeErrorCode(error),
+          status: "completed-operation-record-failed",
+        },
+        { cause: error },
+      )
+    }
+    try {
+      await this.#activityStore.append(changeActivityEntry({
+        activityId,
+        guildId: plan.guild.id,
+        plan,
+        request,
+        status,
+        timestamp: this.#clock().toISOString(),
+        verification,
+      }))
+    } catch (error) {
+      throw new WebhookChangeExecutionError(
+        "Discord webhook change completed but the final activity record failed",
+        {
+          ...result,
+          activityRecordError: safeErrorCode(error),
+          status: "completed-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+    return result
+  }
+
   execute(
     applicationId: string,
     botId: string,
@@ -874,7 +2130,7 @@ export class WebhookService {
       throw new RangeError("Discord webhook deletion plan digest is invalid")
     }
     return withTargetLock(
-      normalized.webhookId,
+      `webhook:${normalized.webhookId}`,
       () => this.#executeNormalized(
         applicationId,
         botId,
