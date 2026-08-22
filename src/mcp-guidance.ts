@@ -23,6 +23,8 @@ export type DiscordGuidanceService = Pick<
   | "getMessage"
   | "getRole"
   | "getStageInstance"
+  | "getThreadMembership"
+  | "getThreadState"
   | "listActivity"
   | "listAutoModerationRules"
   | "listChannels"

@@ -94,6 +94,11 @@ export interface PolicyDescription {
   stageInstanceChangesEnabled: boolean
   stageStartNotificationsEnabled: boolean
   threadCreationEnabled: boolean
+  threadAuditEnabled: boolean
+  threadChangesEnabled: boolean
+  threadGuildIds: string[]
+  threadIds: string[]
+  threadMemberUserIds: string[]
   threadParentIds: string[]
   welcomeScreenAuditEnabled: boolean
   welcomeScreenChangesEnabled: boolean
@@ -158,6 +163,8 @@ export class ScopePolicy {
   readonly #allowStageInstanceChanges: boolean
   readonly #allowStageStartNotifications: boolean
   readonly #allowThreadCreation: boolean
+  readonly #allowThreadAudit: boolean
+  readonly #allowThreadChanges: boolean
   readonly #allowWelcomeScreenAudit: boolean
   readonly #allowWelcomeScreenChanges: boolean
   readonly #allowWebhookAudit: boolean
@@ -204,6 +211,9 @@ export class ScopePolicy {
   readonly #soundboardRoots: readonly string[]
   readonly #stageChannelIds: ReadonlySet<string>
   readonly #threadParentIds: ReadonlySet<string>
+  readonly #threadGuildIds: ReadonlySet<string>
+  readonly #threadIds: ReadonlySet<string>
+  readonly #threadMemberUserIds: ReadonlySet<string>
   readonly #welcomeScreenGuildIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
   readonly #widgetSettingsGuildIds: ReadonlySet<string>
@@ -259,6 +269,8 @@ export class ScopePolicy {
     | "allowStageInstanceChanges"
     | "allowStageStartNotifications"
     | "allowThreadCreation"
+    | "allowThreadAudit"
+    | "allowThreadChanges"
     | "allowWelcomeScreenAudit"
     | "allowWelcomeScreenChanges"
     | "allowWebhookAudit"
@@ -299,6 +311,9 @@ export class ScopePolicy {
     | "soundboardRoots"
     | "stageChannelIds"
     | "threadParentIds"
+    | "threadGuildIds"
+    | "threadIds"
+    | "threadMemberUserIds"
     | "welcomeScreenGuildIds"
     | "webhookChannelIds"
     | "widgetSettingsGuildIds"
@@ -344,6 +359,8 @@ export class ScopePolicy {
     this.#allowStageInstanceChanges = config.allowStageInstanceChanges ?? false
     this.#allowStageStartNotifications = config.allowStageStartNotifications ?? false
     this.#allowThreadCreation = config.allowThreadCreation ?? false
+    this.#allowThreadAudit = config.allowThreadAudit ?? false
+    this.#allowThreadChanges = config.allowThreadChanges ?? false
     this.#allowWelcomeScreenAudit = config.allowWelcomeScreenAudit ?? false
     this.#allowWelcomeScreenChanges = config.allowWelcomeScreenChanges ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
@@ -391,6 +408,9 @@ export class ScopePolicy {
     this.#soundboardRoots = config.soundboardRoots ?? []
     this.#stageChannelIds = config.stageChannelIds ?? new Set()
     this.#threadParentIds = config.threadParentIds ?? new Set()
+    this.#threadGuildIds = config.threadGuildIds ?? new Set()
+    this.#threadIds = config.threadIds ?? new Set()
+    this.#threadMemberUserIds = config.threadMemberUserIds ?? new Set()
     this.#welcomeScreenGuildIds = config.welcomeScreenGuildIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
     this.#widgetSettingsGuildIds = config.widgetSettingsGuildIds ?? new Set()
@@ -537,6 +557,16 @@ export class ScopePolicy {
         && this.#stageChannelIds.size > 0,
       threadCreationEnabled: this.#allowThreadCreation
         && this.#threadParentIds.size > 0,
+      threadAuditEnabled: this.#allowThreadAudit
+        && this.#threadGuildIds.size > 0
+        && this.#threadIds.size > 0,
+      threadChangesEnabled: this.#allowThreadAudit
+        && this.#allowThreadChanges
+        && this.#threadGuildIds.size > 0
+        && this.#threadIds.size > 0,
+      threadGuildIds: [...this.#threadGuildIds].sort(),
+      threadIds: [...this.#threadIds].sort(),
+      threadMemberUserIds: [...this.#threadMemberUserIds].sort(),
       threadParentIds: [...this.#threadParentIds].sort(),
       welcomeScreenAuditEnabled: this.#allowWelcomeScreenAudit
         && this.#welcomeScreenGuildIds.size > 0,
@@ -1191,6 +1221,41 @@ export class ScopePolicy {
       throw new PolicyError(`Discord channel ${channel.id} is outside the thread-creation scope`)
     }
     return guildId
+  }
+
+  assertThreadAuditable(guildId: string, threadId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowThreadAudit) {
+      throw new PolicyError("Discord thread audit is disabled by connector configuration")
+    }
+    if (this.#threadGuildIds.size === 0) {
+      throw new PolicyError("Discord thread audit requires an explicit guild allowlist")
+    }
+    if (!this.#threadGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the thread-governance scope`)
+    }
+    if (this.#threadIds.size === 0) {
+      throw new PolicyError("Discord thread audit requires an exact thread allowlist")
+    }
+    if (!this.#threadIds.has(threadId) || !this.channelIdReadable(threadId)) {
+      throw new PolicyError(`Discord thread ${threadId} is outside the thread-governance scope`)
+    }
+  }
+
+  assertThreadMemberUserAllowed(userId: string): void {
+    if (this.#threadMemberUserIds.size === 0) {
+      throw new PolicyError("Discord thread membership access requires an exact user allowlist")
+    }
+    if (!this.#threadMemberUserIds.has(userId)) {
+      throw new PolicyError(`Discord user ${userId} is outside the thread-membership scope`)
+    }
+  }
+
+  assertThreadChangeAllowed(guildId: string, threadId: string): void {
+    this.assertThreadAuditable(guildId, threadId)
+    if (!this.#allowThreadChanges) {
+      throw new PolicyError("Discord thread changes are disabled by connector configuration")
+    }
   }
 
   assertNotificationUsers(userIds: readonly string[]): void {

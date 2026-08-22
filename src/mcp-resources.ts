@@ -224,6 +224,8 @@ export function registerDiscordResources(
           "",
           "Member voice-state audit requires a separate exact guild and voice-channel allowlist, verified connector identity, exact target membership, exact current voice state, and complete VIEW_CHANNEL plus CONNECT evidence without enumerating occupants. It returns verified identities, bounded untrusted display names, the target's source channel, server mute and deafen state, permission evidence, and a privacy projection while omitting session, self-state, stream, camera, Stage participant state, embedded-member, and unknown-field values. Reviewed move, disconnect, server-mute, and server-deafen changes require an additional toggle, ordinary voice channels, protected-user and strict hierarchy checks, complete action-specific connector source and destination permissions plus target destination access, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried one-field PATCH, strict response validation, and exact state readback. Same-member uncertain outcomes fail closed. It never enumerates occupants, controls Stage participants, retries, rolls back, or persists channel IDs, state values, names, permissions, audit reasons, raw operation keys, or raw payloads.",
           "",
+          "Thread-state audit requires separate exact guild and thread allowlists, verified connector identity, exact connector membership, a supported exact parent, complete roles and parent overwrites, and complete inherited permission evidence without member enumeration or messages. Exact target membership reads and actions require a separate user allowlist and request no embedded guild member. Reviewed rename, archive, unarchive, lock, unlock, auto-archive, slowmode, invitation-policy, member-add, and member-remove changes require an additional toggle, a strict one-field action, complete known lifecycle metadata, action-specific MANAGE_THREADS, membership, send, or private-thread ownership authority, protected removal checks, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried PATCH, PUT, or DELETE, and exact state or membership readback. Same-thread uncertain outcomes fail closed. It never lists members, retries, rolls back, combines metadata fields, or persists parent IDs, lifecycle values, membership timestamps, names, permissions, audit reasons, raw operation keys, or raw payloads.",
+          "",
           "Role creation is additive-only and requires a separate exact guild allowlist. Planning checks the complete bounded role inventory, logical-name collisions, capacity, bot hierarchy, MANAGE_ROLES, and every named permission as a subset of the bot's effective permissions. ADMINISTRATOR is forbidden. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, pending content-free records, one non-retried create request, and exact role readback. It never edits, moves, assigns, deletes, or rolls back roles.",
           "",
           "Role configuration requires a separate feature gate and exact standard-role allowlist. Planning binds verified application and bot identity, complete guild, member, role-inventory, hierarchy, permission-grantability, logical-name collision, modern color, and aggregate affected-member-count evidence into a keyed digest. Omitted properties and unrelated permission bits are preserved; ADMINISTRATOR grants, permission changes with unknown bits or an ungrantable complete desired set, connector lockout, @everyone, and managed roles fail closed. Metadata-only changes report but do not require grantability of unchanged permissions. Execution requires a fresh matching plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and exact role, complete inventory, and complete member-count readback. Same-role uncertain outcomes fail closed. It never deletes, reorders, assigns, creates, changes icons or emoji, retries, rolls back, or persists names, permission data, audit reasons, or raw operation keys.",
@@ -678,6 +680,57 @@ export function registerDiscordResources(
       secrets,
       () => service.getMemberVoiceState(
         templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "userId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.threadState,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.threadState, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact privacy-minimized Discord thread lifecycle state from the separately gated thread-governance audit. The result enumerates no members, persists nothing, and omits messages, applied tags, timestamps, raw permission summaries, current-user membership objects, and unknown-field values.",
+      mimeType: "application/json",
+      title: "Exact privacy-safe Discord thread state",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getThreadState(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "threadId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.threadMembership,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.threadMembership, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact privacy-minimized Discord thread-membership state for a separately allowlisted user. The result uses an exact non-enumerating lookup, requests no embedded guild member, persists nothing, and omits messages, profiles, flags, raw payloads, and unknown-field values.",
+      mimeType: "application/json",
+      title: "Exact privacy-safe Discord thread membership",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getThreadMembership(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "threadId"),
         templateSnowflake(variables, "userId"),
         { signal: context.mcpReq.signal },
       ),

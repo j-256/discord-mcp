@@ -586,6 +586,42 @@ export class MemberVoiceEvidenceError extends Error {
   override name = "MemberVoiceEvidenceError"
 }
 
+export class ThreadGovernancePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord thread snapshot does not match the reviewed governance plan")
+    this.name = "ThreadGovernancePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ThreadGovernanceOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord thread-governance operation key has already been reserved")
+    this.name = "ThreadGovernanceOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ThreadGovernanceExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ThreadGovernanceExecutionError"
+    this.result = result
+  }
+}
+
+export class ThreadGovernanceEvidenceError extends Error {
+  override name = "ThreadGovernanceEvidenceError"
+}
+
 export class OnboardingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

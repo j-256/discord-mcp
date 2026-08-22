@@ -55,6 +55,7 @@ export const MCP_TOOLSET_NAMES = [
   "scheduled-events",
   "soundboard",
   "stage-instances",
+  "thread-governance",
   "threads",
   "voice-moderation",
   "welcome-screen",
@@ -107,6 +108,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowStageInstanceChanges: "DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES",
   allowStageStartNotifications: "DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS",
   allowThreadCreation: "DISCORD_MCP_ALLOW_THREAD_CREATION",
+  allowThreadAudit: "DISCORD_MCP_ALLOW_THREAD_AUDIT",
+  allowThreadChanges: "DISCORD_MCP_ALLOW_THREAD_CHANGES",
   allowWelcomeScreenAudit: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT",
   allowWelcomeScreenChanges: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES",
   allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
@@ -176,6 +179,9 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
   toolsets: "DISCORD_MCP_TOOLSETS",
   threadParentIds: "DISCORD_MCP_THREAD_PARENT_IDS",
+  threadGuildIds: "DISCORD_MCP_THREAD_GUILD_IDS",
+  threadIds: "DISCORD_MCP_THREAD_IDS",
+  threadMemberUserIds: "DISCORD_MCP_THREAD_MEMBER_USER_IDS",
   welcomeScreenGuildIds: "DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS",
   webhookChannelIds: "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
   widgetSettingsGuildIds: "DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS",
@@ -393,6 +399,9 @@ export const CONNECTOR_LIMITS = Object.freeze({
   searchFilterStrings: 25,
   soundboardGuildAllowlist: 100,
   stageInstanceChannels: 25,
+  threadGovernanceGuildAllowlist: 100,
+  threadGovernanceThreadAllowlist: 100,
+  threadGovernanceUserAllowlist: 100,
   threadPageDefault: 50,
   welcomeScreenGuildAllowlist: 100,
   widgetSettingsGuildAllowlist: 100,
@@ -469,6 +478,21 @@ export const THREAD_CREATION_MODES = [
 ] as const
 
 export type ThreadCreationMode = typeof THREAD_CREATION_MODES[number]
+
+export const THREAD_CHANGE_ACTIONS = [
+  "add-member",
+  "archive",
+  "lock",
+  "remove-member",
+  "rename",
+  "set-auto-archive-duration",
+  "set-invitable",
+  "set-slowmode",
+  "unarchive",
+  "unlock",
+] as const
+
+export type ThreadChangeAction = typeof THREAD_CHANGE_ACTIONS[number]
 
 export const CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS = [
   60,

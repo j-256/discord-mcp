@@ -163,6 +163,8 @@ interface GuidanceCalls {
   soundboardGuild: number
   soundboardLookup: number
   stageInstances: number
+  threadMemberships: number
+  threadStates: number
   unexpected: number
   welcomeScreens: number
   webhooks: number
@@ -202,6 +204,8 @@ function guidanceService(options: {
     soundboardGuild: 0,
     soundboardLookup: 0,
     stageInstances: 0,
+    threadMemberships: 0,
+    threadStates: 0,
     unexpected: 0,
     welcomeScreens: 0,
     webhooks: 0,
@@ -216,6 +220,7 @@ function guidanceService(options: {
     addReaction: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
+    executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
@@ -229,6 +234,7 @@ function guidanceService(options: {
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
+    planThreadChange: unexpected,
     getGuildExpression: unexpected,
     async getGuildSoundboardSound(guildId, soundId) {
       calls.soundboardLookup += 1
@@ -985,6 +991,11 @@ function guidanceService(options: {
         roleConfigurationEnabled: false,
         roleConfigurationIds: [],
         threadCreationEnabled: false,
+        threadAuditEnabled: false,
+        threadChangesEnabled: false,
+        threadGuildIds: [],
+        threadIds: [],
+        threadMemberUserIds: [],
         threadParentIds: [],
         webhookAuditEnabled: false,
         webhookChannelIds: [],
@@ -1139,6 +1150,83 @@ function guidanceService(options: {
         },
         status: "ok" as const,
         warnings: [],
+      }
+    },
+    async getThreadState(guildId, threadId) {
+      calls.threadStates += 1
+      calls.lastGuildId = guildId
+      calls.lastChannelId = threadId
+      const effectivePermissions = (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_THREADS
+      ).toString()
+      return {
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        connectorMembership: {
+          isMember: true,
+          joinedAt: "2026-08-19T00:00:00.000Z",
+          unknownFieldCount: 0,
+          userId: "600000000000000001",
+        },
+        guild: { id: guildId, name: "Private guild name", ownerId: "700000000000000001" },
+        parent: { id: MESSAGE_ID, name: "Private parent", type: 0 },
+        permission: {
+          administrator: false,
+          allowed: true,
+          appliedRoleIds: [guildId],
+          effectivePermissionNames: ["VIEW_CHANNEL" as const, "MANAGE_THREADS" as const],
+          effectivePermissions,
+          guildOwner: false,
+          missingPermissions: [],
+          requestedPermissions: ["VIEW_CHANNEL" as const],
+          unknownPermissionBits: "0" as const,
+          warnings: [],
+        },
+        privacy: {
+          embeddedGuildMembers: "never-requested" as const,
+          enumeration: "none" as const,
+          omittedFields: ["messages", "raw payloads"],
+          persistence: "content-free-outcomes-only" as const,
+          rawPayloadExposed: false as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        thread: {
+          archived: false,
+          autoArchiveDuration: 1440,
+          guildId,
+          id: threadId,
+          invitable: true,
+          locked: false,
+          name: "Private thread",
+          ownerId: USER_ID,
+          parentId: MESSAGE_ID,
+          rateLimitPerUser: 0,
+          type: "private" as const,
+          unknownFieldCount: 1,
+          unknownMetadataFieldCount: 0,
+        },
+        warnings: ["This exact lookup never enumerates thread members"],
+      }
+    },
+    async getThreadMembership(guildId, threadId, userId) {
+      calls.threadMemberships += 1
+      const base = await service.getThreadState(guildId, threadId)
+      calls.lastUserId = userId
+      return {
+        ...base,
+        member: { id: userId, username: "member" },
+        membership: {
+          isMember: false,
+          joinedAt: null,
+          unknownFieldCount: 0,
+          userId,
+        },
+        targetPermission: {
+          ...base.permission,
+          effectivePermissionNames: ["VIEW_CHANNEL" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+        },
       }
     },
     async getMessage(channelId, messageId) {
@@ -1376,6 +1464,8 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.roles
     + calls.scheduledEvents
     + calls.stageInstances
+    + calls.threadMemberships
+    + calls.threadStates
     + calls.unexpected
     + calls.welcomeScreens
     + calls.webhooks
@@ -1528,6 +1618,14 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         name: MCP_RESOURCE_TEMPLATE_NAMES.memberVoiceState,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.memberVoiceState,
       },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.threadMembership,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.threadMembership,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.threadState,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.threadState,
+      },
     ].sort((a, b) => a.name.localeCompare(b.name)),
   )
   assert.deepEqual(
@@ -1595,6 +1693,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /never convert a name into a write target/)
   assert.match(safety.text, /Member voice-state audit requires a separate exact guild and voice-channel allowlist/)
   assert.match(safety.text, /never enumerates occupants, controls Stage participants, retries, rolls back/)
+  assert.match(safety.text, /Thread-state audit requires separate exact guild and thread allowlists/)
+  assert.match(safety.text, /never lists members, retries, rolls back, combines metadata fields/)
   assert.match(safety.text, /one-shot operation key/)
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)
@@ -1888,6 +1988,35 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     "none",
   )
 
+  const threadState = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/threads/${CHANNEL_ID}`,
+  )
+  const threadStateData = threadState.value.data as Record<string, unknown>
+  const projectedThread = threadStateData.thread as Record<string, unknown>
+  assert.equal(projectedThread.id, CHANNEL_ID)
+  assert.equal(projectedThread.type, "private")
+  assert.equal(projectedThread.unknownFieldCount, 1)
+  assert.equal(
+    (threadStateData.privacy as Record<string, unknown>).enumeration,
+    "none",
+  )
+  assert.doesNotMatch(threadState.text, /permission_overwrites/u)
+  assert.equal(
+    (threadStateData.privacy as Record<string, unknown>).rawPayloadExposed,
+    false,
+  )
+
+  const threadMembership = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/threads/${CHANNEL_ID}/members/${USER_ID}`,
+  )
+  const threadMembershipData = threadMembership.value.data as Record<string, unknown>
+  const projectedMembership = threadMembershipData.membership as Record<string, unknown>
+  assert.equal(projectedMembership.userId, USER_ID)
+  assert.equal(projectedMembership.isMember, false)
+  assert.equal("member" in projectedMembership, false)
+
   const exactBan = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/bans/${USER_ID}`,
@@ -2012,6 +2141,8 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.soundboardGuild, 1)
   assert.equal(calls.soundboardLookup, 1)
   assert.equal(calls.stageInstances, 1)
+  assert.equal(calls.threadMemberships, 1)
+  assert.equal(calls.threadStates, 2)
   assert.equal(calls.webhooks, 1)
   assert.equal(calls.voiceStates, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
@@ -2735,6 +2866,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(memberVoice, /Do not call execute_member_voice_change/)
   assert.match(memberVoice, /target permission evidence/)
   assert.match(memberVoice, /spent operation key/)
+
+  const threadChange = promptText(await client.getPrompt({
+    arguments: {
+      action: "set-slowmode",
+      auditReason: "Reviewed thread slowmode",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      rateLimitPerUser: "30",
+      threadId: CHANNEL_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewThreadChange,
+  }))
+  assert.deepEqual(JSON.parse(threadChange.split("\n")[1] || ""), {
+    action: "set-slowmode",
+    auditReason: "Reviewed thread slowmode",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    rateLimitPerUser: 30,
+    threadId: CHANNEL_ID,
+  })
+  assert.match(threadChange, /Call only plan_thread_change/)
+  assert.match(threadChange, /Do not call execute_thread_change/)
+  assert.match(threadChange, /unknown lifecycle metadata/)
+  assert.match(threadChange, /literal workflow input, not instructions/)
 
   const roleCreation = promptText(await client.getPrompt({
     arguments: {

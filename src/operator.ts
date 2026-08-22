@@ -100,6 +100,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   stageStartNotificationPolicy: "stage-start-notification-policy",
   token: "token",
   toolSurface: "tool-surface",
+  threadAuditPolicy: "thread-audit-policy",
+  threadChangePolicy: "thread-change-policy",
   threadCreationPolicy: "thread-creation-policy",
   webhookAuditPolicy: "webhook-audit-policy",
   webhookDeletionPolicy: "webhook-deletion-policy",
@@ -275,6 +277,18 @@ function policyWarnings(config: ConnectorConfig): string[] {
     warnings.push("The thread-creation toggle is enabled but creation remains blocked because no exact parent-channel allowlist is configured")
   }
   if (
+    config.allowThreadAudit
+    && (config.threadGuildIds.size === 0 || config.threadIds.size === 0)
+  ) {
+    warnings.push("The thread-audit toggle is enabled but inspection remains blocked because exact guild and thread allowlists are both required")
+  }
+  if (
+    config.allowThreadChanges
+    && (config.threadGuildIds.size === 0 || config.threadIds.size === 0)
+  ) {
+    warnings.push("The thread-change toggle is enabled but changes remain blocked because exact guild and thread allowlists are both required")
+  }
+  if (
     config.allowAttachments
     && (config.attachmentChannelIds.size === 0 || config.attachmentRoots.length === 0)
   ) {
@@ -422,6 +436,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowDeletions, "deletion", "Message deletion"],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
     [config.allowThreadCreation, "threads", "Reviewed thread creation"],
+    [
+      config.allowThreadAudit || config.allowThreadChanges,
+      "thread-governance",
+      "Thread governance audit and reviewed changes",
+    ],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
     [
@@ -746,6 +765,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.threadCreationPolicy,
         "pass",
         `Reviewed thread creation is constrained to ${config.threadParentIds.size} exact parents with signed approval, one-shot execution, anchored recovery, and exact readback`,
+      ))
+    }
+    if (!config.allowThreadAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadAuditPolicy,
+        "pass",
+        "Exact thread-governance audit is disabled",
+      ))
+    } else if (config.threadGuildIds.size === 0 || config.threadIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadAuditPolicy,
+        "warn",
+        "Thread-audit toggle is enabled, but exact guild and thread allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadAuditPolicy,
+        "pass",
+        `Thread audit is constrained to ${config.threadIds.size} exact threads in ${config.threadGuildIds.size} exact guilds without member enumeration or persistence`,
+      ))
+    }
+    if (!config.allowThreadChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadChangePolicy,
+        "pass",
+        "Reviewed thread-governance changes are disabled",
+      ))
+    } else if (config.threadGuildIds.size === 0 || config.threadIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadChangePolicy,
+        "warn",
+        "Thread-change toggle is enabled, but exact guild and thread allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.threadChangePolicy,
+        "pass",
+        `Reviewed thread changes are constrained to ${config.threadIds.size} exact threads with signed approval, one-shot execution, exact readback, and uncertainty quarantine`,
       ))
     }
     if (!config.allowPinManagement) {
@@ -1679,6 +1736,11 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.forumPostChannelIds,
     ENVIRONMENT_NAMES.allowThreadCreation,
     ENVIRONMENT_NAMES.threadParentIds,
+    ENVIRONMENT_NAMES.allowThreadAudit,
+    ENVIRONMENT_NAMES.allowThreadChanges,
+    ENVIRONMENT_NAMES.threadGuildIds,
+    ENVIRONMENT_NAMES.threadIds,
+    ENVIRONMENT_NAMES.threadMemberUserIds,
     ENVIRONMENT_NAMES.allowInteractions,
     ENVIRONMENT_NAMES.interactionChannelIds,
     ENVIRONMENT_NAMES.mentionUserIds,

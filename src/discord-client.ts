@@ -32,6 +32,7 @@ import {
   ScheduledEventEvidenceError,
   SoundboardEvidenceError,
   StageInstanceEvidenceError,
+  ThreadGovernanceEvidenceError,
   WelcomeScreenEvidenceError,
   WebhookEvidenceError,
   WidgetSettingsEvidenceError,
@@ -148,6 +149,30 @@ export interface DiscordChannelMetadata {
   type: number
   unknownFieldCount: number
 }
+
+export interface DiscordThreadStateSummary {
+  archived: boolean
+  autoArchiveDuration: number
+  guildId: string
+  id: string
+  invitable: boolean | null
+  locked: boolean
+  name: string
+  ownerId: string
+  parentId: string
+  rateLimitPerUser: number
+  type: number
+  unknownFieldCount: number
+  unknownMetadataFieldCount: number
+}
+
+export type ModifyThreadStateInput =
+  | { archived: boolean }
+  | { autoArchiveDuration: number }
+  | { invitable: boolean }
+  | { locked: boolean }
+  | { name: string }
+  | { rateLimitPerUser: number }
 
 export interface DiscordStageInstanceSummary {
   channelId: string
@@ -1028,6 +1053,7 @@ type QueryScalar = boolean | number | string
 type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
+  "add_thread_member",
   "create_guild_auto_moderation_rule",
   "create_guild_emoji",
   "create_guild_soundboard_sound",
@@ -1043,6 +1069,8 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_soundboard_sound",
   "get_guild_sticker",
   "get_guild_voice_state",
+  "get_thread_member",
+  "get_thread_state",
   "get_stage_instance",
   "get_channel_metadata",
   "get_guild_onboarding",
@@ -1059,6 +1087,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
   "modify_guild_member_voice",
+  "modify_thread_state",
   "modify_stage_instance",
   "modify_guild_onboarding",
   "modify_guild_welcome_screen",
@@ -1066,7 +1095,17 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
+  "remove_thread_member",
 ])
+
+const THREAD_METADATA_RESPONSE_KEYS = [
+  "archive_timestamp",
+  "archived",
+  "auto_archive_duration",
+  "create_timestamp",
+  "invitable",
+  "locked",
+] as const
 
 const STAGE_INSTANCE_RESPONSE_KEYS: ReadonlySet<string> = new Set([
   "channel_id",
@@ -1168,6 +1207,7 @@ const CHANNEL_METADATA_RESPONSE_KEYS: ReadonlySet<string> = new Set([
   "user_limit",
   "video_quality_mode",
 ])
+const THREAD_STATE_RESPONSE_KEYS: readonly string[] = [...CHANNEL_METADATA_RESPONSE_KEYS]
 const CHANNEL_METADATA_OVERWRITE_KEYS: ReadonlySet<string> = new Set([
   "allow",
   "deny",
@@ -3620,6 +3660,209 @@ function projectGuildChannelMetadata(
       .filter((key) => !CHANNEL_METADATA_RESPONSE_KEYS.has(key)).length
       + projectedOverwrites.unknownFieldCount,
   }
+}
+
+function threadGovernanceEvidenceError(options?: ErrorOptions): ThreadGovernanceEvidenceError {
+  return new ThreadGovernanceEvidenceError(
+    "Discord returned invalid thread-governance evidence",
+    options,
+  )
+}
+
+function projectThreadState(
+  value: unknown,
+  expectedThreadId: string,
+): DiscordThreadStateSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw threadGovernanceEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const metadata = record.thread_metadata
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw threadGovernanceEvidenceError()
+  }
+  const threadMetadata = metadata as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(record.id as string, "Discord thread ID")
+    assertPositiveSnowflake(record.guild_id as string, "Discord thread guild ID")
+    assertPositiveSnowflake(record.parent_id as string, "Discord thread parent ID")
+    assertPositiveSnowflake(record.owner_id as string, "Discord thread owner ID")
+    if (record.id !== expectedThreadId) {
+      throw new RangeError("Discord thread ID does not match the request")
+    }
+    if (
+      record.type !== DISCORD_CHANNEL_TYPES.announcementThread
+      && record.type !== DISCORD_CHANNEL_TYPES.publicThread
+      && record.type !== DISCORD_CHANNEL_TYPES.privateThread
+    ) {
+      throw new RangeError("Discord channel is not a supported guild thread")
+    }
+    if (
+      typeof record.name !== "string"
+      || record.name.length < 1
+      || record.name.length > DISCORD_LIMITS.channelNameCharacters
+      || CHANNEL_NAME_CONTROL_PATTERN.test(record.name)
+    ) {
+      throw new RangeError("Discord thread name is invalid")
+    }
+    assertValidUnicode(record.name, "Discord thread name")
+    if (
+      typeof threadMetadata.archived !== "boolean"
+      || typeof threadMetadata.locked !== "boolean"
+      || !Number.isSafeInteger(threadMetadata.auto_archive_duration)
+      || !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[])
+        .includes(threadMetadata.auto_archive_duration as number)
+    ) {
+      throw new RangeError("Discord thread lifecycle state is invalid")
+    }
+    if (typeof threadMetadata.archive_timestamp !== "string") {
+      throw new RangeError("Discord thread archive timestamp is missing")
+    }
+    assertIsoTimestamp(
+      threadMetadata.archive_timestamp,
+      "Discord thread archive timestamp",
+    )
+    if (threadMetadata.create_timestamp !== undefined && threadMetadata.create_timestamp !== null) {
+      assertIsoTimestamp(
+        threadMetadata.create_timestamp as string,
+        "Discord thread creation timestamp",
+      )
+    }
+    const privateThread = record.type === DISCORD_CHANNEL_TYPES.privateThread
+    if (
+      (privateThread && typeof threadMetadata.invitable !== "boolean")
+      || (!privateThread && threadMetadata.invitable !== undefined)
+    ) {
+      throw new RangeError("Discord thread invitation state is invalid")
+    }
+  } catch (error) {
+    throw threadGovernanceEvidenceError({ cause: error })
+  }
+  const rateLimitPerUser = record.rate_limit_per_user ?? 0
+  if (
+    typeof rateLimitPerUser !== "number"
+    || !Number.isSafeInteger(rateLimitPerUser)
+    || rateLimitPerUser < 0
+    || rateLimitPerUser > DISCORD_LIMITS.channelRateLimitSeconds
+  ) {
+    throw threadGovernanceEvidenceError()
+  }
+  return {
+    archived: threadMetadata.archived as boolean,
+    autoArchiveDuration: threadMetadata.auto_archive_duration as number,
+    guildId: record.guild_id as string,
+    id: expectedThreadId,
+    invitable: record.type === DISCORD_CHANNEL_TYPES.privateThread
+      ? threadMetadata.invitable as boolean
+      : null,
+    locked: threadMetadata.locked as boolean,
+    name: record.name as string,
+    ownerId: record.owner_id as string,
+    parentId: record.parent_id as string,
+    rateLimitPerUser,
+    type: record.type as number,
+    unknownFieldCount: countUnknownFields(record, THREAD_STATE_RESPONSE_KEYS),
+    unknownMetadataFieldCount: countUnknownFields(
+      threadMetadata,
+      THREAD_METADATA_RESPONSE_KEYS,
+    ),
+  }
+}
+
+function projectExactThreadMember(
+  value: unknown,
+  threadId: string,
+  userId: string,
+): DiscordThreadMember {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw threadGovernanceEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(record.id as string, "Discord thread-member thread ID")
+    assertPositiveSnowflake(record.user_id as string, "Discord thread-member user ID")
+    if (record.id !== threadId || record.user_id !== userId) {
+      throw new RangeError("Discord thread-member identity does not match the request")
+    }
+    if (typeof record.join_timestamp !== "string") {
+      throw new RangeError("Discord thread-member join timestamp is missing")
+    }
+    assertIsoTimestamp(
+      record.join_timestamp,
+      "Discord thread-member join timestamp",
+    )
+    if (
+      typeof record.flags !== "number"
+      || !Number.isSafeInteger(record.flags)
+      || record.flags < 0
+      || record.member !== undefined
+    ) {
+      throw new RangeError("Discord thread-member state is invalid")
+    }
+  } catch (error) {
+    throw threadGovernanceEvidenceError({ cause: error })
+  }
+  return {
+    flags: record.flags as number,
+    id: threadId,
+    join_timestamp: record.join_timestamp as string,
+    unknown_field_count: countUnknownFields(
+      record,
+      ["flags", "id", "join_timestamp", "member", "user_id"],
+    ),
+    user_id: userId,
+  }
+}
+
+function threadStateBody(input: ModifyThreadStateInput): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord thread-state input must be an exact object")
+  }
+  const record = input as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (keys.length !== 1 || record[keys[0] as string] === undefined) {
+    throw new RangeError("Discord thread-state input must contain exactly one field")
+  }
+  if ("name" in input) {
+    if (
+      typeof input.name !== "string"
+      || input.name.length < 1
+      || input.name.length > DISCORD_LIMITS.channelNameCharacters
+      || input.name.trim() !== input.name
+      || CHANNEL_NAME_CONTROL_PATTERN.test(input.name)
+    ) {
+      throw new RangeError("Discord thread name is invalid")
+    }
+    assertValidUnicode(input.name, "Discord thread name")
+    return { name: input.name }
+  }
+  if ("autoArchiveDuration" in input) {
+    if (!(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[]).includes(
+      input.autoArchiveDuration,
+    )) {
+      throw new RangeError("Discord thread auto-archive duration is unsupported")
+    }
+    return { auto_archive_duration: input.autoArchiveDuration }
+  }
+  if ("rateLimitPerUser" in input) {
+    assertIntegerRange(
+      input.rateLimitPerUser,
+      0,
+      DISCORD_LIMITS.channelRateLimitSeconds,
+      "Discord thread slowmode seconds",
+    )
+    return { rate_limit_per_user: input.rateLimitPerUser }
+  }
+  for (const key of ["archived", "invitable", "locked"] as const) {
+    if (key in input) {
+      const value = record[key]
+      if (typeof value !== "boolean") {
+        throw new RangeError(`Discord thread ${key} state must be a boolean`)
+      }
+      return { [key]: value }
+    }
+  }
+  throw new RangeError("Discord thread-state input field is unsupported")
 }
 
 function channelMetadataBody(input: ModifyChannelMetadataInput): Record<string, unknown> {
@@ -7137,6 +7380,46 @@ export class DiscordClient {
     return this.#request("get_channel", `/channels/${channelId}`, options)
   }
 
+  async getThreadState(
+    threadId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordThreadStateSummary> {
+    assertPositiveSnowflake(threadId, "Discord thread-governance thread ID")
+    const response = await this.#request<unknown>(
+      "get_thread_state",
+      `/channels/${threadId}`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{thread.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectThreadState(response, threadId)
+  }
+
+  async modifyThreadState(
+    threadId: string,
+    input: ModifyThreadStateInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordThreadStateSummary> {
+    assertPositiveSnowflake(threadId, "Discord thread-governance thread ID")
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_thread_state",
+      `/channels/${threadId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: threadStateBody(input),
+        diagnosticRoute: "/channels/{thread.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectThreadState(response, threadId)
+  }
+
   async getGuildChannelMetadata(
     channelId: string,
     options: RequestOptions = {},
@@ -7279,10 +7562,52 @@ export class DiscordClient {
     ) {
       throw new RangeError("Discord exact thread-member lookup requires snowflake IDs")
     }
-    return this.#request(
+    return this.#request<unknown>(
       "get_thread_member",
       `/channels/${threadId}/thread-members/${userId}?with_member=false`,
-      options,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{thread.id}/thread-members/{user.id}",
+        suppressFailureCause: true,
+      },
+    ).then((response) => projectExactThreadMember(response, threadId, userId))
+  }
+
+  async addThreadMember(
+    threadId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(threadId, "Discord thread-governance thread ID")
+    assertPositiveSnowflake(userId, "Discord thread-governance user ID")
+    await this.#request<void>(
+      "add_thread_member",
+      `/channels/${threadId}/thread-members/${userId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{thread.id}/thread-members/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async removeThreadMember(
+    threadId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(threadId, "Discord thread-governance thread ID")
+    assertPositiveSnowflake(userId, "Discord thread-governance user ID")
+    await this.#request<void>(
+      "remove_thread_member",
+      `/channels/${threadId}/thread-members/${userId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{thread.id}/thread-members/{user.id}",
+        suppressFailureCause: true,
+      },
     )
   }
 

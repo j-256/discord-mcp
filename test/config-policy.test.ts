@@ -223,6 +223,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
     threadCreationEnabled: false,
+    threadAuditEnabled: false,
+    threadChangesEnabled: false,
+    threadGuildIds: [],
+    threadIds: [],
+    threadMemberUserIds: [],
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
@@ -524,6 +529,11 @@ test("configuration and policy require an exact administration guild and protect
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
     threadCreationEnabled: false,
+    threadAuditEnabled: false,
+    threadChangesEnabled: false,
+    threadGuildIds: [],
+    threadIds: [],
+    threadMemberUserIds: [],
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
@@ -1428,6 +1438,77 @@ test("configuration and policy isolate thread creation to exact readable parents
   assert.deepEqual(enabled.describe().threadParentIds, [CHANNEL_ID])
 })
 
+test("configuration and policy isolate exact thread governance and membership", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_THREAD_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_THREAD_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_THREAD_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_THREAD_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_THREAD_IDS must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_THREAD_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_THREAD_IDS: CHANNEL_ID,
+    DISCORD_MCP_THREAD_MEMBER_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertThreadAuditable(GUILD_ID, CHANNEL_ID),
+    /thread audit is disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
+    DISCORD_MCP_THREAD_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_THREAD_IDS: CHANNEL_ID,
+    DISCORD_MCP_THREAD_MEMBER_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  enabled.assertThreadAuditable(GUILD_ID, CHANNEL_ID)
+  enabled.assertThreadChangeAllowed(GUILD_ID, CHANNEL_ID)
+  enabled.assertThreadMemberUserAllowed(USER_ID)
+  assert.throws(
+    () => enabled.assertThreadAuditable(GUILD_ID, OTHER_CHANNEL_ID),
+    /outside the thread-governance scope/,
+  )
+  assert.throws(
+    () => enabled.assertThreadAuditable(OTHER_GUILD_ID, CHANNEL_ID),
+    /outside the configured read scope/,
+  )
+  assert.throws(
+    () => enabled.assertThreadMemberUserAllowed("400000000000000002"),
+    /outside the thread-membership scope/,
+  )
+  assert.equal(enabled.describe().threadAuditEnabled, true)
+  assert.equal(enabled.describe().threadChangesEnabled, true)
+  assert.deepEqual(enabled.describe().threadGuildIds, [GUILD_ID])
+  assert.deepEqual(enabled.describe().threadIds, [CHANNEL_ID])
+  assert.deepEqual(enabled.describe().threadMemberUserIds, [USER_ID])
+})
+
 test("configuration and policy isolate pin management to exact readable channels", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1765,6 +1846,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
     threadCreationEnabled: false,
+    threadAuditEnabled: false,
+    threadChangesEnabled: false,
+    threadGuildIds: [],
+    threadIds: [],
+    threadMemberUserIds: [],
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],

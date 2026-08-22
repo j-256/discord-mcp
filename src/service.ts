@@ -303,6 +303,20 @@ import {
   ThreadCreationService,
 } from "./thread-creation-service.js"
 import type {
+  ThreadChangePlan,
+  ThreadChangeRequest,
+  ThreadChangeResult,
+  ThreadGovernanceServiceOptions,
+  ThreadMembershipAuditResult,
+  ThreadStateAuditResult,
+} from "./thread-governance-service.js"
+import {
+  assertThreadAuditInput,
+  assertThreadMembershipInput,
+  normalizeThreadChangeRequest,
+  ThreadGovernanceService,
+} from "./thread-governance-service.js"
+import type {
   WebhookDeletionPlan,
   WebhookDeletionRequest,
   WebhookDeletionResult,
@@ -328,6 +342,7 @@ import type {
 } from "./types.js"
 
 export interface DiscordServiceClient {
+  addThreadMember: DiscordClient["addThreadMember"]
   addGuildMemberRole: DiscordClient["addGuildMemberRole"]
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
@@ -383,6 +398,7 @@ export interface DiscordServiceClient {
   getStageInstance: DiscordClient["getStageInstance"]
   getMessage: DiscordClient["getMessage"]
   getThreadMember: DiscordClient["getThreadMember"]
+  getThreadState: DiscordClient["getThreadState"]
   getUser: DiscordClient["getUser"]
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
@@ -404,6 +420,7 @@ export interface DiscordServiceClient {
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
+  modifyThreadState: DiscordClient["modifyThreadState"]
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
@@ -419,6 +436,7 @@ export interface DiscordServiceClient {
   removeGuildBan: DiscordClient["removeGuildBan"]
   removeGuildMember: DiscordClient["removeGuildMember"]
   removeGuildMemberRole: DiscordClient["removeGuildMemberRole"]
+  removeThreadMember: DiscordClient["removeThreadMember"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
   searchGuildMembers: DiscordClient["searchGuildMembers"]
   unpinMessage: DiscordClient["unpinMessage"]
@@ -524,6 +542,10 @@ export interface ConnectorServiceOptions {
   >
   threadCreationOptions?: Pick<
     ThreadCreationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  threadGovernanceOptions?: Pick<
+    ThreadGovernanceServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
@@ -689,6 +711,7 @@ export class ConnectorService {
   readonly #soundboardService: SoundboardService
   readonly #stageInstanceService: StageInstanceService
   readonly #threadCreationService: ThreadCreationService
+  readonly #threadGovernanceService: ThreadGovernanceService
   readonly #webhookService: WebhookService
   readonly #welcomeScreenService: WelcomeScreenService
   readonly #widgetSettingsService: WidgetSettingsService
@@ -889,6 +912,13 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.threadCreationOptions,
     })
+    this.#threadGovernanceService = new ThreadGovernanceService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.threadGovernanceOptions,
+    })
     this.#guildAuditLogService = new GuildAuditLogService({
       client: this.#client,
     })
@@ -1072,6 +1102,40 @@ export class ConnectorService {
       identity.application.id,
       identity.bot.id,
       guildId,
+      userId,
+      options,
+    )
+  }
+
+  async getThreadState(
+    guildId: string,
+    threadId: string,
+    options: RequestOptions = {},
+  ): Promise<ThreadStateAuditResult> {
+    assertThreadAuditInput(guildId, threadId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#threadGovernanceService.getState(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      threadId,
+      options,
+    )
+  }
+
+  async getThreadMembership(
+    guildId: string,
+    threadId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<ThreadMembershipAuditResult> {
+    assertThreadMembershipInput(guildId, threadId, userId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#threadGovernanceService.getMembership(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      threadId,
       userId,
       options,
     )
@@ -1948,6 +2012,20 @@ export class ConnectorService {
     )
   }
 
+  async planThreadChange(
+    request: ThreadChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ThreadChangePlan> {
+    normalizeThreadChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#threadGovernanceService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planChannelCreation(
     request: ChannelCreationRequest,
     options: RequestOptions = {},
@@ -2165,6 +2243,25 @@ export class ConnectorService {
     }
     const identity = await this.#verifyIdentity(options)
     return this.#memberVoiceService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeThreadChange(
+    request: ThreadChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ThreadChangeResult> {
+    normalizeThreadChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord thread-governance plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#threadGovernanceService.execute(
       identity.application.id,
       identity.bot.id,
       request,

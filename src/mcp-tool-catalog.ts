@@ -60,6 +60,7 @@ type McpToolWorkflow =
   | "scheduled-event-change"
   | "stage-instance-change"
   | "thread-creation"
+  | "thread-governance-change"
   | "webhook-deletion"
   | "welcome-screen-change"
   | "widget-settings-change"
@@ -129,6 +130,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "execute", "private", "public", "thread"],
     toolset: "threads",
     workflow: "thread-creation",
+  },
+  execute_thread_change: {
+    keywords: ["add", "archive", "execute", "invite", "lock", "member", "remove", "rename", "slowmode", "thread"],
+    toolset: "thread-governance",
+    workflow: "thread-governance-change",
   },
   execute_guild_scaffold: {
     keywords: ["blueprint", "category", "channel", "create", "guild", "role", "scaffold"],
@@ -263,6 +269,14 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_member_voice_state: {
     keywords: ["audit", "exact", "member", "state", "voice"],
     toolset: "voice-moderation",
+  },
+  get_thread_membership: {
+    keywords: ["audit", "exact", "member", "membership", "thread"],
+    toolset: "thread-governance",
+  },
+  get_thread_state: {
+    keywords: ["archive", "audit", "exact", "invitable", "lock", "metadata", "state", "thread"],
+    toolset: "thread-governance",
   },
   get_guild_emoji: {
     keywords: ["emoji", "exact", "expression", "guild", "lookup"],
@@ -453,6 +467,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "plan", "private", "public", "review", "thread"],
     toolset: "threads",
     workflow: "thread-creation",
+  },
+  plan_thread_change: {
+    keywords: ["add", "archive", "invite", "lock", "member", "plan", "remove", "rename", "review", "slowmode", "thread"],
+    toolset: "thread-governance",
+    workflow: "thread-governance-change",
   },
   plan_guild_scaffold: {
     keywords: ["blueprint", "category", "channel", "guild", "plan", "review", "role", "scaffold"],

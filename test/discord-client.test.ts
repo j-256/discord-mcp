@@ -14,6 +14,7 @@ import {
   OnboardingEvidenceError,
   RoleConfigurationEvidenceError,
   StageInstanceEvidenceError,
+  ThreadGovernanceEvidenceError,
   WelcomeScreenEvidenceError,
   WidgetSettingsEvidenceError,
 } from "../src/errors.js"
@@ -39,6 +40,31 @@ function channelMetadataPayload(overrides: Record<string, unknown> = {}) {
     topic: "Share product feedback",
     type: 15,
     unknown_channel_field: "omitted",
+    ...overrides,
+  }
+}
+
+function threadStatePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    future_thread_field: "discarded",
+    guild_id: "100",
+    id: "200",
+    member: { flags: 0, user_id: "500" },
+    member_count: 8,
+    message_count: 12,
+    name: "incident-review",
+    owner_id: "400",
+    parent_id: "300",
+    rate_limit_per_user: 15,
+    thread_metadata: {
+      archive_timestamp: "2026-08-22T00:00:00.000Z",
+      archived: false,
+      auto_archive_duration: 1_440,
+      create_timestamp: "2026-08-21T00:00:00.000Z",
+      invitable: true,
+      locked: false,
+    },
+    type: 12,
     ...overrides,
   }
 }
@@ -506,7 +532,12 @@ test("Discord client targets role, member, thread-member, and thread-list routes
       requests.push(url)
       if (url.endsWith("/roles")) return jsonResponse([])
       if (url.includes("/thread-members/")) {
-        return jsonResponse({ flags: 0, join_timestamp: "2026-08-14T00:00:00.000Z" })
+        return jsonResponse({
+          flags: 0,
+          id: "200",
+          join_timestamp: "2026-08-14T00:00:00.000Z",
+          user_id: "101",
+        })
       }
       if (url.includes("/members/")) return jsonResponse({ roles: [] })
       return jsonResponse({ has_more: false, threads: [] })
@@ -1244,6 +1275,208 @@ test("Discord client rejects raw or ambiguous member voice evidence and never re
       assert(error instanceof DiscordApiError)
       assert.equal(error.status, 429)
       assert.equal(error.message.includes("rate limited"), false)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client projects exact thread state and membership with one-field writes", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const method = init?.method || "GET"
+      const url = String(input)
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url,
+      })
+      if (url.includes("/thread-members/") && method === "GET") {
+        return jsonResponse({
+          flags: 3,
+          future_member_field: "discarded",
+          id: "200",
+          join_timestamp: "2026-08-20T00:00:00.000Z",
+          user_id: "500",
+        })
+      }
+      if (method === "PUT" || method === "DELETE") return new Response(null, { status: 204 })
+      if (method === "PATCH") {
+        return jsonResponse(threadStatePayload({
+          name: "incident-review-renamed",
+          thread_metadata: {
+            archive_timestamp: "2026-08-22T00:00:00.000Z",
+            archived: false,
+            auto_archive_duration: 1_440,
+            create_timestamp: "2026-08-21T00:00:00.000Z",
+            invitable: true,
+            locked: false,
+          },
+        }))
+      }
+      return jsonResponse(threadStatePayload())
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getThreadState("200"), {
+    archived: false,
+    autoArchiveDuration: 1_440,
+    guildId: "100",
+    id: "200",
+    invitable: true,
+    locked: false,
+    name: "incident-review",
+    ownerId: "400",
+    parentId: "300",
+    rateLimitPerUser: 15,
+    type: 12,
+    unknownFieldCount: 1,
+    unknownMetadataFieldCount: 0,
+  })
+  assert.deepEqual(await client.getThreadMember("200", "500"), {
+    flags: 3,
+    id: "200",
+    join_timestamp: "2026-08-20T00:00:00.000Z",
+    unknown_field_count: 1,
+    user_id: "500",
+  })
+  assert.equal((await client.modifyThreadState(
+    "200",
+    { name: "incident-review-renamed" },
+    "Reviewed thread / case 42",
+  )).name, "incident-review-renamed")
+  await client.addThreadMember("200", "500")
+  await client.removeThreadMember("200", "500")
+
+  assert.deepEqual(requests, [
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/channels/200`,
+    },
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/channels/200/thread-members/500?with_member=false`,
+    },
+    {
+      body: { name: "incident-review-renamed" },
+      method: "PATCH",
+      reason: "Reviewed%20thread%20%2F%20case%2042",
+      url: `${API_BASE_URL}/channels/200`,
+    },
+    {
+      body: null,
+      method: "PUT",
+      reason: null,
+      url: `${API_BASE_URL}/channels/200/thread-members/500`,
+    },
+    {
+      body: null,
+      method: "DELETE",
+      reason: null,
+      url: `${API_BASE_URL}/channels/200/thread-members/500`,
+    },
+  ])
+})
+
+test("Discord client rejects malformed thread evidence and never retries governance writes", async () => {
+  const malformed = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse(threadStatePayload({ guild_id: "101" })),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    malformed.getThreadState("201"),
+    ThreadGovernanceEvidenceError,
+  )
+  await assert.rejects(
+    malformed.modifyThreadState(
+      "200",
+      { archived: true, locked: true } as never,
+      "Reviewed thread",
+    ),
+    /exactly one field/,
+  )
+
+  const missingArchiveTimestamp = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse(threadStatePayload({
+      thread_metadata: {
+        archived: false,
+        auto_archive_duration: 1_440,
+        invitable: true,
+        locked: false,
+      },
+    })),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    missingArchiveTimestamp.getThreadState("200"),
+    ThreadGovernanceEvidenceError,
+  )
+
+  const embeddedMember = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      flags: 0,
+      id: "200",
+      join_timestamp: "2026-08-20T00:00:00.000Z",
+      member: { user: { id: "500", username: "private" } },
+      user_id: "500",
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    embeddedMember.getThreadMember("200", "500"),
+    ThreadGovernanceEvidenceError,
+  )
+
+  const missingJoinTimestamp = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      flags: 0,
+      id: "200",
+      user_id: "500",
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    missingJoinTimestamp.getThreadMember("200", "500"),
+    ThreadGovernanceEvidenceError,
+  )
+
+  let requests = 0
+  let sleeps = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "private thread failure", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.addThreadMember("200", "500"),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes("private thread failure"), false)
       return true
     },
   )

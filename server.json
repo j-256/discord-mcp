@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
           "default": "all",
           "format": "string"
         },
@@ -262,7 +262,7 @@
         },
         {
           "name": "DISCORD_MCP_PROTECTED_USER_IDS",
-          "description": "Exact user IDs that member administration, member-role changes, and member voice changes must never target",
+          "description": "Exact user IDs that member administration, member-role changes, member voice changes, and thread-member removals must never target",
           "format": "string"
         },
         {
@@ -394,6 +394,39 @@
         {
           "name": "DISCORD_MCP_THREAD_PARENT_IDS",
           "description": "Exact stable text or announcement parent channel IDs eligible for reviewed thread creation",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_THREAD_AUDIT",
+          "description": "Enable exact privacy-safe thread lifecycle and membership audit when exact guild and thread allowlists are also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_THREAD_CHANGES",
+          "description": "Enable reviewed thread lifecycle, metadata, and membership changes; requires thread audit and exact guild and thread allowlists",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_THREAD_GUILD_IDS",
+          "description": "Exact guild IDs eligible for thread-governance audit and reviewed changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_THREAD_IDS",
+          "description": "Exact thread IDs eligible for thread-governance audit and reviewed changes; each must remain in the ordinary read channel scope",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_THREAD_MEMBER_USER_IDS",
+          "description": "Exact user IDs eligible for non-enumerating thread-membership audit and reviewed add or remove changes",
           "format": "string"
         },
         {

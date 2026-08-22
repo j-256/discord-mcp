@@ -22,6 +22,7 @@ import {
   type DiscordScheduledEventSummary,
   type DiscordSoundboardSoundSummary,
   type DiscordStageInstanceSummary,
+  type DiscordThreadStateSummary,
 } from "../src/discord-client.js"
 import {
   ConfigurationError,
@@ -220,6 +221,7 @@ function serviceFixture(overrides: {
   soundboardOptions?: ConnectorServiceOptions["soundboardOptions"]
   stageInstanceOptions?: ConnectorServiceOptions["stageInstanceOptions"]
   threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
+  threadGovernanceOptions?: ConnectorServiceOptions["threadGovernanceOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
 } = {}) {
   const calls = {
@@ -241,6 +243,9 @@ function serviceFixture(overrides: {
     user: 0,
   }
   const client: DiscordServiceClient = {
+    async addThreadMember() {
+      throw new Error("Unexpected thread-member add")
+    },
     async addGuildMemberRole() {
       throw new Error("Unexpected member-role add")
     },
@@ -457,6 +462,9 @@ function serviceFixture(overrides: {
         user_id: userId,
       }
     },
+    async getThreadState() {
+      throw new Error("Unexpected thread-state lookup")
+    },
     async getUser(userId) {
       return { id: userId, username: "target" }
     },
@@ -535,6 +543,9 @@ function serviceFixture(overrides: {
     async modifyGuildMemberVoice() {
       throw new Error("Unexpected member voice change")
     },
+    async modifyThreadState() {
+      throw new Error("Unexpected thread-state change")
+    },
     async modifyGuildChannelMetadata() {
       throw new Error("Unexpected channel metadata change")
     },
@@ -585,6 +596,9 @@ function serviceFixture(overrides: {
     },
     async removeGuildMemberRole() {
       throw new Error("Unexpected member-role remove")
+    },
+    async removeThreadMember() {
+      throw new Error("Unexpected thread-member remove")
     },
     async searchGuildMessages() {
       return {
@@ -690,6 +704,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.threadCreationOptions
         ? { threadCreationOptions: overrides.threadCreationOptions }
+        : {}),
+      ...(overrides.threadGovernanceOptions
+        ? { threadGovernanceOptions: overrides.threadGovernanceOptions }
         : {}),
       ...(overrides.webhookOptions
         ? { webhookOptions: overrides.webhookOptions }
@@ -2286,6 +2303,134 @@ test("service pins identity through privacy-safe reviewed member voice changes",
   )
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(calls.activityEntries.every((entry) => entry.kind === "member-voice-change"), true)
+})
+
+test("service pins identity through privacy-safe reviewed thread governance", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "800000000000000021"
+  let threadState: DiscordThreadStateSummary = {
+    archived: false,
+    autoArchiveDuration: 1_440,
+    guildId: GUILD_ID,
+    id: THREAD_ID,
+    invitable: true,
+    locked: false,
+    name: "private-thread-name",
+    ownerId: MEMBER_USER_ID,
+    parentId: CHANNEL_ID,
+    rateLimitPerUser: 0,
+    type: 12,
+    unknownFieldCount: 0,
+    unknownMetadataFieldCount: 0,
+  }
+  let membershipReads = 0
+  let threadReads = 0
+  let threadWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getChannel(channelId) {
+        assert.equal(channelId, CHANNEL_ID)
+        return channel({ name: "private-parent-name" })
+      },
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildMember(_guildId, userId) {
+        assert.equal(userId, BOT_ID)
+        return { roles: [botRoleId], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(
+            GUILD_ID,
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+              | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS,
+            "@everyone",
+          ),
+          {
+            ...role(botRoleId, DISCORD_PERMISSIONS.MANAGE_THREADS, "connector"),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
+      },
+      async getThreadMember(threadId, userId) {
+        assert.equal(threadId, THREAD_ID)
+        assert.equal(userId, BOT_ID)
+        membershipReads += 1
+        return {
+          flags: 0,
+          id: threadId,
+          join_timestamp: "2026-08-21T00:00:00.000Z",
+          user_id: userId,
+        }
+      },
+      async getThreadState(threadId) {
+        assert.equal(threadId, THREAD_ID)
+        threadReads += 1
+        return threadState
+      },
+      async modifyThreadState(threadId, input, auditReason) {
+        assert.equal(threadId, THREAD_ID)
+        assert.deepEqual(input, { name: "reviewed-thread-name" })
+        assert.equal(auditReason, "Reviewed exact thread rename")
+        threadWrites += 1
+        threadState = { ...threadState, name: input.name }
+        return threadState
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${THREAD_ID}`,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
+      DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
+      DISCORD_MCP_THREAD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_THREAD_IDS: THREAD_ID,
+    },
+    operationStore,
+    threadGovernanceOptions: {
+      clock: () => new Date("2026-08-22T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(17),
+      randomId: () => "activity-thread-governance",
+    },
+  })
+  const request = {
+    action: "rename" as const,
+    auditReason: "Reviewed exact thread rename",
+    guildId: GUILD_ID,
+    name: "reviewed-thread-name",
+    operationKey: "thread-governance-attempt-0001",
+    threadId: THREAD_ID,
+  }
+
+  const audit = await service.getThreadState(GUILD_ID, THREAD_ID)
+  const plan = await service.planThreadChange(request)
+  const result = await service.executeThreadChange(request, plan.digest)
+
+  assert.equal(audit.applicationId, APPLICATION_ID)
+  assert.equal(audit.botId, BOT_ID)
+  assert.equal(audit.privacy.enumeration, "none")
+  assert.equal(plan.action, "rename")
+  assert.deepEqual(plan.desired, { field: "name", value: "reviewed-thread-name" })
+  assert.equal(result.status, "completed")
+  assert.equal(result.observedThread.name, "reviewed-thread-name")
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(membershipReads, 3)
+  assert.equal(threadReads, 4)
+  assert.equal(threadWrites, 1)
+  assert.equal(operationStore.receipt?.kind, "thread-governance-change")
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.doesNotMatch(
+    JSON.stringify(operationStore.receipt),
+    /thread-governance-attempt|Reviewed exact|private-|reviewed-thread/,
+  )
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(
+    calls.activityEntries.every((entry) => entry.kind === "thread-governance-change"),
+    true,
+  )
 })
 
 test("service verifies identity before reviewed additive channel creation", async () => {

@@ -19,6 +19,7 @@ import {
   SCHEMA_VERSION,
   SOUNDBOARD_ACTIONS,
   STAGE_INSTANCE_ACTIONS,
+  THREAD_CHANGE_ACTIONS,
   THREAD_CREATION_MODES,
   type ChannelCreationKind,
   type MemberModerationAction,
@@ -26,6 +27,7 @@ import {
   type MemberVoiceAction,
   type SoundboardAction,
   type StageInstanceAction,
+  type ThreadChangeAction,
   type ThreadCreationMode,
 } from "./constants.js"
 import { AuditLogError, errorMessage } from "./errors.js"
@@ -240,6 +242,29 @@ export interface MemberVoiceActivity {
   status: MemberVoiceActivityStatus
   timestamp: string
   userId: string
+  verification: "drift" | "match" | null
+}
+
+export type ThreadGovernanceActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ThreadGovernanceActivity {
+  action: ThreadChangeAction
+  error: string | null
+  guildId: string
+  id: string
+  kind: "thread-governance-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: ThreadGovernanceActivityStatus
+  targetUserId: string | null
+  threadId: string
+  timestamp: string
   verification: "drift" | "match" | null
 }
 
@@ -625,6 +650,7 @@ export type ActivityEntry =
   | SoundboardActivity
   | StageInstanceActivity
   | ThreadCreationActivity
+  | ThreadGovernanceActivity
   | WelcomeScreenActivity
   | WebhookDeletionActivity
   | WidgetSettingsActivity
@@ -1168,6 +1194,73 @@ function parseMemberVoiceActivity(
     status: record.status as MemberVoiceActivityStatus,
     timestamp: record.timestamp,
     userId: record.userId,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseThreadGovernanceActivity(
+  value: unknown,
+): ThreadGovernanceActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "thread-governance-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !THREAD_CHANGE_ACTIONS.includes(record.action as ThreadChangeAction)
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.threadId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.threadId)
+    || !(record.targetUserId === null || (
+      typeof record.targetUserId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.targetUserId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  const membershipAction = record.action === "add-member" || record.action === "remove-member"
+  if (membershipAction !== (record.targetUserId !== null)) return undefined
+  return {
+    action: record.action as ThreadChangeAction,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "thread-governance-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ThreadGovernanceActivityStatus,
+    targetUserId: record.targetUserId as string | null,
+    threadId: record.threadId,
+    timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
 }
@@ -2335,6 +2428,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseOnboardingActivity(value)
     || parseMemberRoleActivity(value)
     || parseMemberVoiceActivity(value)
+    || parseThreadGovernanceActivity(value)
     || parseRoleCreationActivity(value)
     || parseRoleConfigurationActivity(value)
     || parsePollActivity(value)

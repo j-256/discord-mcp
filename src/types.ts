@@ -281,6 +281,7 @@ export interface DiscordThreadMember {
   id?: string
   join_timestamp: string
   member?: DiscordGuildMember
+  unknown_field_count?: number
   user_id?: string
 }
 

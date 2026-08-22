@@ -34,6 +34,7 @@ import {
   type SoundboardActivity,
   type StageInstanceActivity,
   type ThreadCreationActivity,
+  type ThreadGovernanceActivity,
   type WebhookDeletionActivity,
   type WelcomeScreenActivity,
   type WidgetSettingsActivity,
@@ -293,6 +294,33 @@ function memberVoice(
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     userId: "400",
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function threadGovernance(
+  id: string,
+  status: ThreadGovernanceActivity["status"],
+): ThreadGovernanceActivity {
+  return {
+    action: "remove-member",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "thread-governance-change",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    targetUserId: "400",
+    threadId: "300",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
       : status === "completed-with-drift"
@@ -1056,6 +1084,63 @@ test("JSONL activity log keeps member voice evidence and state content-free", as
   assert.doesNotMatch(
     JSON.stringify(result),
     /private audit|private destination|private member|private permission|private source|private voice|serverMuted/,
+  )
+})
+
+test("JSONL activity log keeps thread-governance evidence content-free and action exact", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...threadGovernance("1", "pending"),
+    auditReason: "must never reach disk",
+    desiredName: "must-not-persist",
+    memberName: "must-not-persist",
+    threadName: "must-not-persist",
+  } as ThreadGovernanceActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...threadGovernance("2", "completed-with-drift"),
+      auditReason: "private audit reason",
+      currentState: { archived: false, name: "private thread" },
+      operationKey: "private-operation-key",
+      parentName: "private parent",
+      permissionNames: ["private permission"],
+      username: "private member",
+    })}\n${JSON.stringify({
+      ...threadGovernance("3", "completed"),
+      action: "rename",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "thread-governance-change")
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "action",
+    "error",
+    "guildId",
+    "id",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "status",
+    "targetUserId",
+    "threadId",
+    "timestamp",
+    "verification",
+  ])
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private audit|private member|private-operation|private parent|private permission|private thread/,
   )
 })
 

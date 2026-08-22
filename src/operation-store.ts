@@ -45,6 +45,7 @@ export const OPERATION_KINDS = [
   "guild-soundboard-change",
   "stage-instance-change",
   "thread-create",
+  "thread-governance-change",
   "welcome-screen-change",
   "webhook-deletion",
   "widget-settings-change",

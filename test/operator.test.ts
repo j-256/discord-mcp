@@ -150,6 +150,11 @@ function status(
       roleConfigurationEnabled: false,
       roleConfigurationIds: [],
       threadCreationEnabled: false,
+      threadAuditEnabled: false,
+      threadChangesEnabled: false,
+      threadGuildIds: [],
+      threadIds: [],
+      threadMemberUserIds: [],
       threadParentIds: [],
       webhookAuditEnabled: false,
       webhookChannelIds: [],
@@ -183,6 +188,7 @@ function toolService(): DiscordToolService {
     addReaction: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
+    executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeSoundboardChange: unexpected,
@@ -195,6 +201,9 @@ function toolService(): DiscordToolService {
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
+    getThreadMembership: unexpected,
+    getThreadState: unexpected,
+    planThreadChange: unexpected,
     getGuildExpression: unexpected,
     getGuildSoundboardSound: unexpected,
     getAutoModerationRule: unexpected,
@@ -624,6 +633,73 @@ test("doctor and setup explain reviewed thread-creation scope without Discord wr
   )
   assert.match(setup.warnings.join("\n"), /parent-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /threads toolset/)
+})
+
+test("doctor and setup explain privacy-safe reviewed thread governance", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
+    DISCORD_MCP_THREAD_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_THREAD_IDS: CHANNEL_ID,
+    DISCORD_MCP_THREAD_MEMBER_USER_IDS: BOT_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.threadAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.threadChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /without member enumeration or persistence/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /uncertainty quarantine/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.threadAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.threadChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /exact guild and thread allowlists/)
+  assert.match(omitted.warnings.join("\n"), /thread-governance toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_THREAD_AUDIT",
+    "DISCORD_MCP_ALLOW_THREAD_CHANGES",
+    "DISCORD_MCP_THREAD_GUILD_IDS",
+    "DISCORD_MCP_THREAD_IDS",
+    "DISCORD_MCP_THREAD_MEMBER_USER_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
 })
 
 test("doctor and setup explain reviewed message-pin scope without Discord writes", async () => {
@@ -2320,6 +2396,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_scheduled_event_change",
     "review_soundboard_change",
     "review_stage_instance_change",
+    "review_thread_change",
     "review_webhook_deletion",
     "review_welcome_screen_change",
     "review_widget_settings_change",
@@ -2357,6 +2434,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/soundboard",
     "discord://guilds/{guildId}/soundboard/{soundId}",
     "discord://guilds/{guildId}/stickers",
+    "discord://guilds/{guildId}/threads/{threadId}",
+    "discord://guilds/{guildId}/threads/{threadId}/members/{userId}",
     "discord://guilds/{guildId}/welcome-screen",
     "discord://guilds/{guildId}/widget-settings",
   ])
@@ -2380,6 +2459,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_role_configuration",
     "execute_scheduled_event_change",
     "execute_stage_instance_change",
+    "execute_thread_change",
     "execute_webhook_deletion",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
@@ -2391,6 +2471,9 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
   assert.equal(report.readOnlyTools.includes("get_member_voice_state"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_voice_change"), true)
+  assert.equal(report.readOnlyTools.includes("get_thread_state"), true)
+  assert.equal(report.readOnlyTools.includes("get_thread_membership"), true)
+  assert.equal(report.readOnlyTools.includes("plan_thread_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_configuration"), true)
   assert.equal(report.readOnlyTools.includes("plan_poll_creation"), true)

@@ -72,6 +72,8 @@ export interface ConnectorConfig {
   allowStageInstanceChanges: boolean
   allowStageStartNotifications: boolean
   allowThreadCreation: boolean
+  allowThreadAudit: boolean
+  allowThreadChanges: boolean
   allowWelcomeScreenAudit: boolean
   allowWelcomeScreenChanges: boolean
   allowWebhookAudit: boolean
@@ -123,6 +125,9 @@ export interface ConnectorConfig {
   stageChannelIds: ReadonlySet<string>
   token: string
   threadParentIds: ReadonlySet<string>
+  threadGuildIds: ReadonlySet<string>
+  threadIds: ReadonlySet<string>
+  threadMemberUserIds: ReadonlySet<string>
   welcomeScreenGuildIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
   widgetSettingsGuildIds: ReadonlySet<string>
@@ -340,6 +345,21 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.threadParentIds],
     ENVIRONMENT_NAMES.threadParentIds,
   )
+  const threadGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.threadGuildIds],
+    ENVIRONMENT_NAMES.threadGuildIds,
+    CONNECTOR_LIMITS.threadGovernanceGuildAllowlist,
+  )
+  const threadIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.threadIds],
+    ENVIRONMENT_NAMES.threadIds,
+    CONNECTOR_LIMITS.threadGovernanceThreadAllowlist,
+  )
+  const threadMemberUserIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.threadMemberUserIds],
+    ENVIRONMENT_NAMES.threadMemberUserIds,
+    CONNECTOR_LIMITS.threadGovernanceUserAllowlist,
+  )
   const stageChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.stageChannelIds],
     ENVIRONMENT_NAMES.stageChannelIds,
@@ -439,6 +459,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.memberVoiceGuildIds, memberVoiceGuildIds],
+    [ENVIRONMENT_NAMES.threadGuildIds, threadGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
     [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
@@ -466,6 +487,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
     [ENVIRONMENT_NAMES.stageChannelIds, stageChannelIds],
     [ENVIRONMENT_NAMES.threadParentIds, threadParentIds],
+    [ENVIRONMENT_NAMES.threadIds, threadIds],
     [ENVIRONMENT_NAMES.webhookChannelIds, webhookChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
@@ -659,6 +681,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowStageStartNotifications} requires ${ENVIRONMENT_NAMES.allowStageInstanceChanges}`,
     )
   }
+  const allowThreadAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowThreadAudit],
+    ENVIRONMENT_NAMES.allowThreadAudit,
+  )
+  const allowThreadChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowThreadChanges],
+    ENVIRONMENT_NAMES.allowThreadChanges,
+  )
+  if (allowThreadChanges && !allowThreadAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowThreadChanges} requires ${ENVIRONMENT_NAMES.allowThreadAudit}`,
+    )
+  }
   const allowPollAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowPollAudit],
     ENVIRONMENT_NAMES.allowPollAudit,
@@ -771,6 +806,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowThreadCreation],
       ENVIRONMENT_NAMES.allowThreadCreation,
     ),
+    allowThreadAudit,
+    allowThreadChanges,
     allowWelcomeScreenAudit,
     allowWelcomeScreenChanges,
     allowWebhookAudit,
@@ -868,6 +905,9 @@ export function loadConnectorConfig(
     stageChannelIds,
     token,
     threadParentIds,
+    threadGuildIds,
+    threadIds,
+    threadMemberUserIds,
     welcomeScreenGuildIds,
     webhookChannelIds,
     widgetSettingsGuildIds,
