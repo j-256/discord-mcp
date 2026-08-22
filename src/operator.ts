@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 8
+export const OPERATOR_REPORT_SCHEMA_VERSION = 9
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -67,6 +67,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildExpressionChangePolicy: "guild-expression-change-policy",
   gatewayPolicy: "gateway-policy",
   guildScaffoldPolicy: "guild-scaffold-policy",
+  guildTemplateAuditPolicy: "guild-template-audit-policy",
+  guildTemplateChangePolicy: "guild-template-change-policy",
   interactionPolicy: "interaction-policy",
   inviteAuditPolicy: "invite-audit-policy",
   inviteDeletionPolicy: "invite-deletion-policy",
@@ -321,6 +323,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowGuildScaffolds && config.guildScaffoldGuildIds.size === 0) {
     warnings.push("The guild-scaffold toggle is enabled but scaffold execution remains blocked because no guild-scaffold allowlist is configured")
   }
+  if (config.allowGuildTemplateAudit && config.guildTemplateGuildIds.size === 0) {
+    warnings.push("The Guild Template audit toggle is enabled but inventory remains blocked because no exact guild allowlist is configured")
+  }
+  if (config.allowGuildTemplateChanges && config.guildTemplateGuildIds.size === 0) {
+    warnings.push("The Guild Template change toggle is enabled but changes remain blocked because no exact guild allowlist is configured")
+  }
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
@@ -452,6 +460,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     ],
     [config.allowGateway, "gateway", "Gateway events"],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
+    [
+      config.allowGuildTemplateAudit || config.allowGuildTemplateChanges,
+      "guild-templates",
+      "Guild Template audit and reviewed changes",
+    ],
     [
       config.allowGuildExpressionAudit || config.allowGuildExpressionChanges,
       "guild-expressions",
@@ -1012,6 +1025,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.guildScaffoldPolicy,
         "pass",
         `Reviewed additive guild scaffolds are constrained to ${config.guildScaffoldGuildIds.size} guilds with durable bounded resumption`,
+      ))
+    }
+    if (!config.allowGuildTemplateAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildTemplateAuditPolicy,
+        "pass",
+        "Capability-safe Guild Template audit is disabled",
+      ))
+    } else if (config.guildTemplateGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildTemplateAuditPolicy,
+        "warn",
+        "Guild Template audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildTemplateAuditPolicy,
+        "pass",
+        `Capability-safe Guild Template audit is constrained to ${config.guildTemplateGuildIds.size} guilds with opaque process-local references and count-only snapshot evidence`,
+      ))
+    }
+    if (!config.allowGuildTemplateChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildTemplateChangePolicy,
+        "pass",
+        "Reviewed Guild Template changes are disabled",
+      ))
+    } else if (config.guildTemplateGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildTemplateChangePolicy,
+        "warn",
+        "Guild Template changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildTemplateChangePolicy,
+        "pass",
+        `Reviewed Guild Template changes are constrained to ${config.guildTemplateGuildIds.size} guilds with full private-inventory planning, one-shot execution, and exact readback`,
       ))
     }
     if (!config.allowInteractions) {
@@ -1769,6 +1820,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.roleConfigurationIds,
     ENVIRONMENT_NAMES.allowGuildScaffolds,
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
+    ENVIRONMENT_NAMES.allowGuildTemplateAudit,
+    ENVIRONMENT_NAMES.allowGuildTemplateChanges,
+    ENVIRONMENT_NAMES.guildTemplateGuildIds,
     ENVIRONMENT_NAMES.allowGuildExpressionAudit,
     ENVIRONMENT_NAMES.allowGuildExpressionChanges,
     ENVIRONMENT_NAMES.guildExpressionGuildIds,

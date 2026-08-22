@@ -37,6 +37,7 @@ export const MCP_TOOLSET_NAMES = [
   "gateway",
   "guild-expressions",
   "guild-scaffolds",
+  "guild-templates",
   "guilds",
   "interactions",
   "invites",
@@ -86,6 +87,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowGuildExpressionAudit: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
   allowGuildExpressionChanges: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
   allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
+  allowGuildTemplateAudit: "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT",
+  allowGuildTemplateChanges: "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES",
   allowInteractions: "DISCORD_MCP_ALLOW_INTERACTIONS",
   allowInviteAudit: "DISCORD_MCP_ALLOW_INVITE_AUDIT",
   allowInviteDeletions: "DISCORD_MCP_ALLOW_INVITE_DELETIONS",
@@ -140,6 +143,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   guildScaffoldGuildIds: "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
   guildExpressionGuildIds: "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
   guildExpressionRoots: "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
+  guildTemplateGuildIds: "DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS",
   interactionChannelIds: "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
   interactionMaxWritesPerMinute: "DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE",
   interactionMinWriteIntervalMs: "DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS",
@@ -342,6 +346,16 @@ export const INVITE_LIMITS = Object.freeze({
 export const INVITE_REFERENCE_PATTERN = /^iref_hmac_sha256_[a-f0-9]{64}$/
 export const INVITE_CURSOR_PATTERN = /^icur_hmac_sha256_[A-Za-z0-9_-]+\.[a-f0-9]{64}$/
 export const DISCORD_INVITE_URL_PATTERN = /(?:discord\.gg\/|discord(?:app)?\.com\/invite\/)/iu
+
+export const GUILD_TEMPLATE_LIMITS = Object.freeze({
+  codeCharacters: 256,
+  descriptionCharacters: 120,
+  inventory: 100,
+  nameCharacters: 100,
+  snapshotPermissionOverwrites: 10_000,
+})
+
+export const GUILD_TEMPLATE_REFERENCE_PATTERN = /^tref_hmac_sha256_[a-f0-9]{64}$/
 
 export const ONBOARDING_LIMITS = Object.freeze({
   auditOptionsPerPrompt: 100,

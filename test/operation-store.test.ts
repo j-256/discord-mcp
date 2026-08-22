@@ -26,6 +26,7 @@ const CHANNEL_ID = "200000000000000001"
 const PLAN_DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const OPERATION_KEY = "channel-create-operation-0001"
 const INVITE_REF = `iref_hmac_sha256_${"b".repeat(64)}`
+const GUILD_TEMPLATE_REF = `tref_hmac_sha256_${"c".repeat(64)}`
 
 function receipt(
   status: OperationReceipt["status"] = "pending",
@@ -136,6 +137,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const expression = { ...receipt(), kind: "guild-expression-change" as const }
   const scaffold = { ...receipt(), kind: "guild-scaffold" as const }
   const invite = { ...receipt(), kind: "invite-deletion" as const }
+  const guildTemplate = { ...receipt(), kind: "guild-template-change" as const }
   const onboarding = { ...receipt(), kind: "onboarding-change" as const }
   const memberRole = { ...receipt(), kind: "member-role-change" as const }
   const pin = { ...receipt(), kind: "message-pin" as const }
@@ -157,6 +159,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(expression)).created, true)
   assert.equal((await store.reserve(scaffold)).created, true)
   assert.equal((await store.reserve(invite)).created, true)
+  assert.equal((await store.reserve(guildTemplate)).created, true)
   assert.equal((await store.reserve(onboarding)).created, true)
   assert.equal((await store.reserve(memberRole)).created, true)
   assert.equal((await store.reserve(pin)).created, true)
@@ -203,6 +206,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("invite-deletion", invite.operationKeyHash),
     invite,
+  )
+  assert.deepEqual(
+    await store.get("guild-template-change", guildTemplate.operationKeyHash),
+    guildTemplate,
   )
   assert.deepEqual(
     await store.get("onboarding-change", onboarding.operationKeyHash),
@@ -260,6 +267,18 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("invite-deletion", invite.operationKeyHash),
     completedInvite,
+  )
+  const completedGuildTemplate = {
+    ...guildTemplate,
+    resourceId: GUILD_TEMPLATE_REF,
+    status: "completed" as const,
+    timestamp: "2026-08-20T00:00:01.000Z",
+    verification: "match" as const,
+  }
+  await store.finish(completedGuildTemplate)
+  assert.deepEqual(
+    await store.get("guild-template-change", guildTemplate.operationKeyHash),
+    completedGuildTemplate,
   )
 })
 

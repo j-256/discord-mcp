@@ -47,6 +47,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "scheduled-events",
   "soundboard",
   "stickers",
+  "templates",
   "welcome-screen",
   "widget-settings",
 ] as const

@@ -12,6 +12,7 @@ import {
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
   DISCORD_SNOWFLAKE_PATTERN,
+  GUILD_TEMPLATE_REFERENCE_PATTERN,
   INVITE_REFERENCE_PATTERN,
   MEMBER_ROLE_ACTIONS,
   MEMBER_VOICE_ACTIONS,
@@ -449,6 +450,27 @@ export interface NativeInteractionCommandActivity {
   verification: "drift" | "match" | null
 }
 
+export type GuildTemplateActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildTemplateActivity {
+  action: "create" | "delete" | "synchronize" | "update-metadata"
+  error: string | null
+  guildId: string
+  id: string
+  kind: "guild-template-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: GuildTemplateActivityStatus
+  templateRef: string | null
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type NativeInteractionActivityStatus =
   | "accepted"
   | "expired"
@@ -702,6 +724,7 @@ export type ActivityEntry =
   | DeletionActivity
   | ForumPostActivity
   | GuildExpressionActivity
+  | GuildTemplateActivity
   | InteractionActivity
   | InviteDeletionActivity
   | MemberModerationActivity
@@ -1514,6 +1537,72 @@ function parseNativeInteractionCommandActivity(
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as NativeInteractionCommandActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseGuildTemplateActivity(
+  value: unknown,
+): GuildTemplateActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-template-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "create",
+      "delete",
+      "synchronize",
+      "update-metadata",
+    ].includes(String(record.action))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.templateRef === null || (
+      typeof record.templateRef === "string"
+      && GUILD_TEMPLATE_REFERENCE_PATTERN.test(record.templateRef)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+      || record.templateRef === null
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as GuildTemplateActivity["action"],
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "guild-template-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GuildTemplateActivityStatus,
+    templateRef: record.templateRef as string | null,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
@@ -2656,6 +2745,7 @@ function parseStageInstanceActivity(
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAnnouncementCrosspostActivity(value)
     || parseNativeInteractionCommandActivity(value)
+    || parseGuildTemplateActivity(value)
     || parseNativeInteractionActivity(value)
     || parseAttachmentMessageActivity(value)
     || parseAutoModerationActivity(value)

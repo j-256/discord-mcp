@@ -8,6 +8,7 @@ import {
   DISCORD_API_BASE_URL,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
+  GUILD_TEMPLATE_LIMITS,
   INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
   ONBOARDING_LIMITS,
@@ -24,6 +25,7 @@ import {
   DiscordApiError,
   errorMessage,
   GuildExpressionEvidenceError,
+  GuildTemplateEvidenceError,
   InviteEvidenceError,
   MemberVoiceEvidenceError,
   OnboardingEvidenceError,
@@ -254,6 +256,30 @@ export interface DiscordDeletedInviteSummary {
   code: string
   guildId: string | null
   type: number
+}
+
+export interface DiscordGuildTemplateSummary {
+  code: string
+  createdAt: string
+  creatorId: string
+  description: string | null
+  isDirty: boolean | null
+  name: string
+  serializedSourceGuild: Record<string, unknown>
+  sourceGuildId: string
+  unknownFieldCount: number
+  updatedAt: string
+  usageCount: number
+}
+
+export interface CreateGuildTemplateInput {
+  description: string | null
+  name: string
+}
+
+export interface ModifyGuildTemplateInput {
+  description?: string | null
+  name?: string
 }
 
 export const DISCORD_ONBOARDING_MODES = Object.freeze({
@@ -1073,11 +1099,13 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_guild_emoji",
   "create_guild_soundboard_sound",
   "create_guild_sticker",
+  "create_guild_template",
   "create_stage_instance",
   "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
   "delete_guild_soundboard_sound",
   "delete_guild_sticker",
+  "delete_guild_template",
   "delete_stage_instance",
   "edit_original_interaction_response",
   "get_guild_auto_moderation_rule",
@@ -1098,10 +1126,12 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_default_soundboard_sounds",
   "list_guild_soundboard_sounds",
   "list_guild_stickers",
+  "list_guild_templates",
   "modify_guild_emoji",
   "modify_guild_soundboard_sound",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
+  "modify_guild_template",
   "modify_guild_member_voice",
   "modify_thread_state",
   "modify_stage_instance",
@@ -1111,6 +1141,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
+  "sync_guild_template",
   "remove_thread_member",
 ])
 
@@ -1357,6 +1388,164 @@ function projectInvite(value: unknown): DiscordInviteSummary {
     type: inviteInteger(record.type),
     uses: inviteInteger(record.uses),
   }
+}
+
+const GUILD_TEMPLATE_KEYS: ReadonlySet<string> = new Set([
+  "code",
+  "created_at",
+  "creator",
+  "creator_id",
+  "description",
+  "is_dirty",
+  "name",
+  "serialized_source_guild",
+  "source_guild_id",
+  "updated_at",
+  "usage_count",
+])
+
+function guildTemplateEvidenceError(): GuildTemplateEvidenceError {
+  return new GuildTemplateEvidenceError("Discord returned invalid guild-template evidence")
+}
+
+function guildTemplateText(
+  value: unknown,
+  maximum: number,
+  nullable: boolean,
+  minimum = 1,
+): string | null {
+  if (nullable && value === null) return null
+  if (
+    typeof value !== "string"
+    || [...value].length < minimum
+    || [...value].length > maximum
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    throw guildTemplateEvidenceError()
+  }
+  try {
+    encodeURIComponent(value)
+  } catch {
+    throw guildTemplateEvidenceError()
+  }
+  return value
+}
+
+function guildTemplateCode(value: unknown): string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > GUILD_TEMPLATE_LIMITS.codeCharacters
+    || URL_DOT_PATH_SEGMENTS.has(value)
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    throw guildTemplateEvidenceError()
+  }
+  try {
+    encodeURIComponent(value)
+  } catch {
+    throw guildTemplateEvidenceError()
+  }
+  return value
+}
+
+function guildTemplateTimestamp(value: unknown): string {
+  if (
+    typeof value !== "string"
+    || !ISO_8601_TIMESTAMP_PATTERN.test(value)
+    || Number.isNaN(Date.parse(value))
+  ) {
+    throw guildTemplateEvidenceError()
+  }
+  return new Date(value).toISOString()
+}
+
+function projectGuildTemplate(value: unknown): DiscordGuildTemplateSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw guildTemplateEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.creator_id !== "string"
+    || typeof record.source_guild_id !== "string"
+    || !record.creator
+    || typeof record.creator !== "object"
+    || Array.isArray(record.creator)
+    || (record.creator as Record<string, unknown>).id !== record.creator_id
+  ) {
+    throw guildTemplateEvidenceError()
+  }
+  try {
+    assertPositiveSnowflake(record.creator_id, "Discord guild-template creator ID")
+    assertPositiveSnowflake(record.source_guild_id, "Discord guild-template source guild ID")
+  } catch {
+    throw guildTemplateEvidenceError()
+  }
+  if (
+    !Number.isSafeInteger(record.usage_count)
+    || (record.usage_count as number) < 0
+    || !record.serialized_source_guild
+    || typeof record.serialized_source_guild !== "object"
+    || Array.isArray(record.serialized_source_guild)
+    || !(record.is_dirty === null || typeof record.is_dirty === "boolean")
+  ) {
+    throw guildTemplateEvidenceError()
+  }
+  return {
+    code: guildTemplateCode(record.code),
+    createdAt: guildTemplateTimestamp(record.created_at),
+    creatorId: record.creator_id,
+    description: guildTemplateText(
+      record.description,
+      GUILD_TEMPLATE_LIMITS.descriptionCharacters,
+      true,
+      0,
+    ),
+    isDirty: record.is_dirty,
+    name: guildTemplateText(
+      record.name,
+      GUILD_TEMPLATE_LIMITS.nameCharacters,
+      false,
+    ) as string,
+    serializedSourceGuild: record.serialized_source_guild as Record<string, unknown>,
+    sourceGuildId: record.source_guild_id,
+    unknownFieldCount: Object.keys(record)
+      .filter((key) => !GUILD_TEMPLATE_KEYS.has(key)).length,
+    updatedAt: guildTemplateTimestamp(record.updated_at),
+    usageCount: record.usage_count as number,
+  }
+}
+
+function assertGuildTemplateInput(
+  value: CreateGuildTemplateInput | ModifyGuildTemplateInput,
+  requireName: boolean,
+): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord guild-template metadata must be an object")
+  }
+  const keys = Object.keys(value)
+  if (
+    keys.some((key) => key !== "description" && key !== "name")
+    || requireName && !keys.includes("name")
+    || !requireName && keys.length < 1
+  ) {
+    throw new RangeError("Discord guild-template metadata fields are invalid")
+  }
+  if (value.name !== undefined) {
+    guildTemplateText(value.name, GUILD_TEMPLATE_LIMITS.nameCharacters, false)
+  }
+  if (value.description !== undefined) {
+    guildTemplateText(
+      value.description,
+      GUILD_TEMPLATE_LIMITS.descriptionCharacters,
+      true,
+      0,
+    )
+  }
+}
+
+function encodedGuildTemplateCode(code: string): string {
+  return encodeURIComponent(guildTemplateCode(code))
 }
 
 const ONBOARDING_KEYS = [
@@ -7447,6 +7636,117 @@ export class DiscordClient {
       throw inviteEvidenceError()
     }
     return response.map(projectInvite)
+  }
+
+  async listGuildTemplates(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildTemplateSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord guild-template guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_templates",
+      `/guilds/${guildId}/templates`,
+      { ...options, suppressFailureCause: true },
+    )
+    if (
+      !Array.isArray(response)
+      || response.length > GUILD_TEMPLATE_LIMITS.inventory
+    ) {
+      throw guildTemplateEvidenceError()
+    }
+    const templates = response.map(projectGuildTemplate)
+    if (new Set(templates.map(({ code }) => code)).size !== templates.length) {
+      throw guildTemplateEvidenceError()
+    }
+    return templates
+  }
+
+  async createGuildTemplate(
+    guildId: string,
+    input: CreateGuildTemplateInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildTemplateSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild-template guild ID")
+    assertGuildTemplateInput(input, true)
+    const response = await this.#request<unknown>(
+      "create_guild_template",
+      `/guilds/${guildId}/templates`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          description: input.description,
+          name: input.name,
+        },
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildTemplate(response)
+  }
+
+  async syncGuildTemplate(
+    guildId: string,
+    code: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildTemplateSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild-template guild ID")
+    const response = await this.#request<unknown>(
+      "sync_guild_template",
+      `/guilds/${guildId}/templates/${encodedGuildTemplateCode(code)}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/guilds/{guild.id}/templates/{template.code}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildTemplate(response)
+  }
+
+  async modifyGuildTemplate(
+    guildId: string,
+    code: string,
+    input: ModifyGuildTemplateInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildTemplateSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild-template guild ID")
+    assertGuildTemplateInput(input, false)
+    const response = await this.#request<unknown>(
+      "modify_guild_template",
+      `/guilds/${guildId}/templates/${encodedGuildTemplateCode(code)}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.name !== undefined ? { name: input.name } : {}),
+        },
+        diagnosticRoute: "/guilds/{guild.id}/templates/{template.code}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildTemplate(response)
+  }
+
+  async deleteGuildTemplate(
+    guildId: string,
+    code: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildTemplateSummary> {
+    assertPositiveSnowflake(guildId, "Discord guild-template guild ID")
+    const response = await this.#request<unknown>(
+      "delete_guild_template",
+      `/guilds/${guildId}/templates/${encodedGuildTemplateCode(code)}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/guilds/{guild.id}/templates/{template.code}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildTemplate(response)
   }
 
   async deleteInvite(

@@ -168,6 +168,7 @@ const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
 assert.equal(typeof connector.AutoModerationService, "function")
 assert.equal(typeof connector.ChannelMetadataService, "function")
+assert.equal(typeof connector.GuildTemplateService, "function")
 assert.equal(typeof connector.InviteService, "function")
 assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")

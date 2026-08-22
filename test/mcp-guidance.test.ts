@@ -43,6 +43,10 @@ const ROLE_ID = "350000000000000001"
 const WEBHOOK_ID = "360000000000000001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
+const GUILD_TEMPLATE_REF = `tref_hmac_sha256_${"7".repeat(64)}`
+const PRIVATE_GUILD_TEMPLATE_CODE = "private-template-capability"
+const PRIVATE_GUILD_TEMPLATE_NAME = "private-template-name"
+const PRIVATE_GUILD_TEMPLATE_TOPIC = "private-template-topic"
 const PRIVATE_ONBOARDING_TEXT = "private-onboarding-member-copy"
 const PRIVATE_WELCOME_SCREEN_TEXT = "private-welcome-screen-copy"
 const PRIVATE_CHANNEL_TOPIC = "private-channel-roadmap"
@@ -163,6 +167,7 @@ interface GuidanceCalls {
   soundboardGuild: number
   soundboardLookup: number
   stageInstances: number
+  templates: number
   threadMemberships: number
   threadStates: number
   unexpected: number
@@ -204,6 +209,7 @@ function guidanceService(options: {
     soundboardGuild: 0,
     soundboardLookup: 0,
     stageInstances: 0,
+    templates: 0,
     threadMemberships: 0,
     threadStates: 0,
     unexpected: 0,
@@ -226,6 +232,7 @@ function guidanceService(options: {
     executeAutoModerationChange: unexpected,
     executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeGuildTemplateChange: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
@@ -238,6 +245,7 @@ function guidanceService(options: {
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planNativeInteractionCommand: unexpected,
+    planGuildTemplateChange: unexpected,
     planThreadChange: unexpected,
     getGuildExpression: unexpected,
     async getGuildSoundboardSound(guildId, soundId) {
@@ -684,6 +692,90 @@ function guidanceService(options: {
     },
     planWebhookDeletion: unexpected,
     listGuildInvites: unexpected,
+    async listGuildTemplates(guildId) {
+      calls.templates += 1
+      calls.lastGuildId = guildId
+      const structure = {
+        channels: {
+          announcement: 0,
+          category: 0,
+          directory: 0,
+          forum: 0,
+          media: 0,
+          nsfw: 0,
+          stage: 0,
+          text: 1,
+          threads: 0,
+          total: 1,
+          unknown: 0,
+          voice: 0,
+        },
+        permissionOverwrites: {
+          memberTargets: 0,
+          roleTargets: 0,
+          total: 0,
+          unknownTargets: 0,
+        },
+        roles: {
+          privileged: 0,
+          riskyPermissionClasses: 0,
+          total: 1,
+          unknownPermissionBitfields: 0,
+        },
+        unknownFields: 0,
+      }
+      return {
+        access: {
+          appliedRoleIds: [ROLE_ID],
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true as const,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true as const,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guild: { id: guildId },
+        inventory: { returned: 1, safetyLimit: 100 },
+        limitations: ["Guild Templates are snapshots rather than backups"],
+        liveStructure: structure,
+        privacy: {
+          capabilities: "opaque-process-local-references" as const,
+          omittedFields: [
+            "code",
+            "useUrl",
+            "name",
+            "description",
+            "creatorProfile",
+            "guildName",
+            "roleNames",
+            "channelNames",
+            "channelTopics",
+            "iconHashes",
+            "serializedSourceGuild",
+            "rawPayloads",
+          ] as const,
+          persistence: "content-free-activity-only" as const,
+          rawPayloads: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        templates: [{
+          createdAt: "2026-08-20T00:00:00.000Z",
+          creatorUserId: USER_ID,
+          isDirty: true,
+          metadata: { descriptionCharacters: 28, nameCharacters: 21 },
+          structure,
+          templateRef: GUILD_TEMPLATE_REF,
+          unknownFieldCount: 0,
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          usageCount: 3,
+        }],
+      }
+    },
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -944,6 +1036,9 @@ function guidanceService(options: {
         guildExpressionCreationEnabled: false,
         guildExpressionGuildIds: [],
         guildExpressionRootCount: 0,
+        guildTemplateAuditEnabled: false,
+        guildTemplateChangesEnabled: false,
+        guildTemplateGuildIds: [],
         scheduledEventAuditEnabled: false,
         scheduledEventChangesEnabled: false,
         scheduledEventCoverChangesEnabled: false,
@@ -1478,6 +1573,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.roles
     + calls.scheduledEvents
     + calls.stageInstances
+    + calls.templates
     + calls.threadMemberships
     + calls.threadStates
     + calls.unexpected
@@ -1613,6 +1709,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildOnboarding,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildTemplates,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildTemplates,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildWelcomeScreen,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWelcomeScreen,
       },
@@ -1691,6 +1791,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
   assert.match(safety.text, /Raw invite codes and URLs are bearer capabilities/)
   assert.match(safety.text, /full-inventory absence readback/)
+  assert.match(safety.text, /Guild Template audit requires separate audit and exact-guild scope/)
+  assert.match(safety.text, /process-keyed opaque references/)
+  assert.match(safety.text, /Templates create future guilds from snapshots and are not backups/)
   assert.match(safety.text, /Guild onboarding audit requires a separate exact guild allowlist/)
   assert.match(safety.text, /Prompt, option, description, and Unicode emoji text is omitted by default/)
   assert.match(safety.text, /Omitted prompts, options, assignments, and default channels are deletions/)
@@ -2070,6 +2173,26 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("url" in invite, false)
   assert.doesNotMatch(exactInvite.text, new RegExp(PRIVATE_INVITE_CODE))
 
+  const guildTemplates = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/templates`,
+  )
+  const guildTemplateData = guildTemplates.value.data as Record<string, unknown>
+  const projectedTemplate = (
+    guildTemplateData.templates as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(projectedTemplate?.templateRef, GUILD_TEMPLATE_REF)
+  assert.deepEqual(guildTemplateData.guild, { id: GUILD_ID })
+  assert.equal(
+    (guildTemplateData.privacy as Record<string, unknown>).capabilities,
+    "opaque-process-local-references",
+  )
+  assert.equal("code" in (projectedTemplate || {}), false)
+  assert.equal("name" in (projectedTemplate || {}), false)
+  assert.doesNotMatch(guildTemplates.text, new RegExp(PRIVATE_GUILD_TEMPLATE_CODE))
+  assert.doesNotMatch(guildTemplates.text, new RegExp(PRIVATE_GUILD_TEMPLATE_NAME))
+  assert.doesNotMatch(guildTemplates.text, new RegExp(PRIVATE_GUILD_TEMPLATE_TOPIC))
+
   const onboarding = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/onboarding`,
@@ -2163,6 +2286,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.soundboardGuild, 1)
   assert.equal(calls.soundboardLookup, 1)
   assert.equal(calls.stageInstances, 1)
+  assert.equal(calls.templates, 1)
   assert.equal(calls.threadMemberships, 1)
   assert.equal(calls.threadStates, 2)
   assert.equal(calls.webhooks, 1)
@@ -2463,6 +2587,32 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(inviteDeletion, /complete MANAGE_GUILD evidence/)
   assert.match(inviteDeletion, /exposed invite code or URL/)
   assert.doesNotMatch(inviteDeletion, new RegExp(PRIVATE_INVITE_CODE))
+
+  const guildTemplateRequest = {
+    action: "update-metadata",
+    auditReason: "Reviewed Guild Template metadata",
+    description: "Reviewed description",
+    guildId: GUILD_ID,
+    name: "Reviewed template",
+    operationKey: OPERATION_KEY,
+    templateRef: GUILD_TEMPLATE_REF,
+  }
+  const guildTemplateChange = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(guildTemplateRequest) },
+    name: MCP_PROMPT_NAMES.reviewGuildTemplateChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(guildTemplateChange.split("\n")[1] || ""),
+    guildTemplateRequest,
+  )
+  assert.match(guildTemplateChange, /Call only plan_guild_template_change/)
+  assert.match(guildTemplateChange, /Do not call execute_guild_template_change/)
+  assert.match(guildTemplateChange, /complete MANAGE_GUILD evidence/)
+  assert.match(guildTemplateChange, /exposed template code or URL/)
+  assert.doesNotMatch(
+    guildTemplateChange,
+    new RegExp(PRIVATE_GUILD_TEMPLATE_CODE),
+  )
 
   const onboardingRequest = {
     auditReason: "Reviewed community onboarding",
@@ -3136,6 +3286,30 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewInviteDeletion,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          action: "delete",
+          auditReason: "Reviewed Guild Template deletion",
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+          templateRef: PRIVATE_GUILD_TEMPLATE_CODE,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildTemplateChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          action: "delete",
+          auditReason: "Delete https://discord.new/private-capability",
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+          templateRef: GUILD_TEMPLATE_REF,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildTemplateChange,
     },
     {
       arguments: {

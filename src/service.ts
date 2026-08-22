@@ -124,6 +124,18 @@ import type {
 } from "./guild-scaffold-service.js"
 import { GuildScaffoldService } from "./guild-scaffold-service.js"
 import type {
+  GuildTemplateChangePlan,
+  GuildTemplateChangeRequest,
+  GuildTemplateChangeResult,
+  GuildTemplateInventoryResult,
+  GuildTemplateServiceOptions,
+} from "./guild-template-service.js"
+import {
+  assertGuildTemplateListInput,
+  GuildTemplateService,
+  normalizeGuildTemplateChangeRequest,
+} from "./guild-template-service.js"
+import type {
   AddReactionRequest,
   EditOwnMessageRequest,
   InteractionServiceOptions,
@@ -381,6 +393,7 @@ export interface DiscordServiceClient {
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
   createGuildSoundboardSound: DiscordClient["createGuildSoundboardSound"]
   createGuildSticker: DiscordClient["createGuildSticker"]
+  createGuildTemplate: DiscordClient["createGuildTemplate"]
   createStageInstance: DiscordClient["createStageInstance"]
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
@@ -395,6 +408,7 @@ export interface DiscordServiceClient {
   deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
   deleteGuildSoundboardSound: DiscordClient["deleteGuildSoundboardSound"]
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
+  deleteGuildTemplate: DiscordClient["deleteGuildTemplate"]
   deleteStageInstance: DiscordClient["deleteStageInstance"]
   deleteInvite: DiscordClient["deleteInvite"]
   deleteWebhook: DiscordClient["deleteWebhook"]
@@ -439,6 +453,7 @@ export interface DiscordServiceClient {
   listGuildSoundboardSounds: DiscordClient["listGuildSoundboardSounds"]
   listGuildEmojis: DiscordClient["listGuildEmojis"]
   listGuildStickers: DiscordClient["listGuildStickers"]
+  listGuildTemplates: DiscordClient["listGuildTemplates"]
   listMessagePins: DiscordClient["listMessagePins"]
   listPollAnswerVoters: DiscordClient["listPollAnswerVoters"]
   listChannelWebhooks: DiscordClient["listChannelWebhooks"]
@@ -458,6 +473,7 @@ export interface DiscordServiceClient {
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
   modifyGuildSoundboardSound: DiscordClient["modifyGuildSoundboardSound"]
   modifyGuildRole: DiscordClient["modifyGuildRole"]
+  modifyGuildTemplate: DiscordClient["modifyGuildTemplate"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
   modifyStageInstance: DiscordClient["modifyStageInstance"]
   pinMessage: DiscordClient["pinMessage"]
@@ -465,6 +481,7 @@ export interface DiscordServiceClient {
   removeGuildMember: DiscordClient["removeGuildMember"]
   removeGuildMemberRole: DiscordClient["removeGuildMemberRole"]
   removeThreadMember: DiscordClient["removeThreadMember"]
+  syncGuildTemplate: DiscordClient["syncGuildTemplate"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
   searchGuildMembers: DiscordClient["searchGuildMembers"]
   unpinMessage: DiscordClient["unpinMessage"]
@@ -532,6 +549,10 @@ export interface ConnectorServiceOptions {
   >
   nativeInteractionCommandOptions?: Pick<
     NativeInteractionCommandServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildTemplateOptions?: Pick<
+    GuildTemplateServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   inviteOptions?: Pick<InviteServiceOptions, "clock" | "planKey" | "randomId">
@@ -741,6 +762,7 @@ export class ConnectorService {
   readonly #forumPostService: ForumPostService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
+  readonly #guildTemplateService: GuildTemplateService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #pollService: PollService
@@ -854,6 +876,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.inviteOptions,
+    })
+    this.#guildTemplateService = new GuildTemplateService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildTemplateOptions,
     })
     this.#onboardingService = new OnboardingService({
       activityStore: this.#activityStore,
@@ -1267,6 +1296,20 @@ export class ConnectorService {
     assertInviteListInput(guildId, options)
     const identity = await this.#verifyIdentity(options)
     return this.#inviteService.list(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async listGuildTemplates(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildTemplateInventoryResult> {
+    assertGuildTemplateListInput(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildTemplateService.list(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -1776,6 +1819,20 @@ export class ConnectorService {
   ): Promise<NativeInteractionCommandPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#nativeInteractionCommandService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildTemplateChange(
+    request: GuildTemplateChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildTemplateChangePlan> {
+    normalizeGuildTemplateChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildTemplateService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -2670,6 +2727,31 @@ export class ConnectorService {
       planDigest,
       [writeGuildCollectionTarget("application-commands", request.guildId)],
       () => this.#nativeInteractionCommandService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildTemplateChange(
+    request: GuildTemplateChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildTemplateChangeResult> {
+    normalizeGuildTemplateChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild-template plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "guild-template-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("templates", request.guildId)],
+      () => this.#guildTemplateService.execute(
         identity.application.id,
         identity.bot.id,
         request,

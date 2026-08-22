@@ -43,6 +43,9 @@ export interface PolicyDescription {
   guildExpressionCreationEnabled: boolean
   guildExpressionGuildIds: string[]
   guildExpressionRootCount: number
+  guildTemplateAuditEnabled: boolean
+  guildTemplateChangesEnabled: boolean
+  guildTemplateGuildIds: string[]
   interactionChannelIds: string[]
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -165,6 +168,8 @@ export class ScopePolicy {
   readonly #allowGuildExpressionAudit: boolean
   readonly #allowGuildExpressionChanges: boolean
   readonly #allowGuildScaffolds: boolean
+  readonly #allowGuildTemplateAudit: boolean
+  readonly #allowGuildTemplateChanges: boolean
   readonly #allowForumPosts: boolean
   readonly #allowRoleCreation: boolean
   readonly #allowRoleConfiguration: boolean
@@ -203,6 +208,7 @@ export class ScopePolicy {
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
   readonly #guildExpressionGuildIds: ReadonlySet<string>
   readonly #guildExpressionRoots: readonly string[]
+  readonly #guildTemplateGuildIds: ReadonlySet<string>
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
@@ -263,6 +269,8 @@ export class ScopePolicy {
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
+    | "allowGuildTemplateAudit"
+    | "allowGuildTemplateChanges"
     | "allowInviteAudit"
     | "allowInviteDeletions"
     | "allowMemberDirectory"
@@ -314,6 +322,7 @@ export class ScopePolicy {
     | "guildScaffoldGuildIds"
     | "guildExpressionGuildIds"
     | "guildExpressionRoots"
+    | "guildTemplateGuildIds"
     | "inviteGuildIds"
     | "memberDirectoryGuildIds"
     | "memberRoleGuildIds"
@@ -381,6 +390,8 @@ export class ScopePolicy {
     this.#allowGuildExpressionAudit = config.allowGuildExpressionAudit ?? false
     this.#allowGuildExpressionChanges = config.allowGuildExpressionChanges ?? false
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
+    this.#allowGuildTemplateAudit = config.allowGuildTemplateAudit ?? false
+    this.#allowGuildTemplateChanges = config.allowGuildTemplateChanges ?? false
     this.#allowForumPosts = config.allowForumPosts ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
@@ -420,6 +431,7 @@ export class ScopePolicy {
     this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
     this.#guildExpressionGuildIds = config.guildExpressionGuildIds ?? new Set()
     this.#guildExpressionRoots = config.guildExpressionRoots ?? []
+    this.#guildTemplateGuildIds = config.guildTemplateGuildIds ?? new Set()
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
@@ -504,6 +516,12 @@ export class ScopePolicy {
         && this.#guildExpressionRoots.length > 0,
       guildExpressionGuildIds: [...this.#guildExpressionGuildIds].sort(),
       guildExpressionRootCount: this.#guildExpressionRoots.length,
+      guildTemplateAuditEnabled: this.#allowGuildTemplateAudit
+        && this.#guildTemplateGuildIds.size > 0,
+      guildTemplateChangesEnabled: this.#allowGuildTemplateAudit
+        && this.#allowGuildTemplateChanges
+        && this.#guildTemplateGuildIds.size > 0,
+      guildTemplateGuildIds: [...this.#guildTemplateGuildIds].sort(),
       forumPostChannelIds: [...this.#forumPostChannelIds].sort(),
       forumPostsEnabled: this.#allowForumPosts && this.#forumPostChannelIds.size > 0,
       interactionChannelIds: [...this.#interactionChannelIds].sort(),
@@ -759,6 +777,26 @@ export class ScopePolicy {
     this.assertGuildInviteAuditable(guildId)
     if (!this.#allowInviteDeletions) {
       throw new PolicyError("Discord invite deletion is disabled by connector configuration")
+    }
+  }
+
+  assertGuildTemplateAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowGuildTemplateAudit) {
+      throw new PolicyError("Discord guild-template audit is disabled by connector configuration")
+    }
+    if (this.#guildTemplateGuildIds.size === 0) {
+      throw new PolicyError("Discord guild-template audit requires an explicit guild allowlist")
+    }
+    if (!this.#guildTemplateGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the guild-template scope`)
+    }
+  }
+
+  assertGuildTemplateChangeable(guildId: string): void {
+    this.assertGuildTemplateAuditable(guildId)
+    if (!this.#allowGuildTemplateChanges) {
+      throw new PolicyError("Discord guild-template changes are disabled by connector configuration")
     }
   }
 

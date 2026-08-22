@@ -991,6 +991,42 @@ export class AdministrationExecutionError extends Error {
   }
 }
 
+export class GuildTemplateEvidenceError extends Error {
+  override name = "GuildTemplateEvidenceError"
+}
+
+export class GuildTemplatePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild-template snapshot does not match the reviewed plan")
+    this.name = "GuildTemplatePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildTemplateOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild-template operation key has already been reserved")
+    this.name = "GuildTemplateOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildTemplateExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildTemplateExecutionError"
+    this.result = result
+  }
+}
+
 export class DiscordApiError extends Error {
   readonly code: number | undefined
   readonly method: string

@@ -16,6 +16,7 @@ import {
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
   DISCORD_SNOWFLAKE_PATTERN,
+  GUILD_TEMPLATE_REFERENCE_PATTERN,
   IDEMPOTENCY_KEY_PATTERN,
   INVITE_REFERENCE_PATTERN,
 } from "./constants.js"
@@ -34,6 +35,7 @@ export const OPERATION_KINDS = [
   "forum-post",
   "guild-expression-change",
   "guild-scaffold",
+  "guild-template-change",
   "invite-deletion",
   "member-role-change",
   "member-voice-change",
@@ -131,6 +133,8 @@ function parseReceipt(value: unknown): OperationReceipt {
       && (
         record.kind === "invite-deletion"
           ? INVITE_REFERENCE_PATTERN.test(record.resourceId)
+          : record.kind === "guild-template-change"
+            ? GUILD_TEMPLATE_REFERENCE_PATTERN.test(record.resourceId)
           : DISCORD_SNOWFLAKE_PATTERN.test(record.resourceId)
       )
     ))

@@ -61,6 +61,13 @@ import type {
   GuildScaffoldRequest,
 } from "../src/guild-scaffold-service.js"
 import type {
+  GuildTemplateChangePlan,
+  GuildTemplateChangeRequest,
+  GuildTemplatePrivacyProjection,
+  GuildTemplateStructure,
+  ProjectedGuildTemplate,
+} from "../src/guild-template-service.js"
+import type {
   GuildExpressionChangeRequest,
   GuildExpressionKind,
   GuildExpressionPlan,
@@ -167,6 +174,8 @@ import {
   GuildExpressionOperationConflictError,
   GuildScaffoldExecutionError,
   GuildScaffoldOperationConflictError,
+  GuildTemplateExecutionError,
+  GuildTemplateOperationConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
   InviteDeletionExecutionError,
@@ -296,6 +305,9 @@ const WEBHOOK_ID = "370000000000000001"
 const INVITE_OPERATION_KEY = "invite-delete-attempt-0001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
+const GUILD_TEMPLATE_OPERATION_KEY = "guild-template-attempt-0001"
+const GUILD_TEMPLATE_REF = `tref_hmac_sha256_${"7".repeat(64)}`
+const PRIVATE_GUILD_TEMPLATE_CODE = "private-template-capability"
 const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
 const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
 const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
@@ -1560,6 +1572,133 @@ function inviteDeletionPlan(
       roles: 1,
     },
     warnings: ["One-shot capability revocation"],
+  }
+}
+
+function guildTemplateStructure(): GuildTemplateStructure {
+  return {
+    channels: {
+      announcement: 0,
+      category: 0,
+      directory: 0,
+      forum: 0,
+      media: 0,
+      nsfw: 0,
+      stage: 0,
+      text: 1,
+      threads: 0,
+      total: 1,
+      unknown: 0,
+      voice: 0,
+    },
+    permissionOverwrites: {
+      memberTargets: 0,
+      roleTargets: 0,
+      total: 0,
+      unknownTargets: 0,
+    },
+    roles: {
+      privileged: 0,
+      riskyPermissionClasses: 0,
+      total: 1,
+      unknownPermissionBitfields: 0,
+    },
+    unknownFields: 0,
+  }
+}
+
+function guildTemplatePrivacy(): GuildTemplatePrivacyProjection {
+  return {
+    capabilities: "opaque-process-local-references",
+    omittedFields: [
+      "code",
+      "useUrl",
+      "name",
+      "description",
+      "creatorProfile",
+      "guildName",
+      "roleNames",
+      "channelNames",
+      "channelTopics",
+      "iconHashes",
+      "serializedSourceGuild",
+      "rawPayloads",
+    ],
+    persistence: "content-free-activity-only",
+    rawPayloads: "omitted",
+  }
+}
+
+function projectedGuildTemplate(): ProjectedGuildTemplate {
+  return {
+    createdAt: "2026-08-20T00:00:00.000Z",
+    creatorUserId: USER_ID,
+    isDirty: true,
+    metadata: {
+      descriptionCharacters: 28,
+      nameCharacters: 21,
+    },
+    structure: guildTemplateStructure(),
+    templateRef: GUILD_TEMPLATE_REF,
+    unknownFieldCount: 0,
+    updatedAt: "2026-08-21T00:00:00.000Z",
+    usageCount: 3,
+  }
+}
+
+function guildTemplatePlan(
+  request: GuildTemplateChangeRequest,
+  digest = DIGEST,
+  mutation: GuildTemplateChangePlan["mutation"] = request.action,
+): GuildTemplateChangePlan {
+  const target = request.action === "create" ? null : projectedGuildTemplate()
+  return {
+    access: {
+      appliedRoleIds: [ROLE_ID],
+      botAdministrator: false,
+      botIsGuildOwner: false,
+      complete: true,
+      effectivePermissionNames: ["MANAGE_GUILD"],
+      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+      manageGuild: true,
+      requiredPermission: "MANAGE_GUILD",
+      unknownPermissionBits: "0",
+    },
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-22T00:00:00.000Z",
+    desiredMetadata: request.action === "create" || request.action === "update-metadata"
+      ? { description: request.description, name: request.name }
+      : null,
+    digest,
+    drift: target
+      ? {
+          ambiguousChannelIdentities: 0,
+          ambiguousRoleIdentities: 0,
+          channelSettingsChanged: 1,
+          channelsAddedSinceSnapshot: 0,
+          channelsMissingFromGuild: 0,
+          roleSettingsChanged: 0,
+          rolesAddedSinceSnapshot: 0,
+          rolesMissingFromGuild: 0,
+        }
+      : null,
+    guild: { id: request.guildId },
+    inventory: { returned: 1, safetyLimit: 100 },
+    liveStructure: guildTemplateStructure(),
+    mutation,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: guildTemplatePrivacy(),
+    risks: ["The reviewed capability will change"],
+    schemaVersion: 1,
+    status: mutation === "none" ? "already-current" : "planned",
+    target,
+    warnings: [
+      "Template codes and use URLs are intentionally omitted",
+      "The full private inventory is freshness-bound",
+    ],
   }
 }
 
@@ -3374,6 +3513,9 @@ function fixturePolicy(): PolicyDescription {
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildTemplateAuditEnabled: false,
+    guildTemplateChangesEnabled: false,
+    guildTemplateGuildIds: [],
     scheduledEventAuditEnabled: false,
     scheduledEventChangesEnabled: false,
     scheduledEventCoverChangesEnabled: false,
@@ -3475,6 +3617,9 @@ function serviceFixture(overrides: {
   forumPostPlanDigest?: string
   guildScaffoldError?: Error
   guildScaffoldPlanDigest?: string
+  guildTemplateError?: Error
+  guildTemplateMutation?: GuildTemplateChangePlan["mutation"]
+  guildTemplatePlanDigest?: string
   guildExpressionEffect?: "change" | "none"
   guildExpressionError?: Error
   guildExpressionPlanDigest?: string
@@ -3578,6 +3723,9 @@ function serviceFixture(overrides: {
     forumPostPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
+    guildTemplateExecute: 0,
+    guildTemplateList: 0,
+    guildTemplatePlan: 0,
     guildExpressionExecute: 0,
     guildExpressionGet: 0,
     guildExpressionList: 0,
@@ -3919,6 +4067,28 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listGuildTemplates(guildId) {
+      calls.guildTemplateList += 1
+      return {
+        access: guildTemplatePlan({
+          action: "delete",
+          auditReason: AUDIT_REASON,
+          guildId,
+          operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+          templateRef: GUILD_TEMPLATE_REF,
+        }).access,
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guild: { id: guildId },
+        inventory: { returned: 1, safetyLimit: 100 },
+        limitations: ["Guild Templates are snapshots rather than backups"],
+        liveStructure: guildTemplateStructure(),
+        privacy: guildTemplatePrivacy(),
+        schemaVersion: 1,
+        status: "ok",
+        templates: [projectedGuildTemplate()],
+      }
+    },
     async planInviteDeletion(request) {
       calls.inviteDeletionPlan += 1
       return inviteDeletionPlan(
@@ -4212,6 +4382,28 @@ function serviceFixture(overrides: {
         status: planned.effect === "none" ? "already-current" : "completed",
       }
     },
+    async executeGuildTemplateChange(request, planDigest) {
+      if (overrides.guildTemplateError) throw overrides.guildTemplateError
+      calls.guildTemplateExecute += 1
+      const planned = guildTemplatePlan(
+        request,
+        planDigest,
+        overrides.guildTemplateMutation,
+      )
+      return {
+        action: request.action,
+        activityId: planned.mutation === "none" ? null : "activity-guild-template",
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        schemaVersion: 1,
+        status: planned.mutation === "none" ? "already-current" : "completed",
+        templateRef: request.action === "create"
+          ? `tref_hmac_sha256_${"8".repeat(64)}`
+          : request.templateRef as string,
+      }
+    },
     async executeSoundboardChange(request, planDigest) {
       if (overrides.soundboardError) throw overrides.soundboardError
       calls.soundboardExecute += 1
@@ -4338,6 +4530,14 @@ function serviceFixture(overrides: {
         request,
         overrides.guildExpressionPlanDigest || DIGEST,
         overrides.guildExpressionEffect,
+      )
+    },
+    async planGuildTemplateChange(request) {
+      calls.guildTemplatePlan += 1
+      return guildTemplatePlan(
+        request,
+        overrides.guildTemplatePlanDigest || DIGEST,
+        overrides.guildTemplateMutation,
       )
     },
     async executeWebhookDeletion(request, planDigest) {
@@ -5725,6 +5925,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_ban",
       "list_guild_invites",
       "get_guild_invite",
+      "list_guild_templates",
       "get_guild_onboarding",
       "get_guild_welcome_screen",
       "get_guild_widget_settings",
@@ -5772,6 +5973,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_announcement_crosspost",
       "plan_native_interaction_command",
       "execute_native_interaction_command",
+      "plan_guild_template_change",
+      "execute_guild_template_change",
       "plan_webhook_deletion",
       "execute_webhook_deletion",
       "plan_invite_deletion",
@@ -5829,6 +6032,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const nativeInteractionCommand = result.tools.find((tool) => (
     tool.name === "execute_native_interaction_command"
+  ))
+  const guildTemplateChange = result.tools.find((tool) => (
+    tool.name === "execute_guild_template_change"
   ))
   const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
@@ -5905,6 +6111,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(guildTemplateChange?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
   assert.deepEqual(
     listedTool(result.tools, "respond_to_discord_interaction").annotations,
     {
@@ -5941,6 +6153,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_channel_webhook",
     "list_guild_invites",
     "get_guild_invite",
+    "list_guild_templates",
     "get_guild_onboarding",
     "get_guild_widget_settings",
     "list_guild_emojis",
@@ -5964,6 +6177,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_member_role_change",
     "plan_webhook_deletion",
     "plan_invite_deletion",
+    "plan_guild_template_change",
     "plan_onboarding_change",
     "plan_guild_widget_settings_change",
     "plan_guild_expression_change",
@@ -7018,6 +7232,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     forumPostPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
+    guildTemplateExecute: 0,
+    guildTemplateList: 0,
+    guildTemplatePlan: 0,
     guildExpressionExecute: 0,
     guildExpressionGet: 0,
     guildExpressionList: 0,
@@ -9446,6 +9663,281 @@ test("MCP invite deletion exposes uncertain and one-shot conflict outcomes safel
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(INVITE_OPERATION_KEY))
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(PRIVATE_INVITE_CODE))
+})
+
+test("MCP Guild Template audit and plans expose only capability-safe evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_guild_templates",
+  })
+  const request = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+    templateRef: GUILD_TEMPLATE_REF,
+  }
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_guild_template_change",
+  })
+  const capabilityInput = await client.callTool({
+    arguments: { ...request, code: PRIVATE_GUILD_TEMPLATE_CODE },
+    name: "plan_guild_template_change",
+  })
+  const rawReference = await client.callTool({
+    arguments: { ...request, templateRef: PRIVATE_GUILD_TEMPLATE_CODE },
+    name: "plan_guild_template_change",
+  })
+  const shortKey = await client.callTool({
+    arguments: { ...request, operationKey: "short" },
+    name: "plan_guild_template_change",
+  })
+
+  const listedContent = structuredContent(listed)
+  const planContent = structuredContent(planned)
+  const projected = (listedContent.templates as Array<Record<string, unknown>>)[0]
+  assert.equal(listedContent.status, "ok")
+  assert.deepEqual(listedContent.guild, { id: GUILD_ID })
+  assert.equal(projected?.templateRef, GUILD_TEMPLATE_REF)
+  assert.deepEqual(Object.keys(projected || {}).sort(), [
+    "createdAt",
+    "creatorUserId",
+    "isDirty",
+    "metadata",
+    "structure",
+    "templateRef",
+    "unknownFieldCount",
+    "updatedAt",
+    "usageCount",
+  ])
+  assert.equal(planContent.status, "planned")
+  assert.equal((planContent.target as Record<string, unknown>).templateRef, GUILD_TEMPLATE_REF)
+  assert.deepEqual(planContent.liveStructure, guildTemplateStructure())
+  assert.equal(capabilityInput.isError, true)
+  assert.equal(rawReference.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(calls.guildTemplateList, 1)
+  assert.equal(calls.guildTemplatePlan, 1)
+  assert.doesNotMatch(
+    JSON.stringify([listed, planned, capabilityInput, rawReference, shortKey]),
+    new RegExp(PRIVATE_GUILD_TEMPLATE_CODE),
+  )
+})
+
+test("MCP Guild Template execution binds approval to the exact opaque capability", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "update-metadata",
+      auditReason: AUDIT_REASON,
+      description: "Reviewed description",
+      guildId: GUILD_ID,
+      name: "Reviewed template",
+      operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+      planDigest: DIGEST,
+      templateRef: GUILD_TEMPLATE_REF,
+    },
+    name: "execute_guild_template_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.guildTemplatePlan, 1)
+  assert.equal(calls.guildTemplateExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    GUILD_TEMPLATE_REF,
+    OPERATION_KEY_HASH,
+    DIGEST,
+    AUDIT_REASON,
+    "Reviewed template",
+    "Reviewed description",
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Bot ID/)
+  assert.match(confirmationMessage, /Required permission confirmed: MANAGE_GUILD/)
+  assert.match(confirmationMessage, /Templates in complete inventory: 1\/100/)
+  assert.match(confirmationMessage, /Live channels: 1/)
+  assert.match(confirmationMessage, /Live roles: 1/)
+  assert.match(confirmationMessage, /Ambiguous channel identities: 0/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, /Private guild name/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_TEMPLATE_OPERATION_KEY))
+  assert.doesNotMatch(confirmationMessage, new RegExp(PRIVATE_GUILD_TEMPLATE_CODE))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(PRIVATE_GUILD_TEMPLATE_CODE),
+  )
+})
+
+test("MCP Guild Template approval distinguishes omitted metadata from clearing it", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    action: "update-metadata" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    name: "Reviewed template",
+    operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+    templateRef: GUILD_TEMPLATE_REF,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, planDigest: DIGEST },
+      name: "execute_guild_template_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        description: null,
+        planDigest: DIGEST,
+      },
+      inputResponses: {
+        confirm_guild_template_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_template_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.guildTemplateExecute, 0)
+})
+
+test("MCP Guild Template execution stops on refusal or fresh-plan drift and skips no-ops", async (context) => {
+  const argumentsValue = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+    planDigest: DIGEST,
+    templateRef: GUILD_TEMPLATE_REF,
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_template_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.guildTemplateExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildTemplatePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_template_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.guildTemplateExecute, 0)
+
+  const noOp = await connectedFixture(context, {
+    serviceOverrides: { guildTemplateMutation: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_template_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOp.calls.guildTemplateExecute, 1)
+})
+
+test("MCP Guild Template execution exposes uncertain and conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+    planDigest: DIGEST,
+    templateRef: GUILD_TEMPLATE_REF,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildTemplateError: new GuildTemplateExecutionError(
+        "Discord Guild Template outcome is uncertain",
+        { status: "uncertain", templateRef: GUILD_TEMPLATE_REF },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_template_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-template",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    resourceId: GUILD_TEMPLATE_REF,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildTemplateError: new GuildTemplateOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_template_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify([uncertainResult, conflictResult]),
+    new RegExp(PRIVATE_GUILD_TEMPLATE_CODE),
+  )
+  assert.doesNotMatch(
+    JSON.stringify([uncertainResult, conflictResult]),
+    new RegExp(GUILD_TEMPLATE_OPERATION_KEY),
+  )
 })
 
 test("MCP onboarding audit defaults to text omission and requires explicit opt-in", async (context) => {

@@ -20,6 +20,7 @@ import {
   DISCORD_SCHEDULED_EVENT_STATUSES,
   DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS,
   type DiscordAutoModerationRuleSummary,
+  type DiscordGuildTemplateSummary,
   type DiscordScheduledEventSummary,
   type DiscordSoundboardSoundSummary,
   type DiscordStageInstanceSummary,
@@ -228,6 +229,7 @@ function serviceFixture(overrides: {
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
+  guildTemplateOptions?: ConnectorServiceOptions["guildTemplateOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
@@ -346,8 +348,14 @@ function serviceFixture(overrides: {
         type: 2,
       }
     },
+    async createGuildTemplate() {
+      throw new Error("Unexpected guild-template creation")
+    },
     async deleteGuildApplicationCommand() {
       throw new Error("Unexpected application-command deletion")
+    },
+    async deleteGuildTemplate() {
+      throw new Error("Unexpected guild-template deletion")
     },
     async createMessage(_channelId, input) {
       calls.createMessage += 1
@@ -536,6 +544,9 @@ function serviceFixture(overrides: {
     async listGuildStickers() {
       return []
     },
+    async listGuildTemplates() {
+      return []
+    },
     async modifyGuildOnboarding() {
       throw new Error("Unexpected onboarding change")
     },
@@ -610,6 +621,9 @@ function serviceFixture(overrides: {
     async modifyGuildRole() {
       throw new Error("Unexpected role configuration")
     },
+    async modifyGuildTemplate() {
+      throw new Error("Unexpected guild-template metadata update")
+    },
     async modifyGuildSticker(_guildId, expressionId, input) {
       return {
         available: true,
@@ -636,6 +650,9 @@ function serviceFixture(overrides: {
     },
     async removeThreadMember() {
       throw new Error("Unexpected thread-member remove")
+    },
+    async syncGuildTemplate() {
+      throw new Error("Unexpected guild-template synchronization")
     },
     async searchGuildMessages() {
       return {
@@ -723,6 +740,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.guildScaffoldOptions
         ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
+        : {}),
+      ...(overrides.guildTemplateOptions
+        ? { guildTemplateOptions: overrides.guildTemplateOptions }
         : {}),
       ...(overrides.guildExpressionOptions
         ? { guildExpressionOptions: overrides.guildExpressionOptions }
@@ -848,6 +868,13 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     guildId: GUILD_ID,
     kind: "emoji",
     operationKey,
+  }, digest))
+  await captured(() => service.executeGuildTemplateChange({
+    action: "delete",
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    templateRef: `tref_hmac_sha256_${"c".repeat(64)}`,
   }, digest))
   await captured(() => service.executeInviteDeletion({
     auditReason: "reviewed",
@@ -975,7 +1002,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 25)
+  assert.equal(byKind.size, 26)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1009,6 +1036,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       }],
       "guild-soundboard-change": [{
         collection: "soundboard",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "guild-template-change": [{
+        collection: "templates",
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
@@ -1090,7 +1122,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 25)
+  assert.equal(writeCoordinator.intents.length, 26)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -1420,6 +1452,151 @@ test("service pins identity through capability-safe invite audit and revocation"
   assert.doesNotMatch(
     JSON.stringify([listed, exact, plan, result, calls.activityEntries, operationStore.receipt]),
     new RegExp(privateCode),
+  )
+})
+
+test("service pins identity through capability-safe Guild Template audit and changes", async () => {
+  const privateCode = "private-template-capability"
+  const privateTemplateName = "Private template name"
+  const privateTopic = "Private template topic"
+  const operationStore = new MemoryOperationStore()
+  let inventory: DiscordGuildTemplateSummary[] = [{
+    code: privateCode,
+    createdAt: "2026-08-20T00:00:00.000Z",
+    creatorId: MEMBER_USER_ID,
+    description: "Private description",
+    isDirty: true,
+    name: privateTemplateName,
+    serializedSourceGuild: {
+      channels: [{
+        id: 1,
+        name: "private-template-channel",
+        parent_id: null,
+        permission_overwrites: [],
+        position: 1,
+        topic: privateTopic,
+        type: 0,
+      }],
+      name: "Private template guild",
+      roles: [{
+        color: 0,
+        hoist: false,
+        id: 0,
+        mentionable: false,
+        name: "@everyone",
+        permissions: "0",
+      }],
+    },
+    sourceGuildId: GUILD_ID,
+    unknownFieldCount: 0,
+    updatedAt: "2026-08-21T00:00:00.000Z",
+    usageCount: 3,
+  }]
+  let inventoryCalls = 0
+  let updateCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, "@everyone")]
+      },
+      async listGuildTemplates(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryCalls += 1
+        return inventory
+      },
+      async modifyGuildTemplate(guildId, code, input) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(code, privateCode)
+        updateCalls += 1
+        inventory = inventory.map((entry) => entry.code === code
+          ? {
+              ...entry,
+              ...(input.description !== undefined
+                ? { description: input.description }
+                : {}),
+              ...(input.name !== undefined ? { name: input.name } : {}),
+            }
+          : entry)
+        return inventory[0] as DiscordGuildTemplateSummary
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+    },
+    guildTemplateOptions: {
+      clock: () => new Date("2026-08-22T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(37),
+      randomId: () => "activity-guild-template-change",
+    },
+    operationStore,
+  })
+
+  await assert.rejects(
+    () => service.planGuildTemplateChange({
+      action: "create",
+      auditReason: "Reviewed invalid Guild Template",
+      description: null,
+      guildId: "bad",
+      name: "Invalid",
+      operationKey: "guild-template-invalid-attempt-0001",
+    }),
+    /guild-template guild ID/,
+  )
+  await assert.rejects(
+    () => service.executeGuildTemplateChange({
+      action: "create",
+      auditReason: "Reviewed invalid Guild Template digest",
+      description: null,
+      guildId: GUILD_ID,
+      name: "Invalid digest",
+      operationKey: "guild-template-invalid-attempt-0002",
+    }, "invalid"),
+    /guild-template plan digest/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const listed = await service.listGuildTemplates(GUILD_ID)
+  const templateRef = listed.templates[0]?.templateRef
+  assert.ok(templateRef)
+  const request = {
+    action: "update-metadata" as const,
+    auditReason: "Reviewed Guild Template metadata",
+    description: "",
+    guildId: GUILD_ID,
+    name: "Reviewed template",
+    operationKey: "guild-template-service-attempt-0001",
+    templateRef,
+  }
+  const plan = await service.planGuildTemplateChange(request)
+  const result = await service.executeGuildTemplateChange(request, plan.digest)
+
+  assert.deepEqual(listed.guild, { id: GUILD_ID })
+  assert.equal(plan.target?.templateRef, templateRef)
+  assert.equal(plan.access.manageGuild, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.readbackMatched, true)
+  assert.equal(updateCalls, 1)
+  assert.equal(inventoryCalls, 4)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "guild-template-change")
+  assert.equal(operationStore.receipt?.resourceId, templateRef)
+  assert.doesNotMatch(
+    JSON.stringify([
+      listed,
+      result,
+      calls.activityEntries,
+      operationStore.receipt,
+    ]),
+    new RegExp(`${privateCode}|${privateTemplateName}|${privateTopic}`),
   )
 })
 

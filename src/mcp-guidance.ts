@@ -34,6 +34,7 @@ export type DiscordGuidanceService = Pick<
   | "listGuildExpressions"
   | "listDefaultSoundboardSounds"
   | "listGuildSoundboardSounds"
+  | "listGuildTemplates"
   | "listScheduledEvents"
   | "listRoles"
 >

@@ -183,6 +183,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
     guildScaffoldsEnabled: false,
+    guildTemplateAuditEnabled: false,
+    guildTemplateChangesEnabled: false,
+    guildTemplateGuildIds: [],
     guildExpressionAuditEnabled: false,
     guildExpressionChangesEnabled: false,
     guildExpressionCreationEnabled: false,
@@ -595,6 +598,9 @@ test("configuration and policy require an exact administration guild and protect
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
     guildScaffoldsEnabled: false,
+    guildTemplateAuditEnabled: false,
+    guildTemplateChangesEnabled: false,
+    guildTemplateGuildIds: [],
     guildExpressionAuditEnabled: false,
     guildExpressionChangesEnabled: false,
     guildExpressionCreationEnabled: false,
@@ -1501,6 +1507,70 @@ test("configuration and policy isolate exact guild scaffold authority", () => {
   assert.deepEqual(enabled.describe().guildScaffoldGuildIds, [GUILD_ID])
 })
 
+test("configuration and policy separate capability-safe Guild Template audit from changes", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildTemplateAuditable(GUILD_ID),
+    /guild-template audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+    DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  auditOnly.assertGuildTemplateAuditable(GUILD_ID)
+  assert.throws(
+    () => auditOnly.assertGuildTemplateChangeable(GUILD_ID),
+    /guild-template changes are disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+    DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  enabled.assertGuildTemplateAuditable(GUILD_ID)
+  enabled.assertGuildTemplateChangeable(GUILD_ID)
+  assert.throws(
+    () => enabled.assertGuildTemplateAuditable(OTHER_GUILD_ID),
+    /outside the guild-template scope/,
+  )
+  assert.equal(enabled.describe().guildTemplateAuditEnabled, true)
+  assert.equal(enabled.describe().guildTemplateChangesEnabled, true)
+  assert.deepEqual(enabled.describe().guildTemplateGuildIds, [GUILD_ID])
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertGuildTemplateAuditable(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+})
+
 test("configuration and policy isolate forum posts to exact readable channels", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1975,6 +2045,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     gatewayEventBufferSize: 100,
     guildScaffoldGuildIds: [],
     guildScaffoldsEnabled: false,
+    guildTemplateAuditEnabled: false,
+    guildTemplateChangesEnabled: false,
+    guildTemplateGuildIds: [],
     guildExpressionAuditEnabled: false,
     guildExpressionChangesEnabled: false,
     guildExpressionCreationEnabled: false,

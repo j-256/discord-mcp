@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, announcement-crossposts, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, native-interactions, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, announcement-crossposts, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guild-templates, guilds, interactions, invites, member-roles, members, messages, moderation, native-interactions, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
           "default": "all",
           "format": "string"
         },
@@ -492,6 +492,29 @@
         {
           "name": "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
           "description": "Exact guild IDs eligible for reviewed resumable additive scaffolds",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT",
+          "description": "Enable capability-safe native Guild Template inventory when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES",
+          "description": "Enable reviewed native Guild Template create, synchronize, metadata-update, or delete actions when audit is also enabled",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS",
+          "description": "Exact guild IDs eligible for capability-safe Guild Template audit or changes",
           "format": "string"
         },
         {

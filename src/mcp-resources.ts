@@ -204,6 +204,8 @@ export function registerDiscordResources(
           "",
           "Guild invite audit requires separate audit and exact-guild scope, verified connector identity, a complete bounded guild role and channel snapshot, and complete MANAGE_GUILD evidence. Raw invite codes and URLs are bearer capabilities, so the connector replaces them with process-keyed opaque references before building any MCP result. Authenticated cursors bind a local page to the complete fresh projected inventory and fail when it changes. Reviewed revocation requires an additional toggle, fresh keyed plan, signed approval, one-shot reservation, pending content-free activity, one non-retried secret-route DELETE, returned-identity validation, and full-inventory absence readback. Codes, URLs, profiles, role names, audit reasons, raw keys, and raw payloads are never persisted or emitted through diagnostics.",
           "",
+          "Guild Template audit requires separate audit and exact-guild scope, verified connector identity, a complete bounded guild, member, role, channel, and template inventory, plus complete MANAGE_GUILD evidence. Raw template codes and use URLs are reusable capabilities, so the connector replaces them with process-keyed opaque references before building any MCP result. Names, descriptions, profiles, role and channel names, topics, icon hashes, serialized snapshots, and raw payloads are omitted in favor of count-only structure, risky-permission signals, dirty state, and explicit fidelity limitations. Reviewed create, synchronize, metadata update, and delete require an additional toggle, fresh full-inventory keyed plan, signed approval, durable template-collection exclusion, one-shot records, pending content-free activity, one non-retried mutation, strict capability-safe response validation, and exact full-inventory readback. Templates create future guilds from snapshots and are not backups of live IDs, members, messages, audit history, integrations, application-owned resources, or every guild feature.",
+          "",
           "Guild onboarding audit requires a separate exact guild allowlist, verified connector identity, and complete bounded guild-feature, onboarding, role, channel, overwrite, emoji, and membership evidence. Prompt, option, description, and Unicode emoji text is omitted by default and returned only transiently through explicit tool opt-in; unknown fields and enums are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD and MANAGE_ROLES evidence, zero-authority standard roles below the connector, directly visible referenced channels, conservative enablement constraints, the COMMUNITY guild feature when enabling, exact ownership of existing IDs, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PUT, authoritative response-ID validation, and a fresh full readback. Omitted prompts, options, assignments, and default channels are deletions. New-item placeholder IDs exist only in the outbound transport. Same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client join flow. Onboarding text, names, audit reasons, raw operation keys, and raw payloads are never persisted.",
           "",
           "Welcome Screen audit requires a separate exact guild allowlist, verified connector identity, and complete bounded guild-feature, role, channel, overwrite, emoji, membership, and Welcome Screen evidence. Descriptions and Unicode emoji text are omitted by default and returned only transiently through explicit tool opt-in; unknown fields are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD evidence, the COMMUNITY guild feature, directly supported channels visible to @everyone, exact available public custom emoji or one validated Unicode grapheme, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PATCH with an audit-log reason, authoritative response validation, and a fresh full readback. Omitted ordered channel entries are deletions. Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed, same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client experience. Descriptions, Unicode emoji text, names, audit reasons, channel IDs, raw operation keys, and raw payloads are never persisted.",
@@ -809,6 +811,30 @@ export function registerDiscordResources(
       secrets,
       () => service.getChannel(
         templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildTemplates,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildTemplates, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete capability-safe Guild Template inventory for one separately allowlisted source guild. Codes, URLs, names, descriptions, profiles, role and channel text, serialized snapshots, raw payloads, and persistence are omitted.",
+      mimeType: "application/json",
+      title: "Capability-safe Discord Guild Templates",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listGuildTemplates(
+        templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),
     ),

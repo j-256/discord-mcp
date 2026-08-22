@@ -21,6 +21,7 @@ import {
   type DeletionActivity,
   type ForumPostActivity,
   type GuildExpressionActivity,
+  type GuildTemplateActivity,
   type InteractionActivity,
   type InviteDeletionActivity,
   type MemberModerationActivity,
@@ -537,6 +538,30 @@ function inviteDeletion(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function guildTemplateChange(
+  id: string,
+  status: GuildTemplateActivity["status"],
+): GuildTemplateActivity {
+  return {
+    action: "synchronize",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "guild-template-change",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    templateRef: status === "completed"
+      ? `tref_hmac_sha256_${"b".repeat(64)}`
+      : null,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -1622,6 +1647,65 @@ test("JSONL activity log keeps invite deletion evidence capability-free", async 
       "planDigest",
       "schemaVersion",
       "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps Guild Template evidence content- and capability-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-template-code",
+    "private-template-name",
+    "private-template-description",
+    "private-template-topic",
+    "private-operation-key",
+  ]
+
+  await store.append(guildTemplateChange("1", "pending"))
+  await store.append({
+    ...guildTemplateChange("2", "completed"),
+    code: privateValues[0],
+    name: privateValues[1],
+    description: privateValues[2],
+    topic: privateValues[3],
+    operationKey: privateValues[4],
+  } as GuildTemplateActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildTemplateChange("3", "completed"),
+      templateRef: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "templateRef",
       "timestamp",
       "verification",
     ],

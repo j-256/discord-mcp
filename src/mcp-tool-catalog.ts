@@ -47,6 +47,7 @@ type McpToolWorkflow =
   | "guild-scaffold"
   | "guild-expression-change"
   | "guild-soundboard-change"
+  | "guild-template-change"
   | "invite-deletion"
   | "onboarding-change"
   | "poll-creation"
@@ -157,6 +158,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audio", "create", "delete", "emoji", "execute", "sound", "soundboard", "update"],
     toolset: "soundboard",
     workflow: "guild-soundboard-change",
+  },
+  execute_guild_template_change: {
+    keywords: ["capability", "delete", "execute", "guild", "metadata", "snapshot", "sync", "template"],
+    toolset: "guild-templates",
+    workflow: "guild-template-change",
   },
   execute_invite_deletion: {
     keywords: ["delete", "execute", "invite", "revoke"],
@@ -418,6 +424,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audio", "guild", "inventory", "list", "sound", "soundboard"],
     toolset: "soundboard",
   },
+  list_guild_templates: {
+    keywords: ["audit", "blueprint", "capability", "guild", "snapshot", "template"],
+    toolset: "guild-templates",
+  },
   list_roles: {
     keywords: ["guild", "hierarchy", "list", "permission", "role"],
     toolset: "roles",
@@ -508,6 +518,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audio", "create", "delete", "emoji", "plan", "review", "sound", "soundboard", "update"],
     toolset: "soundboard",
     workflow: "guild-soundboard-change",
+  },
+  plan_guild_template_change: {
+    keywords: ["create", "delete", "guild", "metadata", "plan", "snapshot", "sync", "template"],
+    toolset: "guild-templates",
+    workflow: "guild-template-change",
   },
   plan_invite_deletion: {
     keywords: ["delete", "invite", "plan", "review", "revoke"],

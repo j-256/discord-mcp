@@ -99,6 +99,9 @@ function status(
       guildExpressionCreationEnabled: false,
       guildExpressionGuildIds: [],
       guildExpressionRootCount: 0,
+      guildTemplateAuditEnabled: false,
+      guildTemplateChangesEnabled: false,
+      guildTemplateGuildIds: [],
       scheduledEventAuditEnabled: false,
       scheduledEventChangesEnabled: false,
       scheduledEventCoverChangesEnabled: false,
@@ -215,6 +218,7 @@ function toolService(): DiscordToolService {
     executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeGuildTemplateChange: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
@@ -232,6 +236,7 @@ function toolService(): DiscordToolService {
     planThreadChange: unexpected,
     getGuildExpression: unexpected,
     getGuildSoundboardSound: unexpected,
+    listGuildTemplates: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getStageInstance: unexpected,
@@ -255,6 +260,7 @@ function toolService(): DiscordToolService {
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildExpressionChange: unexpected,
+    planGuildTemplateChange: unexpected,
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -1895,6 +1901,66 @@ test("doctor and setup explain resumable guild-scaffold scope without Discord wr
   assert.match(omitted.warnings.join("\n"), /guild-scaffolds toolset/)
 })
 
+test("doctor and setup explain capability-safe Guild Template scope without Discord writes", async () => {
+  const enabled = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildTemplateAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildTemplateChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /opaque process-local references/)
+  assert.match(audit?.summary || "", /count-only snapshot evidence/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /full private-inventory planning/)
+  assert.match(changes?.summary || "", /one-shot execution, and exact readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.guildTemplateAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.guildTemplateChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /Guild Template audit toggle/)
+  assert.match(setup.warnings.join("\n"), /Guild Template change toggle/)
+  assert.match(omitted.warnings.join("\n"), /guild-templates toolset/)
+})
+
 test("doctor reports the privacy-safe Gateway policy without opening a connection", async () => {
   const enabled = await diagnoseConnector({
     environment: environment({
@@ -2541,6 +2607,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_forum_post",
     "review_guild_expression_change",
     "review_guild_scaffold",
+    "review_guild_template_change",
     "review_invite_deletion",
     "review_member_moderation",
     "review_member_role_change",
@@ -2594,6 +2661,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/soundboard",
     "discord://guilds/{guildId}/soundboard/{soundId}",
     "discord://guilds/{guildId}/stickers",
+    "discord://guilds/{guildId}/templates",
     "discord://guilds/{guildId}/threads/{threadId}",
     "discord://guilds/{guildId}/threads/{threadId}/members/{userId}",
     "discord://guilds/{guildId}/welcome-screen",
@@ -2608,6 +2676,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
     "execute_guild_soundboard_change",
+    "execute_guild_template_change",
     "execute_guild_welcome_screen_change",
     "execute_guild_widget_settings_change",
     "execute_invite_deletion",

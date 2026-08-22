@@ -52,6 +52,8 @@ export interface ConnectorConfig {
   allowGuildExpressionAudit: boolean
   allowGuildExpressionChanges: boolean
   allowGuildScaffolds: boolean
+  allowGuildTemplateAudit: boolean
+  allowGuildTemplateChanges: boolean
   allowInteractions: boolean
   allowInviteAudit: boolean
   allowInviteDeletions: boolean
@@ -105,6 +107,7 @@ export interface ConnectorConfig {
   guildScaffoldGuildIds: ReadonlySet<string>
   guildExpressionGuildIds: ReadonlySet<string>
   guildExpressionRoots: readonly string[]
+  guildTemplateGuildIds: ReadonlySet<string>
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
@@ -460,6 +463,10 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.guildExpressionGuildIds],
     ENVIRONMENT_NAMES.guildExpressionGuildIds,
   )
+  const guildTemplateGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.guildTemplateGuildIds],
+    ENVIRONMENT_NAMES.guildTemplateGuildIds,
+  )
   const scheduledEventGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.scheduledEventGuildIds],
     ENVIRONMENT_NAMES.scheduledEventGuildIds,
@@ -499,6 +506,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
+    [ENVIRONMENT_NAMES.guildTemplateGuildIds, guildTemplateGuildIds],
     [ENVIRONMENT_NAMES.inviteGuildIds, inviteGuildIds],
     [ENVIRONMENT_NAMES.onboardingGuildIds, onboardingGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
@@ -666,6 +674,19 @@ export function loadConnectorConfig(
   if (allowGuildExpressionChanges && !allowGuildExpressionAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGuildExpressionChanges} requires ${ENVIRONMENT_NAMES.allowGuildExpressionAudit}`,
+    )
+  }
+  const allowGuildTemplateAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGuildTemplateAudit],
+    ENVIRONMENT_NAMES.allowGuildTemplateAudit,
+  )
+  const allowGuildTemplateChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGuildTemplateChanges],
+    ENVIRONMENT_NAMES.allowGuildTemplateChanges,
+  )
+  if (allowGuildTemplateChanges && !allowGuildTemplateAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowGuildTemplateChanges} requires ${ENVIRONMENT_NAMES.allowGuildTemplateAudit}`,
     )
   }
   const allowScheduledEventAudit = parseBoolean(
@@ -841,6 +862,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowGuildScaffolds],
       ENVIRONMENT_NAMES.allowGuildScaffolds,
     ),
+    allowGuildTemplateAudit,
+    allowGuildTemplateChanges,
     allowForumPosts: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowForumPosts],
       ENVIRONMENT_NAMES.allowForumPosts,
@@ -940,6 +963,7 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.guildExpressionRoots],
       ENVIRONMENT_NAMES.guildExpressionRoots,
     ),
+    guildTemplateGuildIds,
     interactionChannelIds,
     interactionMaxWritesPerMinute: parseInteger(
       environment[ENVIRONMENT_NAMES.interactionMaxWritesPerMinute],
