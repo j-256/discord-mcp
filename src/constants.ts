@@ -56,6 +56,7 @@ export const MCP_TOOLSET_NAMES = [
   "soundboard",
   "stage-instances",
   "threads",
+  "welcome-screen",
   "webhooks",
 ] as const
 
@@ -102,6 +103,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowStageInstanceChanges: "DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES",
   allowStageStartNotifications: "DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS",
   allowThreadCreation: "DISCORD_MCP_ALLOW_THREAD_CREATION",
+  allowWelcomeScreenAudit: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT",
+  allowWelcomeScreenChanges: "DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES",
   allowWebhookAudit: "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
   allowWebhookDeletions: "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
@@ -164,6 +167,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
   toolsets: "DISCORD_MCP_TOOLSETS",
   threadParentIds: "DISCORD_MCP_THREAD_PARENT_IDS",
+  welcomeScreenGuildIds: "DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS",
   webhookChannelIds: "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
 })
 
@@ -328,6 +332,12 @@ export const ONBOARDING_LIMITS = Object.freeze({
   prompts: 5,
 })
 
+export const WELCOME_SCREEN_LIMITS = Object.freeze({
+  channelDescriptionCharacters: 50,
+  channels: 5,
+  descriptionCharacters: 140,
+})
+
 export const CONNECTOR_LIMITS = Object.freeze({
   activityEntries: 100,
   activityPageDefault: 25,
@@ -372,6 +382,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   soundboardGuildAllowlist: 100,
   stageInstanceChannels: 25,
   threadPageDefault: 50,
+  welcomeScreenGuildAllowlist: 100,
 })
 
 export const STAGE_INSTANCE_ACTIONS = [

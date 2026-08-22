@@ -76,6 +76,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   nodeVersion: "node-version",
   onboardingAuditPolicy: "onboarding-audit-policy",
   onboardingChangePolicy: "onboarding-change-policy",
+  welcomeScreenAuditPolicy: "welcome-screen-audit-policy",
+  welcomeScreenChangePolicy: "welcome-screen-change-policy",
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
   pollAuditPolicy: "poll-audit-policy",
@@ -312,6 +314,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowOnboardingChanges && config.onboardingGuildIds.size === 0) {
     warnings.push("The onboarding-change toggle is enabled but replacement remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowWelcomeScreenAudit && config.welcomeScreenGuildIds.size === 0) {
+    warnings.push("The Welcome Screen audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowWelcomeScreenChanges && config.welcomeScreenGuildIds.size === 0) {
+    warnings.push("The Welcome Screen change toggle is enabled but replacement remains blocked because an exact guild allowlist is required")
+  }
   if (
     config.allowMemberRoleChanges
     && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
@@ -405,6 +413,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowOnboardingAudit || config.allowOnboardingChanges,
       "onboarding",
       "Onboarding audit and reviewed replacement",
+    ],
+    [
+      config.allowWelcomeScreenAudit || config.allowWelcomeScreenChanges,
+      "welcome-screen",
+      "Welcome Screen audit and reviewed replacement",
     ],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
@@ -1001,6 +1014,44 @@ export async function diagnoseConnector(
         `Reviewed guild onboarding replacement is constrained to ${config.onboardingGuildIds.size} exact guilds with complete-state review, signed approval, one-shot execution, and authoritative response plus API readback`,
       ))
     }
+    if (!config.allowWelcomeScreenAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.welcomeScreenAuditPolicy,
+        "pass",
+        "Privacy-safe guild Welcome Screen audit is disabled",
+      ))
+    } else if (config.welcomeScreenGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.welcomeScreenAuditPolicy,
+        "warn",
+        "Welcome Screen audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.welcomeScreenAuditPolicy,
+        "pass",
+        `Guild Welcome Screen audit is constrained to ${config.welcomeScreenGuildIds.size} exact guilds with default text omission, bounded complete evidence, and future-field counts only`,
+      ))
+    }
+    if (!config.allowWelcomeScreenChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.welcomeScreenChangePolicy,
+        "pass",
+        "Reviewed guild Welcome Screen replacement is disabled",
+      ))
+    } else if (config.welcomeScreenGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.welcomeScreenChangePolicy,
+        "warn",
+        "Welcome Screen changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.welcomeScreenChangePolicy,
+        "pass",
+        `Reviewed guild Welcome Screen replacement is constrained to ${config.welcomeScreenGuildIds.size} exact guilds with complete-state review, signed approval, one-shot execution, and authoritative response plus API readback`,
+      ))
+    }
     if (!config.allowMemberRoleChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberRolePolicy,
@@ -1500,6 +1551,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowOnboardingAudit,
     ENVIRONMENT_NAMES.allowOnboardingChanges,
     ENVIRONMENT_NAMES.onboardingGuildIds,
+    ENVIRONMENT_NAMES.allowWelcomeScreenAudit,
+    ENVIRONMENT_NAMES.allowWelcomeScreenChanges,
+    ENVIRONMENT_NAMES.welcomeScreenGuildIds,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowBanAudit,

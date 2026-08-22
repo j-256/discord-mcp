@@ -187,6 +187,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],
+    welcomeScreenAuditEnabled: false,
+    welcomeScreenChangesEnabled: false,
+    welcomeScreenGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -477,6 +480,9 @@ test("configuration and policy require an exact administration guild and protect
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],
+    welcomeScreenAuditEnabled: false,
+    welcomeScreenChangesEnabled: false,
+    welcomeScreenGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,
@@ -749,6 +755,81 @@ test("configuration and policy isolate reviewed guild onboarding", () => {
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "sometimes",
+    }, { homeDirectory: "/test/home" }),
+    /must be true or false/,
+  )
+})
+
+test("configuration and policy isolate reviewed guild Welcome Screens", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+    DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowWelcomeScreenAudit, true)
+  assert.equal(config.allowWelcomeScreenChanges, true)
+  assert.deepEqual([...config.welcomeScreenGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().welcomeScreenAuditEnabled, true)
+  assert.equal(policy.describe().welcomeScreenChangesEnabled, true)
+  assert.deepEqual(policy.describe().welcomeScreenGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildWelcomeScreenAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildWelcomeScreenChangeable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildWelcomeScreenAuditable(OTHER_GUILD_ID),
+    /outside the Welcome Screen audit scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildWelcomeScreenAuditable(GUILD_ID),
+    /Welcome Screen audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+    DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildWelcomeScreenAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildWelcomeScreenChangeable(GUILD_ID),
+    /Welcome Screen changes are disabled/,
+  )
+
+  const empty = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => empty.assertGuildWelcomeScreenAuditable(GUILD_ID),
+    /requires an explicit guild allowlist/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "sometimes",
     }, { homeDirectory: "/test/home" }),
     /must be true or false/,
   )
@@ -1438,6 +1519,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],
+    welcomeScreenAuditEnabled: false,
+    welcomeScreenChangesEnabled: false,
+    welcomeScreenGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
     memberRoleChangesEnabled: false,

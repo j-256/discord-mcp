@@ -478,6 +478,42 @@ export class SoundboardEvidenceError extends Error {
   override name = "SoundboardEvidenceError"
 }
 
+export class WelcomeScreenPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord Welcome Screen snapshot does not match the reviewed plan")
+    this.name = "WelcomeScreenPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class WelcomeScreenOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord Welcome Screen operation key has already been reserved")
+    this.name = "WelcomeScreenOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class WelcomeScreenExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "WelcomeScreenExecutionError"
+    this.result = result
+  }
+}
+
+export class WelcomeScreenEvidenceError extends Error {
+  override name = "WelcomeScreenEvidenceError"
+}
+
 export class OnboardingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

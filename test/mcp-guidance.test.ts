@@ -9,6 +9,7 @@ import {
 import {
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
+  WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
 import {
   MCP_PROMPT_NAMES,
@@ -43,6 +44,7 @@ const WEBHOOK_ID = "360000000000000001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const PRIVATE_ONBOARDING_TEXT = "private-onboarding-member-copy"
+const PRIVATE_WELCOME_SCREEN_TEXT = "private-welcome-screen-copy"
 const PRIVATE_CHANNEL_TOPIC = "private-channel-roadmap"
 const EMOJI_ID = "370000000000000001"
 const STICKER_ID = "380000000000000001"
@@ -162,6 +164,7 @@ interface GuidanceCalls {
   soundboardLookup: number
   stageInstances: number
   unexpected: number
+  welcomeScreens: number
   webhooks: number
 }
 
@@ -198,6 +201,7 @@ function guidanceService(options: {
     soundboardLookup: 0,
     stageInstances: 0,
     unexpected: 0,
+    welcomeScreens: 0,
     webhooks: 0,
   }
   const unexpected = async (..._arguments: unknown[]): Promise<never> => {
@@ -213,6 +217,7 @@ function guidanceService(options: {
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
+    executeWelcomeScreenChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
@@ -512,6 +517,79 @@ function guidanceService(options: {
         },
       }
     },
+    async getGuildWelcomeScreen(guildId) {
+      calls.welcomeScreens += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredChangePermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        configuration: {
+          available: true,
+          channels: [{
+            channel: {
+              channelId: CHANNEL_ID,
+              direct: true,
+              everyoneCanView: true,
+              exists: true,
+              parentId: null,
+              type: 0,
+            },
+            description: null,
+            descriptionCharacters: PRIVATE_WELCOME_SCREEN_TEXT.length,
+            emoji: {
+              animated: null,
+              available: null,
+              customEmojiId: null,
+              healthy: true,
+              kind: "unicode" as const,
+              restrictedRoleIds: [],
+              unicode: null,
+            },
+          }],
+          communityGuild: true,
+          description: null,
+          descriptionCharacters: PRIVATE_WELCOME_SCREEN_TEXT.length,
+          enabled: true,
+          issues: [],
+          replacementBlockedReasons: [],
+          textIncluded: false,
+          unknownFieldCount: 0,
+        },
+        guild: { id: guildId, name: "Private guild name" },
+        localLimits: {
+          channelDescriptionCharacters:
+            WELCOME_SCREEN_LIMITS.channelDescriptionCharacters,
+          channels: WELCOME_SCREEN_LIMITS.channels,
+          descriptionCharacters: WELCOME_SCREEN_LIMITS.descriptionCharacters,
+        },
+        privacy: {
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          text: "omitted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        verificationBoundary: {
+          apiReadback: true as const,
+          freshNonStaffClientCheckRecommended: true,
+          memberExperienceVerified: false as const,
+        },
+      }
+    },
     planWebhookDeletion: unexpected,
     listGuildInvites: unexpected,
     planInviteDeletion: unexpected,
@@ -734,6 +812,7 @@ function guidanceService(options: {
     planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
     planOnboardingChange: unexpected,
+    planWelcomeScreenChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -822,6 +901,9 @@ function guidanceService(options: {
         webhookAuditEnabled: false,
         webhookChannelIds: [],
         webhookDeletionsEnabled: false,
+        welcomeScreenAuditEnabled: false,
+        welcomeScreenChangesEnabled: false,
+        welcomeScreenGuildIds: [],
       }
     },
     editOwnMessage: unexpected,
@@ -1157,6 +1239,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.scheduledEvents
     + calls.stageInstances
     + calls.unexpected
+    + calls.welcomeScreens
     + calls.webhooks
 }
 
@@ -1278,6 +1361,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildOnboarding,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildWelcomeScreen,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWelcomeScreen,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
       },
@@ -1340,6 +1427,10 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Prompt, option, description, and Unicode emoji text is omitted by default/)
   assert.match(safety.text, /Omitted prompts, options, assignments, and default channels are deletions/)
   assert.match(safety.text, /API readback never claims to verify the member client join flow/)
+  assert.match(safety.text, /Welcome Screen audit requires a separate exact guild allowlist/)
+  assert.match(safety.text, /directly supported channels visible to @everyone/)
+  assert.match(safety.text, /Omitted ordered channel entries are deletions/)
+  assert.match(safety.text, /Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
@@ -1671,6 +1762,21 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal((onboardingConfiguration.prompts as unknown[]).length, 1)
   assert.doesNotMatch(onboarding.text, new RegExp(PRIVATE_ONBOARDING_TEXT))
 
+  const welcomeScreen = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/welcome-screen`,
+  )
+  const welcomeScreenData = welcomeScreen.value.data as Record<string, unknown>
+  const welcomeScreenPrivacy = welcomeScreenData.privacy as Record<string, unknown>
+  const welcomeScreenConfiguration = welcomeScreenData.configuration as Record<string, unknown>
+  assert.equal(welcomeScreenPrivacy.text, "omitted")
+  assert.equal(welcomeScreenConfiguration.textIncluded, false)
+  assert.equal((welcomeScreenConfiguration.channels as unknown[]).length, 1)
+  assert.doesNotMatch(
+    welcomeScreen.text,
+    new RegExp(PRIVATE_WELCOME_SCREEN_TEXT),
+  )
+
   const channelMetadata = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}`,
@@ -1707,6 +1813,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.invites, 1)
   assert.equal(calls.onboarding, 1)
+  assert.equal(calls.welcomeScreens, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
@@ -2015,6 +2122,35 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(onboarding, /Do not call execute_onboarding_change/)
   assert.match(onboarding, /complete current and desired onboarding states/)
   assert.match(onboarding, /verification boundary/)
+
+  const welcomeScreenRequest = {
+    auditReason: "Reviewed Welcome Screen",
+    channels: [{
+      channelId: CHANNEL_ID,
+      description: PRIVATE_WELCOME_SCREEN_TEXT,
+      emoji: { kind: "unicode", unicode: "👋" },
+    }],
+    description: "Welcome to the community",
+    enabled: true,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+  }
+  const welcomeScreen = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(welcomeScreenRequest) },
+    name: MCP_PROMPT_NAMES.reviewWelcomeScreenChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(welcomeScreen.split("\n")[1] || ""),
+    welcomeScreenRequest,
+  )
+  assert.match(welcomeScreen, /Call only plan_guild_welcome_screen_change/)
+  assert.match(
+    welcomeScreen,
+    /Do not call execute_guild_welcome_screen_change/,
+  )
+  assert.match(welcomeScreen, /complete ordered current and desired Welcome Screen states/)
+  assert.match(welcomeScreen, /@everyone channel visibility/)
+  assert.match(welcomeScreen, /uncertain same-guild predecessor/)
 
   const channelMetadataRequest = {
     auditReason: "Reviewed channel metadata",
@@ -2533,6 +2669,23 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewInviteDeletion,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed Welcome Screen",
+          channels: [{
+            channelId: CHANNEL_ID,
+            description: "Read the rules",
+            emoji: { kind: "unicode", unicode: "not-an-emoji" },
+          }],
+          description: null,
+          enabled: true,
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewWelcomeScreenChange,
     },
     {
       arguments: {

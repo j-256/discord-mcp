@@ -34,6 +34,7 @@ import {
   type StageInstanceActivity,
   type ThreadCreationActivity,
   type WebhookDeletionActivity,
+  type WelcomeScreenActivity,
 } from "../src/activity-log.js"
 
 function attachmentMessage(
@@ -427,6 +428,30 @@ function onboardingChange(
     kind: "onboarding-change",
     operationKeyHash: `sha256:${"8".repeat(64)}`,
     planDigest: `hmac-sha256:${"9".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function welcomeScreenChange(
+  id: string,
+  status: WelcomeScreenActivity["status"],
+): WelcomeScreenActivity {
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "welcome-screen-change",
+    operationKeyHash: `sha256:${"a".repeat(64)}`,
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -1303,6 +1328,63 @@ test("JSONL activity log keeps onboarding evidence content-free", async (context
     Object.keys(result.entries[0] || {}).sort(),
     [
       "enabled",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps Welcome Screen evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-id",
+    "private-description",
+    "private-emoji-name",
+    "private-operation-key",
+  ]
+
+  await store.append(welcomeScreenChange("1", "pending"))
+  await store.append({
+    ...welcomeScreenChange("2", "completed"),
+    auditReason: privateValues[0],
+    channelId: privateValues[1],
+    description: privateValues[2],
+    emojiName: privateValues[3],
+    operationKey: privateValues[4],
+  } as WelcomeScreenActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...welcomeScreenChange("3", "completed-with-drift"),
+      verification: "match",
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
       "error",
       "guildId",
       "id",

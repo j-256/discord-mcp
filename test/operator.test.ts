@@ -150,6 +150,9 @@ function status(
       webhookAuditEnabled: false,
       webhookChannelIds: [],
       webhookDeletionsEnabled: false,
+      welcomeScreenAuditEnabled: false,
+      welcomeScreenChangesEnabled: false,
+      welcomeScreenGuildIds: [],
     },
     schemaVersion: 1,
     status: "ok",
@@ -176,6 +179,7 @@ function toolService(): DiscordToolService {
     executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
+    executeWelcomeScreenChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeScheduledEventChange: unexpected,
@@ -190,6 +194,7 @@ function toolService(): DiscordToolService {
     getPoll: unexpected,
     getGuildInvite: unexpected,
     getGuildOnboarding: unexpected,
+    getGuildWelcomeScreen: unexpected,
     listChannelWebhooks: unexpected,
     listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
@@ -201,6 +206,7 @@ function toolService(): DiscordToolService {
     planWebhookDeletion: unexpected,
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
+    planWelcomeScreenChange: unexpected,
     planGuildExpressionChange: unexpected,
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
@@ -888,6 +894,66 @@ test("doctor and setup explain privacy-safe reviewed onboarding", async () => {
   assert.match(setup.warnings.join("\n"), /onboarding-audit toggle/)
   assert.match(setup.warnings.join("\n"), /onboarding-change toggle/)
   assert.match(omitted.warnings.join("\n"), /onboarding toolset/)
+})
+
+test("doctor and setup explain privacy-safe reviewed Welcome Screens", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+    DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+    DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.welcomeScreenAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.welcomeScreenChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /default text omission/)
+  assert.match(audit?.summary || "", /future-field counts only/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /complete-state review/)
+  assert.match(change?.summary || "", /signed approval/)
+  assert.match(change?.summary || "", /authoritative response plus API readback/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.welcomeScreenAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.welcomeScreenChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /Welcome Screen audit toggle/)
+  assert.match(setup.warnings.join("\n"), /Welcome Screen change toggle/)
+  assert.match(omitted.warnings.join("\n"), /welcome-screen toolset/)
 })
 
 test("doctor and setup explain reviewed exact-channel metadata changes", async () => {
@@ -2112,6 +2178,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_soundboard_change",
     "review_stage_instance_change",
     "review_webhook_deletion",
+    "review_welcome_screen_change",
     "search_guild_messages",
     "summarize_channel",
   ])
@@ -2145,6 +2212,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/soundboard",
     "discord://guilds/{guildId}/soundboard/{soundId}",
     "discord://guilds/{guildId}/stickers",
+    "discord://guilds/{guildId}/welcome-screen",
   ])
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
@@ -2154,6 +2222,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
     "execute_guild_soundboard_change",
+    "execute_guild_welcome_screen_change",
     "execute_invite_deletion",
     "execute_member_moderation",
     "execute_member_role_change",

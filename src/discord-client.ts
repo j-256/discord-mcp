@@ -12,6 +12,7 @@ import {
   MEMBER_DIRECTORY_LIMITS,
   ONBOARDING_LIMITS,
   POLL_LIMITS,
+  WELCOME_SCREEN_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -30,6 +31,7 @@ import {
   ScheduledEventEvidenceError,
   SoundboardEvidenceError,
   StageInstanceEvidenceError,
+  WelcomeScreenEvidenceError,
   WebhookEvidenceError,
 } from "./errors.js"
 import type {
@@ -284,6 +286,33 @@ export interface ModifyGuildOnboardingPromptInput {
   singleSelect: boolean
   title: string
   type: 0 | 1
+}
+
+export interface DiscordGuildWelcomeScreenChannel {
+  channelId: string
+  description: string
+  emojiId: string | null
+  emojiName: string | null
+  unknownFieldCount: number
+}
+
+export interface DiscordGuildWelcomeScreen {
+  description: string | null
+  unknownFieldCount: number
+  welcomeChannels: DiscordGuildWelcomeScreenChannel[]
+}
+
+export interface ModifyGuildWelcomeScreenChannelInput {
+  channelId: string
+  description: string
+  emojiId: string | null
+  emojiName: string | null
+}
+
+export interface ModifyGuildWelcomeScreenInput {
+  description: string | null
+  enabled: boolean
+  welcomeChannels: readonly ModifyGuildWelcomeScreenChannelInput[]
 }
 
 export interface ModifyGuildOnboardingInput {
@@ -982,6 +1011,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_stage_instance",
   "get_channel_metadata",
   "get_guild_onboarding",
+  "get_guild_welcome_screen",
   "list_guild_invites",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
@@ -995,6 +1025,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_sticker",
   "modify_stage_instance",
   "modify_guild_onboarding",
+  "modify_guild_welcome_screen",
   "modify_channel_metadata",
   "delete_invite",
   "search_guild_members",
@@ -1306,7 +1337,7 @@ function onboardingEvidenceError(options?: ErrorOptions): OnboardingEvidenceErro
   )
 }
 
-function unknownOnboardingFieldCount(
+function countUnknownFields(
   value: Record<string, unknown>,
   knownKeys: readonly string[],
 ): number {
@@ -1389,7 +1420,7 @@ function projectOnboardingEmoji(
       id,
       name,
     },
-    unknownFieldCount: unknownOnboardingFieldCount(record, ONBOARDING_EMOJI_KEYS),
+    unknownFieldCount: countUnknownFields(record, ONBOARDING_EMOJI_KEYS),
   }
 }
 
@@ -1428,7 +1459,7 @@ function projectOnboardingOption(value: unknown): ProjectedOnboardingOption {
       title: onboardingReturnedText(record.title, false) as string,
     },
     unknownFieldCount:
-      unknownOnboardingFieldCount(record, ONBOARDING_OPTION_KEYS)
+      countUnknownFields(record, ONBOARDING_OPTION_KEYS)
       + emoji.unknownFieldCount,
   }
 }
@@ -1467,7 +1498,7 @@ function projectOnboardingPrompt(value: unknown): ProjectedOnboardingPrompt {
     },
     unknownEnumCount: ONBOARDING_ENUM_VALUES.has(record.type as number) ? 0 : 1,
     unknownFieldCount:
-      unknownOnboardingFieldCount(record, ONBOARDING_PROMPT_KEYS)
+      countUnknownFields(record, ONBOARDING_PROMPT_KEYS)
       + options.reduce((total, entry) => total + entry.unknownFieldCount, 0),
   }
 }
@@ -1510,7 +1541,7 @@ function projectGuildOnboarding(
       (ONBOARDING_ENUM_VALUES.has(record.mode as number) ? 0 : 1)
       + prompts.reduce((total, entry) => total + entry.unknownEnumCount, 0),
     unknownFieldCount:
-      unknownOnboardingFieldCount(record, ONBOARDING_KEYS)
+      countUnknownFields(record, ONBOARDING_KEYS)
       + prompts.reduce((total, entry) => total + entry.unknownFieldCount, 0),
   }
 }
@@ -1678,6 +1709,213 @@ function assertModifyGuildOnboardingInput(
   }
   if (new Set(optionIds).size !== optionIds.length) {
     throw new RangeError("Discord onboarding option IDs must be unique")
+  }
+}
+
+const WELCOME_SCREEN_KEYS = ["description", "welcome_channels"] as const
+const WELCOME_SCREEN_CHANNEL_KEYS = [
+  "channel_id",
+  "description",
+  "emoji_id",
+  "emoji_name",
+] as const
+const WELCOME_SCREEN_INPUT_KEYS = [
+  "description",
+  "enabled",
+  "welcomeChannels",
+] as const
+const WELCOME_SCREEN_CHANNEL_INPUT_KEYS = [
+  "channelId",
+  "description",
+  "emojiId",
+  "emojiName",
+] as const
+const WELCOME_SCREEN_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+
+function welcomeScreenEvidenceError(options?: ErrorOptions): WelcomeScreenEvidenceError {
+  return new WelcomeScreenEvidenceError(
+    "Discord returned invalid Welcome Screen evidence",
+    options,
+  )
+}
+
+function welcomeScreenReturnedText(
+  value: unknown,
+  maximum: number,
+  nullable: boolean,
+  allowEmpty: boolean,
+): string | null {
+  if (value === null && nullable) return null
+  if (
+    typeof value !== "string"
+    || (!allowEmpty && [...value].length < 1)
+    || [...value].length > maximum
+    || WELCOME_SCREEN_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw welcomeScreenEvidenceError()
+  }
+  try {
+    assertValidUnicode(value, "Discord Welcome Screen text")
+  } catch (error) {
+    throw welcomeScreenEvidenceError({ cause: error })
+  }
+  return value
+}
+
+function projectGuildWelcomeScreen(value: unknown): DiscordGuildWelcomeScreen {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw welcomeScreenEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  if (
+    !(record.description === null || typeof record.description === "string")
+    || !Array.isArray(record.welcome_channels)
+    || record.welcome_channels.length > WELCOME_SCREEN_LIMITS.channels
+  ) {
+    throw welcomeScreenEvidenceError()
+  }
+  const channelIds = new Set<string>()
+  const welcomeChannels = record.welcome_channels.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw welcomeScreenEvidenceError()
+    }
+    const channel = value as Record<string, unknown>
+    if (
+      typeof channel.channel_id !== "string"
+      || typeof channel.description !== "string"
+      || !(channel.emoji_id === null || typeof channel.emoji_id === "string")
+      || !(channel.emoji_name === null || typeof channel.emoji_name === "string")
+      || (channel.emoji_id !== null && channel.emoji_name === null)
+    ) {
+      throw welcomeScreenEvidenceError()
+    }
+    try {
+      assertPositiveSnowflake(channel.channel_id, "Discord Welcome Screen channel ID")
+      if (channelIds.has(channel.channel_id)) {
+        throw new RangeError("Discord Welcome Screen channel IDs must be unique")
+      }
+      channelIds.add(channel.channel_id)
+      if (typeof channel.emoji_id === "string") {
+        assertPositiveSnowflake(channel.emoji_id, "Discord Welcome Screen emoji ID")
+      }
+      if (typeof channel.emoji_name === "string") {
+        welcomeScreenReturnedText(
+          channel.emoji_name,
+          CONNECTOR_LIMITS.interactionEmojiCharacters,
+          false,
+          false,
+        )
+      }
+    } catch (error) {
+      if (error instanceof WelcomeScreenEvidenceError) throw error
+      throw welcomeScreenEvidenceError({ cause: error })
+    }
+    return {
+      channelId: channel.channel_id,
+      description: welcomeScreenReturnedText(
+        channel.description,
+        WELCOME_SCREEN_LIMITS.channelDescriptionCharacters,
+        false,
+        false,
+      ) as string,
+      emojiId: channel.emoji_id,
+      emojiName: channel.emoji_name,
+      unknownFieldCount: countUnknownFields(
+        channel,
+        WELCOME_SCREEN_CHANNEL_KEYS,
+      ),
+    }
+  })
+  return {
+    description: welcomeScreenReturnedText(
+      record.description,
+      WELCOME_SCREEN_LIMITS.descriptionCharacters,
+      true,
+      true,
+    ),
+    unknownFieldCount: countUnknownFields(record, WELCOME_SCREEN_KEYS),
+    welcomeChannels,
+  }
+}
+
+function assertWelcomeScreenInputText(
+  value: unknown,
+  maximum: number,
+  name: string,
+  nullable: boolean,
+): asserts value is string | null {
+  if (value === null && nullable) return
+  if (
+    typeof value !== "string"
+    || [...value].length < 1
+    || [...value].length > maximum
+    || value.trim() !== value
+    || value.normalize("NFC") !== value
+    || WELCOME_SCREEN_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(`${name} is invalid`)
+  }
+  assertValidUnicode(value, name)
+}
+
+function assertModifyGuildWelcomeScreenInput(
+  value: unknown,
+): asserts value is ModifyGuildWelcomeScreenInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord Welcome Screen input must be an exact object")
+  }
+  const input = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(input, WELCOME_SCREEN_INPUT_KEYS)
+    || typeof input.enabled !== "boolean"
+    || !Array.isArray(input.welcomeChannels)
+    || input.welcomeChannels.length > WELCOME_SCREEN_LIMITS.channels
+  ) {
+    throw new RangeError("Discord Welcome Screen input is invalid")
+  }
+  assertWelcomeScreenInputText(
+    input.description,
+    WELCOME_SCREEN_LIMITS.descriptionCharacters,
+    "Discord Welcome Screen description",
+    true,
+  )
+  const channelIds = new Set<string>()
+  for (const value of input.welcomeChannels) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new RangeError("Discord Welcome Screen channel input must be an exact object")
+    }
+    const channel = value as Record<string, unknown>
+    if (
+      !hasOnlyKeys(channel, WELCOME_SCREEN_CHANNEL_INPUT_KEYS)
+      || typeof channel.channelId !== "string"
+      || !(channel.emojiId === null || typeof channel.emojiId === "string")
+      || !(channel.emojiName === null || typeof channel.emojiName === "string")
+      || (channel.emojiId !== null && channel.emojiName === null)
+    ) {
+      throw new RangeError("Discord Welcome Screen channel input is invalid")
+    }
+    assertPositiveSnowflake(channel.channelId, "Discord Welcome Screen channel ID")
+    if (channelIds.has(channel.channelId)) {
+      throw new RangeError("Discord Welcome Screen channel IDs must be unique")
+    }
+    channelIds.add(channel.channelId)
+    assertWelcomeScreenInputText(
+      channel.description,
+      WELCOME_SCREEN_LIMITS.channelDescriptionCharacters,
+      "Discord Welcome Screen channel description",
+      false,
+    )
+    if (typeof channel.emojiId === "string") {
+      assertPositiveSnowflake(channel.emojiId, "Discord Welcome Screen emoji ID")
+    }
+    if (typeof channel.emojiName === "string") {
+      assertWelcomeScreenInputText(
+        channel.emojiName,
+        CONNECTOR_LIMITS.interactionEmojiCharacters,
+        "Discord Welcome Screen emoji name",
+        false,
+      )
+    }
   }
 }
 
@@ -5257,6 +5495,68 @@ export class DiscordClient {
       },
     )
     return projectGuildOnboarding(response, guildId)
+  }
+
+  async getGuildWelcomeScreen(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildWelcomeScreen | null> {
+    assertPositiveSnowflake(guildId, "Discord Welcome Screen guild ID")
+    try {
+      const response = await this.#request<unknown>(
+        "get_guild_welcome_screen",
+        `/guilds/${guildId}/welcome-screen`,
+        {
+          ...options,
+          suppressFailureCause: true,
+        },
+      )
+      return projectGuildWelcomeScreen(response)
+    } catch (error) {
+      if (
+        error instanceof DiscordApiError
+        && error.status === 404
+        && error.code === 10_069
+      ) {
+        return null
+      }
+      throw error
+    }
+  }
+
+  async modifyGuildWelcomeScreen(
+    guildId: string,
+    input: ModifyGuildWelcomeScreenInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildWelcomeScreen> {
+    assertPositiveSnowflake(guildId, "Discord Welcome Screen guild ID")
+    assertModifyGuildWelcomeScreenInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord Welcome Screen audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_welcome_screen",
+      `/guilds/${guildId}/welcome-screen`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          description: input.description,
+          enabled: input.enabled,
+          welcome_channels: input.welcomeChannels.map((channel) => ({
+            channel_id: channel.channelId,
+            description: channel.description,
+            emoji_id: channel.emojiId,
+            emoji_name: channel.emojiName,
+          })),
+        },
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildWelcomeScreen(response)
   }
 
   getGuildAuditLog(

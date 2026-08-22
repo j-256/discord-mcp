@@ -13,6 +13,7 @@ import {
   OnboardingEvidenceError,
   RoleConfigurationEvidenceError,
   StageInstanceEvidenceError,
+  WelcomeScreenEvidenceError,
 } from "../src/errors.js"
 
 function channelMetadataPayload(overrides: Record<string, unknown> = {}) {
@@ -1694,6 +1695,227 @@ test("Discord client rejects malformed role configuration evidence and input", a
   assert.throws(
     () => client.modifyGuildRole("100", "300", { future: true } as never, "reviewed"),
     /supported explicit fields/,
+  )
+  assert.equal(requests, 1)
+})
+
+test("Discord client projects strict Welcome Screen reads and unknown-field counts", async () => {
+  let requestUrl = ""
+  let method = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requestUrl = String(input)
+      method = init?.method || "GET"
+      return jsonResponse({
+        description: "Welcome",
+        future_top_level: "omitted",
+        welcome_channels: [{
+          channel_id: "200",
+          description: "Read the rules",
+          emoji_id: "300",
+          emoji_name: "wave",
+          future_channel_field: "omitted",
+        }, {
+          channel_id: "201",
+          description: "Say hello",
+          emoji_id: null,
+          emoji_name: "👋",
+        }],
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.getGuildWelcomeScreen("100")
+
+  assert.equal(requestUrl, `${API_BASE_URL}/guilds/100/welcome-screen`)
+  assert.equal(method, "GET")
+  assert.deepEqual(result, {
+    description: "Welcome",
+    unknownFieldCount: 1,
+    welcomeChannels: [{
+      channelId: "200",
+      description: "Read the rules",
+      emojiId: "300",
+      emojiName: "wave",
+      unknownFieldCount: 1,
+    }, {
+      channelId: "201",
+      description: "Say hello",
+      emojiId: null,
+      emojiName: "👋",
+      unknownFieldCount: 0,
+    }],
+  })
+  assert.equal(records[0]?.operation, "get_guild_welcome_screen")
+})
+
+test("Discord client sends one exact non-retried Welcome Screen PATCH", async () => {
+  let requests = 0
+  let requestBody: unknown
+  let auditReason = ""
+  let method = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      requests += 1
+      method = init?.method || "GET"
+      auditReason = new Headers(init?.headers).get("X-Audit-Log-Reason") || ""
+      requestBody = JSON.parse(String(init?.body))
+      return jsonResponse({
+        description: "Welcome",
+        welcome_channels: [{
+          channel_id: "200",
+          description: "Read the rules",
+          emoji_id: "300",
+          emoji_name: "wave",
+        }],
+      })
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildWelcomeScreen("100", {
+    description: "Welcome",
+    enabled: true,
+    welcomeChannels: [{
+      channelId: "200",
+      description: "Read the rules",
+      emojiId: "300",
+      emojiName: "wave",
+    }],
+  }, "Reviewed Welcome Screen / launch")
+
+  assert.equal(requests, 1)
+  assert.equal(method, "PATCH")
+  assert.equal(auditReason, "Reviewed%20Welcome%20Screen%20%2F%20launch")
+  assert.deepEqual(requestBody, {
+    description: "Welcome",
+    enabled: true,
+    welcome_channels: [{
+      channel_id: "200",
+      description: "Read the rules",
+      emoji_id: "300",
+      emoji_name: "wave",
+    }],
+  })
+  assert.equal(result.welcomeChannels[0]?.channelId, "200")
+
+  requests = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        code: 20_016,
+        message: "rate limited",
+        retry_after: 0,
+      }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.modifyGuildWelcomeScreen("100", {
+      description: null,
+      enabled: false,
+      welcomeChannels: [],
+    }, "Reviewed"),
+    DiscordApiError,
+  )
+  assert.equal(requests, 1)
+})
+
+test("Discord client distinguishes an absent Welcome Screen from other failures", async () => {
+  const absent = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      code: 10_069,
+      message: "Unknown Guild Welcome Screen",
+    }, 404),
+    token: TOKEN,
+  })
+  assert.equal(await absent.getGuildWelcomeScreen("100"), null)
+
+  const otherFailure = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      code: 10_004,
+      message: "Unknown Guild",
+    }, 404),
+    token: TOKEN,
+  })
+  await assert.rejects(otherFailure.getGuildWelcomeScreen("100"), DiscordApiError)
+})
+
+test("Discord client rejects malformed Welcome Screen evidence and inputs", async () => {
+  let requests = 0
+  const malformed = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        description: "Welcome",
+        welcome_channels: [{
+          channel_id: "200",
+          description: "Read the rules",
+          emoji_id: "300",
+          emoji_name: null,
+        }],
+      })
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    malformed.getGuildWelcomeScreen("100"),
+    WelcomeScreenEvidenceError,
+  )
+
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ description: null, welcome_channels: [] })
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    client.modifyGuildWelcomeScreen("100", {
+      description: " not trimmed",
+      enabled: true,
+      welcomeChannels: [],
+    }, "Reviewed"),
+    /description is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildWelcomeScreen("100", {
+      description: null,
+      enabled: true,
+      welcomeChannels: [{
+        channelId: "200",
+        description: "Read\nthe rules",
+        emojiId: null,
+        emojiName: null,
+      }],
+    }, "Reviewed"),
+    /channel description is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildWelcomeScreen("100", {
+      description: null,
+      enabled: true,
+      welcomeChannels: [{
+        channelId: "200",
+        description: "Read the rules",
+        emojiId: "300",
+        emojiName: null,
+      }],
+    } as unknown as Parameters<DiscordClient["modifyGuildWelcomeScreen"]>[1], "Reviewed"),
+    /channel input is invalid/,
   )
   assert.equal(requests, 1)
 })

@@ -91,6 +91,9 @@ export interface PolicyDescription {
   stageStartNotificationsEnabled: boolean
   threadCreationEnabled: boolean
   threadParentIds: string[]
+  welcomeScreenAuditEnabled: boolean
+  welcomeScreenChangesEnabled: boolean
+  welcomeScreenGuildIds: string[]
   webhookAuditEnabled: boolean
   webhookChannelIds: string[]
   webhookDeletionsEnabled: boolean
@@ -145,6 +148,8 @@ export class ScopePolicy {
   readonly #allowStageInstanceChanges: boolean
   readonly #allowStageStartNotifications: boolean
   readonly #allowThreadCreation: boolean
+  readonly #allowWelcomeScreenAudit: boolean
+  readonly #allowWelcomeScreenChanges: boolean
   readonly #allowWebhookAudit: boolean
   readonly #allowWebhookDeletions: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
@@ -184,6 +189,7 @@ export class ScopePolicy {
   readonly #soundboardRoots: readonly string[]
   readonly #stageChannelIds: ReadonlySet<string>
   readonly #threadParentIds: ReadonlySet<string>
+  readonly #welcomeScreenGuildIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
 
   constructor(config: Pick<
@@ -235,6 +241,8 @@ export class ScopePolicy {
     | "allowStageInstanceChanges"
     | "allowStageStartNotifications"
     | "allowThreadCreation"
+    | "allowWelcomeScreenAudit"
+    | "allowWelcomeScreenChanges"
     | "allowWebhookAudit"
     | "allowWebhookDeletions"
     | "channelCreationGuildIds"
@@ -268,6 +276,7 @@ export class ScopePolicy {
     | "soundboardRoots"
     | "stageChannelIds"
     | "threadParentIds"
+    | "welcomeScreenGuildIds"
     | "webhookChannelIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
@@ -309,6 +318,8 @@ export class ScopePolicy {
     this.#allowStageInstanceChanges = config.allowStageInstanceChanges ?? false
     this.#allowStageStartNotifications = config.allowStageStartNotifications ?? false
     this.#allowThreadCreation = config.allowThreadCreation ?? false
+    this.#allowWelcomeScreenAudit = config.allowWelcomeScreenAudit ?? false
+    this.#allowWelcomeScreenChanges = config.allowWelcomeScreenChanges ?? false
     this.#allowWebhookAudit = config.allowWebhookAudit ?? false
     this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
     this.#deleteChannelIds = config.deleteChannelIds
@@ -349,6 +360,7 @@ export class ScopePolicy {
     this.#soundboardRoots = config.soundboardRoots ?? []
     this.#stageChannelIds = config.stageChannelIds ?? new Set()
     this.#threadParentIds = config.threadParentIds ?? new Set()
+    this.#welcomeScreenGuildIds = config.welcomeScreenGuildIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
   }
 
@@ -485,6 +497,12 @@ export class ScopePolicy {
       threadCreationEnabled: this.#allowThreadCreation
         && this.#threadParentIds.size > 0,
       threadParentIds: [...this.#threadParentIds].sort(),
+      welcomeScreenAuditEnabled: this.#allowWelcomeScreenAudit
+        && this.#welcomeScreenGuildIds.size > 0,
+      welcomeScreenChangesEnabled: this.#allowWelcomeScreenAudit
+        && this.#allowWelcomeScreenChanges
+        && this.#welcomeScreenGuildIds.size > 0,
+      welcomeScreenGuildIds: [...this.#welcomeScreenGuildIds].sort(),
       webhookAuditEnabled: this.#allowWebhookAudit
         && this.#webhookChannelIds.size > 0,
       webhookChannelIds: [...this.#webhookChannelIds].sort(),
@@ -578,6 +596,26 @@ export class ScopePolicy {
     this.assertGuildOnboardingAuditable(guildId)
     if (!this.#allowOnboardingChanges) {
       throw new PolicyError("Discord onboarding changes are disabled by connector configuration")
+    }
+  }
+
+  assertGuildWelcomeScreenAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowWelcomeScreenAudit) {
+      throw new PolicyError("Discord Welcome Screen audit is disabled by connector configuration")
+    }
+    if (this.#welcomeScreenGuildIds.size === 0) {
+      throw new PolicyError("Discord Welcome Screen audit requires an explicit guild allowlist")
+    }
+    if (!this.#welcomeScreenGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the Welcome Screen audit scope`)
+    }
+  }
+
+  assertGuildWelcomeScreenChangeable(guildId: string): void {
+    this.assertGuildWelcomeScreenAuditable(guildId)
+    if (!this.#allowWelcomeScreenChanges) {
+      throw new PolicyError("Discord Welcome Screen changes are disabled by connector configuration")
     }
   }
 

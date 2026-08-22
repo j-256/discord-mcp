@@ -17,6 +17,7 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
+  WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
 import type {
   AttachmentMessagePlan,
@@ -76,6 +77,14 @@ import type {
   OnboardingConfigurationView,
   OnboardingPrivacyProjection,
 } from "../src/onboarding-service.js"
+import type {
+  WelcomeScreenAccessEvidence,
+  WelcomeScreenAuditResult,
+  WelcomeScreenChangePlan,
+  WelcomeScreenChangeRequest,
+  WelcomeScreenConfigurationView,
+  WelcomeScreenPrivacyProjection,
+} from "../src/welcome-screen-service.js"
 import type {
   PollCreationPlan,
   PollCreationRequest,
@@ -161,6 +170,8 @@ import {
   ThreadCreationOperationConflictError,
   WebhookDeletionExecutionError,
   WebhookDeletionOperationConflictError,
+  WelcomeScreenExecutionError,
+  WelcomeScreenOperationConflictError,
 } from "../src/errors.js"
 import {
   createDiscordMcpServer,
@@ -233,10 +244,13 @@ const INVITE_OPERATION_KEY = "invite-delete-attempt-0001"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
+const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
 const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
 const ONBOARDING_PROMPT_TITLE = "Choose your community path"
 const ONBOARDING_OPTION_TITLE = "Community member"
 const ONBOARDING_OPTION_DESCRIPTION = "Join the community channels"
+const WELCOME_SCREEN_DESCRIPTION = "Welcome to the reviewed community"
+const WELCOME_SCREEN_CHANNEL_DESCRIPTION = "Read the community rules"
 const ONBOARDING_DEFAULT_CHANNEL_IDS = Array.from(
   { length: ONBOARDING_LIMITS.enabledDefaultChannels },
   (_, index) => `${200000000000000001n + BigInt(index)}`,
@@ -867,6 +881,178 @@ function onboardingPlan(
     status: changed ? "planned" : "already-current",
     verificationBoundary: onboardingAudit(true).verificationBoundary,
     warnings: ["Fresh non-staff client verification remains external"],
+    writeRequired: changed,
+  }
+}
+
+function welcomeScreenRequest(
+  overrides: Partial<WelcomeScreenChangeRequest> = {},
+): WelcomeScreenChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    channels: [{
+      channelId: CHANNEL_ID,
+      description: WELCOME_SCREEN_CHANNEL_DESCRIPTION,
+      emoji: { kind: "unicode", unicode: "👋" },
+    }],
+    description: WELCOME_SCREEN_DESCRIPTION,
+    enabled: true,
+    guildId: GUILD_ID,
+    operationKey: WELCOME_SCREEN_OPERATION_KEY,
+    ...overrides,
+  }
+}
+
+function welcomeScreenAccess(): WelcomeScreenAccessEvidence {
+  return {
+    appliedRoleIds: [GUILD_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD"],
+    effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+    manageGuild: true,
+    requiredChangePermission: "MANAGE_GUILD",
+    unknownPermissionBits: "0",
+    warnings: [],
+  }
+}
+
+function welcomeScreenPrivacy(
+  includeText: boolean,
+): WelcomeScreenPrivacyProjection {
+  return {
+    persistence: "none",
+    rawPayloads: "omitted",
+    text: includeText ? "included" : "omitted",
+    unknownFields: "counts-only",
+  }
+}
+
+function welcomeScreenConfiguration(
+  request: WelcomeScreenChangeRequest | null,
+  includeText: boolean,
+): WelcomeScreenConfigurationView {
+  return {
+    available: true,
+    channels: (request?.channels ?? []).map((entry) => ({
+      channel: {
+        channelId: entry.channelId,
+        direct: true,
+        everyoneCanView: true,
+        exists: true,
+        parentId: null,
+        type: 0,
+      },
+      description: includeText ? entry.description : null,
+      descriptionCharacters: [...entry.description].length,
+      emoji: entry.emoji.kind === "unicode"
+        ? {
+            animated: null,
+            available: null,
+            customEmojiId: null,
+            healthy: true,
+            kind: "unicode",
+            restrictedRoleIds: [],
+            unicode: includeText ? entry.emoji.unicode : null,
+          }
+        : entry.emoji.kind === "custom"
+          ? {
+              animated: false,
+              available: true,
+              customEmojiId: entry.emoji.emojiId,
+              healthy: true,
+              kind: "custom",
+              restrictedRoleIds: [],
+              unicode: null,
+            }
+          : {
+              animated: null,
+              available: null,
+              customEmojiId: null,
+              healthy: true,
+              kind: "none",
+              restrictedRoleIds: [],
+              unicode: null,
+            },
+    })),
+    communityGuild: true,
+    description: includeText ? request?.description ?? null : null,
+    descriptionCharacters: request?.description === null || request === null
+      ? null
+      : [...request.description].length,
+    enabled: request?.enabled ?? false,
+    issues: [],
+    replacementBlockedReasons: [],
+    textIncluded: includeText,
+    unknownFieldCount: 0,
+  }
+}
+
+function welcomeScreenAudit(includeText: boolean): WelcomeScreenAuditResult {
+  return {
+    access: welcomeScreenAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: welcomeScreenConfiguration(welcomeScreenRequest(), includeText),
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    localLimits: {
+      channelDescriptionCharacters:
+        WELCOME_SCREEN_LIMITS.channelDescriptionCharacters,
+      channels: WELCOME_SCREEN_LIMITS.channels,
+      descriptionCharacters: WELCOME_SCREEN_LIMITS.descriptionCharacters,
+    },
+    privacy: welcomeScreenPrivacy(includeText),
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      apiReadback: true,
+      freshNonStaffClientCheckRecommended: true,
+      memberExperienceVerified: false,
+    },
+  }
+}
+
+function welcomeScreenPlan(
+  request: WelcomeScreenChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): WelcomeScreenChangePlan {
+  const desired = welcomeScreenConfiguration(request, true)
+  const changed = effect === "change"
+  return {
+    access: welcomeScreenAccess(),
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    current: changed
+      ? welcomeScreenConfiguration(null, true)
+      : desired,
+    desired,
+    diff: {
+      channelEntriesAdded: changed ? request.channels.length : 0,
+      channelEntriesModified: 0,
+      channelEntriesMoved: 0,
+      channelEntriesRemoved: 0,
+      descriptionChanged: changed,
+      emojiChanges: changed ? request.channels.length : 0,
+      enabledChanged: changed,
+      textChanges: changed ? request.channels.length + 1 : 0,
+    },
+    digest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    localLimits: welcomeScreenAudit(true).localLimits,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: welcomeScreenPrivacy(true),
+    risks: changed ? ["full-replacement", "omitted-entries-deleted"] : [],
+    schemaVersion: 1,
+    status: changed ? "planned" : "already-current",
+    verificationBoundary: welcomeScreenAudit(true).verificationBoundary,
+    warnings: changed
+      ? ["This replacement is complete and ordered"]
+      : ["The complete desired Welcome Screen already matches Discord"],
     writeRequired: changed,
   }
 }
@@ -2691,6 +2877,9 @@ function fixturePolicy(): PolicyDescription {
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookDeletionsEnabled: false,
+    welcomeScreenAuditEnabled: false,
+    welcomeScreenChangesEnabled: false,
+    welcomeScreenGuildIds: [],
   }
 }
 
@@ -2728,6 +2917,9 @@ function serviceFixture(overrides: {
   onboardingEffect?: "change" | "none"
   onboardingError?: Error
   onboardingPlanDigest?: string
+  welcomeScreenEffect?: "change" | "none"
+  welcomeScreenError?: Error
+  welcomeScreenPlanDigest?: string
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
@@ -2758,6 +2950,11 @@ function serviceFixture(overrides: {
   webhookDeletionError?: Error
   webhookDeletionPlanDigest?: string
 } = {}) {
+  const welcomeScreenCalls = {
+    execute: 0,
+    get: 0,
+    plan: 0,
+  }
   const calls = {
     active: 0,
     addReaction: 0,
@@ -2896,9 +3093,31 @@ function serviceFixture(overrides: {
         verification: planned.writeRequired ? "match" : "not-required",
       }
     },
+    async executeWelcomeScreenChange(request, planDigest) {
+      if (overrides.welcomeScreenError) throw overrides.welcomeScreenError
+      welcomeScreenCalls.execute += 1
+      const planned = welcomeScreenPlan(
+        request,
+        planDigest,
+        overrides.welcomeScreenEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-welcome-screen" : null,
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
     async getGuildOnboarding(_guildId, includeText = false) {
       calls.onboardingGet += 1
       return onboardingAudit(includeText)
+    },
+    async getGuildWelcomeScreen(_guildId, includeText = false) {
+      welcomeScreenCalls.get += 1
+      return welcomeScreenAudit(includeText)
     },
     async planOnboardingChange(request) {
       calls.onboardingPlan += 1
@@ -2906,6 +3125,14 @@ function serviceFixture(overrides: {
         request,
         overrides.onboardingPlanDigest || DIGEST,
         overrides.onboardingEffect,
+      )
+    },
+    async planWelcomeScreenChange(request) {
+      welcomeScreenCalls.plan += 1
+      return welcomeScreenPlan(
+        request,
+        overrides.welcomeScreenPlanDigest || DIGEST,
+        overrides.welcomeScreenEffect,
       )
     },
     async executeInviteDeletion(request, planDigest) {
@@ -4401,7 +4628,7 @@ function serviceFixture(overrides: {
       }
     },
   }
-  return { calls, service }
+  return { calls, service, welcomeScreenCalls }
 }
 
 async function connectedFixture(
@@ -4514,6 +4741,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_guild_invites",
       "get_guild_invite",
       "get_guild_onboarding",
+      "get_guild_welcome_screen",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -4560,6 +4788,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_invite_deletion",
       "plan_onboarding_change",
       "execute_onboarding_change",
+      "plan_guild_welcome_screen_change",
+      "execute_guild_welcome_screen_change",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
@@ -5322,6 +5552,30 @@ test("progressive discovery enables the complete reviewed onboarding workflow", 
     [
       "plan_onboarding_change",
       "execute_onboarding_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed Welcome Screen workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_welcome_screen_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_welcome_screen_change",
+    "plan_guild_welcome_screen_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_welcome_screen_change",
+      "execute_guild_welcome_screen_change",
       "discover_discord_tools",
     ],
   )
@@ -7759,6 +8013,268 @@ test("MCP onboarding execution exposes uncertainty and content-free conflicts", 
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(ONBOARDING_OPERATION_KEY),
+  )
+})
+
+test("MCP Welcome Screen audit defaults to text omission and requires explicit opt-in", async (context) => {
+  const { client, welcomeScreenCalls } = await connectedFixture(context)
+  const minimized = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_welcome_screen",
+  })
+  const included = await client.callTool({
+    arguments: { guildId: GUILD_ID, includeText: true },
+    name: "get_guild_welcome_screen",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "get_guild_welcome_screen",
+  })
+
+  const minimizedContent = structuredContent(minimized)
+  const includedContent = structuredContent(included)
+  assert.equal(
+    (minimizedContent.privacy as Record<string, unknown>).text,
+    "omitted",
+  )
+  assert.equal(
+    (includedContent.privacy as Record<string, unknown>).text,
+    "included",
+  )
+  assert.doesNotMatch(
+    JSON.stringify(minimized),
+    new RegExp(WELCOME_SCREEN_DESCRIPTION),
+  )
+  assert.match(JSON.stringify(included), new RegExp(WELCOME_SCREEN_DESCRIPTION))
+  assert.equal(invalid.isError, true)
+  assert.equal(welcomeScreenCalls.get, 2)
+})
+
+test("MCP Welcome Screen plans preserve an exact bounded complete replacement", async (context) => {
+  const { client, welcomeScreenCalls } = await connectedFixture(context)
+  const request = welcomeScreenRequest()
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_guild_welcome_screen_change",
+  })
+  const duplicate = await client.callTool({
+    arguments: {
+      ...request,
+      channels: [request.channels[0], request.channels[0]],
+    },
+    name: "plan_guild_welcome_screen_change",
+  })
+  const extra = await client.callTool({
+    arguments: { ...request, futureField: true },
+    name: "plan_guild_welcome_screen_change",
+  })
+  const invalidEmoji = await client.callTool({
+    arguments: {
+      ...request,
+      channels: [{
+        ...request.channels[0],
+        emoji: { kind: "unicode", unicode: "not-an-emoji" },
+      }],
+    },
+    name: "plan_guild_welcome_screen_change",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal(content.writeRequired, true)
+  assert.equal(content.operationKeyHash, OPERATION_KEY_HASH)
+  assert.match(
+    JSON.stringify(content.desired),
+    new RegExp(WELCOME_SCREEN_CHANNEL_DESCRIPTION),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(planned),
+    new RegExp(WELCOME_SCREEN_OPERATION_KEY),
+  )
+  assert.equal(duplicate.isError, true)
+  assert.equal(extra.isError, true)
+  assert.equal(invalidEmoji.isError, true)
+  assert.equal(welcomeScreenCalls.plan, 1)
+})
+
+test("MCP Welcome Screen execution binds approval to the complete reviewed state", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client, welcomeScreenCalls } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const request = welcomeScreenRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_guild_welcome_screen_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(welcomeScreenCalls.plan, 1)
+  assert.equal(welcomeScreenCalls.execute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    OPERATION_KEY_HASH,
+    WELCOME_SCREEN_DESCRIPTION,
+    WELCOME_SCREEN_CHANNEL_DESCRIPTION,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /complete Discord Welcome Screen configuration/)
+  assert.match(confirmationMessage, /Omitted channel entries are deleted/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(WELCOME_SCREEN_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(WELCOME_SCREEN_OPERATION_KEY),
+  )
+})
+
+test("MCP Welcome Screen execution skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    ...welcomeScreenRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { welcomeScreenEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_welcome_screen_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.welcomeScreenCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_welcome_screen_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.welcomeScreenCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { welcomeScreenPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_welcome_screen_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.welcomeScreenCalls.execute, 0)
+})
+
+test("MCP Welcome Screen execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...welcomeScreenRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      welcomeScreenError: new WelcomeScreenExecutionError(
+        "Discord Welcome Screen outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_welcome_screen_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PATCH",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/welcome-screen`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      welcomeScreenError: new WelcomeScreenExecutionError(
+        "Discord Welcome Screen replacement was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_welcome_screen_change",
+  })
+  const limitedStructured = structuredContent(limitedResult)
+  assert.equal(limitedStructured.status, "rate-limited")
+  assert.equal(
+    (limitedStructured.error as Record<string, unknown>).retryAfterMs,
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-welcome-screen",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      welcomeScreenError: new WelcomeScreenOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_welcome_screen_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(WELCOME_SCREEN_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(WELCOME_SCREEN_DESCRIPTION),
   )
 })
 

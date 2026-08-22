@@ -70,6 +70,8 @@ export interface ConnectorConfig {
   allowStageInstanceChanges: boolean
   allowStageStartNotifications: boolean
   allowThreadCreation: boolean
+  allowWelcomeScreenAudit: boolean
+  allowWelcomeScreenChanges: boolean
   allowWebhookAudit: boolean
   allowWebhookDeletions: boolean
   auditFile: string
@@ -114,6 +116,7 @@ export interface ConnectorConfig {
   stageChannelIds: ReadonlySet<string>
   token: string
   threadParentIds: ReadonlySet<string>
+  welcomeScreenGuildIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
 }
 
@@ -383,6 +386,11 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.soundboardGuildIds,
     CONNECTOR_LIMITS.soundboardGuildAllowlist,
   )
+  const welcomeScreenGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.welcomeScreenGuildIds],
+    ENVIRONMENT_NAMES.welcomeScreenGuildIds,
+    CONNECTOR_LIMITS.welcomeScreenGuildAllowlist,
+  )
   const webhookChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.webhookChannelIds],
     ENVIRONMENT_NAMES.webhookChannelIds,
@@ -410,6 +418,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
     [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
+    [ENVIRONMENT_NAMES.welcomeScreenGuildIds, welcomeScreenGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
       if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
@@ -554,6 +563,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowSoundboardChanges} requires ${ENVIRONMENT_NAMES.allowSoundboardAudit}`,
     )
   }
+  const allowWelcomeScreenAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWelcomeScreenAudit],
+    ENVIRONMENT_NAMES.allowWelcomeScreenAudit,
+  )
+  const allowWelcomeScreenChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowWelcomeScreenChanges],
+    ENVIRONMENT_NAMES.allowWelcomeScreenChanges,
+  )
+  if (allowWelcomeScreenChanges && !allowWelcomeScreenAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowWelcomeScreenChanges} requires ${ENVIRONMENT_NAMES.allowWelcomeScreenAudit}`,
+    )
+  }
   const allowStageInstanceAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowStageInstanceAudit],
     ENVIRONMENT_NAMES.allowStageInstanceAudit,
@@ -686,6 +708,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowThreadCreation],
       ENVIRONMENT_NAMES.allowThreadCreation,
     ),
+    allowWelcomeScreenAudit,
+    allowWelcomeScreenChanges,
     allowWebhookAudit,
     allowWebhookDeletions,
     auditFile: auditFile(
@@ -776,6 +800,7 @@ export function loadConnectorConfig(
     stageChannelIds,
     token,
     threadParentIds,
+    welcomeScreenGuildIds,
     webhookChannelIds,
   }
 }

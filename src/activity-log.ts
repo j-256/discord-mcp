@@ -468,6 +468,26 @@ export interface SoundboardActivity {
   verification: "drift" | "match" | null
 }
 
+export type WelcomeScreenActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface WelcomeScreenActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "welcome-screen-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: WelcomeScreenActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ScheduledEventActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -560,6 +580,7 @@ export type ActivityEntry =
   | SoundboardActivity
   | StageInstanceActivity
   | ThreadCreationActivity
+  | WelcomeScreenActivity
   | WebhookDeletionActivity
 
 export interface ActivityList {
@@ -1659,6 +1680,65 @@ function parseSoundboardActivity(
   }
 }
 
+function parseWelcomeScreenActivity(
+  value: unknown,
+): WelcomeScreenActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "welcome-screen-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.error !== null || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "welcome-screen-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as WelcomeScreenActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseAutoModerationActivity(
   value: unknown,
 ): AutoModerationActivity | undefined {
@@ -2083,6 +2163,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)
+    || parseWelcomeScreenActivity(value)
     || parseWebhookDeletionActivity(value)
     || parseInviteDeletionActivity(value)
     || parseOnboardingActivity(value)

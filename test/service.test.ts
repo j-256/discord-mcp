@@ -208,6 +208,7 @@ function serviceFixture(overrides: {
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
   onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
+  welcomeScreenOptions?: ConnectorServiceOptions["welcomeScreenOptions"]
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   pollOptions?: ConnectorServiceOptions["pollOptions"]
@@ -386,6 +387,9 @@ function serviceFixture(overrides: {
     async getGuildOnboarding() {
       throw new Error("Unexpected onboarding lookup")
     },
+    async getGuildWelcomeScreen() {
+      throw new Error("Unexpected Welcome Screen lookup")
+    },
     async getGuildEmoji() {
       return {
         animated: false,
@@ -481,6 +485,9 @@ function serviceFixture(overrides: {
     },
     async modifyGuildOnboarding() {
       throw new Error("Unexpected onboarding change")
+    },
+    async modifyGuildWelcomeScreen() {
+      throw new Error("Unexpected Welcome Screen change")
     },
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
@@ -633,6 +640,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.onboardingOptions
         ? { onboardingOptions: overrides.onboardingOptions }
+        : {}),
+      ...(overrides.welcomeScreenOptions
+        ? { welcomeScreenOptions: overrides.welcomeScreenOptions }
         : {}),
       ...(overrides.forumPostOptions
         ? { forumPostOptions: overrides.forumPostOptions }
@@ -1007,6 +1017,94 @@ test("service pins identity through privacy-safe reviewed onboarding", async () 
   assert.equal(result.verification, "not-required")
   assert.equal(onboardingReads, 3)
   assert.equal(onboardingWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through privacy-safe reviewed Welcome Screens", async () => {
+  const operationStore = new MemoryOperationStore()
+  let welcomeScreenReads = 0
+  let welcomeScreenWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: ["COMMUNITY"],
+          owner_id: "700000000000000001",
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD,
+          "@everyone",
+        )]
+      },
+      async getGuildWelcomeScreen(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        welcomeScreenReads += 1
+        return {
+          description: null,
+          unknownFieldCount: 0,
+          welcomeChannels: [],
+        }
+      },
+      async modifyGuildWelcomeScreen() {
+        welcomeScreenWrites += 1
+        throw new Error("Unexpected Welcome Screen write")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+      DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+      DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+    welcomeScreenOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(43),
+      randomId: () => "activity-welcome-screen",
+    },
+  })
+  const request = {
+    auditReason: "Reviewed disabled Welcome Screen",
+    channels: [],
+    description: null,
+    enabled: false,
+    guildId: GUILD_ID,
+    operationKey: "welcome-screen-service-attempt-0001",
+  }
+
+  await assert.rejects(
+    () => service.getGuildWelcomeScreen("bad"),
+    /Welcome Screen guild ID/,
+  )
+  await assert.rejects(
+    () => service.planWelcomeScreenChange({ ...request, guildId: "bad" }),
+    /Welcome Screen guild ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildWelcomeScreen(GUILD_ID)
+  const plan = await service.planWelcomeScreenChange(request)
+  const result = await service.executeWelcomeScreenChange(request, plan.digest)
+
+  assert.equal(audit.privacy.text, "omitted")
+  assert.equal(audit.configuration.textIncluded, false)
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(welcomeScreenReads, 3)
+  assert.equal(welcomeScreenWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

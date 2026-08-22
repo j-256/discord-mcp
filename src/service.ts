@@ -257,6 +257,18 @@ import {
   StageInstanceService,
 } from "./stage-instance-service.js"
 import type {
+  WelcomeScreenAuditResult,
+  WelcomeScreenChangePlan,
+  WelcomeScreenChangeRequest,
+  WelcomeScreenChangeResult,
+  WelcomeScreenServiceOptions,
+} from "./welcome-screen-service.js"
+import {
+  assertWelcomeScreenGetInput,
+  normalizeWelcomeScreenChangeRequest,
+  WelcomeScreenService,
+} from "./welcome-screen-service.js"
+import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
   ThreadCreationResult,
@@ -334,6 +346,7 @@ export interface DiscordServiceClient {
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
   getGuildOnboarding: DiscordClient["getGuildOnboarding"]
+  getGuildWelcomeScreen: DiscordClient["getGuildWelcomeScreen"]
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoleMemberCounts: DiscordClient["getGuildRoleMemberCounts"]
@@ -366,6 +379,7 @@ export interface DiscordServiceClient {
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
+  modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
@@ -481,6 +495,10 @@ export interface ConnectorServiceOptions {
     "clock" | "planKey" | "randomId"
   >
   webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
+  welcomeScreenOptions?: Pick<
+    WelcomeScreenServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
 }
 
 interface VerifiedIdentity {
@@ -635,6 +653,7 @@ export class ConnectorService {
   readonly #stageInstanceService: StageInstanceService
   readonly #threadCreationService: ThreadCreationService
   readonly #webhookService: WebhookService
+  readonly #welcomeScreenService: WelcomeScreenService
 
   constructor(options: ConnectorServiceOptions) {
     this.#config = options.config
@@ -722,6 +741,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.onboardingOptions,
+    })
+    this.#welcomeScreenService = new WelcomeScreenService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.welcomeScreenOptions,
     })
     this.#messagePinService = new MessagePinService({
       activityStore: this.#activityStore,
@@ -1051,6 +1077,22 @@ export class ConnectorService {
     assertOnboardingGetInput(guildId, includeText)
     const identity = await this.#verifyIdentity(options)
     return this.#onboardingService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      includeText,
+      options,
+    )
+  }
+
+  async getGuildWelcomeScreen(
+    guildId: string,
+    includeText = false,
+    options: RequestOptions = {},
+  ): Promise<WelcomeScreenAuditResult> {
+    assertWelcomeScreenGetInput(guildId, includeText)
+    const identity = await this.#verifyIdentity(options)
+    return this.#welcomeScreenService.get(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -1659,6 +1701,20 @@ export class ConnectorService {
     )
   }
 
+  async planWelcomeScreenChange(
+    request: WelcomeScreenChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<WelcomeScreenChangePlan> {
+    normalizeWelcomeScreenChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#welcomeScreenService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildExpressionChange(
     request: GuildExpressionChangeRequest,
     options: RequestOptions = {},
@@ -2172,6 +2228,25 @@ export class ConnectorService {
     }
     const identity = await this.#verifyIdentity(options)
     return this.#onboardingService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeWelcomeScreenChange(
+    request: WelcomeScreenChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WelcomeScreenChangeResult> {
+    normalizeWelcomeScreenChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord Welcome Screen plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#welcomeScreenService.execute(
       identity.application.id,
       identity.bot.id,
       request,
