@@ -64,6 +64,8 @@ export interface ConnectorConfig {
   allowRoleConfiguration: boolean
   allowScheduledEventAudit: boolean
   allowScheduledEventChanges: boolean
+  allowSoundboardAudit: boolean
+  allowSoundboardChanges: boolean
   allowStageInstanceAudit: boolean
   allowStageInstanceChanges: boolean
   allowStageStartNotifications: boolean
@@ -107,6 +109,8 @@ export interface ConnectorConfig {
   roleConfigurationIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
+  soundboardGuildIds: ReadonlySet<string>
+  soundboardRoots: readonly string[]
   stageChannelIds: ReadonlySet<string>
   token: string
   threadParentIds: ReadonlySet<string>
@@ -374,6 +378,11 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.scheduledEventGuildIds],
     ENVIRONMENT_NAMES.scheduledEventGuildIds,
   )
+  const soundboardGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.soundboardGuildIds],
+    ENVIRONMENT_NAMES.soundboardGuildIds,
+    CONNECTOR_LIMITS.soundboardGuildAllowlist,
+  )
   const webhookChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.webhookChannelIds],
     ENVIRONMENT_NAMES.webhookChannelIds,
@@ -400,6 +409,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
+    [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
       if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
@@ -531,6 +541,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowScheduledEventChanges} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
     )
   }
+  const allowSoundboardAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowSoundboardAudit],
+    ENVIRONMENT_NAMES.allowSoundboardAudit,
+  )
+  const allowSoundboardChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowSoundboardChanges],
+    ENVIRONMENT_NAMES.allowSoundboardChanges,
+  )
+  if (allowSoundboardChanges && !allowSoundboardAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowSoundboardChanges} requires ${ENVIRONMENT_NAMES.allowSoundboardAudit}`,
+    )
+  }
   const allowStageInstanceAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowStageInstanceAudit],
     ENVIRONMENT_NAMES.allowStageInstanceAudit,
@@ -654,6 +677,8 @@ export function loadConnectorConfig(
     ),
     allowScheduledEventAudit,
     allowScheduledEventChanges,
+    allowSoundboardAudit,
+    allowSoundboardChanges,
     allowStageInstanceAudit,
     allowStageInstanceChanges,
     allowStageStartNotifications,
@@ -742,6 +767,11 @@ export function loadConnectorConfig(
     scheduledEventRoots: parseOwnedRoots(
       environment[ENVIRONMENT_NAMES.scheduledEventRoots],
       ENVIRONMENT_NAMES.scheduledEventRoots,
+    ),
+    soundboardGuildIds,
+    soundboardRoots: parseOwnedRoots(
+      environment[ENVIRONMENT_NAMES.soundboardRoots],
+      ENVIRONMENT_NAMES.soundboardRoots,
     ),
     stageChannelIds,
     token,

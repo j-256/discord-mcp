@@ -53,6 +53,7 @@ export const MCP_TOOLSET_NAMES = [
   "role-creation",
   "roles",
   "scheduled-events",
+  "soundboard",
   "stage-instances",
   "threads",
   "webhooks",
@@ -95,6 +96,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowRoleConfiguration: "DISCORD_MCP_ALLOW_ROLE_CONFIGURATION",
   allowScheduledEventAudit: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
   allowScheduledEventChanges: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES",
+  allowSoundboardAudit: "DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT",
+  allowSoundboardChanges: "DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES",
   allowStageInstanceAudit: "DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT",
   allowStageInstanceChanges: "DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES",
   allowStageStartNotifications: "DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS",
@@ -154,6 +157,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   roleConfigurationIds: "DISCORD_MCP_ROLE_CONFIGURATION_IDS",
   scheduledEventGuildIds: "DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS",
   scheduledEventRoots: "DISCORD_MCP_SCHEDULED_EVENT_ROOTS",
+  soundboardGuildIds: "DISCORD_MCP_SOUNDBOARD_GUILD_IDS",
+  soundboardRoots: "DISCORD_MCP_SOUNDBOARD_ROOTS",
   stageChannelIds: "DISCORD_MCP_STAGE_CHANNEL_IDS",
   token: "DISCORD_BOT_TOKEN",
   toolSurface: "DISCORD_MCP_TOOL_SURFACE",
@@ -220,6 +225,11 @@ export const DISCORD_LIMITS = Object.freeze({
   scheduledEventLocationCharacters: 100,
   scheduledEventNameCharacters: 100,
   scheduledEvents: 100,
+  soundboardBytes: 512 * 1_024,
+  soundboardDurationSeconds: 5.2,
+  soundboardNameCharacters: 32,
+  soundboardNameMinimumCharacters: 2,
+  soundboardSounds: 250,
   stageTopicCharacters: 120,
   searchChannelIds: 500,
   searchContentCharacters: 1_024,
@@ -359,6 +369,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   roleConfigurationAllowlist: 100,
   searchFilterIds: 25,
   searchFilterStrings: 25,
+  soundboardGuildAllowlist: 100,
   stageInstanceChannels: 25,
   threadPageDefault: 50,
 })
@@ -370,6 +381,14 @@ export const STAGE_INSTANCE_ACTIONS = [
 ] as const
 
 export type StageInstanceAction = typeof STAGE_INSTANCE_ACTIONS[number]
+
+export const SOUNDBOARD_ACTIONS = [
+  "create",
+  "delete",
+  "update",
+] as const
+
+export type SoundboardAction = typeof SOUNDBOARD_ACTIONS[number]
 
 export const GATEWAY_DEFAULTS = Object.freeze({
   authenticationTimeoutMs: 30_000,

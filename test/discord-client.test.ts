@@ -2919,6 +2919,270 @@ test("Discord client validates expression writes before fetching and does not re
   assert.equal(requests, 1)
 })
 
+test("Discord client projects bounded soundboard inventories without audio or creator profiles", async () => {
+  const privateProfile = "private-sound-uploader"
+  const privateUrl = "https://cdn.discord.test/private-sound"
+  const requests: string[] = []
+  const sound = (id: string, guild = true) => ({
+    available: true,
+    cdn_url: privateUrl,
+    emoji_id: null,
+    emoji_name: "🔔",
+    ...(guild ? { guild_id: "100", user: {
+      avatar: "private-avatar",
+      id: "500",
+      username: privateProfile,
+    } } : {}),
+    name: `Bell ${id}`,
+    sound_id: id,
+    volume: 0.75,
+  })
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.endsWith("/soundboard-default-sounds")) {
+        return jsonResponse([sound("2", false), sound("1", false)])
+      }
+      if (url.endsWith("/guilds/100/soundboard-sounds")) {
+        return jsonResponse({ items: [sound("4"), sound("3")] })
+      }
+      return jsonResponse(sound("3"))
+    },
+    token: TOKEN,
+  })
+
+  const defaults = await client.listDefaultSoundboardSounds()
+  const guild = await client.listGuildSoundboardSounds("100")
+  const exact = await client.getGuildSoundboardSound("100", "3")
+
+  assert.deepEqual(defaults.map(({ guildId, id, unknownFieldCount }) => ({
+    guildId,
+    id,
+    unknownFieldCount,
+  })), [
+    { guildId: null, id: "1", unknownFieldCount: 1 },
+    { guildId: null, id: "2", unknownFieldCount: 1 },
+  ])
+  assert.deepEqual(guild.map(({ creatorUserId, guildId, id, unknownFieldCount }) => ({
+    creatorUserId,
+    guildId,
+    id,
+    unknownFieldCount,
+  })), [
+    { creatorUserId: "500", guildId: "100", id: "3", unknownFieldCount: 1 },
+    { creatorUserId: "500", guildId: "100", id: "4", unknownFieldCount: 1 },
+  ])
+  assert.equal(exact.id, "3")
+  assert.deepEqual(requests, [
+    `${API_BASE_URL}/soundboard-default-sounds`,
+    `${API_BASE_URL}/guilds/100/soundboard-sounds`,
+    `${API_BASE_URL}/guilds/100/soundboard-sounds/3`,
+  ])
+  const serialized = JSON.stringify({ defaults, exact, guild })
+  assert.equal(serialized.includes(privateProfile), false)
+  assert.equal(serialized.includes(privateUrl), false)
+  assert.equal(serialized.includes("private-avatar"), false)
+})
+
+test("Discord client rejects incomplete or cross-guild soundboard evidence", async () => {
+  const responses: unknown[] = [
+    { items: [{
+      available: true,
+      emoji_id: null,
+      emoji_name: null,
+      guild_id: "999",
+      name: "Alert",
+      sound_id: "300",
+      volume: 1,
+    }] },
+    { items: [
+      {
+        available: true,
+        emoji_id: null,
+        emoji_name: null,
+        guild_id: "100",
+        name: "Alert",
+        sound_id: "300",
+        volume: 1,
+      },
+      {
+        available: true,
+        emoji_id: null,
+        emoji_name: null,
+        guild_id: "100",
+        name: "Again",
+        sound_id: "300",
+        volume: 1,
+      },
+    ] },
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse(responses.shift()),
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.listGuildSoundboardSounds("100"),
+    /invalid soundboard sound/,
+  )
+  await assert.rejects(
+    client.listGuildSoundboardSounds("100"),
+    /duplicate guild soundboard sound IDs/,
+  )
+})
+
+test("Discord client sends exact non-retried soundboard writes", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      const record = body as Record<string, unknown>
+      return jsonResponse({
+        available: true,
+        emoji_id: record.emoji_id ?? null,
+        emoji_name: record.emoji_name ?? null,
+        guild_id: "100",
+        name: record.name ?? "Alert",
+        sound_id: "300",
+        user: { id: "500" },
+        volume: typeof record.volume === "number" ? record.volume : 1,
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await client.createGuildSoundboardSound("100", {
+    bytes: new Uint8Array([1, 2, 3]),
+    emojiId: null,
+    emojiName: "🔔",
+    format: "mp3",
+    name: "Alert",
+    volume: 0.75,
+  }, "Reviewed / sound")
+  await client.modifyGuildSoundboardSound("100", "300", {
+    emojiId: null,
+    emojiName: null,
+    name: "Alarm",
+    volume: null,
+  }, "Reviewed / sound")
+  await client.deleteGuildSoundboardSound("100", "300", "Reviewed / sound")
+
+  assert.deepEqual(requests, [{
+    body: {
+      emoji_id: null,
+      emoji_name: "🔔",
+      name: "Alert",
+      sound: "data:audio/mpeg;base64,AQID",
+      volume: 0.75,
+    },
+    method: "POST",
+    reason: "Reviewed%20%2F%20sound",
+    url: `${API_BASE_URL}/guilds/100/soundboard-sounds`,
+  }, {
+    body: {
+      emoji_id: null,
+      emoji_name: null,
+      name: "Alarm",
+      volume: null,
+    },
+    method: "PATCH",
+    reason: "Reviewed%20%2F%20sound",
+    url: `${API_BASE_URL}/guilds/100/soundboard-sounds/300`,
+  }, {
+    body: null,
+    method: "DELETE",
+    reason: "Reviewed%20%2F%20sound",
+    url: `${API_BASE_URL}/guilds/100/soundboard-sounds/300`,
+  }])
+  assert.deepEqual(records.map(({ operation, retries }) => ({ operation, retries })), [
+    { operation: "create_guild_soundboard_sound", retries: 0 },
+    { operation: "modify_guild_soundboard_sound", retries: 0 },
+    { operation: "delete_guild_soundboard_sound", retries: 0 },
+  ])
+})
+
+test("Discord client validates soundboard writes before fetching and never retries", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "private-sound-detail", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  const valid = {
+    bytes: new Uint8Array([1]),
+    emojiId: null,
+    emojiName: null,
+    format: "ogg" as const,
+    name: "Alert",
+    volume: 1,
+  }
+
+  await assert.rejects(
+    client.createGuildSoundboardSound("100", valid, "Reviewed sound"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+  await assert.rejects(
+    client.createGuildSoundboardSound("100", {
+      ...valid,
+      bytes: new Uint8Array(),
+    }, "Reviewed sound"),
+    /soundboard bytes/,
+  )
+  await assert.rejects(
+    client.createGuildSoundboardSound("100", {
+      ...valid,
+      emojiId: "400",
+      emojiName: "🔔",
+    }, "Reviewed sound"),
+    /mutually exclusive/,
+  )
+  await assert.rejects(
+    client.modifyGuildSoundboardSound("100", "300", {
+      emojiId: null,
+    }, "Reviewed sound"),
+    /complete nullable pair/,
+  )
+  await assert.rejects(
+    client.modifyGuildSoundboardSound("100", "300", {}, "Reviewed sound"),
+    /must contain a name, volume, or complete emoji pair/,
+  )
+  await assert.rejects(
+    client.modifyGuildSoundboardSound("100", "300", {
+      volume: Number.NaN,
+    }, "Reviewed sound"),
+    /finite number/,
+  )
+  assert.equal(requests, 1)
+})
+
 test("Discord client projects bounded onboarding evidence and counts unknown fields", async () => {
   let requestUrl = ""
   const client = new DiscordClient({

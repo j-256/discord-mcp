@@ -41,6 +41,7 @@ export const OPERATION_KINDS = [
   "role-creation",
   "role-configuration",
   "scheduled-event-change",
+  "guild-soundboard-change",
   "stage-instance-change",
   "thread-create",
   "webhook-deletion",

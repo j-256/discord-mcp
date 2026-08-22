@@ -49,6 +49,7 @@ const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
 const SCHEDULED_EVENT_ID = "390000000000000001"
 const STAGE_INSTANCE_ID = "395000000000000001"
+const SOUNDBOARD_SOUND_ID = "397000000000000001"
 const USER_ID = "400000000000000001"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -156,6 +157,9 @@ interface GuidanceCalls {
   permissionOverwrites: number
   roles: number
   scheduledEvents: number
+  soundboardDefaults: number
+  soundboardGuild: number
+  soundboardLookup: number
   stageInstances: number
   unexpected: number
   webhooks: number
@@ -189,6 +193,9 @@ function guidanceService(options: {
     permissionOverwrites: 0,
     roles: 0,
     scheduledEvents: 0,
+    soundboardDefaults: 0,
+    soundboardGuild: 0,
+    soundboardLookup: 0,
     stageInstances: 0,
     unexpected: 0,
     webhooks: 0,
@@ -203,6 +210,7 @@ function guidanceService(options: {
     executeAutoModerationChange: unexpected,
     executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
     executePollCreation: unexpected,
@@ -211,6 +219,54 @@ function guidanceService(options: {
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
+    async getGuildSoundboardSound(guildId, soundId) {
+      calls.soundboardLookup += 1
+      calls.lastGuildId = guildId
+      return {
+        guild: { id: guildId, name: "Private guild name" },
+        permission: {
+          administrator: false,
+          appliedRoleIds: [guildId],
+          confidence: "complete",
+          createGuildExpressions: true,
+          effectivePermissionNames: [
+            "CREATE_GUILD_EXPRESSIONS" as const,
+            "MANAGE_GUILD_EXPRESSIONS" as const,
+          ],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.CREATE_GUILD_EXPRESSIONS
+            | DISCORD_PERMISSIONS.MANAGE_GUILD_EXPRESSIONS
+          ).toString(),
+          guildOwner: false,
+          manageGuildExpressions: true,
+          ownershipRequired: false,
+          warnings: [],
+        },
+        privacy: {
+          audioPersisted: false as const,
+          creatorProfilesExposed: false as const,
+          omittedFields: [
+            "audioBytes" as const,
+            "cdnUrl" as const,
+            "creatorProfile" as const,
+            "rawDiscordObject" as const,
+          ],
+          privateFieldsProjectedOut: true as const,
+        },
+        schemaVersion: 1,
+        sound: {
+          available: true,
+          creatorUserId: USER_ID,
+          emoji: { emojiName: "🔔", kind: "unicode" as const },
+          guildId,
+          name: "Reviewed sound",
+          soundId,
+          unknownFieldCount: 0,
+          volume: 0.75,
+        },
+        status: "ok" as const,
+      }
+    },
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     async getStageInstance(guildId, channelId) {
@@ -572,6 +628,50 @@ function guidanceService(options: {
       }
     },
     listStageInstances: unexpected,
+    async listDefaultSoundboardSounds() {
+      calls.soundboardDefaults += 1
+      return {
+        page: { returned: 1, safetyLimit: 250 },
+        privacy: {
+          audioPersisted: false as const,
+          creatorProfilesExposed: false as const,
+          omittedFields: [
+            "audioBytes" as const,
+            "cdnUrl" as const,
+            "creatorProfile" as const,
+            "rawDiscordObject" as const,
+          ],
+          privateFieldsProjectedOut: true as const,
+        },
+        schemaVersion: 1,
+        sounds: [{
+          available: true,
+          creatorUserId: null,
+          emoji: { kind: "none" as const },
+          guildId: null,
+          name: "Default sound",
+          soundId: SOUNDBOARD_SOUND_ID,
+          unknownFieldCount: 0,
+          volume: 1,
+        }],
+        status: "ok" as const,
+      }
+    },
+    async listGuildSoundboardSounds(guildId) {
+      calls.soundboardGuild += 1
+      calls.lastGuildId = guildId
+      const exact = await service.getGuildSoundboardSound(guildId, SOUNDBOARD_SOUND_ID)
+      calls.soundboardLookup -= 1
+      return {
+        guild: exact.guild,
+        page: { returned: 1, safetyLimit: 250 },
+        permission: exact.permission,
+        privacy: exact.privacy,
+        schemaVersion: 1,
+        sounds: [exact.sound],
+        status: "ok" as const,
+      }
+    },
     async listGuildExpressions(guildId, kind) {
       calls.guildExpressions += 1
       calls.lastGuildId = guildId
@@ -631,6 +731,7 @@ function guidanceService(options: {
       }
     },
     planGuildExpressionChange: unexpected,
+    planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
     planOnboardingChange: unexpected,
     auditChannelRoleAccess: unexpected,
@@ -673,6 +774,11 @@ function guidanceService(options: {
         scheduledEventCoverChangesEnabled: false,
         scheduledEventGuildIds: [],
         scheduledEventRootCount: 0,
+        soundboardAuditEnabled: false,
+        soundboardChangesEnabled: false,
+        soundboardCreationEnabled: false,
+        soundboardGuildIds: [],
+        soundboardRootCount: 0,
         stageChannelIds: [],
         stageInstanceAuditEnabled: false,
         stageInstanceChangesEnabled: false,
@@ -1097,6 +1203,7 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
     resources.resources.map(({ name, uri }) => ({ name, uri })).sort((a, b) => a.name.localeCompare(b.name)),
     [
       { name: MCP_RESOURCE_NAMES.activity, uri: MCP_RESOURCE_URIS.activity },
+      { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
       { name: MCP_RESOURCE_NAMES.gatewayStatus, uri: MCP_RESOURCE_URIS.gatewayStatus },
       { name: MCP_RESOURCE_NAMES.guilds, uri: MCP_RESOURCE_URIS.guilds },
@@ -1151,6 +1258,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactRole,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.exactGuildSoundboardSound,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactGuildSoundboardSound,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildAutomodRules,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildAutomodRules,
       },
@@ -1173,6 +1284,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildScheduledEvents,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildScheduledEvents,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildSoundboard,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildSoundboard,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildStickers,
@@ -1294,6 +1409,18 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     "untrusted-external-data",
   )
 
+  const defaultSoundboard = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.defaultSoundboard,
+  )
+  const defaultSoundboardData = defaultSoundboard.value.data as Record<string, unknown>
+  const defaultSound = (
+    defaultSoundboardData.sounds as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(defaultSound?.soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(defaultSound?.guildId, null)
+  assert.equal("audioBytes" in (defaultSound || {}), false)
+
   const channels = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/channels`,
@@ -1396,6 +1523,35 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.doesNotMatch(emojis.text + stickers.text, /cdn\.discordapp\.com/)
   assert.equal("imageBytes" in (emoji || {}), false)
   assert.equal("imageBytes" in (sticker || {}), false)
+
+  const guildSoundboard = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/soundboard`,
+  )
+  const guildSoundboardData = guildSoundboard.value.data as Record<string, unknown>
+  const guildSound = (
+    guildSoundboardData.sounds as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(guildSound?.soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(guildSound?.guildId, GUILD_ID)
+  assert.equal(
+    (guildSoundboardData.privacy as Record<string, unknown>).audioPersisted,
+    false,
+  )
+
+  const exactSoundboard = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/soundboard/${SOUNDBOARD_SOUND_ID}`,
+  )
+  const exactSoundboardData = exactSoundboard.value.data as Record<string, unknown>
+  assert.equal(
+    (exactSoundboardData.sound as Record<string, unknown>).soundId,
+    SOUNDBOARD_SOUND_ID,
+  )
+  assert.doesNotMatch(
+    defaultSoundboard.text + guildSoundboard.text + exactSoundboard.text,
+    /cdn\.discordapp\.com|https?:\/\//,
+  )
 
   const automodRules = await readJsonResource(
     client,
@@ -1561,6 +1717,9 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.roles, 2)
   assert.equal(calls.scheduledEvents, 1)
+  assert.equal(calls.soundboardDefaults, 1)
+  assert.equal(calls.soundboardGuild, 1)
+  assert.equal(calls.soundboardLookup, 1)
   assert.equal(calls.stageInstances, 1)
   assert.equal(calls.webhooks, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
@@ -1933,6 +2092,35 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     operationKey: OPERATION_KEY,
     tags: "reviewed",
   })
+
+  const soundboard = promptText(await client.getPrompt({
+    arguments: {
+      action: "create",
+      auditReason: "Reviewed soundboard creation",
+      emojiKind: "custom",
+      emojiValue: EMOJI_ID,
+      filePath: "/srv/discord-soundboard/reviewed-sound.mp3",
+      guildId: GUILD_ID,
+      name: "Reviewed sound",
+      operationKey: OPERATION_KEY,
+      volume: "0.75",
+    },
+    name: MCP_PROMPT_NAMES.reviewSoundboardChange,
+  }))
+  assert.deepEqual(JSON.parse(soundboard.split("\n")[1] || ""), {
+    action: "create",
+    auditReason: "Reviewed soundboard creation",
+    emoji: { emojiId: EMOJI_ID, kind: "custom" },
+    filePath: "/srv/discord-soundboard/reviewed-sound.mp3",
+    guildId: GUILD_ID,
+    name: "Reviewed sound",
+    operationKey: OPERATION_KEY,
+    volume: 0.75,
+  })
+  assert.match(soundboard, /Call only plan_guild_soundboard_change/)
+  assert.match(soundboard, /Do not call execute_guild_soundboard_change/)
+  assert.match(soundboard, /ownership-aware CREATE_GUILD_EXPRESSIONS/)
+  assert.match(soundboard, /invalid or changed local audio/)
 
   const automodRequest = {
     action: "create",

@@ -168,6 +168,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    soundboardAuditEnabled: false,
+    soundboardChangesEnabled: false,
+    soundboardCreationEnabled: false,
+    soundboardGuildIds: [],
+    soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
     stageInstanceChangesEnabled: false,
@@ -453,6 +458,11 @@ test("configuration and policy require an exact administration guild and protect
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    soundboardAuditEnabled: false,
+    soundboardChangesEnabled: false,
+    soundboardCreationEnabled: false,
+    soundboardGuildIds: [],
+    soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
     stageInstanceChangesEnabled: false,
@@ -1409,6 +1419,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    soundboardAuditEnabled: false,
+    soundboardChangesEnabled: false,
+    soundboardCreationEnabled: false,
+    soundboardGuildIds: [],
+    soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
     stageInstanceChangesEnabled: false,
@@ -1565,6 +1580,65 @@ test("configuration and policy isolate guild expression audit, changes, and loca
       () => loadConnectorConfig({
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_GUILD_EXPRESSION_ROOTS: "relative/path",
+      }, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
+})
+
+test("configuration and policy isolate soundboard audit, changes, and local audio roots", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-soundboard-"))
+  const root = await realpath(temporary)
+  try {
+    const config = loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
+      DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+      DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_SOUNDBOARD_ROOTS: JSON.stringify([root]),
+    }, { homeDirectory: "/test/home" })
+    const scoped = new ScopePolicy(config)
+
+    assert.equal(config.allowSoundboardAudit, true)
+    assert.equal(config.allowSoundboardChanges, true)
+    assert.deepEqual([...config.soundboardGuildIds], [GUILD_ID])
+    assert.deepEqual(config.soundboardRoots, [root])
+    scoped.assertSoundboardAuditEnabled()
+    scoped.assertSoundboardAuditable(GUILD_ID)
+    scoped.assertSoundboardChangeAllowed(GUILD_ID)
+    assert.throws(
+      () => scoped.assertSoundboardAuditable(OTHER_GUILD_ID),
+      /configured read scope/,
+    )
+    const description = scoped.describe()
+    assert.equal(description.soundboardAuditEnabled, true)
+    assert.equal(description.soundboardChangesEnabled, true)
+    assert.equal(description.soundboardCreationEnabled, true)
+    assert.equal(description.soundboardRootCount, 1)
+    assert.equal(JSON.stringify(description).includes(root), false)
+
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+      }, { homeDirectory: "/test/home" }),
+      /requires DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+        DISCORD_MCP_SOUNDBOARD_GUILD_IDS: OTHER_GUILD_ID,
+      }, { homeDirectory: "/test/home" }),
+      /must be a subset/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_SOUNDBOARD_ROOTS: "relative/path",
       }, { homeDirectory: "/test/home" }),
       ConfigurationError,
     )

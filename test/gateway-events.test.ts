@@ -11,6 +11,8 @@ const OTHER_CHANNEL_ID = "200000000000000003"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const STAGE_INSTANCE_ID = "350000000000000001"
+const SOUND_ID = "360000000000000001"
+const SECOND_SOUND_ID = "360000000000000002"
 const TOKEN = "test-discord-token"
 
 function store(options: {
@@ -247,6 +249,66 @@ test("Gateway Stage-instance dispatches retain only scoped identifiers", () => {
   const rendered = JSON.stringify(events)
   assert.doesNotMatch(rendered, new RegExp(TOKEN))
   assert.doesNotMatch(rendered, /topic|member|scheduledEvent|guildScheduledEvent/)
+})
+
+test("Gateway soundboard dispatches retain only scoped sound identifiers", () => {
+  const feed = store()
+  for (const dispatch of [
+    "GUILD_SOUNDBOARD_SOUND_CREATE",
+    "GUILD_SOUNDBOARD_SOUND_UPDATE",
+    "GUILD_SOUNDBOARD_SOUND_DELETE",
+  ]) {
+    assert.equal(feed.ingestDispatch(dispatch, {
+      emoji_name: TOKEN,
+      guild_id: GUILD_ID,
+      name: `Private sound ${TOKEN}`,
+      sound_id: SOUND_ID,
+      user: { id: MESSAGE_ID, username: TOKEN },
+    }), true)
+  }
+  assert.equal(feed.ingestDispatch("GUILD_SOUNDBOARD_SOUNDS_UPDATE", {
+    guild_id: GUILD_ID,
+    soundboard_sounds: [
+      { name: TOKEN, sound_id: SECOND_SOUND_ID },
+      { name: TOKEN, sound_id: SOUND_ID },
+    ],
+  }), true)
+  assert.equal(feed.ingestDispatch("GUILD_SOUNDBOARD_SOUND_CREATE", {
+    guild_id: OTHER_GUILD_ID,
+    name: TOKEN,
+    sound_id: SOUND_ID,
+  }), false)
+  assert.equal(feed.ingestDispatch("GUILD_SOUNDBOARD_SOUND_CREATE", {
+    guild_id: GUILD_ID,
+    name: TOKEN,
+    sound_id: "invalid",
+  }), false)
+  assert.equal(feed.ingestDispatch("GUILD_SOUNDBOARD_SOUNDS_UPDATE", {
+    guild_id: GUILD_ID,
+    soundboard_sounds: [
+      { name: TOKEN, sound_id: SOUND_ID },
+      { name: TOKEN, sound_id: SOUND_ID },
+    ],
+  }), false)
+
+  const events = feed.listEvents().events
+  assert.deepEqual(events.map((event) => event.kind), [
+    "soundboard-sound-created",
+    "soundboard-sound-updated",
+    "soundboard-sound-deleted",
+    "soundboard-sounds-updated",
+  ])
+  assert.deepEqual(events[0], {
+    cursor: "gw1.testcursor12.0.1",
+    guildId: GUILD_ID,
+    kind: "soundboard-sound-created",
+    receivedAt: "2026-08-19T00:00:00.000Z",
+    soundId: SOUND_ID,
+  })
+  assert.deepEqual(events[3]?.soundIds, [SOUND_ID, SECOND_SOUND_ID])
+  const rendered = JSON.stringify(events)
+  assert.doesNotMatch(rendered, new RegExp(TOKEN))
+  assert.doesNotMatch(rendered, /emoji|name|user/)
 })
 
 test("Gateway cursors report overflow, foreign processes, malformed input, and pagination", () => {

@@ -28,6 +28,7 @@ import {
   redactText,
   RoleConfigurationEvidenceError,
   ScheduledEventEvidenceError,
+  SoundboardEvidenceError,
   StageInstanceEvidenceError,
   WebhookEvidenceError,
 } from "./errors.js"
@@ -36,6 +37,7 @@ import type {
   StickerFileFormat,
 } from "./guild-expression-file.js"
 import type { ScheduledEventCoverFormat } from "./scheduled-event-file.js"
+import type { SoundboardFileFormat } from "./soundboard-file.js"
 import {
   DISCORD_REST_OPERATIONS,
   type DiscordRestOperation,
@@ -427,6 +429,18 @@ export interface DiscordGuildStickerSummary {
   type: number
 }
 
+export interface DiscordSoundboardSoundSummary {
+  available: boolean
+  creatorUserId: string | null
+  emojiId: string | null
+  emojiName: string | null
+  guildId: string | null
+  id: string
+  name: string
+  unknownFieldCount: number
+  volume: number
+}
+
 export const DISCORD_SCHEDULED_EVENT_ENTITY_TYPES = Object.freeze({
   external: 3,
   stage: 1,
@@ -632,6 +646,13 @@ const STICKER_FORMAT_UPLOADS: Readonly<Record<
   lottie: { extension: "json", mediaType: "application/json" },
   png: { extension: "png", mediaType: "image/png" },
 })
+const SOUNDBOARD_FORMAT_MEDIA_TYPES: Readonly<Record<
+  SoundboardFileFormat,
+  "audio/mpeg" | "audio/ogg"
+>> = Object.freeze({
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+})
 const AUTO_MODERATION_EVENT_TYPE_VALUES: ReadonlySet<number> = new Set(
   Object.values(DISCORD_AUTO_MODERATION_EVENT_TYPES),
 )
@@ -809,6 +830,22 @@ export interface ModifyGuildStickerInput {
   tags?: string
 }
 
+export interface CreateGuildSoundboardSoundInput {
+  bytes: Uint8Array
+  emojiId: string | null
+  emojiName: string | null
+  format: SoundboardFileFormat
+  name: string
+  volume: number
+}
+
+export interface ModifyGuildSoundboardSoundInput {
+  emojiId?: string | null
+  emojiName?: string | null
+  name?: string
+  volume?: number | null
+}
+
 export interface EditChannelPermissionOverwriteInput {
   allow: string
   deny: string
@@ -930,14 +967,17 @@ type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
   "create_guild_auto_moderation_rule",
   "create_guild_emoji",
+  "create_guild_soundboard_sound",
   "create_guild_sticker",
   "create_stage_instance",
   "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
+  "delete_guild_soundboard_sound",
   "delete_guild_sticker",
   "delete_stage_instance",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
+  "get_guild_soundboard_sound",
   "get_guild_sticker",
   "get_stage_instance",
   "get_channel_metadata",
@@ -946,8 +986,11 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_guild_emojis",
+  "list_default_soundboard_sounds",
+  "list_guild_soundboard_sounds",
   "list_guild_stickers",
   "modify_guild_emoji",
+  "modify_guild_soundboard_sound",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
   "modify_stage_instance",
@@ -966,6 +1009,17 @@ const STAGE_INSTANCE_RESPONSE_KEYS: ReadonlySet<string> = new Set([
   "id",
   "privacy_level",
   "topic",
+])
+
+const SOUNDBOARD_SOUND_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "available",
+  "emoji_id",
+  "emoji_name",
+  "guild_id",
+  "name",
+  "sound_id",
+  "user",
+  "volume",
 ])
 
 const CHANNEL_METADATA_TYPES: ReadonlySet<number> = new Set([
@@ -1815,6 +1869,123 @@ function projectGuildSticker(
     throw new GuildExpressionEvidenceError("Discord returned an invalid guild sticker object", {
       cause: error,
     })
+  }
+}
+
+function soundboardEvidenceError(
+  message = "Discord returned an invalid soundboard sound",
+  cause?: unknown,
+): SoundboardEvidenceError {
+  return new SoundboardEvidenceError(
+    message,
+    cause === undefined ? undefined : { cause },
+  )
+}
+
+function assertSoundboardName(
+  value: unknown,
+  description: string,
+): asserts value is string {
+  if (
+    typeof value !== "string"
+    || [...value].length < DISCORD_LIMITS.soundboardNameMinimumCharacters
+    || [...value].length > DISCORD_LIMITS.soundboardNameCharacters
+    || value.trim() !== value
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(
+      `${description} must contain ${DISCORD_LIMITS.soundboardNameMinimumCharacters}-${DISCORD_LIMITS.soundboardNameCharacters} trimmed characters without unsupported controls`,
+    )
+  }
+  assertValidUnicode(value, description)
+}
+
+function assertSoundboardEmojiName(
+  value: unknown,
+  description: string,
+): asserts value is string | null {
+  if (value === null) return
+  if (
+    typeof value !== "string"
+    || [...value].length < 1
+    || [...value].length > CONNECTOR_LIMITS.interactionEmojiCharacters
+    || EXPRESSION_TEXT_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(`${description} is invalid`)
+  }
+  assertValidUnicode(value, description)
+}
+
+function projectSoundboardSound(
+  value: unknown,
+  expectedGuildId: string | null,
+): DiscordSoundboardSoundSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw soundboardEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const user = record.user
+  try {
+    assertPositiveSnowflake(record.sound_id as string, "Discord soundboard sound ID")
+    assertSoundboardName(record.name, "Discord soundboard sound name")
+    if (
+      typeof record.volume !== "number"
+      || !Number.isFinite(record.volume)
+      || record.volume < 0
+      || record.volume > 1
+      || typeof record.available !== "boolean"
+      || !(record.emoji_id === null || typeof record.emoji_id === "string")
+      || !(record.guild_id === undefined || typeof record.guild_id === "string")
+      || !(user === undefined || (
+        user !== null
+        && typeof user === "object"
+        && !Array.isArray(user)
+        && typeof (user as Record<string, unknown>).id === "string"
+      ))
+    ) {
+      throw new RangeError("Discord soundboard sound fields are invalid")
+    }
+    assertSoundboardEmojiName(record.emoji_name, "Discord soundboard Unicode emoji")
+    if (typeof record.emoji_id === "string") {
+      assertPositiveSnowflake(record.emoji_id, "Discord soundboard custom emoji ID")
+    }
+    if (record.emoji_id !== null && record.emoji_name !== null) {
+      throw new RangeError("Discord soundboard sound has conflicting emoji fields")
+    }
+    if (expectedGuildId === null) {
+      if (record.guild_id !== undefined) {
+        throw new RangeError("Discord default sound unexpectedly names a guild")
+      }
+    } else {
+      assertPositiveSnowflake(expectedGuildId, "Discord soundboard guild ID")
+      if (typeof record.guild_id === "string") {
+        assertPositiveSnowflake(record.guild_id, "Discord soundboard response guild ID")
+        if (record.guild_id !== expectedGuildId) {
+          throw new RangeError("Discord returned a soundboard sound for another guild")
+        }
+      }
+    }
+    const creatorUserId = expectedGuildId !== null && user !== undefined
+      ? (user as Record<string, unknown>).id as string
+      : null
+    if (creatorUserId !== null) {
+      assertPositiveSnowflake(creatorUserId, "Discord soundboard sound creator ID")
+    }
+    return {
+      available: record.available,
+      creatorUserId,
+      emojiId: record.emoji_id,
+      emojiName: record.emoji_name,
+      guildId: expectedGuildId,
+      id: record.sound_id as string,
+      name: record.name,
+      unknownFieldCount: Object.keys(record)
+        .filter((key) => !SOUNDBOARD_SOUND_RESPONSE_KEYS.has(key)).length,
+      volume: record.volume,
+    }
+  } catch (error) {
+    if (error instanceof SoundboardEvidenceError) throw error
+    throw soundboardEvidenceError(undefined, error)
   }
 }
 
@@ -3691,7 +3862,7 @@ function assertGuildEmojiRoleIds(roleIds: readonly string[]): void {
 function assertGuildExpressionBytes(
   bytes: Uint8Array,
   maximum: number,
-  kind: "emoji" | "sticker",
+  kind: "emoji" | "soundboard" | "sticker",
 ): void {
   if (
     !(bytes instanceof Uint8Array)
@@ -3791,6 +3962,97 @@ function assertModifyGuildStickerInput(input: ModifyGuildStickerInput): void {
   if (input.name !== undefined) assertGuildExpressionName(input.name, "sticker")
   if (input.description !== undefined) assertStickerDescription(input.description)
   if (input.tags !== undefined) assertStickerTags(input.tags)
+}
+
+function assertSoundboardEmojiPair(
+  emojiId: string | null | undefined,
+  emojiName: string | null | undefined,
+  required: boolean,
+): void {
+  if (
+    (required && (emojiId === undefined || emojiName === undefined))
+    || ((emojiId === undefined) !== (emojiName === undefined))
+    || !(emojiId === undefined || emojiId === null || typeof emojiId === "string")
+  ) {
+    throw new RangeError("Discord soundboard emoji fields must be one complete nullable pair")
+  }
+  if (emojiId === undefined || emojiName === undefined) return
+  assertSoundboardEmojiName(emojiName, "Discord soundboard Unicode emoji")
+  if (emojiId !== null) assertPositiveSnowflake(emojiId, "Discord soundboard custom emoji ID")
+  if (emojiId !== null && emojiName !== null) {
+    throw new RangeError("Discord soundboard custom and Unicode emoji are mutually exclusive")
+  }
+  if (emojiName !== null) {
+    const graphemes = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(emojiName)]
+    if (
+      graphemes.length !== 1
+      || POLL_EMOJI_CONTROL_OR_SPACE_PATTERN.test(emojiName)
+      || !POLL_EMOJI_CODE_POINT_PATTERN.test(emojiName)
+    ) {
+      throw new RangeError("Discord soundboard Unicode emoji must be one emoji grapheme")
+    }
+  }
+}
+
+function assertSoundboardVolume(
+  volume: unknown,
+  nullable: boolean,
+): asserts volume is number | null {
+  if (nullable && volume === null) return
+  if (
+    typeof volume !== "number"
+    || !Number.isFinite(volume)
+    || volume < 0
+    || volume > 1
+  ) {
+    throw new RangeError("Discord soundboard volume must be a finite number from 0 through 1")
+  }
+}
+
+function assertCreateGuildSoundboardSoundInput(
+  input: CreateGuildSoundboardSoundInput,
+): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord soundboard creation input must be an object")
+  }
+  assertSoundboardName(input.name, "Discord soundboard sound name")
+  if (input.name.normalize("NFC") !== input.name) {
+    throw new RangeError("Discord soundboard sound name must use NFC normalization")
+  }
+  assertGuildExpressionBytes(input.bytes, DISCORD_LIMITS.soundboardBytes, "soundboard")
+  if (!Object.hasOwn(SOUNDBOARD_FORMAT_MEDIA_TYPES, input.format)) {
+    throw new RangeError("Discord soundboard audio format is unsupported")
+  }
+  assertSoundboardVolume(input.volume, false)
+  assertSoundboardEmojiPair(input.emojiId, input.emojiName, true)
+}
+
+function assertModifyGuildSoundboardSoundInput(
+  input: ModifyGuildSoundboardSoundInput,
+): void {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || (
+      input.name === undefined
+      && input.volume === undefined
+      && input.emojiId === undefined
+      && input.emojiName === undefined
+    )
+  ) {
+    throw new RangeError(
+      "Discord soundboard update must contain a name, volume, or complete emoji pair",
+    )
+  }
+  if (input.name !== undefined) {
+    assertSoundboardName(input.name, "Discord soundboard sound name")
+    if (input.name.normalize("NFC") !== input.name) {
+      throw new RangeError("Discord soundboard sound name must use NFC normalization")
+    }
+  }
+  if (input.volume !== undefined) assertSoundboardVolume(input.volume, true)
+  assertSoundboardEmojiPair(input.emojiId, input.emojiName, false)
 }
 
 function assertAutoModerationInputText(
@@ -5358,6 +5620,175 @@ export class DiscordClient {
     await this.#request<void>(
       "delete_guild_sticker",
       `/guilds/${guildId}/stickers/${stickerId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async listDefaultSoundboardSounds(
+    options: RequestOptions = {},
+  ): Promise<DiscordSoundboardSoundSummary[]> {
+    const response = await this.#request<unknown>(
+      "list_default_soundboard_sounds",
+      "/soundboard-default-sounds",
+      options,
+    )
+    if (!Array.isArray(response) || response.length > DISCORD_LIMITS.soundboardSounds) {
+      throw new SoundboardEvidenceError(
+        "Discord returned an invalid default soundboard inventory",
+      )
+    }
+    const sounds = response.map((sound) => projectSoundboardSound(sound, null))
+    if (new Set(sounds.map((sound) => sound.id)).size !== sounds.length) {
+      throw new SoundboardEvidenceError(
+        "Discord returned duplicate default soundboard sound IDs",
+      )
+    }
+    return sounds.sort((left, right) => {
+      const leftId = BigInt(left.id)
+      const rightId = BigInt(right.id)
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+    })
+  }
+
+  async listGuildSoundboardSounds(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordSoundboardSoundSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord soundboard guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_soundboard_sounds",
+      `/guilds/${guildId}/soundboard-sounds`,
+      options,
+    )
+    if (
+      !response
+      || typeof response !== "object"
+      || Array.isArray(response)
+      || !Array.isArray((response as Record<string, unknown>).items)
+      || ((response as Record<string, unknown>).items as unknown[]).length
+        > DISCORD_LIMITS.soundboardSounds
+      || Object.keys(response).some((key) => key !== "items")
+    ) {
+      throw new SoundboardEvidenceError(
+        "Discord returned an invalid guild soundboard inventory",
+      )
+    }
+    const sounds = ((response as Record<string, unknown>).items as unknown[])
+      .map((sound) => projectSoundboardSound(sound, guildId))
+    if (new Set(sounds.map((sound) => sound.id)).size !== sounds.length) {
+      throw new SoundboardEvidenceError(
+        "Discord returned duplicate guild soundboard sound IDs",
+      )
+    }
+    return sounds.sort((left, right) => {
+      const leftId = BigInt(left.id)
+      const rightId = BigInt(right.id)
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+    })
+  }
+
+  async getGuildSoundboardSound(
+    guildId: string,
+    soundId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordSoundboardSoundSummary> {
+    assertPositiveSnowflake(guildId, "Discord soundboard guild ID")
+    assertPositiveSnowflake(soundId, "Discord soundboard sound ID")
+    const response = await this.#request<unknown>(
+      "get_guild_soundboard_sound",
+      `/guilds/${guildId}/soundboard-sounds/${soundId}`,
+      options,
+    )
+    const sound = projectSoundboardSound(response, guildId)
+    if (sound.id !== soundId) {
+      throw new SoundboardEvidenceError(
+        "Discord returned another soundboard sound for an exact lookup",
+      )
+    }
+    return sound
+  }
+
+  async createGuildSoundboardSound(
+    guildId: string,
+    input: CreateGuildSoundboardSoundInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordSoundboardSoundSummary> {
+    assertPositiveSnowflake(guildId, "Discord soundboard guild ID")
+    assertCreateGuildSoundboardSoundInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const mediaType = SOUNDBOARD_FORMAT_MEDIA_TYPES[input.format]
+    const sound = `data:${mediaType};base64,${Buffer.from(input.bytes).toString("base64")}`
+    const response = await this.#request<unknown>(
+      "create_guild_soundboard_sound",
+      `/guilds/${guildId}/soundboard-sounds`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          emoji_id: input.emojiId,
+          emoji_name: input.emojiName,
+          name: input.name,
+          sound,
+          volume: input.volume,
+        },
+      },
+    )
+    return projectSoundboardSound(response, guildId)
+  }
+
+  async modifyGuildSoundboardSound(
+    guildId: string,
+    soundId: string,
+    input: ModifyGuildSoundboardSoundInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordSoundboardSoundSummary> {
+    assertPositiveSnowflake(guildId, "Discord soundboard guild ID")
+    assertPositiveSnowflake(soundId, "Discord soundboard sound ID")
+    assertModifyGuildSoundboardSoundInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_soundboard_sound",
+      `/guilds/${guildId}/soundboard-sounds/${soundId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          ...(input.emojiId !== undefined ? { emoji_id: input.emojiId } : {}),
+          ...(input.emojiName !== undefined ? { emoji_name: input.emojiName } : {}),
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.volume !== undefined ? { volume: input.volume } : {}),
+        },
+      },
+    )
+    const sound = projectSoundboardSound(response, guildId)
+    if (sound.id !== soundId) {
+      throw new SoundboardEvidenceError(
+        "Discord returned another soundboard sound after an exact update",
+      )
+    }
+    return sound
+  }
+
+  async deleteGuildSoundboardSound(
+    guildId: string,
+    soundId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord soundboard guild ID")
+    assertPositiveSnowflake(soundId, "Discord soundboard sound ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_soundboard_sound",
+      `/guilds/${guildId}/soundboard-sounds/${soundId}`,
       {
         ...options,
         auditReason,

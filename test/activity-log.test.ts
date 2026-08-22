@@ -30,6 +30,7 @@ import {
   type RoleCreationActivity,
   type RoleConfigurationActivity,
   type ScheduledEventActivity,
+  type SoundboardActivity,
   type StageInstanceActivity,
   type ThreadCreationActivity,
   type WebhookDeletionActivity,
@@ -486,6 +487,35 @@ function scheduledEvent(
     schemaVersion: 1,
     status,
     targetStatus: "active",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function soundboard(
+  id: string,
+  status: SoundboardActivity["status"],
+): SoundboardActivity {
+  return {
+    action: "create",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "guild-soundboard-change",
+    operationKeyHash: `sha256:${"c".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
+    schemaVersion: 1,
+    soundId: ["completed", "completed-with-drift", "uncertain"]
+      .includes(status)
+      ? "300"
+      : null,
+    status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -1557,6 +1587,72 @@ test("JSONL activity log keeps scheduled event evidence content-free", async (co
       "schemaVersion",
       "status",
       "targetStatus",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps soundboard evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-audio-bytes",
+    "private-creator-profile",
+    "private-file-path",
+    "private-operation-key",
+    "private-sound-name",
+  ]
+
+  await store.append(soundboard("1", "pending"))
+  await store.append({
+    ...soundboard("2", "completed"),
+    auditReason: privateValues[0],
+    audioBytes: privateValues[1],
+    creatorProfile: privateValues[2],
+    filePath: privateValues[3],
+    operationKey: privateValues[4],
+    name: privateValues[5],
+  } as SoundboardActivity)
+  await store.append({
+    ...soundboard("4", "uncertain"),
+    error: "OperationStoreError",
+  })
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...soundboard("3", "completed"),
+      soundId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["4", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.error, "OperationStoreError")
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "soundId",
+      "status",
       "timestamp",
       "verification",
     ],

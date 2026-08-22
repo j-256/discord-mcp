@@ -45,6 +45,7 @@ type McpToolWorkflow =
   | "forum-post"
   | "guild-scaffold"
   | "guild-expression-change"
+  | "guild-soundboard-change"
   | "invite-deletion"
   | "onboarding-change"
   | "poll-creation"
@@ -135,6 +136,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "delete", "emoji", "execute", "expression", "sticker", "update"],
     toolset: "guild-expressions",
     workflow: "guild-expression-change",
+  },
+  execute_guild_soundboard_change: {
+    keywords: ["audio", "create", "delete", "emoji", "execute", "sound", "soundboard", "update"],
+    toolset: "soundboard",
+    workflow: "guild-soundboard-change",
   },
   execute_invite_deletion: {
     keywords: ["delete", "execute", "invite", "revoke"],
@@ -235,6 +241,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_sticker: {
     keywords: ["exact", "expression", "guild", "lookup", "sticker"],
     toolset: "guild-expressions",
+  },
+  get_guild_soundboard_sound: {
+    keywords: ["audio", "exact", "guild", "lookup", "sound", "soundboard"],
+    toolset: "soundboard",
   },
   get_connector_status: {
     keywords: ["application", "bot", "identity", "scope", "status"],
@@ -340,6 +350,14 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["expression", "guild", "inventory", "list", "sticker"],
     toolset: "guild-expressions",
   },
+  list_default_soundboard_sounds: {
+    keywords: ["audio", "default", "inventory", "list", "sound", "soundboard"],
+    toolset: "soundboard",
+  },
+  list_guild_soundboard_sounds: {
+    keywords: ["audio", "guild", "inventory", "list", "sound", "soundboard"],
+    toolset: "soundboard",
+  },
   list_roles: {
     keywords: ["guild", "hierarchy", "list", "permission", "role"],
     toolset: "roles",
@@ -410,6 +428,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "delete", "emoji", "expression", "plan", "review", "sticker", "update"],
     toolset: "guild-expressions",
     workflow: "guild-expression-change",
+  },
+  plan_guild_soundboard_change: {
+    keywords: ["audio", "create", "delete", "emoji", "plan", "review", "sound", "soundboard", "update"],
+    toolset: "soundboard",
+    workflow: "guild-soundboard-change",
   },
   plan_invite_deletion: {
     keywords: ["delete", "invite", "plan", "review", "revoke"],

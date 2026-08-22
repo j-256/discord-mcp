@@ -230,6 +230,8 @@ export function registerDiscordResources(
           "",
           "Guild emoji and sticker inventory requires a separate exact guild allowlist and returns bounded stable metadata plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. CDN URLs, image bytes, uploader profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local files from dedicated roots, detects the actual container format and animation state, records dimensions where encoded, enforces byte limits plus sticker dimensions and duration, requires fresh VERIFIED or PARTNERED feature evidence for Lottie, and binds the file snapshot into the digest. Every create, update, or delete requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Name collisions, missing role references, managed emoji mutation, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, retries, rolls back, or persists expression content.",
           "",
+          "Soundboard inventory requires a separate feature gate, and guild inventory requires an exact guild allowlist plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. Audio bytes, CDN URLs, creator profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local MP3 or Ogg files from dedicated roots, validates container structure and duration, and binds the stable file snapshot into the keyed plan. Every create, metadata update, or delete requires fresh matching evidence, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Normalized-name collisions, missing custom emoji references, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, plays audio, retries, rolls back, or persists sound content.",
+          "",
           "AutoMod inventory requires a separate exact guild allowlist. Bounded list results expose policy-entry counts and reference health without policy strings; exact lookup returns the projected policy transiently for deliberate review. Action-execution content, matched content, matched keywords, and unknown raw fields are never exposed or persisted. Changes require an additional feature gate, complete MANAGE_GUILD evidence, MODERATE_MEMBERS for timeout actions, strict trigger-action compatibility, exact role and channel references, and separately allowlisted visible text or announcement channels for alerts. New rules are always disabled; policy updates and deletion require a disabled rule; enabling and disabling are separate reviewed actions. Every change requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact state or absence readback. Same-guild uncertain outcomes fail closed; no operation retries, rolls back, or persists policy names, strings, audit reasons, or raw operation keys.",
           "",
           "Scheduled-event inventory requires a separate exact guild allowlist and returns bounded privacy-safe metadata plus complete entity-specific read evidence. Subscriber counts are aggregate and opt-in; subscriber identities, creator profiles, cover URLs and hashes, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate and validate ownership, state transitions, future timing, visible capacity, destination channel type and permissions, and Discord-supported recurrence shapes. Cover changes accept only bounded canonical owned JPEG or non-animated PNG files from dedicated roots. Every create, update, transition, or delete requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact state or absence readback. Same-guild uncertain outcomes fail closed; no operation accepts a URL or base64 payload, exposes subscriber identities, retries, rolls back, or persists event content.",
@@ -305,6 +307,27 @@ export function registerDiscordResources(
       secrets,
       () => service.listGuilds({
         limit: DISCORD_LIMITS.currentUserGuilds,
+        signal: context.mcpReq.signal,
+      }),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.defaultSoundboard,
+    MCP_RESOURCE_URIS.defaultSoundboard,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded privacy-safe Discord default soundboard inventory. Audio bytes, CDN URLs, creator profiles, and unknown raw fields are omitted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord default soundboard sounds",
+    },
+    (uri, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listDefaultSoundboardSounds({
         signal: context.mcpReq.signal,
       }),
     ),
@@ -403,6 +426,55 @@ export function registerDiscordResources(
       () => service.listGuildExpressions(
         templateSnowflake(variables, "guildId"),
         "sticker",
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildSoundboard,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildSoundboard, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded privacy-safe soundboard inventory and ownership-aware connector permission evidence for one exact separately allowlisted Discord guild. Audio bytes, CDN URLs, creator profiles, and unknown raw fields are omitted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord guild soundboard",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listGuildSoundboardSounds(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.exactGuildSoundboardSound,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.exactGuildSoundboardSound, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact privacy-safe Discord guild soundboard sound with fresh complete inventory and ownership-aware connector permission evidence. Audio bytes, CDN URLs, creator profiles, and unknown raw fields are omitted.",
+      mimeType: "application/json",
+      title: "Exact privacy-safe Discord guild soundboard sound",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildSoundboardSound(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "soundId"),
         { signal: context.mcpReq.signal },
       ),
     ),

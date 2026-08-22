@@ -109,6 +109,12 @@ import type {
   StageInstancePlan,
   StageInstancePrivacyProjection,
 } from "../src/stage-instance-service.js"
+import type {
+  ProjectedSoundboardSound,
+  SoundboardChangeRequest,
+  SoundboardPlan,
+  SoundboardPrivacyProjection,
+} from "../src/soundboard-service.js"
 import {
   AdministrationExecutionError,
   AttachmentMessageExecutionError,
@@ -147,6 +153,8 @@ import {
   RoleConfigurationOperationConflictError,
   ScheduledEventExecutionError,
   ScheduledEventOperationConflictError,
+  SoundboardExecutionError,
+  SoundboardOperationConflictError,
   StageInstanceExecutionError,
   StageInstanceOperationConflictError,
   ThreadCreationExecutionError,
@@ -237,6 +245,9 @@ const EMOJI_ID = "380000000000000001"
 const STICKER_ID = "390000000000000001"
 const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
 const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
+const SOUNDBOARD_SOUND_ID = "391000000000000001"
+const SOUNDBOARD_OPERATION_KEY = "soundboard-change-attempt-0001"
+const SOUNDBOARD_PATH = "/test/discord-mcp/reviewed-sound.mp3"
 const AUTOMOD_RULE_ID = "392000000000000001"
 const AUTOMOD_OPERATION_KEY = "automod-attempt-0001"
 const SCHEDULED_EVENT_ID = "395000000000000001"
@@ -1190,6 +1201,138 @@ function guildExpressionPlan(
       safetyLimit: request.kind === "emoji" ? 1_000 : 100,
     },
     warnings: ["One-shot reviewed guild expression change"],
+  }
+}
+
+function soundboardPrivacy(): SoundboardPrivacyProjection {
+  return {
+    audioPersisted: false,
+    creatorProfilesExposed: false,
+    omittedFields: [
+      "audioBytes",
+      "cdnUrl",
+      "creatorProfile",
+      "rawDiscordObject",
+    ],
+    privateFieldsProjectedOut: true,
+  }
+}
+
+function projectedSoundboardSound(
+  soundId = SOUNDBOARD_SOUND_ID,
+): ProjectedSoundboardSound {
+  return {
+    available: true,
+    creatorUserId: BOT_ID,
+    emoji: { emojiName: "🔔", kind: "unicode" },
+    guildId: GUILD_ID,
+    name: "Reviewed sound",
+    soundId,
+    unknownFieldCount: 0,
+    volume: 0.75,
+  }
+}
+
+function soundboardPlan(
+  request: SoundboardChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): SoundboardPlan {
+  const existing = request.action === "create"
+    ? null
+    : projectedSoundboardSound(request.soundId)
+  const desired = request.action === "delete"
+    ? null
+    : request.action === "create"
+      ? {
+          available: true,
+          creatorUserId: BOT_ID,
+          emoji: request.emoji,
+          guildId: request.guildId,
+          name: request.name,
+          soundId: null,
+          volume: request.volume,
+        }
+      : {
+          available: existing!.available,
+          creatorUserId: existing!.creatorUserId as string,
+          emoji: request.emoji ?? existing!.emoji,
+          guildId: request.guildId,
+          name: request.name ?? existing!.name,
+          soundId: request.soundId,
+          volume: request.volume ?? existing!.volume,
+        }
+  const requestedEmoji = request.action === "create"
+    ? request.emoji
+    : request.action === "update"
+      ? request.emoji
+      : undefined
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-21T00:00:00.000Z",
+    customEmoji: requestedEmoji?.kind === "custom"
+      ? {
+          animated: false,
+          available: true,
+          emojiId: requestedEmoji.emojiId,
+          managed: false,
+          name: "reviewed_emoji",
+        }
+      : null,
+    desired,
+    digest,
+    effect,
+    existing,
+    file: request.action === "create"
+      ? {
+          contentDigest: `hmac-sha256:${"e".repeat(64)}`,
+          review: {
+            canonicalPath: request.filePath,
+            codec: "mpeg-1-layer-3",
+            containedByConfiguredRoot: true,
+            durationSeconds: 1.25,
+            format: "mp3",
+            mediaType: "audio/mpeg",
+            ownerMatchesProcess: true,
+            regularFile: true,
+            singleLink: true,
+            sizeBytes: 256,
+            stableRead: true,
+          },
+        }
+      : null,
+    guild: { id: request.guildId, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      appliedRoleIds: [request.guildId],
+      confidence: "complete",
+      createGuildExpressions: true,
+      effectivePermissionNames: [
+        "CREATE_GUILD_EXPRESSIONS",
+        "MANAGE_GUILD_EXPRESSIONS",
+      ],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.CREATE_GUILD_EXPRESSIONS
+        | DISCORD_PERMISSIONS.MANAGE_GUILD_EXPRESSIONS
+      ).toString(),
+      guildOwner: false,
+      manageGuildExpressions: true,
+      ownershipRequired: false,
+      warnings: [],
+    },
+    privacy: soundboardPrivacy(),
+    schemaVersion: 1,
+    soundId: request.action === "create" ? null : request.soundId,
+    status: effect === "none" ? "already-current" : "planned",
+    visibleInventory: {
+      returned: 1,
+      safetyLimit: 250,
+    },
+    warnings: ["One-shot reviewed guild soundboard change"],
   }
 }
 
@@ -2500,6 +2643,11 @@ function fixturePolicy(): PolicyDescription {
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    soundboardAuditEnabled: false,
+    soundboardChangesEnabled: false,
+    soundboardCreationEnabled: false,
+    soundboardGuildIds: [],
+    soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
     stageInstanceChangesEnabled: false,
@@ -2598,6 +2746,9 @@ function serviceFixture(overrides: {
   scheduledEventEffect?: "change" | "none"
   scheduledEventError?: Error
   scheduledEventPlanDigest?: string
+  soundboardEffect?: "change" | "none"
+  soundboardError?: Error
+  soundboardPlanDigest?: string
   stageInstanceEffect?: "change" | "none"
   stageInstanceError?: Error
   stageInstancePlanDigest?: string
@@ -2674,6 +2825,11 @@ function serviceFixture(overrides: {
     scheduledEventGet: 0,
     scheduledEventList: 0,
     scheduledEventPlan: 0,
+    soundboardDefaultList: 0,
+    soundboardExecute: 0,
+    soundboardGet: 0,
+    soundboardGuildList: 0,
+    soundboardPlan: 0,
     stageInstanceExecute: 0,
     stageInstanceGet: 0,
     stageInstanceList: 0,
@@ -3093,6 +3249,84 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: planned.effect === "none" ? "already-current" : "completed",
       }
+    },
+    async executeSoundboardChange(request, planDigest) {
+      if (overrides.soundboardError) throw overrides.soundboardError
+      calls.soundboardExecute += 1
+      const planned = soundboardPlan(
+        request,
+        planDigest,
+        overrides.soundboardEffect,
+      )
+      const soundId = request.action === "create"
+        ? SOUNDBOARD_SOUND_ID
+        : request.soundId
+      return {
+        action: request.action,
+        activityId: planned.effect === "none" ? null : "activity-soundboard",
+        guildId: request.guildId,
+        observed: request.action === "delete"
+          ? null
+          : { ...planned.desired, soundId } as ProjectedSoundboardSound,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        soundId,
+        status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
+    async getGuildSoundboardSound(guildId, soundId) {
+      calls.soundboardGet += 1
+      return {
+        guild: { id: guildId, name: "Private guild name" },
+        permission: soundboardPlan({
+          action: "delete",
+          auditReason: AUDIT_REASON,
+          guildId,
+          operationKey: SOUNDBOARD_OPERATION_KEY,
+          soundId,
+        }).permission,
+        privacy: soundboardPrivacy(),
+        schemaVersion: 1,
+        sound: projectedSoundboardSound(soundId),
+        status: "ok",
+      }
+    },
+    async listDefaultSoundboardSounds() {
+      calls.soundboardDefaultList += 1
+      return {
+        page: { returned: 1, safetyLimit: 250 },
+        privacy: soundboardPrivacy(),
+        schemaVersion: 1,
+        sounds: [{ ...projectedSoundboardSound(), creatorUserId: null, guildId: null }],
+        status: "ok",
+      }
+    },
+    async listGuildSoundboardSounds(guildId) {
+      calls.soundboardGuildList += 1
+      return {
+        guild: { id: guildId, name: "Private guild name" },
+        page: { returned: 1, safetyLimit: 250 },
+        permission: soundboardPlan({
+          action: "delete",
+          auditReason: AUDIT_REASON,
+          guildId,
+          operationKey: SOUNDBOARD_OPERATION_KEY,
+          soundId: SOUNDBOARD_SOUND_ID,
+        }).permission,
+        privacy: soundboardPrivacy(),
+        schemaVersion: 1,
+        sounds: [projectedSoundboardSound()],
+        status: "ok",
+      }
+    },
+    async planSoundboardChange(request) {
+      calls.soundboardPlan += 1
+      return soundboardPlan(
+        request,
+        overrides.soundboardPlanDigest || DIGEST,
+        overrides.soundboardEffect,
+      )
     },
     async getGuildExpression(guildId, kind, expressionId) {
       calls.guildExpressionGet += 1
@@ -4299,6 +4533,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_emoji",
       "list_guild_stickers",
       "get_guild_sticker",
+      "list_default_soundboard_sounds",
+      "list_guild_soundboard_sounds",
+      "get_guild_soundboard_sound",
       "list_automod_rules",
       "get_automod_rule",
       "list_scheduled_events",
@@ -4325,6 +4562,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_onboarding_change",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
+      "plan_guild_soundboard_change",
+      "execute_guild_soundboard_change",
       "plan_automod_change",
       "execute_automod_change",
       "plan_scheduled_event_change",
@@ -4366,6 +4605,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
+  const soundboard = result.tools.find((tool) => (
+    tool.name === "execute_guild_soundboard_change"
+  ))
   const scheduledEvent = result.tools.find((tool) => (
     tool.name === "execute_scheduled_event_change"
   ))
@@ -4392,6 +4634,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     inviteDeletion,
     onboarding,
     guildExpression,
+    soundboard,
     scheduledEvent,
     channelMetadata,
     permissionOverwrite,
@@ -4429,6 +4672,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_guild_emoji",
     "list_guild_stickers",
     "get_guild_sticker",
+    "list_default_soundboard_sounds",
+    "list_guild_soundboard_sounds",
+    "get_guild_soundboard_sound",
     "list_scheduled_events",
     "get_scheduled_event",
     "get_channel",
@@ -4443,6 +4689,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_invite_deletion",
     "plan_onboarding_change",
     "plan_guild_expression_change",
+    "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
     "plan_role_configuration",
   ]) {
@@ -5104,6 +5351,30 @@ test("progressive discovery enables the complete reviewed guild-expression workf
   )
 })
 
+test("progressive discovery enables the complete reviewed soundboard workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_soundboard_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_soundboard_change",
+    "plan_guild_soundboard_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_soundboard_change",
+      "execute_guild_soundboard_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed AutoMod workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -5387,6 +5658,11 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     scheduledEventGet: 0,
     scheduledEventList: 0,
     scheduledEventPlan: 0,
+    soundboardDefaultList: 0,
+    soundboardExecute: 0,
+    soundboardGet: 0,
+    soundboardGuildList: 0,
+    soundboardPlan: 0,
     stageInstanceExecute: 0,
     stageInstanceGet: 0,
     stageInstanceList: 0,
@@ -8063,6 +8339,296 @@ test("MCP guild expression execution exposes uncertain and one-shot conflict out
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(GUILD_EXPRESSION_OPERATION_KEY),
+  )
+})
+
+test("MCP soundboard reads expose only bounded privacy-safe evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const defaults = await client.callTool({
+    arguments: {},
+    name: "list_default_soundboard_sounds",
+  })
+  const guild = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_guild_soundboard_sounds",
+  })
+  const exact = await client.callTool({
+    arguments: { guildId: GUILD_ID, soundId: SOUNDBOARD_SOUND_ID },
+    name: "get_guild_soundboard_sound",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: GUILD_ID, soundId: "invalid" },
+    name: "get_guild_soundboard_sound",
+  })
+
+  const defaultSound = (
+    structuredContent(defaults).sounds as Array<Record<string, unknown>>
+  )[0]
+  const guildSound = (
+    structuredContent(guild).sounds as Array<Record<string, unknown>>
+  )[0]
+  const exactSound = structuredContent(exact).sound as Record<string, unknown>
+  assert.deepEqual(Object.keys(guildSound || {}).sort(), [
+    "available",
+    "creatorUserId",
+    "emoji",
+    "guildId",
+    "name",
+    "soundId",
+    "unknownFieldCount",
+    "volume",
+  ])
+  assert.deepEqual(Object.keys(exactSound).sort(), Object.keys(guildSound || {}).sort())
+  assert.equal(defaultSound?.guildId, null)
+  assert.equal(defaultSound?.creatorUserId, null)
+  assert.equal(guildSound?.soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(exactSound.soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(
+    (structuredContent(guild).privacy as Record<string, unknown>).audioPersisted,
+    false,
+  )
+  for (const value of [defaults, guild, exact]) {
+    const serialized = JSON.stringify(value)
+    assert.doesNotMatch(serialized, /cdn\.discordapp\.com|https?:\/\//)
+    assert.equal(serialized.includes("audioBytes"), true)
+  }
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.soundboardDefaultList, 1)
+  assert.equal(calls.soundboardGuildList, 1)
+  assert.equal(calls.soundboardGet, 1)
+})
+
+test("MCP soundboard plans accept exact actions and reject transported audio", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const validRequests = [{
+    action: "create",
+    auditReason: AUDIT_REASON,
+    emoji: { emojiId: EMOJI_ID, kind: "custom" },
+    filePath: SOUNDBOARD_PATH,
+    guildId: GUILD_ID,
+    name: "Reviewed sound",
+    operationKey: SOUNDBOARD_OPERATION_KEY,
+    volume: 0.75,
+  }, {
+    action: "update",
+    auditReason: AUDIT_REASON,
+    emoji: { kind: "none" },
+    guildId: GUILD_ID,
+    name: "Updated sound",
+    operationKey: SOUNDBOARD_OPERATION_KEY,
+    soundId: SOUNDBOARD_SOUND_ID,
+    volume: 0,
+  }, {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: SOUNDBOARD_OPERATION_KEY,
+    soundId: SOUNDBOARD_SOUND_ID,
+  }]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_guild_soundboard_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(SOUNDBOARD_OPERATION_KEY))
+  }
+
+  const invalidRequests = [
+    { ...validRequests[0], sound: "data:audio/mpeg;base64,AAAA" },
+    { ...validRequests[0], soundUrl: "https://cdn.example/reviewed.mp3" },
+    { ...validRequests[0], filePath: "relative/reviewed.mp3" },
+    { ...validRequests[0], emoji: { emojiName: "not emoji", kind: "unicode" } },
+    { ...validRequests[0], volume: 1.01 },
+    { ...validRequests[0], name: "Cafe\u0301 sound" },
+    {
+      action: "update",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: SOUNDBOARD_OPERATION_KEY,
+      soundId: SOUNDBOARD_SOUND_ID,
+    },
+    { ...validRequests[2], name: "not-accepted" },
+    { ...validRequests[2], operationKey: "short" },
+  ]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_guild_soundboard_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.soundboardPlan, validRequests.length)
+})
+
+test("MCP soundboard execution binds signed approval to exact reviewed evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      auditReason: AUDIT_REASON,
+      emoji: { emojiId: EMOJI_ID, kind: "custom" },
+      filePath: SOUNDBOARD_PATH,
+      guildId: GUILD_ID,
+      name: "Reviewed sound",
+      operationKey: SOUNDBOARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      volume: 0.75,
+    },
+    name: "execute_guild_soundboard_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(calls.soundboardPlan, 1)
+  assert.equal(calls.soundboardExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    SOUNDBOARD_PATH,
+    EMOJI_ID,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /File format: mp3/)
+  assert.match(confirmationMessage, /File codec: mpeg-1-layer-3/)
+  assert.match(confirmationMessage, /File duration: 1.25 seconds/)
+  assert.match(confirmationMessage, /Bot CREATE_GUILD_EXPRESSIONS: true/)
+  assert.match(confirmationMessage, /Bot MANAGE_GUILD_EXPRESSIONS: true/)
+  assert.match(confirmationMessage, /Regular owned single-link file: true/)
+  assert.match(confirmationMessage, /Private fields projected out:/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(SOUNDBOARD_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(SOUNDBOARD_OPERATION_KEY),
+  )
+})
+
+test("MCP soundboard execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    action: "update",
+    auditReason: AUDIT_REASON,
+    emoji: { emojiName: "🔔", kind: "unicode" },
+    guildId: GUILD_ID,
+    name: "Reviewed sound",
+    operationKey: SOUNDBOARD_OPERATION_KEY,
+    planDigest: DIGEST,
+    soundId: SOUNDBOARD_SOUND_ID,
+    volume: 0.75,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { soundboardEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_soundboard_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.soundboardExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_soundboard_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.soundboardExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { soundboardPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_soundboard_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.soundboardExecute, 0)
+})
+
+test("MCP soundboard execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: SOUNDBOARD_OPERATION_KEY,
+    planDigest: DIGEST,
+    soundId: SOUNDBOARD_SOUND_ID,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      soundboardError: new SoundboardExecutionError(
+        "Discord guild soundboard outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_soundboard_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-soundboard",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    soundId: SOUNDBOARD_SOUND_ID,
+    status: "completed" as const,
+    timestamp: "2026-08-21T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      soundboardError: new SoundboardOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_soundboard_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(SOUNDBOARD_OPERATION_KEY),
   )
 })
 
@@ -11356,7 +11922,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
 
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
-  assert.equal(resources.resources.length, 7)
+  assert.equal(resources.resources.length, Object.keys(MCP_RESOURCE_URIS).length)
   assert.equal(
     templates.resourceTemplates.length,
     Object.keys(MCP_RESOURCE_TEMPLATE_NAMES).length,

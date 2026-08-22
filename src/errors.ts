@@ -442,6 +442,42 @@ export class GuildExpressionEvidenceError extends Error {
   override name = "GuildExpressionEvidenceError"
 }
 
+export class SoundboardPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild soundboard snapshot does not match the reviewed plan")
+    this.name = "SoundboardPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class SoundboardOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild soundboard operation key has already been reserved")
+    this.name = "SoundboardOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class SoundboardExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "SoundboardExecutionError"
+    this.result = result
+  }
+}
+
+export class SoundboardEvidenceError extends Error {
+  override name = "SoundboardEvidenceError"
+}
+
 export class OnboardingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

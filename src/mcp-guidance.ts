@@ -16,6 +16,7 @@ export type DiscordGuidanceService = Pick<
   | "getGuildBan"
   | "getGuildInvite"
   | "getGuildOnboarding"
+  | "getGuildSoundboardSound"
   | "getMessage"
   | "getRole"
   | "getStageInstance"
@@ -26,6 +27,8 @@ export type DiscordGuidanceService = Pick<
   | "listChannelWebhooks"
   | "listGuilds"
   | "listGuildExpressions"
+  | "listDefaultSoundboardSounds"
+  | "listGuildSoundboardSounds"
   | "listScheduledEvents"
   | "listRoles"
 >

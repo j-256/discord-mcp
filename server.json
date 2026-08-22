@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, stage-instances, threads, webhooks, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, threads, webhooks, or all",
           "default": "all",
           "format": "string"
         },
@@ -661,6 +661,34 @@
         {
           "name": "DISCORD_MCP_SCHEDULED_EVENT_ROOTS",
           "description": "One absolute canonical directory or JSON array of directories containing eligible owned JPEG or non-animated PNG covers",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT",
+          "description": "Enable privacy-safe default and guild soundboard inventory when an exact guild allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES",
+          "description": "Enable reviewed guild soundboard creation, update, and deletion; requires soundboard audit",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_SOUNDBOARD_GUILD_IDS",
+          "description": "Exact guild IDs eligible for privacy-safe soundboard inventory and reviewed changes",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_SOUNDBOARD_ROOTS",
+          "description": "One absolute canonical directory or JSON array of directories containing eligible owned MP3 or Ogg sound files",
           "format": "string"
         },
         {

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto"
 import {
   CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
+  DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
   GATEWAY_DEFAULTS,
   SCHEMA_VERSION,
@@ -29,6 +30,10 @@ export const GATEWAY_EVENT_KINDS = [
   "role-created",
   "role-deleted",
   "role-updated",
+  "soundboard-sound-created",
+  "soundboard-sound-deleted",
+  "soundboard-sound-updated",
+  "soundboard-sounds-updated",
   "stage-instance-created",
   "stage-instance-deleted",
   "stage-instance-updated",
@@ -81,6 +86,8 @@ export interface ContentFreeGatewayEvent {
   parentChannelId?: string
   receivedAt: string
   roleId?: string
+  soundId?: string
+  soundIds?: string[]
   stageInstanceId?: string
 }
 
@@ -178,6 +185,8 @@ interface EventFields {
   messageIds?: string[]
   parentChannelId?: string
   roleId?: string
+  soundId?: string
+  soundIds?: string[]
   stageInstanceId?: string
 }
 
@@ -209,6 +218,17 @@ function snowflakeList(value: unknown): string[] | undefined {
 
 function integerValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined
+}
+
+function soundboardSoundIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > DISCORD_LIMITS.soundboardSounds) {
+    return undefined
+  }
+  const ids = value.map((entry) => snowflake(recordValue(entry)?.sound_id))
+  if (ids.some((id) => !id)) return undefined
+  const unique = new Set(ids as string[])
+  if (unique.size !== ids.length) return undefined
+  return [...unique].sort()
 }
 
 function channelFields(value: unknown, fallbackGuildId?: string): {
@@ -377,6 +397,8 @@ export class GatewayEventStore implements GatewayEventSource {
       ...(fields.messageIds ? { messageIds: [...fields.messageIds] } : {}),
       ...(fields.parentChannelId ? { parentChannelId: fields.parentChannelId } : {}),
       ...(fields.roleId ? { roleId: fields.roleId } : {}),
+      ...(fields.soundId ? { soundId: fields.soundId } : {}),
+      ...(fields.soundIds ? { soundIds: [...fields.soundIds] } : {}),
       ...(fields.stageInstanceId ? { stageInstanceId: fields.stageInstanceId } : {}),
     }
     this.#events.push(event)
@@ -514,6 +536,28 @@ export class GatewayEventStore implements GatewayEventSource {
     return true
   }
 
+  #soundboardSoundEvent(kind: GatewayEventKind, raw: unknown): boolean {
+    const record = recordValue(raw)
+    const guildId = snowflake(record?.guild_id)
+    const soundId = snowflake(record?.sound_id)
+    if (!guildId || !soundId || !this.#guildEventAllowed(guildId)) return false
+    this.#append({ guildId, kind, soundId })
+    return true
+  }
+
+  #soundboardSoundsEvent(raw: unknown): boolean {
+    const record = recordValue(raw)
+    const guildId = snowflake(record?.guild_id)
+    const soundIds = soundboardSoundIds(record?.soundboard_sounds)
+    if (!guildId || !soundIds || !this.#guildEventAllowed(guildId)) return false
+    this.#append({
+      guildId,
+      kind: "soundboard-sounds-updated",
+      soundIds,
+    })
+    return true
+  }
+
   ingestDispatch(name: string, raw: unknown): boolean {
     if (!this.enabled) return false
     switch (name) {
@@ -601,6 +645,14 @@ export class GatewayEventStore implements GatewayEventSource {
         return this.#roleEvent("role-updated", raw)
       case "GUILD_ROLE_DELETE":
         return this.#roleEvent("role-deleted", raw)
+      case "GUILD_SOUNDBOARD_SOUND_CREATE":
+        return this.#soundboardSoundEvent("soundboard-sound-created", raw)
+      case "GUILD_SOUNDBOARD_SOUND_UPDATE":
+        return this.#soundboardSoundEvent("soundboard-sound-updated", raw)
+      case "GUILD_SOUNDBOARD_SOUND_DELETE":
+        return this.#soundboardSoundEvent("soundboard-sound-deleted", raw)
+      case "GUILD_SOUNDBOARD_SOUNDS_UPDATE":
+        return this.#soundboardSoundsEvent(raw)
       case "STAGE_INSTANCE_CREATE":
         return this.#stageInstanceEvent("stage-instance-created", raw)
       case "STAGE_INSTANCE_UPDATE":

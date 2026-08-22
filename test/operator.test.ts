@@ -102,6 +102,11 @@ function status(
       scheduledEventCoverChangesEnabled: false,
       scheduledEventGuildIds: [],
       scheduledEventRootCount: 0,
+      soundboardAuditEnabled: false,
+      soundboardChangesEnabled: false,
+      soundboardCreationEnabled: false,
+      soundboardGuildIds: [],
+      soundboardRootCount: 0,
       stageChannelIds: [],
       stageInstanceAuditEnabled: false,
       stageInstanceChangesEnabled: false,
@@ -168,6 +173,7 @@ function toolService(): DiscordToolService {
     executeMemberRoleChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
+    executeSoundboardChange: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
     executePollCreation: unexpected,
@@ -176,6 +182,7 @@ function toolService(): DiscordToolService {
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
     getGuildExpression: unexpected,
+    getGuildSoundboardSound: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getStageInstance: unexpected,
@@ -186,6 +193,8 @@ function toolService(): DiscordToolService {
     listChannelWebhooks: unexpected,
     listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
+    listDefaultSoundboardSounds: unexpected,
+    listGuildSoundboardSounds: unexpected,
     listAutoModerationRules: unexpected,
     listScheduledEvents: unexpected,
     listStageInstances: unexpected,
@@ -193,6 +202,7 @@ function toolService(): DiscordToolService {
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
     planGuildExpressionChange: unexpected,
+    planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
     planScheduledEventChange: unexpected,
@@ -1078,6 +1088,83 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   )
   assert.match(setup.warnings.join("\n"), /cover updates remain blocked/)
   assert.match(omitted.warnings.join("\n"), /scheduled-events toolset/)
+})
+
+test("doctor and setup explain privacy-safe reviewed soundboard scope", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-soundboard-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const canonicalRoot = await realpath(root)
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+    DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_SOUNDBOARD_ROOTS: canonicalRoot,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const missingGuildEnvironment = environment({
+    DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+  })
+  const missingGuild = await diagnoseConnector({
+    environment: missingGuildEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const missingRootEnvironment = environment({
+    DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
+    DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+    DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
+  })
+  const missingRoot = await diagnoseConnector({
+    environment: missingRootEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: missingRootEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /privacy-safe default and guild soundboard inventory/i)
+  assert.match(audit?.summary || "", /1 exact guilds/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /1 canonical creation roots/)
+  assert.match(changes?.summary || "", /exact metadata or absence readback/)
+  assert.equal(
+    missingGuild.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    missingGuild.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    missingRoot.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /creation remains blocked/)
+  assert.match(omitted.warnings.join("\n"), /soundboard toolset/)
 })
 
 test("doctor and setup explain reviewed Stage-instance scope", async () => {
@@ -2022,6 +2109,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_role_configuration",
     "review_role_creation",
     "review_scheduled_event_change",
+    "review_soundboard_change",
     "review_stage_instance_change",
     "review_webhook_deletion",
     "search_guild_messages",
@@ -2035,6 +2123,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://gateway/events",
     "discord://gateway/status",
     "discord://guilds",
+    "discord://soundboard/defaults",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://channels/{channelId}",
@@ -2053,6 +2142,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
     "discord://guilds/{guildId}/scheduled-events",
+    "discord://guilds/{guildId}/soundboard",
+    "discord://guilds/{guildId}/soundboard/{soundId}",
     "discord://guilds/{guildId}/stickers",
   ])
   assert.deepEqual(report.destructiveTools, [
@@ -2062,6 +2153,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_metadata_change",
     "execute_channel_permission_overwrite",
     "execute_guild_expression_change",
+    "execute_guild_soundboard_change",
     "execute_invite_deletion",
     "execute_member_moderation",
     "execute_member_role_change",

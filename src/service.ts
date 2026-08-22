@@ -232,6 +232,19 @@ import type {
 } from "./scheduled-event-service.js"
 import { ScheduledEventService } from "./scheduled-event-service.js"
 import type {
+  DefaultSoundboardInventoryResult,
+  GuildSoundboardInventoryResult,
+  GuildSoundboardLookupResult,
+  SoundboardChangeRequest,
+  SoundboardPlan,
+  SoundboardResult,
+  SoundboardServiceOptions,
+} from "./soundboard-service.js"
+import {
+  normalizeSoundboardChangeRequest,
+  SoundboardService,
+} from "./soundboard-service.js"
+import type {
   StageInstanceChangeRequest,
   StageInstanceInventoryResult,
   StageInstanceLookupResult,
@@ -288,6 +301,7 @@ export interface DiscordServiceClient {
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
+  createGuildSoundboardSound: DiscordClient["createGuildSoundboardSound"]
   createGuildSticker: DiscordClient["createGuildSticker"]
   createStageInstance: DiscordClient["createStageInstance"]
   createForumPost: DiscordClient["createForumPost"]
@@ -301,6 +315,7 @@ export interface DiscordServiceClient {
   deleteMessage: DiscordClient["deleteMessage"]
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
   deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
+  deleteGuildSoundboardSound: DiscordClient["deleteGuildSoundboardSound"]
   deleteGuildSticker: DiscordClient["deleteGuildSticker"]
   deleteStageInstance: DiscordClient["deleteStageInstance"]
   deleteInvite: DiscordClient["deleteInvite"]
@@ -324,6 +339,7 @@ export interface DiscordServiceClient {
   getGuildRoleMemberCounts: DiscordClient["getGuildRoleMemberCounts"]
   getGuildRoles: DiscordClient["getGuildRoles"]
   getGuildScheduledEvent: DiscordClient["getGuildScheduledEvent"]
+  getGuildSoundboardSound: DiscordClient["getGuildSoundboardSound"]
   getGuildSticker: DiscordClient["getGuildSticker"]
   getStageInstance: DiscordClient["getStageInstance"]
   getMessage: DiscordClient["getMessage"]
@@ -337,12 +353,14 @@ export interface DiscordServiceClient {
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
+  listGuildSoundboardSounds: DiscordClient["listGuildSoundboardSounds"]
   listGuildEmojis: DiscordClient["listGuildEmojis"]
   listGuildStickers: DiscordClient["listGuildStickers"]
   listMessagePins: DiscordClient["listMessagePins"]
   listPollAnswerVoters: DiscordClient["listPollAnswerVoters"]
   listChannelWebhooks: DiscordClient["listChannelWebhooks"]
   listMessages: DiscordClient["listMessages"]
+  listDefaultSoundboardSounds: DiscordClient["listDefaultSoundboardSounds"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
@@ -351,6 +369,7 @@ export interface DiscordServiceClient {
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
+  modifyGuildSoundboardSound: DiscordClient["modifyGuildSoundboardSound"]
   modifyGuildRole: DiscordClient["modifyGuildRole"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
   modifyStageInstance: DiscordClient["modifyStageInstance"]
@@ -447,6 +466,10 @@ export interface ConnectorServiceOptions {
   >
   scheduledEventOptions?: Pick<
     ScheduledEventServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  soundboardOptions?: Pick<
+    SoundboardServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   stageInstanceOptions?: Pick<
@@ -608,6 +631,7 @@ export class ConnectorService {
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
   readonly #scheduledEventService: ScheduledEventService
+  readonly #soundboardService: SoundboardService
   readonly #stageInstanceService: StageInstanceService
   readonly #threadCreationService: ThreadCreationService
   readonly #webhookService: WebhookService
@@ -728,6 +752,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.scheduledEventOptions,
+    })
+    this.#soundboardService = new SoundboardService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      fileRoots: options.config.soundboardRoots,
+      operationStore,
+      policy: this.#policy,
+      ...options.soundboardOptions,
     })
     this.#stageInstanceService = new StageInstanceService({
       activityStore: this.#activityStore,
@@ -1497,6 +1529,35 @@ export class ConnectorService {
     )
   }
 
+  async listDefaultSoundboardSounds(
+    options: RequestOptions = {},
+  ): Promise<DefaultSoundboardInventoryResult> {
+    await this.#verifyIdentity(options)
+    return this.#soundboardService.listDefaults(options)
+  }
+
+  async listGuildSoundboardSounds(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildSoundboardInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#soundboardService.listGuild(identity.bot.id, guildId, options)
+  }
+
+  async getGuildSoundboardSound(
+    guildId: string,
+    soundId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildSoundboardLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#soundboardService.getGuild(
+      identity.bot.id,
+      guildId,
+      soundId,
+      options,
+    )
+  }
+
   async listScheduledEvents(
     guildId: string,
     includeSubscriberCount = false,
@@ -1617,6 +1678,20 @@ export class ConnectorService {
   ): Promise<ScheduledEventPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#scheduledEventService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planSoundboardChange(
+    request: SoundboardChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<SoundboardPlan> {
+    normalizeSoundboardChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#soundboardService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -2127,6 +2202,25 @@ export class ConnectorService {
   ): Promise<ScheduledEventResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#scheduledEventService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeSoundboardChange(
+    request: SoundboardChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<SoundboardResult> {
+    normalizeSoundboardChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord soundboard plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#soundboardService.execute(
       identity.application.id,
       identity.bot.id,
       request,

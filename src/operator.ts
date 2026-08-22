@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 6
+export const OPERATOR_REPORT_SCHEMA_VERSION = 7
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -86,6 +86,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   roleConfigurationPolicy: "role-configuration-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
   scheduledEventChangePolicy: "scheduled-event-change-policy",
+  soundboardAuditPolicy: "soundboard-audit-policy",
+  soundboardChangePolicy: "soundboard-change-policy",
   stageInstanceAuditPolicy: "stage-instance-audit-policy",
   stageInstanceChangePolicy: "stage-instance-change-policy",
   stageStartNotificationPolicy: "stage-start-notification-policy",
@@ -354,6 +356,19 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("Scheduled-event changes are enabled, but cover updates remain blocked because no canonical local roots are configured")
   }
+  if (config.allowSoundboardAudit && config.soundboardGuildIds.size === 0) {
+    warnings.push("The soundboard-audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowSoundboardChanges && config.soundboardGuildIds.size === 0) {
+    warnings.push("The soundboard-change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (
+    config.allowSoundboardChanges
+    && config.soundboardGuildIds.size > 0
+    && config.soundboardRoots.length === 0
+  ) {
+    warnings.push("Soundboard updates and deletions are enabled, but creation remains blocked because no canonical local roots are configured")
+  }
   if (config.allowStageInstanceAudit && config.stageChannelIds.size === 0) {
     warnings.push("The Stage-instance audit toggle is enabled but inventory remains blocked because an exact Stage-channel allowlist is required")
   }
@@ -410,6 +425,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowScheduledEventAudit || config.allowScheduledEventChanges,
       "scheduled-events",
       "Scheduled event audit and changes",
+    ],
+    [
+      config.allowSoundboardAudit || config.allowSoundboardChanges,
+      "soundboard",
+      "Soundboard audit and reviewed changes",
     ],
     [
       config.allowStageInstanceAudit
@@ -1167,6 +1187,50 @@ export async function diagnoseConnector(
         `Reviewed scheduled-event changes are constrained to ${config.scheduledEventGuildIds.size} exact guilds and ${config.scheduledEventRoots.length} canonical cover roots with one-shot execution and exact state or absence readback`,
       ))
     }
+    if (!config.allowSoundboardAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardAuditPolicy,
+        "pass",
+        "Privacy-safe soundboard inventory is disabled",
+      ))
+    } else if (config.soundboardGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardAuditPolicy,
+        "warn",
+        "Soundboard audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardAuditPolicy,
+        "pass",
+        `Privacy-safe default and guild soundboard inventory is constrained to ${config.soundboardGuildIds.size} exact guilds`,
+      ))
+    }
+    if (!config.allowSoundboardChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardChangePolicy,
+        "pass",
+        "Reviewed soundboard changes are disabled",
+      ))
+    } else if (config.soundboardGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardChangePolicy,
+        "warn",
+        "Soundboard changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else if (config.soundboardRoots.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardChangePolicy,
+        "warn",
+        `Reviewed soundboard updates and deletions are constrained to ${config.soundboardGuildIds.size} exact guilds, but creation is blocked because canonical local roots are empty`,
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardChangePolicy,
+        "pass",
+        `Reviewed soundboard changes are constrained to ${config.soundboardGuildIds.size} exact guilds and ${config.soundboardRoots.length} canonical creation roots with one-shot execution and exact metadata or absence readback`,
+      ))
+    }
     if (!config.allowStageInstanceAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.stageInstanceAuditPolicy,
@@ -1402,6 +1466,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowScheduledEventChanges,
     ENVIRONMENT_NAMES.scheduledEventGuildIds,
     ENVIRONMENT_NAMES.scheduledEventRoots,
+    ENVIRONMENT_NAMES.allowSoundboardAudit,
+    ENVIRONMENT_NAMES.allowSoundboardChanges,
+    ENVIRONMENT_NAMES.soundboardGuildIds,
+    ENVIRONMENT_NAMES.soundboardRoots,
     ENVIRONMENT_NAMES.allowStageInstanceAudit,
     ENVIRONMENT_NAMES.allowStageInstanceChanges,
     ENVIRONMENT_NAMES.allowStageStartNotifications,

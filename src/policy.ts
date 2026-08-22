@@ -80,6 +80,11 @@ export interface PolicyDescription {
   scheduledEventCoverChangesEnabled: boolean
   scheduledEventGuildIds: string[]
   scheduledEventRootCount: number
+  soundboardAuditEnabled: boolean
+  soundboardChangesEnabled: boolean
+  soundboardCreationEnabled: boolean
+  soundboardGuildIds: string[]
+  soundboardRootCount: number
   stageChannelIds: string[]
   stageInstanceAuditEnabled: boolean
   stageInstanceChangesEnabled: boolean
@@ -134,6 +139,8 @@ export class ScopePolicy {
   readonly #allowRoleConfiguration: boolean
   readonly #allowScheduledEventAudit: boolean
   readonly #allowScheduledEventChanges: boolean
+  readonly #allowSoundboardAudit: boolean
+  readonly #allowSoundboardChanges: boolean
   readonly #allowStageInstanceAudit: boolean
   readonly #allowStageInstanceChanges: boolean
   readonly #allowStageStartNotifications: boolean
@@ -173,6 +180,8 @@ export class ScopePolicy {
   readonly #roleConfigurationIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
+  readonly #soundboardGuildIds: ReadonlySet<string>
+  readonly #soundboardRoots: readonly string[]
   readonly #stageChannelIds: ReadonlySet<string>
   readonly #threadParentIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
@@ -220,6 +229,8 @@ export class ScopePolicy {
     | "allowRoleConfiguration"
     | "allowScheduledEventAudit"
     | "allowScheduledEventChanges"
+    | "allowSoundboardAudit"
+    | "allowSoundboardChanges"
     | "allowStageInstanceAudit"
     | "allowStageInstanceChanges"
     | "allowStageStartNotifications"
@@ -253,6 +264,8 @@ export class ScopePolicy {
     | "roleConfigurationIds"
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
+    | "soundboardGuildIds"
+    | "soundboardRoots"
     | "stageChannelIds"
     | "threadParentIds"
     | "webhookChannelIds"
@@ -290,6 +303,8 @@ export class ScopePolicy {
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
     this.#allowScheduledEventChanges = config.allowScheduledEventChanges ?? false
+    this.#allowSoundboardAudit = config.allowSoundboardAudit ?? false
+    this.#allowSoundboardChanges = config.allowSoundboardChanges ?? false
     this.#allowStageInstanceAudit = config.allowStageInstanceAudit ?? false
     this.#allowStageInstanceChanges = config.allowStageInstanceChanges ?? false
     this.#allowStageStartNotifications = config.allowStageStartNotifications ?? false
@@ -330,6 +345,8 @@ export class ScopePolicy {
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
+    this.#soundboardGuildIds = config.soundboardGuildIds ?? new Set()
+    this.#soundboardRoots = config.soundboardRoots ?? []
     this.#stageChannelIds = config.stageChannelIds ?? new Set()
     this.#threadParentIds = config.threadParentIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
@@ -444,6 +461,17 @@ export class ScopePolicy {
         && this.#scheduledEventRoots.length > 0,
       scheduledEventGuildIds: [...this.#scheduledEventGuildIds].sort(),
       scheduledEventRootCount: this.#scheduledEventRoots.length,
+      soundboardAuditEnabled: this.#allowSoundboardAudit
+        && this.#soundboardGuildIds.size > 0,
+      soundboardChangesEnabled: this.#allowSoundboardAudit
+        && this.#allowSoundboardChanges
+        && this.#soundboardGuildIds.size > 0,
+      soundboardCreationEnabled: this.#allowSoundboardAudit
+        && this.#allowSoundboardChanges
+        && this.#soundboardGuildIds.size > 0
+        && this.#soundboardRoots.length > 0,
+      soundboardGuildIds: [...this.#soundboardGuildIds].sort(),
+      soundboardRootCount: this.#soundboardRoots.length,
       stageChannelIds: [...this.#stageChannelIds].sort(),
       stageInstanceAuditEnabled: this.#allowStageInstanceAudit
         && this.#stageChannelIds.size > 0,
@@ -720,6 +748,30 @@ export class ScopePolicy {
     this.assertScheduledEventAuditable(guildId)
     if (!this.#allowScheduledEventChanges) {
       throw new PolicyError("Discord scheduled event changes are disabled by connector configuration")
+    }
+  }
+
+  assertSoundboardAuditEnabled(): void {
+    if (!this.#allowSoundboardAudit) {
+      throw new PolicyError("Discord soundboard audit is disabled by connector configuration")
+    }
+    if (this.#soundboardGuildIds.size === 0) {
+      throw new PolicyError("Discord soundboard audit requires an explicit guild allowlist")
+    }
+  }
+
+  assertSoundboardAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    this.assertSoundboardAuditEnabled()
+    if (!this.#soundboardGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the soundboard scope`)
+    }
+  }
+
+  assertSoundboardChangeAllowed(guildId: string): void {
+    this.assertSoundboardAuditable(guildId)
+    if (!this.#allowSoundboardChanges) {
+      throw new PolicyError("Discord soundboard changes are disabled by connector configuration")
     }
   }
 

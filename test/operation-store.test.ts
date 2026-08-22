@@ -142,6 +142,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const pollEnd = { ...receipt(), kind: "poll-end" as const }
   const role = { ...receipt(), kind: "role-creation" as const }
   const scheduledEvent = { ...receipt(), kind: "scheduled-event-change" as const }
+  const soundboard = { ...receipt(), kind: "guild-soundboard-change" as const }
   const stageInstance = { ...receipt(), kind: "stage-instance-change" as const }
   const webhook = { ...receipt(), kind: "webhook-deletion" as const }
 
@@ -160,6 +161,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(pollEnd)).created, true)
   assert.equal((await store.reserve(role)).created, true)
   assert.equal((await store.reserve(scheduledEvent)).created, true)
+  assert.equal((await store.reserve(soundboard)).created, true)
   assert.equal((await store.reserve(stageInstance)).created, true)
   assert.equal((await store.reserve(webhook)).created, true)
   assert.deepEqual(
@@ -221,6 +223,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("scheduled-event-change", scheduledEvent.operationKeyHash),
     scheduledEvent,
+  )
+  assert.deepEqual(
+    await store.get("guild-soundboard-change", soundboard.operationKeyHash),
+    soundboard,
   )
   assert.deepEqual(
     await store.get("stage-instance-change", stageInstance.operationKeyHash),

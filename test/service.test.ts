@@ -20,6 +20,7 @@ import {
   DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS,
   type DiscordAutoModerationRuleSummary,
   type DiscordScheduledEventSummary,
+  type DiscordSoundboardSoundSummary,
   type DiscordStageInstanceSummary,
 } from "../src/discord-client.js"
 import {
@@ -65,6 +66,7 @@ const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
 const AUTOMOD_RULE_ID = "910000000000000001"
 const SCHEDULED_EVENT_ID = "930000000000000001"
+const SOUNDBOARD_SOUND_ID = "935000000000000001"
 const STAGE_INSTANCE_ID = "940000000000000001"
 
 class MemoryOperationStore implements OperationStore {
@@ -212,6 +214,7 @@ function serviceFixture(overrides: {
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
   roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
+  soundboardOptions?: ConnectorServiceOptions["soundboardOptions"]
   stageInstanceOptions?: ConnectorServiceOptions["stageInstanceOptions"]
   threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
@@ -288,6 +291,9 @@ function serviceFixture(overrides: {
     async createGuildScheduledEvent() {
       throw new Error("Unexpected scheduled-event creation")
     },
+    async createGuildSoundboardSound() {
+      throw new Error("Unexpected soundboard creation")
+    },
     async createGuildSticker(_guildId, input) {
       return {
         available: true,
@@ -326,6 +332,7 @@ function serviceFixture(overrides: {
     async deleteGuildEmoji() {},
     async deleteGuildAutoModerationRule() {},
     async deleteGuildScheduledEvent() {},
+    async deleteGuildSoundboardSound() {},
     async deleteGuildSticker() {},
     async deleteStageInstance() {},
     async deleteInvite() {
@@ -408,6 +415,9 @@ function serviceFixture(overrides: {
     async getGuildScheduledEvent() {
       throw new Error("Unexpected scheduled-event lookup")
     },
+    async getGuildSoundboardSound() {
+      throw new Error("Unexpected soundboard lookup")
+    },
     async getGuildSticker() {
       return {
         available: true,
@@ -460,6 +470,9 @@ function serviceFixture(overrides: {
     async listGuildScheduledEvents() {
       return []
     },
+    async listGuildSoundboardSounds() {
+      return []
+    },
     async listGuildEmojis() {
       return []
     },
@@ -484,6 +497,9 @@ function serviceFixture(overrides: {
     async listMessages() {
       calls.listMessages += 1
       return [message()]
+    },
+    async listDefaultSoundboardSounds() {
+      return []
     },
     async listPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
@@ -518,6 +534,9 @@ function serviceFixture(overrides: {
     },
     async modifyGuildScheduledEvent() {
       throw new Error("Unexpected scheduled-event modification")
+    },
+    async modifyGuildSoundboardSound() {
+      throw new Error("Unexpected soundboard modification")
     },
     async modifyGuildRole() {
       throw new Error("Unexpected role configuration")
@@ -632,6 +651,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.scheduledEventOptions
         ? { scheduledEventOptions: overrides.scheduledEventOptions }
+        : {}),
+      ...(overrides.soundboardOptions
+        ? { soundboardOptions: overrides.soundboardOptions }
         : {}),
       ...(overrides.stageInstanceOptions
         ? { stageInstanceOptions: overrides.stageInstanceOptions }
@@ -1386,6 +1408,107 @@ test("service pins identity through privacy-safe scheduled event reads and revie
   ])
   assert.equal(operationStore.receipt?.kind, "scheduled-event-change")
   assert.equal(operationStore.receipt?.resourceId, SCHEDULED_EVENT_ID)
+})
+
+test("service pins identity through privacy-safe reviewed soundboard changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  let sound: DiscordSoundboardSoundSummary = {
+    available: true,
+    creatorUserId: BOT_ID,
+    emojiId: null,
+    emojiName: "🎺",
+    guildId: GUILD_ID,
+    id: SOUNDBOARD_SOUND_ID,
+    name: "launch",
+    unknownFieldCount: 0,
+    volume: 0.8,
+  }
+  let defaultReads = 0
+  let exactReads = 0
+  let inventoryReads = 0
+  let updateCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.CREATE_GUILD_EXPRESSIONS, "@everyone")]
+      },
+      async getGuildSoundboardSound(guildId, soundId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(soundId, SOUNDBOARD_SOUND_ID)
+        exactReads += 1
+        return sound
+      },
+      async listDefaultSoundboardSounds() {
+        defaultReads += 1
+        return [{ ...sound, creatorUserId: null, guildId: null }]
+      },
+      async listGuildSoundboardSounds(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        inventoryReads += 1
+        return [sound]
+      },
+      async modifyGuildSoundboardSound(guildId, soundId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(soundId, SOUNDBOARD_SOUND_ID)
+        assert.equal(auditReason, "Reviewed soundboard update")
+        updateCalls += 1
+        sound = {
+          ...sound,
+          name: input.name ?? sound.name,
+        }
+        return sound
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
+      DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+      DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+    soundboardOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(37),
+      randomId: () => "activity-soundboard-change",
+    },
+  })
+  const request = {
+    action: "update" as const,
+    auditReason: "Reviewed soundboard update",
+    guildId: GUILD_ID,
+    name: "arrival",
+    operationKey: "soundboard-service-attempt-0001",
+    soundId: SOUNDBOARD_SOUND_ID,
+  }
+
+  const defaults = await service.listDefaultSoundboardSounds()
+  const listed = await service.listGuildSoundboardSounds(GUILD_ID)
+  const exact = await service.getGuildSoundboardSound(GUILD_ID, SOUNDBOARD_SOUND_ID)
+  const plan = await service.planSoundboardChange(request)
+  const result = await service.executeSoundboardChange(request, plan.digest)
+
+  assert.equal(defaults.sounds[0]?.guildId, null)
+  assert.equal(listed.sounds.length, 1)
+  assert.equal(exact.sound.soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(plan.existing?.soundId, SOUNDBOARD_SOUND_ID)
+  assert.equal(plan.permission.createGuildExpressions, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed?.name, "arrival")
+  assert.equal(defaultReads, 1)
+  assert.equal(inventoryReads, 4)
+  assert.equal(exactReads, 2)
+  assert.equal(updateCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(calls.activityEntries.map((entry) => entry.status), [
+    "pending",
+    "completed",
+  ])
+  assert.equal(operationStore.receipt?.kind, "guild-soundboard-change")
+  assert.equal(operationStore.receipt?.resourceId, SOUNDBOARD_SOUND_ID)
 })
 
 test("service pins identity through privacy-safe reviewed Stage-instance lifecycle", async () => {
