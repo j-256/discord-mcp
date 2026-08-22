@@ -56,6 +56,7 @@ export const MCP_TOOLSET_NAMES = [
   "soundboard",
   "stage-instances",
   "threads",
+  "voice-moderation",
   "welcome-screen",
   "webhooks",
   "widget-settings",
@@ -85,6 +86,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowInviteDeletions: "DISCORD_MCP_ALLOW_INVITE_DELETIONS",
   allowMemberDirectory: "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
   allowMemberRoleChanges: "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
+  allowMemberVoiceAudit: "DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT",
+  allowMemberVoiceChanges: "DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES",
   allowOnboardingAudit: "DISCORD_MCP_ALLOW_ONBOARDING_AUDIT",
   allowOnboardingChanges: "DISCORD_MCP_ALLOW_ONBOARDING_CHANGES",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
@@ -136,6 +139,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   memberDirectoryGuildIds: "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
   memberRoleGuildIds: "DISCORD_MCP_MEMBER_ROLE_GUILD_IDS",
   memberRoleIds: "DISCORD_MCP_MEMBER_ROLE_IDS",
+  memberVoiceChannelIds: "DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS",
+  memberVoiceGuildIds: "DISCORD_MCP_MEMBER_VOICE_GUILD_IDS",
   observabilityLogs: "DISCORD_MCP_OBSERVABILITY_LOGS",
   onboardingGuildIds: "DISCORD_MCP_ONBOARDING_GUILD_IDS",
   otelCompression: "OTEL_EXPORTER_OTLP_COMPRESSION",
@@ -363,6 +368,8 @@ export const CONNECTOR_LIMITS = Object.freeze({
   interactionNotificationUsers: 10,
   memberRoleAllowlist: 100,
   memberRoleImpactChannels: 50,
+  memberVoiceChannelAllowlist: 100,
+  memberVoiceGuildAllowlist: 100,
   mentionUserAllowlist: 100,
   messagePageDefault: 50,
   toolDiscoveryMatches: 8,
@@ -479,6 +486,15 @@ export const MEMBER_MODERATION_ACTIONS = [
 ] as const
 
 export type MemberModerationAction = typeof MEMBER_MODERATION_ACTIONS[number]
+
+export const MEMBER_VOICE_ACTIONS = [
+  "disconnect",
+  "move",
+  "set-server-deafen",
+  "set-server-mute",
+] as const
+
+export type MemberVoiceAction = typeof MEMBER_VOICE_ACTIONS[number]
 
 export const MEMBER_ROLE_ACTIONS = [
   "add",

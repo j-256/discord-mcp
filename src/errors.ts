@@ -550,6 +550,42 @@ export class WidgetSettingsEvidenceError extends Error {
   override name = "WidgetSettingsEvidenceError"
 }
 
+export class MemberVoicePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord member voice snapshot does not match the reviewed plan")
+    this.name = "MemberVoicePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class MemberVoiceOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord member voice operation key has already been reserved")
+    this.name = "MemberVoiceOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class MemberVoiceExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "MemberVoiceExecutionError"
+    this.result = result
+  }
+}
+
+export class MemberVoiceEvidenceError extends Error {
+  override name = "MemberVoiceEvidenceError"
+}
+
 export class OnboardingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

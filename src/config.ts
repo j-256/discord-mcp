@@ -52,6 +52,8 @@ export interface ConnectorConfig {
   allowInviteDeletions: boolean
   allowMemberDirectory: boolean
   allowMemberRoleChanges: boolean
+  allowMemberVoiceAudit: boolean
+  allowMemberVoiceChanges: boolean
   allowOnboardingAudit: boolean
   allowOnboardingChanges: boolean
   allowPermissionOverwrites: boolean
@@ -102,6 +104,8 @@ export interface ConnectorConfig {
   memberDirectoryGuildIds: ReadonlySet<string>
   memberRoleGuildIds: ReadonlySet<string>
   memberRoleIds: ReadonlySet<string>
+  memberVoiceChannelIds: ReadonlySet<string>
+  memberVoiceGuildIds: ReadonlySet<string>
   mcpToolsets: ReadonlySet<McpToolsetName>
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
@@ -359,6 +363,16 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.memberRoleIds,
     CONNECTOR_LIMITS.memberRoleAllowlist,
   )
+  const memberVoiceChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.memberVoiceChannelIds],
+    ENVIRONMENT_NAMES.memberVoiceChannelIds,
+    CONNECTOR_LIMITS.memberVoiceChannelAllowlist,
+  )
+  const memberVoiceGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.memberVoiceGuildIds],
+    ENVIRONMENT_NAMES.memberVoiceGuildIds,
+    CONNECTOR_LIMITS.memberVoiceGuildAllowlist,
+  )
   const protectedUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.protectedUserIds],
     ENVIRONMENT_NAMES.protectedUserIds,
@@ -424,6 +438,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.onboardingGuildIds, onboardingGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
+    [ENVIRONMENT_NAMES.memberVoiceGuildIds, memberVoiceGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
     [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
@@ -445,6 +460,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
+    [ENVIRONMENT_NAMES.memberVoiceChannelIds, memberVoiceChannelIds],
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
@@ -608,6 +624,19 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowWidgetPublicExposure} requires ${ENVIRONMENT_NAMES.allowWidgetSettingsChanges}`,
     )
   }
+  const allowMemberVoiceAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowMemberVoiceAudit],
+    ENVIRONMENT_NAMES.allowMemberVoiceAudit,
+  )
+  const allowMemberVoiceChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowMemberVoiceChanges],
+    ENVIRONMENT_NAMES.allowMemberVoiceChanges,
+  )
+  if (allowMemberVoiceChanges && !allowMemberVoiceAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowMemberVoiceChanges} requires ${ENVIRONMENT_NAMES.allowMemberVoiceAudit}`,
+    )
+  }
   const allowStageInstanceAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowStageInstanceAudit],
     ENVIRONMENT_NAMES.allowStageInstanceAudit,
@@ -707,6 +736,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
       ENVIRONMENT_NAMES.allowMemberRoleChanges,
     ),
+    allowMemberVoiceAudit,
+    allowMemberVoiceChanges,
     allowOnboardingAudit,
     allowOnboardingChanges,
     allowPermissionOverwrites: parseBoolean(
@@ -806,6 +837,8 @@ export function loadConnectorConfig(
     memberDirectoryGuildIds,
     memberRoleGuildIds,
     memberRoleIds,
+    memberVoiceChannelIds,
+    memberVoiceGuildIds,
     mcpToolsets: parseMcpToolsets(
       environment[ENVIRONMENT_NAMES.toolsets],
       ENVIRONMENT_NAMES.toolsets,

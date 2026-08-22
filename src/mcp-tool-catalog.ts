@@ -52,6 +52,7 @@ type McpToolWorkflow =
   | "poll-end"
   | "member-moderation"
   | "member-role-change"
+  | "member-voice-change"
   | "message-deletion"
   | "message-pin"
   | "role-creation"
@@ -184,6 +185,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "member-roles",
     workflow: "member-role-change",
   },
+  execute_member_voice_change: {
+    keywords: ["deafen", "disconnect", "execute", "member", "move", "mute", "voice"],
+    toolset: "voice-moderation",
+    workflow: "member-voice-change",
+  },
   execute_message_pin: {
     keywords: ["execute", "message", "pin", "state", "unpin"],
     toolset: "pins",
@@ -253,6 +259,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_member: {
     keywords: ["directory", "exact", "member", "profile", "user"],
     toolset: "members",
+  },
+  get_member_voice_state: {
+    keywords: ["audit", "exact", "member", "state", "voice"],
+    toolset: "voice-moderation",
   },
   get_guild_emoji: {
     keywords: ["emoji", "exact", "expression", "guild", "lookup"],
@@ -403,6 +413,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["add", "assign", "member", "permission", "plan", "remove", "review", "role"],
     toolset: "member-roles",
     workflow: "member-role-change",
+  },
+  plan_member_voice_change: {
+    keywords: ["deafen", "disconnect", "member", "move", "mute", "plan", "review", "voice"],
+    toolset: "voice-moderation",
+    workflow: "member-voice-change",
   },
   plan_automod_change: {
     keywords: ["automod", "create", "delete", "disable", "enable", "moderation", "plan", "policy", "review", "rule", "update"],

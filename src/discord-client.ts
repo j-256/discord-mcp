@@ -25,6 +25,7 @@ import {
   errorMessage,
   GuildExpressionEvidenceError,
   InviteEvidenceError,
+  MemberVoiceEvidenceError,
   OnboardingEvidenceError,
   redactText,
   RoleConfigurationEvidenceError,
@@ -922,6 +923,27 @@ export interface ModifyGuildMemberTimeoutInput {
   communicationDisabledUntil: string | null
 }
 
+export interface DiscordVoiceStateSummary {
+  channelId: string | null
+  deaf: boolean
+  guildId: string | null
+  mute: boolean
+  unknownFieldCount: number
+  userId: string
+}
+
+export interface DiscordGuildMemberVoiceUpdate {
+  deaf: boolean
+  mute: boolean
+  unknownFieldCount: number
+  userId: string
+}
+
+export type ModifyGuildMemberVoiceInput =
+  | { channelId: string | null }
+  | { deaf: boolean }
+  | { mute: boolean }
+
 interface RequestParameters extends RequestOptions {
   auditReason?: string
   automaticRateLimitRetry?: boolean
@@ -1020,6 +1042,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_emoji",
   "get_guild_soundboard_sound",
   "get_guild_sticker",
+  "get_guild_voice_state",
   "get_stage_instance",
   "get_channel_metadata",
   "get_guild_onboarding",
@@ -1035,6 +1058,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_soundboard_sound",
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
+  "modify_guild_member_voice",
   "modify_stage_instance",
   "modify_guild_onboarding",
   "modify_guild_welcome_screen",
@@ -1746,6 +1770,151 @@ const WELCOME_SCREEN_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 
 const WIDGET_SETTINGS_KEYS = ["channel_id", "enabled"] as const
 const WIDGET_SETTINGS_INPUT_KEYS = ["channelId", "enabled"] as const
+
+const VOICE_STATE_KEYS = [
+  "channel_id",
+  "deaf",
+  "discoverable_disabled",
+  "guild_id",
+  "member",
+  "mute",
+  "request_to_speak_timestamp",
+  "self_deaf",
+  "self_mute",
+  "self_stream",
+  "self_video",
+  "session_id",
+  "suppress",
+  "user_id",
+] as const
+const GUILD_MEMBER_KEYS = [
+  "avatar",
+  "avatar_decoration_data",
+  "banner",
+  "collectibles",
+  "communication_disabled_until",
+  "deaf",
+  "flags",
+  "joined_at",
+  "mute",
+  "nick",
+  "pending",
+  "permissions",
+  "premium_since",
+  "roles",
+  "user",
+] as const
+
+function memberVoiceEvidenceError(options?: ErrorOptions): MemberVoiceEvidenceError {
+  return new MemberVoiceEvidenceError(
+    "Discord returned invalid member voice evidence",
+    options,
+  )
+}
+
+function projectVoiceState(
+  value: unknown,
+  guildId: string,
+  userId: string,
+): DiscordVoiceStateSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw memberVoiceEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(record.user_id as string, "Discord voice-state user ID")
+    if (record.user_id !== userId) {
+      throw new RangeError("Discord voice-state user ID does not match the request")
+    }
+    if (typeof record.guild_id === "string") {
+      assertPositiveSnowflake(record.guild_id, "Discord voice-state guild ID")
+      if (record.guild_id !== guildId) {
+        throw new RangeError("Discord voice-state guild ID does not match the request")
+      }
+    } else if (record.guild_id !== undefined) {
+      throw new RangeError("Discord voice-state guild ID is invalid")
+    }
+    if (typeof record.channel_id === "string") {
+      assertPositiveSnowflake(record.channel_id, "Discord voice-state channel ID")
+    } else if (record.channel_id !== null) {
+      throw new RangeError("Discord voice-state channel ID is invalid")
+    }
+    if (typeof record.mute !== "boolean" || typeof record.deaf !== "boolean") {
+      throw new RangeError("Discord voice-state moderation fields are invalid")
+    }
+  } catch (error) {
+    throw memberVoiceEvidenceError({ cause: error })
+  }
+  return {
+    channelId: record.channel_id as string | null,
+    deaf: record.deaf as boolean,
+    guildId: typeof record.guild_id === "string" ? record.guild_id : null,
+    mute: record.mute as boolean,
+    unknownFieldCount: countUnknownFields(record, VOICE_STATE_KEYS),
+    userId: record.user_id as string,
+  }
+}
+
+function projectGuildMemberVoiceUpdate(
+  value: unknown,
+  userId: string,
+): DiscordGuildMemberVoiceUpdate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw memberVoiceEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const user = record.user
+  try {
+    if (!user || typeof user !== "object" || Array.isArray(user)) {
+      throw new RangeError("Discord guild-member update omitted its user")
+    }
+    assertPositiveSnowflake(
+      (user as Record<string, unknown>).id as string,
+      "Discord guild-member update user ID",
+    )
+    if ((user as Record<string, unknown>).id !== userId) {
+      throw new RangeError("Discord guild-member update user ID does not match the request")
+    }
+    if (typeof record.mute !== "boolean" || typeof record.deaf !== "boolean") {
+      throw new RangeError("Discord guild-member update voice fields are invalid")
+    }
+  } catch (error) {
+    throw memberVoiceEvidenceError({ cause: error })
+  }
+  return {
+    deaf: record.deaf as boolean,
+    mute: record.mute as boolean,
+    unknownFieldCount: countUnknownFields(record, GUILD_MEMBER_KEYS),
+    userId: (user as Record<string, unknown>).id as string,
+  }
+}
+
+function memberVoiceBody(input: ModifyGuildMemberVoiceInput): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord member voice input must be an exact object")
+  }
+  const record = input as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (keys.length !== 1) {
+    throw new RangeError("Discord member voice input must control exactly one field")
+  }
+  if (keys[0] === "channelId") {
+    if (!(record.channelId === null || typeof record.channelId === "string")) {
+      throw new RangeError("Discord member voice channel ID is invalid")
+    }
+    if (typeof record.channelId === "string") {
+      assertPositiveSnowflake(record.channelId, "Discord member voice channel ID")
+    }
+    return { channel_id: record.channelId }
+  }
+  if (keys[0] === "mute" && typeof record.mute === "boolean") {
+    return { mute: record.mute }
+  }
+  if (keys[0] === "deaf" && typeof record.deaf === "boolean") {
+    return { deaf: record.deaf }
+  }
+  throw new RangeError("Discord member voice input contains an unsupported field")
+}
 
 function widgetSettingsEvidenceError(options?: ErrorOptions): WidgetSettingsEvidenceError {
   return new WidgetSettingsEvidenceError(
@@ -5734,6 +5903,25 @@ export class DiscordClient {
     return this.#request("get_guild_member", `/guilds/${guildId}/members/${userId}`, options)
   }
 
+  async getGuildVoiceState(
+    guildId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordVoiceStateSummary> {
+    assertPositiveSnowflake(guildId, "Discord member voice guild ID")
+    assertPositiveSnowflake(userId, "Discord member voice user ID")
+    const response = await this.#request<unknown>(
+      "get_guild_voice_state",
+      `/guilds/${guildId}/voice-states/${userId}`,
+      {
+        ...options,
+        diagnosticRoute: "/guilds/{guild.id}/voice-states/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectVoiceState(response, guildId, userId)
+  }
+
   listGuildMembers(
     guildId: string,
     options: GuildMemberPageOptions = {},
@@ -6874,6 +7062,31 @@ export class DiscordClient {
         communication_disabled_until: input.communicationDisabledUntil,
       },
     })
+  }
+
+  async modifyGuildMemberVoice(
+    guildId: string,
+    userId: string,
+    input: ModifyGuildMemberVoiceInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildMemberVoiceUpdate> {
+    assertPositiveSnowflake(guildId, "Discord member voice guild ID")
+    assertPositiveSnowflake(userId, "Discord member voice user ID")
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_member_voice",
+      `/guilds/${guildId}/members/${userId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: memberVoiceBody(input),
+        diagnosticRoute: "/guilds/{guild.id}/members/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildMemberVoiceUpdate(response, userId)
   }
 
   async removeGuildMember(

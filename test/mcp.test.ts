@@ -110,6 +110,10 @@ import type {
   MemberRoleChangePlan,
   MemberRoleChangeRequest,
 } from "../src/member-role-service.js"
+import type {
+  MemberVoiceChangePlan,
+  MemberVoiceChangeRequest,
+} from "../src/member-voice-service.js"
 import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
   type NormalizedDiscordRole,
@@ -166,6 +170,9 @@ import {
   MemberRoleExecutionError,
   MemberRoleOperationConflictError,
   MemberRolePlanChangedError,
+  MemberVoiceExecutionError,
+  MemberVoiceOperationConflictError,
+  MemberVoicePlanChangedError,
   OnboardingExecutionError,
   OnboardingOperationConflictError,
   PollExecutionError,
@@ -232,6 +239,7 @@ const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const GUILD_ID = "100000000000000001"
 const APPLICATION_ID = "110000000000000001"
 const BOT_ID = "120000000000000001"
+const GUILD_OWNER_ID = "130000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const PARENT_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
@@ -253,6 +261,7 @@ const POLL_QUESTION = "Which release theme should we choose?"
 const POLL_ANSWER_ONE = "Reliability"
 const POLL_ANSWER_TWO = "Usability"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
+const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
 const WEBHOOK_ID = "370000000000000001"
@@ -2874,6 +2883,99 @@ function memberRolePlan(
   }
 }
 
+function memberVoicePlan(
+  request: MemberVoiceChangeRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): MemberVoiceChangePlan {
+  const permission = (
+    requiredPermissions: Array<"CONNECT" | "DEAFEN_MEMBERS" | "MOVE_MEMBERS" | "MUTE_MEMBERS" | "VIEW_CHANNEL">,
+    appliedRoleIds = [request.guildId, ROLE_ID],
+  ) => ({
+    administrator: false,
+    allowed: true as const,
+    appliedRoleIds,
+    effectivePermissionNames: [...requiredPermissions],
+    effectivePermissions: requiredPermissions.reduce(
+      (bits, name) => bits | DISCORD_PERMISSIONS[name],
+      0n,
+    ).toString(),
+    guildOwner: false,
+    requiredPermissions,
+    unknownPermissionBits: "0" as const,
+    warnings: [],
+  })
+  const sourcePermissionNames = request.action === "set-server-mute"
+    ? ["VIEW_CHANNEL", "CONNECT", "MUTE_MEMBERS"] as const
+    : request.action === "set-server-deafen"
+      ? ["VIEW_CHANNEL", "CONNECT", "DEAFEN_MEMBERS"] as const
+      : ["VIEW_CHANNEL", "CONNECT", "MOVE_MEMBERS"] as const
+  const destination = request.action === "move"
+    ? {
+        guildId: request.guildId,
+        id: request.destinationChannelId,
+        name: "untrusted-destination-name",
+        type: "voice" as const,
+      }
+    : null
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-22T00:00:00.000Z",
+    destination,
+    destinationBotPermission: request.action === "move"
+      ? permission(["VIEW_CHANNEL", "CONNECT", "MOVE_MEMBERS"])
+      : null,
+    destinationTargetPermission: request.action === "move"
+      ? permission(["VIEW_CHANNEL", "CONNECT"], [request.guildId])
+      : null,
+    digest,
+    guild: {
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: GUILD_OWNER_ID,
+    },
+    hierarchy: {
+      botHighestRoleIds: [ROLE_ID],
+      botHighestRolePosition: 10,
+      targetAdministrator: false,
+      targetBelowBot: true,
+      targetHighestRoleIds: [request.guildId],
+      targetHighestRolePosition: 0,
+    },
+    member: { id: request.userId, username: "untrusted-member-name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: permission([...sourcePermissionNames]),
+    privacy: {
+      enumeration: "none",
+      omittedFields: ["session ID", "embedded member"],
+      persistence: "content-free-outcomes-only",
+      rawPayloadExposed: false,
+    },
+    requestedEnabled: "enabled" in request ? request.enabled : null,
+    risks: writeRequired ? ["Immediate voice-state change"] : [],
+    schemaVersion: 1,
+    state: {
+      channel: {
+        guildId: request.guildId,
+        id: CHANNEL_ID,
+        name: "untrusted-source-name",
+        type: "voice",
+      },
+      connected: true,
+      serverDeafened: false,
+      serverMuted: false,
+      unknownFieldCount: 0,
+      userId: request.userId,
+    },
+    status: writeRequired ? "planned" : "already-current",
+    warnings: ["Same-member serialization is process-local"],
+    writeRequired,
+  }
+}
+
 function guildScaffoldPlan(
   request: GuildScaffoldRequest,
   digest = DIGEST,
@@ -3022,6 +3124,10 @@ function fixturePolicy(): PolicyDescription {
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVoiceAuditEnabled: false,
+    memberVoiceChangesEnabled: false,
+    memberVoiceChannelIds: [],
+    memberVoiceGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -3090,6 +3196,9 @@ function serviceFixture(overrides: {
   memberRoleAction?: "add" | "none" | "remove"
   memberRoleError?: Error
   memberRolePlanDigest?: string
+  memberVoiceError?: Error
+  memberVoicePlanDigest?: string
+  memberVoiceWriteRequired?: boolean
   onboardingEffect?: "change" | "none"
   onboardingError?: Error
   onboardingPlanDigest?: string
@@ -3184,6 +3293,9 @@ function serviceFixture(overrides: {
     messagePinPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
+    memberVoiceExecute: 0,
+    memberVoiceGet: 0,
+    memberVoicePlan: 0,
     onboardingExecute: 0,
     onboardingGet: 0,
     onboardingPlan: 0,
@@ -4171,6 +4283,40 @@ function serviceFixture(overrides: {
         userId: request.userId,
       }
     },
+    async executeMemberVoiceChange(request, planDigest) {
+      if (overrides.memberVoiceError) throw overrides.memberVoiceError
+      calls.memberVoiceExecute += 1
+      const writeRequired = overrides.memberVoiceWriteRequired ?? true
+      const planned = memberVoicePlan(request, planDigest, writeRequired)
+      const observedChannel = request.action === "disconnect"
+        ? null
+        : request.action === "move"
+          ? planned.destination
+          : planned.state.channel
+      return {
+        action: request.action,
+        activityId: writeRequired ? "activity-member-voice" : null,
+        guildId: request.guildId,
+        observed: {
+          channel: observedChannel,
+          connected: observedChannel !== null,
+          serverDeafened: request.action === "set-server-deafen"
+            ? request.enabled
+            : observedChannel ? planned.state.serverDeafened : null,
+          serverMuted: request.action === "set-server-mute"
+            ? request.enabled
+            : observedChannel ? planned.state.serverMuted : null,
+          unknownFieldCount: 0,
+          userId: request.userId,
+        },
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: writeRequired ? "completed" : "already-current",
+        userId: request.userId,
+        verification: writeRequired ? "match" : "not-required",
+      }
+    },
     async executeRoleCreation(request, planDigest) {
       if (overrides.roleCreationError) throw overrides.roleCreationError
       calls.roleCreationExecute += 1
@@ -4262,8 +4408,10 @@ function serviceFixture(overrides: {
           basePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
           confidence: "complete",
           decisionTrace: [],
-          effectivePermissionNames: ["VIEW_CHANNEL"],
-          effectivePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+          effectivePermissionNames: ["VIEW_CHANNEL", "CONNECT"],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.CONNECT
+          ).toString(),
           guildOwner: false,
           hierarchy: {
             actorHighestRoleIds: [],
@@ -4372,6 +4520,50 @@ function serviceFixture(overrides: {
         },
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async getMemberVoiceState(guildId, userId) {
+      calls.memberVoiceGet += 1
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guild: { id: guildId, name: "Private guild name", ownerId: GUILD_OWNER_ID },
+        member: { id: userId, username: "untrusted-member-name" },
+        permission: {
+          administrator: false,
+          allowed: true,
+          appliedRoleIds: [guildId, ROLE_ID],
+          effectivePermissionNames: ["VIEW_CHANNEL", "CONNECT"],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.CONNECT
+          ).toString(),
+          guildOwner: false,
+          requiredPermissions: ["VIEW_CHANNEL", "CONNECT"],
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        privacy: {
+          enumeration: "none",
+          omittedFields: ["session ID"],
+          persistence: "content-free-outcomes-only",
+          rawPayloadExposed: false,
+        },
+        schemaVersion: 1,
+        state: {
+          channel: {
+            guildId,
+            id: CHANNEL_ID,
+            name: "untrusted-source-name",
+            type: "voice",
+          },
+          connected: true,
+          serverDeafened: false,
+          serverMuted: false,
+          unknownFieldCount: 0,
+          userId,
+        },
+        status: "ok",
+        warnings: ["No occupant enumeration"],
       }
     },
     async getGuildBan(guildId, userId, options) {
@@ -4739,6 +4931,14 @@ function serviceFixture(overrides: {
         overrides.memberRoleAction,
       )
     },
+    async planMemberVoiceChange(request) {
+      calls.memberVoicePlan += 1
+      return memberVoicePlan(
+        request,
+        overrides.memberVoicePlanDigest || DIGEST,
+        overrides.memberVoiceWriteRequired ?? true,
+      )
+    },
     async planMessagePin(request) {
       calls.messagePinPlan += 1
       return messagePinPlan(
@@ -5041,6 +5241,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_roles",
       "get_role",
       "get_guild_member",
+      "get_member_voice_state",
       "list_guild_members",
       "search_guild_members",
       "list_guild_bans",
@@ -5126,6 +5327,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_scaffold",
       "plan_member_role_change",
       "execute_member_role_change",
+      "plan_member_voice_change",
+      "execute_member_voice_change",
       "plan_role_creation",
       "execute_role_creation",
       "plan_role_configuration",
@@ -5166,6 +5369,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const memberRole = result.tools.find((tool) => (
     tool.name === "execute_member_role_change"
   ))
+  const memberVoice = result.tools.find((tool) => (
+    tool.name === "execute_member_voice_change"
+  ))
   const roleConfiguration = result.tools.find((tool) => (
     tool.name === "execute_role_configuration"
   ))
@@ -5184,6 +5390,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     permissionOverwrite,
     administration,
     memberRole,
+    memberVoice,
     roleConfiguration,
   ]) {
     assert.deepEqual(tool?.annotations, {
@@ -5729,6 +5936,30 @@ test("progressive discovery enables the complete reviewed member-role workflow",
   )
 })
 
+test("progressive discovery enables the complete reviewed member voice workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_member_voice_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_member_voice_change",
+    "plan_member_voice_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_member_voice_change",
+      "execute_member_voice_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed message-pin workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -6230,6 +6461,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
+    memberVoiceExecute: 0,
+    memberVoiceGet: 0,
+    memberVoicePlan: 0,
     onboardingExecute: 0,
     onboardingGet: 0,
     onboardingPlan: 0,
@@ -12214,6 +12448,398 @@ test("MCP member-role changes expose uncertain, rate-limited, and conflict outco
     { status: "unavailable" },
   )
   assert.doesNotMatch(JSON.stringify(unsafeResult), new RegExp(MEMBER_ROLE_OPERATION_KEY))
+})
+
+test("MCP member voice tools audit exact state and reject unsafe action shapes", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID, userId: USER_ID },
+    name: "get_member_voice_state",
+  })
+  const planned = await client.callTool({
+    arguments: {
+      action: "move",
+      auditReason: AUDIT_REASON,
+      destinationChannelId: PARENT_ID,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    name: "plan_member_voice_change",
+  })
+  const invalidRequests = [
+    {
+      action: "move",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    {
+      action: "disconnect",
+      auditReason: AUDIT_REASON,
+      enabled: false,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    {
+      action: "set-server-mute",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    {
+      action: "set-server-deafen",
+      auditReason: AUDIT_REASON,
+      destinationChannelId: PARENT_ID,
+      enabled: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      userId: USER_ID,
+    },
+  ]
+  const invalidResults = await Promise.all(invalidRequests.map((arguments_) => (
+    client.callTool({ arguments: arguments_, name: "plan_member_voice_change" })
+  )))
+  const invalidUser = await client.callTool({
+    arguments: { guildId: GUILD_ID, userId: "0" },
+    name: "get_member_voice_state",
+  })
+
+  assert.equal(structuredContent(audited).status, "ok")
+  assert.equal(
+    ((structuredContent(audited).privacy as Record<string, unknown>).enumeration),
+    "none",
+  )
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(structuredContent(planned).action, "move")
+  assert.equal(structuredContent(planned).destinationChannelId, undefined)
+  assert.equal(invalidResults.every((result) => result.isError === true), true)
+  assert.equal(invalidUser.isError, true)
+  assert.equal(calls.memberVoiceGet, 1)
+  assert.equal(calls.memberVoicePlan, 1)
+})
+
+test("MCP member voice changes bind signed approval to exact state and authority", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "move",
+      auditReason: AUDIT_REASON,
+      destinationChannelId: PARENT_ID,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_voice_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.memberVoicePlan, 1)
+  assert.equal(calls.memberVoiceExecute, 1)
+  assert.match(confirmationMessage, /Action: move/)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_OWNER_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(PARENT_ID))
+  assert.match(confirmationMessage, /Source bot permissions: VIEW_CHANNEL, CONNECT, MOVE_MEMBERS/)
+  assert.match(confirmationMessage, /Destination member permissions: VIEW_CHANNEL, CONNECT/)
+  assert.match(confirmationMessage, /Target is below bot: true/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(MEMBER_VOICE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MEMBER_VOICE_OPERATION_KEY),
+  )
+})
+
+test("MCP member voice changes skip no-op confirmation and stop on refusal", async (context) => {
+  let confirmations = 0
+  const current = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberVoiceWriteRequired: false },
+  })
+  const currentResult = await current.client.callTool({
+    arguments: {
+      action: "set-server-mute",
+      auditReason: AUDIT_REASON,
+      enabled: false,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(currentResult).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(current.calls.memberVoiceExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "disconnect",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.memberVoiceExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      action: "set-server-deafen",
+      auditReason: AUDIT_REASON,
+      enabled: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.memberVoiceExecute, 0)
+})
+
+test("MCP member voice changes refuse fresh-plan drift before confirmation", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberVoicePlanDigest: DIFFERENT_DIGEST },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "move",
+      auditReason: AUDIT_REASON,
+      destinationChannelId: PARENT_ID,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VOICE_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_voice_change",
+  })
+
+  assert.equal(structuredContent(result).status, "plan-changed")
+  assert.equal(result.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.memberVoiceExecute, 0)
+})
+
+test("MCP member voice approval state binds the exact action-specific request", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    action: "move" as const,
+    auditReason: AUDIT_REASON,
+    destinationChannelId: PARENT_ID,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_VOICE_OPERATION_KEY,
+    planDigest: DIGEST,
+    userId: USER_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_member_voice_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        destinationChannelId: MESSAGE_ID,
+      },
+      inputResponses: {
+        confirm_member_voice_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_member_voice_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.memberVoiceExecute, 0)
+})
+
+test("MCP member voice changes expose uncertain, rate-limited, and conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const arguments_ = {
+    action: "move" as const,
+    auditReason: AUDIT_REASON,
+    destinationChannelId: PARENT_ID,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_VOICE_OPERATION_KEY,
+    planDigest: DIGEST,
+    userId: USER_ID,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVoiceError: new MemberVoiceExecutionError(
+        "Discord member voice outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const changed = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVoiceError: new MemberVoicePlanChangedError(DIGEST, DIFFERENT_DIGEST),
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(
+    ((structuredContent(changedResult).error as Record<string, unknown>).actualDigest),
+    DIFFERENT_DIGEST,
+  )
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PATCH",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/members/${USER_ID}`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVoiceError: new MemberVoiceExecutionError(
+        "Discord member voice change was rate limited",
+        { status: "uncertain" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(limitedResult).status, "rate-limited")
+  assert.equal(
+    ((structuredContent(limitedResult).error as Record<string, unknown>).retryAfterMs),
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-member-voice",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    userId: USER_ID,
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVoiceError: new MemberVoiceOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_voice_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(MEMBER_VOICE_OPERATION_KEY),
+  )
+
+  const unsafeConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVoiceError: new MemberVoiceOperationConflictError({
+        ...receipt,
+        operationKey: MEMBER_VOICE_OPERATION_KEY,
+      }),
+    },
+  })
+  const unsafeResult = await unsafeConflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_voice_change",
+  })
+  assert.deepEqual(
+    (structuredContent(unsafeResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(
+    JSON.stringify(unsafeResult),
+    new RegExp(MEMBER_VOICE_OPERATION_KEY),
+  )
 })
 
 test("MCP role creation plans named permissions and rejects unsafe schemas", async (context) => {

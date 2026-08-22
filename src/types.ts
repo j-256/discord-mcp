@@ -118,7 +118,9 @@ export interface DiscordGuild {
 
 export interface DiscordGuildMember {
   communication_disabled_until?: string | null
+  deaf?: boolean
   joined_at?: string | null
+  mute?: boolean
   nick?: string | null
   pending?: boolean
   roles: string[]

@@ -13,6 +13,7 @@ export type DiscordGuidanceService = Pick<
   | "explainChannelAccess"
   | "getChannel"
   | "getGuildMember"
+  | "getMemberVoiceState"
   | "getGuildBan"
   | "getGuildInvite"
   | "getGuildOnboarding"

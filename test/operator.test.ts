@@ -123,6 +123,10 @@ function status(
       memberRoleChangesEnabled: false,
       memberRoleGuildIds: [],
       memberRoleCount: 0,
+      memberVoiceAuditEnabled: false,
+      memberVoiceChangesEnabled: false,
+      memberVoiceChannelIds: [],
+      memberVoiceGuildIds: [],
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
@@ -178,6 +182,7 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     executeMemberRoleChange: unexpected,
+    executeMemberVoiceChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeSoundboardChange: unexpected,
@@ -218,6 +223,7 @@ function toolService(): DiscordToolService {
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
+    planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
     planStageInstanceChange: unexpected,
     auditChannelRoleAccess: unexpected,
@@ -243,6 +249,7 @@ function toolService(): DiscordToolService {
     getChannel: unexpected,
     getGuildBan: unexpected,
     getGuildMember: unexpected,
+    getMemberVoiceState: unexpected,
     getMessage: unexpected,
     getRole: unexpected,
     async getStatus() {
@@ -1616,6 +1623,58 @@ test("doctor and setup explain reviewed member-role scope without Discord writes
   assert.match(omitted.warnings.join("\n"), /member-roles toolset/)
 })
 
+test("doctor and setup explain privacy-safe reviewed member voice scope", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
+    DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.memberVoiceChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact guilds and 1 exact voice-scope channels/)
+  assert.match(audit?.summary || "", /without occupant enumeration or state persistence/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /permission and hierarchy review/)
+  assert.match(changes?.summary || "", /signed approval, and one-shot execution/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /exact guild and voice-channel allowlists/)
+  assert.match(omitted.warnings.join("\n"), /voice-moderation toolset/)
+})
+
 test("doctor and setup explain resumable guild-scaffold scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
     environment: environment({
@@ -2252,6 +2311,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_invite_deletion",
     "review_member_moderation",
     "review_member_role_change",
+    "review_member_voice_change",
     "review_message_deletion",
     "review_message_pin",
     "review_onboarding_change",
@@ -2289,6 +2349,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/invites/{inviteRef}",
     "discord://guilds/{guildId}/members/{userId}",
+    "discord://guilds/{guildId}/members/{userId}/voice-state",
     "discord://guilds/{guildId}/onboarding",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
@@ -2312,6 +2373,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_invite_deletion",
     "execute_member_moderation",
     "execute_member_role_change",
+    "execute_member_voice_change",
     "execute_message_pin",
     "execute_onboarding_change",
     "execute_poll_end",
@@ -2327,6 +2389,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
+  assert.equal(report.readOnlyTools.includes("get_member_voice_state"), true)
+  assert.equal(report.readOnlyTools.includes("plan_member_voice_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_configuration"), true)
   assert.equal(report.readOnlyTools.includes("plan_poll_creation"), true)

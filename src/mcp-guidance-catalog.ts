@@ -44,6 +44,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   guildScheduledEvents: "guild_scheduled_events",
   guildSoundboard: "guild_soundboard",
   guildStickers: "guild_stickers",
+  memberVoiceState: "member_voice_state",
 })
 
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
@@ -68,6 +69,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   guildScheduledEvents: "discord://guilds/{guildId}/scheduled-events",
   guildSoundboard: "discord://guilds/{guildId}/soundboard",
   guildStickers: "discord://guilds/{guildId}/stickers",
+  memberVoiceState: "discord://guilds/{guildId}/members/{userId}/voice-state",
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
@@ -88,6 +90,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewGuildScaffold: "review_guild_scaffold",
   reviewMemberModeration: "review_member_moderation",
   reviewMemberRoleChange: "review_member_role_change",
+  reviewMemberVoiceChange: "review_member_voice_change",
   reviewMessageDeletion: "review_message_deletion",
   reviewMessagePin: "review_message_pin",
   reviewRoleCreation: "review_role_creation",
@@ -121,6 +124,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewGuildScaffold]: "guild-scaffolds",
   [MCP_PROMPT_NAMES.reviewMemberModeration]: "moderation",
   [MCP_PROMPT_NAMES.reviewMemberRoleChange]: "member-roles",
+  [MCP_PROMPT_NAMES.reviewMemberVoiceChange]: "voice-moderation",
   [MCP_PROMPT_NAMES.reviewMessageDeletion]: "deletion",
   [MCP_PROMPT_NAMES.reviewMessagePin]: "pins",
   [MCP_PROMPT_NAMES.reviewRoleCreation]: "role-creation",

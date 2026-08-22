@@ -14,6 +14,7 @@ import {
   DISCORD_SNOWFLAKE_PATTERN,
   INVITE_REFERENCE_PATTERN,
   MEMBER_ROLE_ACTIONS,
+  MEMBER_VOICE_ACTIONS,
   MEMBER_MODERATION_ACTIONS,
   SCHEMA_VERSION,
   SOUNDBOARD_ACTIONS,
@@ -22,6 +23,7 @@ import {
   type ChannelCreationKind,
   type MemberModerationAction,
   type MemberRoleAction,
+  type MemberVoiceAction,
   type SoundboardAction,
   type StageInstanceAction,
   type ThreadCreationMode,
@@ -214,6 +216,28 @@ export interface MemberRoleActivity {
   roleId: string
   schemaVersion: number
   status: MemberRoleActivityStatus
+  timestamp: string
+  userId: string
+  verification: "drift" | "match" | null
+}
+
+export type MemberVoiceActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface MemberVoiceActivity {
+  action: MemberVoiceAction
+  error: string | null
+  guildId: string
+  id: string
+  kind: "member-voice-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: MemberVoiceActivityStatus
   timestamp: string
   userId: string
   verification: "drift" | "match" | null
@@ -591,6 +615,7 @@ export type ActivityEntry =
   | InviteDeletionActivity
   | MemberModerationActivity
   | MemberRoleActivity
+  | MemberVoiceActivity
   | MessagePinActivity
   | OnboardingActivity
   | PollActivity
@@ -1081,6 +1106,66 @@ function parseMemberRoleActivity(
     roleId: record.roleId,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as MemberRoleActivityStatus,
+    timestamp: record.timestamp,
+    userId: record.userId,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseMemberVoiceActivity(
+  value: unknown,
+): MemberVoiceActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "member-voice-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !MEMBER_VOICE_ACTIONS.includes(record.action as MemberVoiceAction)
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.userId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.userId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as MemberVoiceAction,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "member-voice-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as MemberVoiceActivityStatus,
     timestamp: record.timestamp,
     userId: record.userId,
     verification: record.verification as "drift" | "match" | null,
@@ -2249,6 +2334,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseInviteDeletionActivity(value)
     || parseOnboardingActivity(value)
     || parseMemberRoleActivity(value)
+    || parseMemberVoiceActivity(value)
     || parseRoleCreationActivity(value)
     || parseRoleConfigurationActivity(value)
     || parsePollActivity(value)

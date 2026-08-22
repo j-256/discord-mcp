@@ -199,6 +199,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVoiceAuditEnabled: false,
+    memberVoiceChangesEnabled: false,
+    memberVoiceChannelIds: [],
+    memberVoiceGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
@@ -496,6 +500,10 @@ test("configuration and policy require an exact administration guild and protect
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVoiceAuditEnabled: false,
+    memberVoiceChangesEnabled: false,
+    memberVoiceChannelIds: [],
+    memberVoiceGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -1030,6 +1038,91 @@ test("configuration and policy isolate exact member-role authority", () => {
       DISCORD_MCP_MEMBER_ROLE_IDS: excessiveRoles,
     }, { homeDirectory: "/test/home" }),
     /must contain at most 100 unique IDs/,
+  )
+})
+
+test("configuration and policy isolate exact member voice audit and changes", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_MEMBER_VOICE_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertMemberVoiceAuditable(GUILD_ID),
+    /member voice audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+    DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertMemberVoiceAuditable(GUILD_ID))
+  assert.doesNotThrow(() => auditOnly.assertMemberVoiceChannelAllowed(CHANNEL_ID))
+  assert.throws(
+    () => auditOnly.assertMemberVoiceChangeable(GUILD_ID, USER_ID),
+    /member voice changes are disabled/,
+  )
+  assert.throws(
+    () => auditOnly.assertMemberVoiceChannelAllowed(OTHER_CHANNEL_ID),
+    /outside the configured channel scope/,
+  )
+
+  const enabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
+    DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" }))
+  enabled.assertMemberVoiceChangeable(GUILD_ID, "400000000000000002")
+  assert.throws(
+    () => enabled.assertMemberVoiceChangeable(GUILD_ID, USER_ID),
+    /protected from administration/,
+  )
+  assert.throws(
+    () => enabled.assertMemberVoiceAuditable(OTHER_GUILD_ID),
+    /outside the member voice scope/,
+  )
+  assert.equal(enabled.describe().memberVoiceAuditEnabled, true)
+  assert.equal(enabled.describe().memberVoiceChangesEnabled, true)
+  assert.deepEqual(enabled.describe().memberVoiceChannelIds, [CHANNEL_ID, OTHER_CHANNEL_ID])
+  assert.deepEqual(enabled.describe().memberVoiceGuildIds, [GUILD_ID])
+
+  const emptyChannels = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+    DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => emptyChannels.assertMemberVoiceAuditable(GUILD_ID),
+    /requires an exact channel allowlist/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT/,
   )
 })
 
@@ -1648,6 +1741,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVoiceAuditEnabled: false,
+    memberVoiceChangesEnabled: false,
+    memberVoiceChannelIds: [],
+    memberVoiceGuildIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",

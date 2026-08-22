@@ -171,6 +171,18 @@ import type {
   MemberRoleServiceOptions,
 } from "./member-role-service.js"
 import { MemberRoleService } from "./member-role-service.js"
+import type {
+  MemberVoiceAuditResult,
+  MemberVoiceChangePlan,
+  MemberVoiceChangeRequest,
+  MemberVoiceChangeResult,
+  MemberVoiceServiceOptions,
+} from "./member-voice-service.js"
+import {
+  assertMemberVoiceGetInput,
+  MemberVoiceService,
+  normalizeMemberVoiceChangeRequest,
+} from "./member-voice-service.js"
 import {
   normalizeChannel,
   normalizeGuild,
@@ -357,6 +369,7 @@ export interface DiscordServiceClient {
   getGuildBan: DiscordClient["getGuildBan"]
   getGuildChannels: DiscordClient["getGuildChannels"]
   getGuildMember: DiscordClient["getGuildMember"]
+  getGuildVoiceState: DiscordClient["getGuildVoiceState"]
   getGuildOnboarding: DiscordClient["getGuildOnboarding"]
   getGuildWelcomeScreen: DiscordClient["getGuildWelcomeScreen"]
   getGuildWidgetSettings: DiscordClient["getGuildWidgetSettings"]
@@ -390,6 +403,7 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
@@ -474,6 +488,10 @@ export interface ConnectorServiceOptions {
   >
   memberRoleOptions?: Pick<
     MemberRoleServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  memberVoiceOptions?: Pick<
+    MemberVoiceServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   permissionOverwriteOptions?: Pick<
@@ -656,6 +674,7 @@ export class ConnectorService {
   readonly #messagePinService: MessagePinService
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberRoleService: MemberRoleService
+  readonly #memberVoiceService: MemberVoiceService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
@@ -831,6 +850,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.memberRoleOptions,
+    })
+    this.#memberVoiceService = new MemberVoiceService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.memberVoiceOptions,
     })
     this.#permissionOverwriteService = new ChannelPermissionOverwriteService({
       activityStore: this.#activityStore,
@@ -1033,6 +1059,22 @@ export class ConnectorService {
   ) {
     await this.#verifyIdentity(options)
     return this.#memberDirectoryService.get(guildId, userId, options)
+  }
+
+  async getMemberVoiceState(
+    guildId: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<MemberVoiceAuditResult> {
+    assertMemberVoiceGetInput(guildId, userId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberVoiceService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      userId,
+      options,
+    )
   }
 
   async listGuildBans(
@@ -1892,6 +1934,20 @@ export class ConnectorService {
     )
   }
 
+  async planMemberVoiceChange(
+    request: MemberVoiceChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<MemberVoiceChangePlan> {
+    normalizeMemberVoiceChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberVoiceService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planChannelCreation(
     request: ChannelCreationRequest,
     options: RequestOptions = {},
@@ -2090,6 +2146,25 @@ export class ConnectorService {
   ): Promise<MemberRoleChangeResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#memberRoleService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
+  async executeMemberVoiceChange(
+    request: MemberVoiceChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MemberVoiceChangeResult> {
+    normalizeMemberVoiceChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord member voice plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberVoiceService.execute(
       identity.application.id,
       identity.bot.id,
       request,

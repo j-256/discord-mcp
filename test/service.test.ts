@@ -207,6 +207,7 @@ function serviceFixture(overrides: {
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
+  memberVoiceOptions?: ConnectorServiceOptions["memberVoiceOptions"]
   onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
   welcomeScreenOptions?: ConnectorServiceOptions["welcomeScreenOptions"]
   widgetSettingsOptions?: ConnectorServiceOptions["widgetSettingsOptions"]
@@ -385,6 +386,9 @@ function serviceFixture(overrides: {
     async getGuildMember(): Promise<DiscordGuildMember> {
       return { roles: [] }
     },
+    async getGuildVoiceState() {
+      throw new Error("Unexpected member voice lookup")
+    },
     async getGuildOnboarding() {
       throw new Error("Unexpected onboarding lookup")
     },
@@ -528,6 +532,9 @@ function serviceFixture(overrides: {
         user: { id: userId, username: "target" },
       }
     },
+    async modifyGuildMemberVoice() {
+      throw new Error("Unexpected member voice change")
+    },
     async modifyGuildChannelMetadata() {
       throw new Error("Unexpected channel metadata change")
     },
@@ -644,6 +651,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.memberRoleOptions
         ? { memberRoleOptions: overrides.memberRoleOptions }
+        : {}),
+      ...(overrides.memberVoiceOptions
+        ? { memberVoiceOptions: overrides.memberVoiceOptions }
         : {}),
       ...(overrides.onboardingOptions
         ? { onboardingOptions: overrides.onboardingOptions }
@@ -2152,6 +2162,130 @@ test("service pins identity through reviewed exact member-role changes", async (
     JSON.stringify(operationStore.receipt),
     /member-role-attempt|Reviewed exact|reviewer|target/,
   )
+})
+
+test("service pins identity through privacy-safe reviewed member voice changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "800000000000000011"
+  const targetRoleId = "800000000000000012"
+  const targetId = "700000000000000012"
+  let voiceState = {
+    channelId: CHANNEL_ID,
+    deaf: false,
+    guildId: GUILD_ID,
+    mute: false,
+    unknownFieldCount: 0,
+    userId: targetId,
+  }
+  let voiceWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getChannel(channelId) {
+        return channel({
+          id: channelId,
+          name: channelId === CHANNEL_ID ? "private-source" : "private-destination",
+          type: 2,
+        })
+      },
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildMember(_guildId, userId) {
+        return userId === BOT_ID
+          ? { roles: [botRoleId], user: bot() }
+          : {
+              roles: [targetRoleId],
+              user: { id: targetId, username: "target" },
+            }
+      },
+      async getGuildRoles() {
+        return [
+          role(
+            GUILD_ID,
+            DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.CONNECT,
+            "@everyone",
+          ),
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.MOVE_MEMBERS
+                | DISCORD_PERMISSIONS.MUTE_MEMBERS
+                | DISCORD_PERMISSIONS.DEAFEN_MEMBERS,
+              "connector",
+            ),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+          { ...role(targetRoleId, 0n, "target-role"), position: 1 },
+        ]
+      },
+      async getGuildVoiceState(guildId, userId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(userId, targetId)
+        return voiceState
+      },
+      async modifyGuildMemberVoice(guildId, userId, input, auditReason) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(userId, targetId)
+        assert.equal(auditReason, "Reviewed exact voice move")
+        assert.deepEqual(input, { channelId: OTHER_CHANNEL_ID })
+        voiceWrites += 1
+        voiceState = { ...voiceState, channelId: OTHER_CHANNEL_ID }
+        return {
+          deaf: voiceState.deaf,
+          mute: voiceState.mute,
+          unknownFieldCount: 0,
+          userId,
+        }
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
+      DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+      DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+    },
+    memberVoiceOptions: {
+      clock: () => new Date("2026-08-22T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(13),
+      randomId: () => "activity-member-voice",
+    },
+    operationStore,
+  })
+  const request = {
+    action: "move" as const,
+    auditReason: "Reviewed exact voice move",
+    destinationChannelId: OTHER_CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: "member-voice-attempt-0001",
+    userId: targetId,
+  }
+
+  const audit = await service.getMemberVoiceState(GUILD_ID, targetId)
+  const plan = await service.planMemberVoiceChange(request)
+  const result = await service.executeMemberVoiceChange(request, plan.digest)
+
+  assert.equal(audit.applicationId, APPLICATION_ID)
+  assert.equal(audit.botId, BOT_ID)
+  assert.equal(audit.privacy.enumeration, "none")
+  assert.equal(plan.action, "move")
+  assert.equal(plan.destination?.id, OTHER_CHANNEL_ID)
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed.channel?.id, OTHER_CHANNEL_ID)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(voiceWrites, 1)
+  assert.equal(operationStore.receipt?.kind, "member-voice-change")
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.doesNotMatch(
+    JSON.stringify(operationStore.receipt),
+    /member-voice-attempt|Reviewed exact|private-|target|channelId|mute|deaf/,
+  )
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(calls.activityEntries.every((entry) => entry.kind === "member-voice-change"), true)
 })
 
 test("service verifies identity before reviewed additive channel creation", async () => {

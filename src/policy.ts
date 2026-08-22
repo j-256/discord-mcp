@@ -53,6 +53,10 @@ export interface PolicyDescription {
   memberRoleChangesEnabled: boolean
   memberRoleGuildIds: string[]
   memberRoleCount: number
+  memberVoiceAuditEnabled: boolean
+  memberVoiceChangesEnabled: boolean
+  memberVoiceChannelIds: string[]
+  memberVoiceGuildIds: string[]
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
@@ -129,6 +133,8 @@ export class ScopePolicy {
   readonly #allowInviteDeletions: boolean
   readonly #allowMemberDirectory: boolean
   readonly #allowMemberRoleChanges: boolean
+  readonly #allowMemberVoiceAudit: boolean
+  readonly #allowMemberVoiceChanges: boolean
   readonly #allowOnboardingAudit: boolean
   readonly #allowOnboardingChanges: boolean
   readonly #allowPermissionOverwrites: boolean
@@ -181,6 +187,8 @@ export class ScopePolicy {
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
   readonly #memberRoleGuildIds: ReadonlySet<string>
   readonly #memberRoleIds: ReadonlySet<string>
+  readonly #memberVoiceChannelIds: ReadonlySet<string>
+  readonly #memberVoiceGuildIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
   readonly #onboardingGuildIds: ReadonlySet<string>
@@ -228,6 +236,8 @@ export class ScopePolicy {
     | "allowInviteDeletions"
     | "allowMemberDirectory"
     | "allowMemberRoleChanges"
+    | "allowMemberVoiceAudit"
+    | "allowMemberVoiceChanges"
     | "allowOnboardingAudit"
     | "allowOnboardingChanges"
     | "allowGuildScaffolds"
@@ -272,6 +282,8 @@ export class ScopePolicy {
     | "memberDirectoryGuildIds"
     | "memberRoleGuildIds"
     | "memberRoleIds"
+    | "memberVoiceChannelIds"
+    | "memberVoiceGuildIds"
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -307,6 +319,8 @@ export class ScopePolicy {
     this.#allowInviteDeletions = config.allowInviteDeletions ?? false
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
+    this.#allowMemberVoiceAudit = config.allowMemberVoiceAudit ?? false
+    this.#allowMemberVoiceChanges = config.allowMemberVoiceChanges ?? false
     this.#allowOnboardingAudit = config.allowOnboardingAudit ?? false
     this.#allowOnboardingChanges = config.allowOnboardingChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
@@ -360,6 +374,8 @@ export class ScopePolicy {
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
     this.#memberRoleGuildIds = config.memberRoleGuildIds ?? new Set()
     this.#memberRoleIds = config.memberRoleIds ?? new Set()
+    this.#memberVoiceChannelIds = config.memberVoiceChannelIds ?? new Set()
+    this.#memberVoiceGuildIds = config.memberVoiceGuildIds ?? new Set()
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#onboardingGuildIds = config.onboardingGuildIds ?? new Set()
@@ -444,6 +460,15 @@ export class ScopePolicy {
         && this.#memberRoleIds.size > 0,
       memberRoleGuildIds: [...this.#memberRoleGuildIds].sort(),
       memberRoleCount: this.#memberRoleIds.size,
+      memberVoiceAuditEnabled: this.#allowMemberVoiceAudit
+        && this.#memberVoiceGuildIds.size > 0
+        && this.#memberVoiceChannelIds.size > 0,
+      memberVoiceChangesEnabled: this.#allowMemberVoiceAudit
+        && this.#allowMemberVoiceChanges
+        && this.#memberVoiceGuildIds.size > 0
+        && this.#memberVoiceChannelIds.size > 0,
+      memberVoiceChannelIds: [...this.#memberVoiceChannelIds].sort(),
+      memberVoiceGuildIds: [...this.#memberVoiceGuildIds].sort(),
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
@@ -706,6 +731,39 @@ export class ScopePolicy {
     }
     if (!this.#memberRoleIds.has(roleId)) {
       throw new PolicyError(`Discord role ${roleId} is outside the member-role scope`)
+    }
+    this.assertUserNotProtected(userId)
+  }
+
+  assertMemberVoiceAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowMemberVoiceAudit) {
+      throw new PolicyError("Discord member voice audit is disabled by connector configuration")
+    }
+    if (this.#memberVoiceGuildIds.size === 0) {
+      throw new PolicyError("Discord member voice audit requires an explicit guild allowlist")
+    }
+    if (!this.#memberVoiceGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the member voice scope`)
+    }
+    if (this.#memberVoiceChannelIds.size === 0) {
+      throw new PolicyError("Discord member voice audit requires an exact channel allowlist")
+    }
+  }
+
+  assertMemberVoiceChannelAllowed(channelId: string): void {
+    if (
+      !this.channelIdReadable(channelId)
+      || !this.#memberVoiceChannelIds.has(channelId)
+    ) {
+      throw new PolicyError("Discord member voice state is outside the configured channel scope")
+    }
+  }
+
+  assertMemberVoiceChangeable(guildId: string, userId: string): void {
+    this.assertMemberVoiceAuditable(guildId)
+    if (!this.#allowMemberVoiceChanges) {
+      throw new PolicyError("Discord member voice changes are disabled by connector configuration")
     }
     this.assertUserNotProtected(userId)
   }

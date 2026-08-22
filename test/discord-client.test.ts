@@ -10,6 +10,7 @@ import {
 import {
   ChannelMetadataEvidenceError,
   DiscordApiError,
+  MemberVoiceEvidenceError,
   OnboardingEvidenceError,
   RoleConfigurationEvidenceError,
   StageInstanceEvidenceError,
@@ -1073,6 +1074,181 @@ test("Discord client rejects invalid moderation parameters and audit reasons bef
     /invalid Unicode/,
   )
   assert.equal(requests, 0)
+})
+
+test("Discord client projects exact member voice state and sends one-field PATCH bodies", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const method = init?.method || "GET"
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (method === "GET") {
+        return jsonResponse({
+          channel_id: "200",
+          deaf: false,
+          future_voice_field: { secret: "discarded" },
+          guild_id: "100",
+          member: { user: { id: "400", username: "discarded" } },
+          mute: true,
+          request_to_speak_timestamp: "2026-08-22T00:00:00.000Z",
+          self_deaf: false,
+          self_mute: false,
+          self_stream: true,
+          self_video: true,
+          session_id: "discarded-session",
+          suppress: false,
+          user_id: "400",
+        })
+      }
+      return jsonResponse({
+        deaf: false,
+        future_member_field: "discarded",
+        mute: true,
+        roles: [],
+        user: { id: "400", username: "discarded" },
+      })
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getGuildVoiceState("100", "400"), {
+    channelId: "200",
+    deaf: false,
+    guildId: "100",
+    mute: true,
+    unknownFieldCount: 1,
+    userId: "400",
+  })
+  assert.deepEqual(await client.modifyGuildMemberVoice(
+    "100",
+    "400",
+    { mute: true },
+    "Reviewed voice / case 42",
+  ), {
+    deaf: false,
+    mute: true,
+    unknownFieldCount: 1,
+    userId: "400",
+  })
+  assert.deepEqual(requests, [
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/guilds/100/voice-states/400`,
+    },
+    {
+      body: { mute: true },
+      method: "PATCH",
+      reason: "Reviewed%20voice%20%2F%20case%2042",
+      url: `${API_BASE_URL}/guilds/100/members/400`,
+    },
+  ])
+})
+
+test("Discord client rejects raw or ambiguous member voice evidence and never retries writes", async () => {
+  let requests = 0
+  let sleeps = 0
+  const privateText = "private member voice transport detail"
+  const malformed = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      channel_id: "200",
+      deaf: false,
+      guild_id: "100",
+      mute: false,
+      user_id: "401",
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    malformed.getGuildVoiceState("100", "400"),
+    MemberVoiceEvidenceError,
+  )
+  await assert.rejects(
+    malformed.modifyGuildMemberVoice(
+      "100",
+      "400",
+      { mute: true, deaf: true } as never,
+      "Reviewed voice",
+    ),
+    /exactly one field/,
+  )
+  const mismatchedUpdate = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      deaf: false,
+      mute: true,
+      user: { id: "401" },
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    mismatchedUpdate.modifyGuildMemberVoice(
+      "100",
+      "400",
+      { mute: true },
+      "Reviewed voice",
+    ),
+    MemberVoiceEvidenceError,
+  )
+
+  const transportFailure = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateText)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transportFailure.getGuildVoiceState("100", "400"),
+    (error: unknown) => {
+      assert(error instanceof Error)
+      assert.equal(error.message.includes(privateText), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.modifyGuildMemberVoice(
+      "100",
+      "400",
+      { channelId: null },
+      "Reviewed disconnect",
+    ),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes("rate limited"), false)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
 })
 
 test("Discord client sends narrow channel creation bodies and encoded audit reasons", async () => {

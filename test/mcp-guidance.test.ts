@@ -167,6 +167,7 @@ interface GuidanceCalls {
   welcomeScreens: number
   webhooks: number
   widgetSettings: number
+  voiceStates: number
 }
 
 function guidanceService(options: {
@@ -205,6 +206,7 @@ function guidanceService(options: {
     welcomeScreens: 0,
     webhooks: 0,
     widgetSettings: 0,
+    voiceStates: 0,
   }
   const unexpected = async (..._arguments: unknown[]): Promise<never> => {
     calls.unexpected += 1
@@ -213,6 +215,7 @@ function guidanceService(options: {
   const service: DiscordToolService = {
     addReaction: unexpected,
     executeMemberRoleChange: unexpected,
+    executeMemberVoiceChange: unexpected,
     executeAutoModerationChange: unexpected,
     executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
@@ -674,6 +677,7 @@ function guidanceService(options: {
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
+    planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
     planStageInstanceChange: unexpected,
     async listAutoModerationRules(guildId) {
@@ -954,6 +958,10 @@ function guidanceService(options: {
         memberRoleChangesEnabled: false,
         memberRoleGuildIds: [],
         memberRoleCount: 0,
+        memberVoiceAuditEnabled: false,
+        memberVoiceChangesEnabled: false,
+        memberVoiceChannelIds: [],
+        memberVoiceGuildIds: [],
         mentionUserCount: 0,
         mcpToolsets: [...MCP_TOOLSET_NAMES],
         mcpToolSurface: "full",
@@ -1085,6 +1093,52 @@ function guidanceService(options: {
         },
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async getMemberVoiceState(guildId, userId) {
+      calls.voiceStates += 1
+      calls.lastGuildId = guildId
+      calls.lastUserId = userId
+      return {
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guild: { id: guildId, name: "Private guild name", ownerId: "700000000000000001" },
+        member: { id: userId, username: "member" },
+        permission: {
+          administrator: false,
+          allowed: true as const,
+          appliedRoleIds: [guildId],
+          effectivePermissionNames: ["VIEW_CHANNEL" as const, "CONNECT" as const],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.CONNECT
+          ).toString(),
+          guildOwner: false,
+          requiredPermissions: ["VIEW_CHANNEL" as const, "CONNECT" as const],
+          unknownPermissionBits: "0" as const,
+          warnings: [],
+        },
+        privacy: {
+          enumeration: "none" as const,
+          omittedFields: ["session ID"],
+          persistence: "content-free-outcomes-only" as const,
+          rawPayloadExposed: false as const,
+        },
+        schemaVersion: 1,
+        state: {
+          channel: {
+            guildId,
+            id: CHANNEL_ID,
+            name: "Private voice room",
+            type: "voice" as const,
+          },
+          connected: true,
+          serverDeafened: false,
+          serverMuted: true,
+          unknownFieldCount: 2,
+          userId,
+        },
+        status: "ok" as const,
+        warnings: [],
       }
     },
     async getMessage(channelId, messageId) {
@@ -1326,6 +1380,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.welcomeScreens
     + calls.webhooks
     + calls.widgetSettings
+    + calls.voiceStates
 }
 
 async function readTextResource(client: Client, uri: string) {
@@ -1469,6 +1524,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildStickers,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildStickers,
       },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.memberVoiceState,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.memberVoiceState,
+      },
     ].sort((a, b) => a.name.localeCompare(b.name)),
   )
   assert.deepEqual(
@@ -1534,6 +1593,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /include reasons only by explicit opt-in/)
   assert.match(safety.text, /Member-directory reads require a separate feature gate/)
   assert.match(safety.text, /never convert a name into a write target/)
+  assert.match(safety.text, /Member voice-state audit requires a separate exact guild and voice-channel allowlist/)
+  assert.match(safety.text, /never enumerates occupants, controls Stage participants, retries, rolls back/)
   assert.match(safety.text, /one-shot operation key/)
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)
@@ -1812,6 +1873,21 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("avatar" in member, false)
   assert.equal("presence" in member, false)
 
+  const memberVoice = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/members/${USER_ID}/voice-state`,
+  )
+  const memberVoiceData = memberVoice.value.data as Record<string, unknown>
+  const voiceState = memberVoiceData.state as Record<string, unknown>
+  assert.equal(voiceState.userId, USER_ID)
+  assert.equal(voiceState.connected, true)
+  assert.equal(voiceState.serverMuted, true)
+  assert.equal("sessionId" in voiceState, false)
+  assert.equal(
+    (memberVoiceData.privacy as Record<string, unknown>).enumeration,
+    "none",
+  )
+
   const exactBan = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/bans/${USER_ID}`,
@@ -1937,6 +2013,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.soundboardLookup, 1)
   assert.equal(calls.stageInstances, 1)
   assert.equal(calls.webhooks, 1)
+  assert.equal(calls.voiceStates, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
   assert.equal(calls.lastMessageId, MESSAGE_ID)
@@ -2635,6 +2712,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(memberRole, /before-and-after guild permissions/)
   assert.match(memberRole, /unknown-bit evidence/)
 
+  const memberVoice = promptText(await client.getPrompt({
+    arguments: {
+      action: "move",
+      auditReason: "Reviewed member voice move",
+      destinationChannelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      userId: USER_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewMemberVoiceChange,
+  }))
+  assert.deepEqual(JSON.parse(memberVoice.split("\n")[1] || ""), {
+    action: "move",
+    auditReason: "Reviewed member voice move",
+    destinationChannelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    userId: USER_ID,
+  })
+  assert.match(memberVoice, /Call only plan_member_voice_change/)
+  assert.match(memberVoice, /Do not call execute_member_voice_change/)
+  assert.match(memberVoice, /target permission evidence/)
+  assert.match(memberVoice, /spent operation key/)
+
   const roleCreation = promptText(await client.getPrompt({
     arguments: {
       auditReason: "Reviewed role",
@@ -2784,6 +2885,27 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         userId: USER_ID,
       },
       name: MCP_PROMPT_NAMES.reviewMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "move",
+        auditReason: "Reviewed member voice move",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberVoiceChange,
+    },
+    {
+      arguments: {
+        action: "disconnect",
+        auditReason: "Reviewed member voice disconnect",
+        enabled: "false",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberVoiceChange,
     },
     {
       arguments: {

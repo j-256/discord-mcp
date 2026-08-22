@@ -24,6 +24,7 @@ import {
   type InviteDeletionActivity,
   type MemberModerationActivity,
   type MemberRoleActivity,
+  type MemberVoiceActivity,
   type MessagePinActivity,
   type OnboardingActivity,
   type PollActivity,
@@ -262,6 +263,32 @@ function memberRole(
     operationKeyHash: `sha256:${"5".repeat(64)}`,
     planDigest: `hmac-sha256:${"6".repeat(64)}`,
     roleId: "350",
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    userId: "400",
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function memberVoice(
+  id: string,
+  status: MemberVoiceActivity["status"],
+): MemberVoiceActivity {
+  return {
+    action: "move",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "member-voice-change",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -971,6 +998,64 @@ test("JSONL activity log keeps member-role evidence content-free", async (contex
   assert.doesNotMatch(
     JSON.stringify(result),
     /private audit|private channel|private-operation|private permission|private role|private member/,
+  )
+})
+
+test("JSONL activity log keeps member voice evidence and state content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...memberVoice("1", "pending"),
+    destinationChannelId: "must-never-reach-disk",
+    enabled: true,
+    sourceChannelId: "must-not-persist",
+  } as MemberVoiceActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...memberVoice("2", "completed-with-drift"),
+      auditReason: "private audit reason",
+      channelName: "private voice channel",
+      destinationChannelId: "private destination",
+      enabled: true,
+      operationKey: "private-operation-key",
+      permissionNames: ["private permission"],
+      serverMuted: true,
+      sourceChannelId: "private source",
+      username: "private member",
+    })}\n${JSON.stringify({
+      ...memberVoice("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must-never-reach-disk|must-not-persist/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "member-voice-change")
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "action",
+    "error",
+    "guildId",
+    "id",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "status",
+    "timestamp",
+    "userId",
+    "verification",
+  ])
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private audit|private destination|private member|private permission|private source|private voice|serverMuted/,
   )
 })
 

@@ -222,6 +222,8 @@ export function registerDiscordResources(
           "",
           "Member-role changes require separate exact guild and role allowlists plus protected-user enforcement. Planning binds verified application and bot identity, the exact member and selected standard role, complete role and direct-channel inventories, strict bot and target hierarchy, MANAGE_ROLES, add-time guild and channel escalation constraints, high-risk effective gains, unknown-bit inventory evidence, and bounded before-and-after guild and direct-channel known-permission impact into a keyed digest. Active timeouts fail closed because they temporarily mask impact; thread access is disclosed outside the direct-channel proof. Execution requires fresh matching evidence, signed approval, durable one-shot reservation, pending content-free activity, one non-retried exact-ID PUT or DELETE, and exact member readback. It never replaces all roles, retries, rolls back, or persists names, permission data, audit reasons, or raw operation keys.",
           "",
+          "Member voice-state audit requires a separate exact guild and voice-channel allowlist, verified connector identity, exact target membership, exact current voice state, and complete VIEW_CHANNEL plus CONNECT evidence without enumerating occupants. It returns verified identities, bounded untrusted display names, the target's source channel, server mute and deafen state, permission evidence, and a privacy projection while omitting session, self-state, stream, camera, Stage participant state, embedded-member, and unknown-field values. Reviewed move, disconnect, server-mute, and server-deafen changes require an additional toggle, ordinary voice channels, protected-user and strict hierarchy checks, complete action-specific connector source and destination permissions plus target destination access, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried one-field PATCH, strict response validation, and exact state readback. Same-member uncertain outcomes fail closed. It never enumerates occupants, controls Stage participants, retries, rolls back, or persists channel IDs, state values, names, permissions, audit reasons, raw operation keys, or raw payloads.",
+          "",
           "Role creation is additive-only and requires a separate exact guild allowlist. Planning checks the complete bounded role inventory, logical-name collisions, capacity, bot hierarchy, MANAGE_ROLES, and every named permission as a subset of the bot's effective permissions. ADMINISTRATOR is forbidden. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, pending content-free records, one non-retried create request, and exact role readback. It never edits, moves, assigns, deletes, or rolls back roles.",
           "",
           "Role configuration requires a separate feature gate and exact standard-role allowlist. Planning binds verified application and bot identity, complete guild, member, role-inventory, hierarchy, permission-grantability, logical-name collision, modern color, and aggregate affected-member-count evidence into a keyed digest. Omitted properties and unrelated permission bits are preserved; ADMINISTRATOR grants, permission changes with unknown bits or an ungrantable complete desired set, connector lockout, @everyone, and managed roles fail closed. Metadata-only changes report but do not require grantability of unchanged permissions. Execution requires a fresh matching plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and exact role, complete inventory, and complete member-count readback. Same-role uncertain outcomes fail closed. It never deletes, reorders, assigns, creates, changes icons or emoji, retries, rolls back, or persists names, permission data, audit reasons, or raw operation keys.",
@@ -650,6 +652,31 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.getGuildMember(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "userId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.memberVoiceState,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.memberVoiceState, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact privacy-minimized Discord member voice state from the separately gated voice audit. The result enumerates no occupants, persists nothing, and omits session, self-state, stream, camera, Stage participant state, embedded-member, and unknown-field values.",
+      mimeType: "application/json",
+      title: "Exact privacy-safe Discord member voice state",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getMemberVoiceState(
         templateSnowflake(variables, "guildId"),
         templateSnowflake(variables, "userId"),
         { signal: context.mcpReq.signal },

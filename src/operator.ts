@@ -71,6 +71,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   inviteDeletionPolicy: "invite-deletion-policy",
   memberDirectoryPolicy: "member-directory-policy",
   memberRolePolicy: "member-role-policy",
+  memberVoiceAuditPolicy: "member-voice-audit-policy",
+  memberVoiceChangePolicy: "member-voice-change-policy",
   messageContentIntent: "message-content-intent",
   messagePinPolicy: "message-pin-policy",
   nodeVersion: "node-version",
@@ -338,6 +340,18 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("The member-role toggle is enabled but changes remain blocked because exact guild and role allowlists are both required")
   }
+  if (
+    config.allowMemberVoiceAudit
+    && (config.memberVoiceGuildIds.size === 0 || config.memberVoiceChannelIds.size === 0)
+  ) {
+    warnings.push("The member voice-audit toggle is enabled but inspection remains blocked because exact guild and voice-channel allowlists are both required")
+  }
+  if (
+    config.allowMemberVoiceChanges
+    && (config.memberVoiceGuildIds.size === 0 || config.memberVoiceChannelIds.size === 0)
+  ) {
+    warnings.push("The member voice-change toggle is enabled but changes remain blocked because exact guild and voice-channel allowlists are both required")
+  }
   if (config.allowAutomodAudit && config.automodGuildIds.size === 0) {
     warnings.push("The AutoMod audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
   }
@@ -441,6 +455,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
     [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
+    [
+      config.allowMemberVoiceAudit || config.allowMemberVoiceChanges,
+      "voice-moderation",
+      "Member voice audit and reviewed changes",
+    ],
     [config.allowPinManagement, "pins", "Message pin management"],
     [
       config.allowPollAudit
@@ -1150,6 +1169,50 @@ export async function diagnoseConnector(
         `Reviewed member-role changes are constrained to ${config.memberRoleGuildIds.size} exact guilds and ${config.memberRoleIds.size} exact roles with bounded permission-impact review and one-shot execution`,
       ))
     }
+    if (!config.allowMemberVoiceAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,
+        "pass",
+        "Privacy-safe exact member voice-state audit is disabled",
+      ))
+    } else if (
+      config.memberVoiceGuildIds.size === 0
+      || config.memberVoiceChannelIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,
+        "warn",
+        "Member voice-state audit is enabled, but exact guild and voice-channel allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,
+        "pass",
+        `Member voice-state audit is constrained to ${config.memberVoiceGuildIds.size} exact guilds and ${config.memberVoiceChannelIds.size} exact voice-scope channels without occupant enumeration or state persistence`,
+      ))
+    }
+    if (!config.allowMemberVoiceChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVoiceChangePolicy,
+        "pass",
+        "Reviewed member voice changes are disabled",
+      ))
+    } else if (
+      config.memberVoiceGuildIds.size === 0
+      || config.memberVoiceChannelIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVoiceChangePolicy,
+        "warn",
+        "Member voice changes are enabled, but exact guild and voice-channel allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVoiceChangePolicy,
+        "pass",
+        `Reviewed member voice changes are constrained to ${config.memberVoiceGuildIds.size} exact guilds and ${config.memberVoiceChannelIds.size} exact voice-scope channels with complete permission and hierarchy review, signed approval, and one-shot execution`,
+      ))
+    }
     if (!config.allowWebhookAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.webhookAuditPolicy,
@@ -1641,6 +1704,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowMemberRoleChanges,
     ENVIRONMENT_NAMES.memberRoleGuildIds,
     ENVIRONMENT_NAMES.memberRoleIds,
+    ENVIRONMENT_NAMES.allowMemberVoiceAudit,
+    ENVIRONMENT_NAMES.allowMemberVoiceChanges,
+    ENVIRONMENT_NAMES.memberVoiceGuildIds,
+    ENVIRONMENT_NAMES.memberVoiceChannelIds,
     ENVIRONMENT_NAMES.allowWebhookAudit,
     ENVIRONMENT_NAMES.allowWebhookDeletions,
     ENVIRONMENT_NAMES.webhookChannelIds,
