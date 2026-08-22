@@ -114,6 +114,7 @@ import { DiscordClient } from "./discord-client.js"
 import {
   ConfigurationError,
   ComponentMessagePlanChangedError,
+  GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
   WebhookDeletionPlanChangedError,
@@ -152,8 +153,12 @@ import type {
   GuildScaffoldRequest,
   GuildScaffoldResult,
   GuildScaffoldServiceOptions,
+  GuildScaffoldVerification,
 } from "./guild-scaffold-service.js"
-import { GuildScaffoldService } from "./guild-scaffold-service.js"
+import {
+  GuildScaffoldService,
+  normalizeGuildScaffoldRequest,
+} from "./guild-scaffold-service.js"
 import type {
   GuildTemplateChangePlan,
   GuildTemplateChangeRequest,
@@ -422,6 +427,7 @@ import {
   writeCoordinationDirectory,
   writeGuildCollectionTarget,
   writeResourceTarget,
+  type WriteCoordinationRunOptions,
   type WriteCoordinationTarget,
   type WriteCoordinator,
 } from "./write-coordination.js"
@@ -1198,6 +1204,7 @@ export class ConnectorService {
     planDigest: string,
     targets: readonly WriteCoordinationTarget[],
     operation: () => Promise<T>,
+    coordinationOptions?: WriteCoordinationRunOptions,
   ): Promise<T> {
     if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
       throw new RangeError("Discord reviewed-write plan digest is invalid")
@@ -1207,7 +1214,7 @@ export class ConnectorService {
       operationKeyHash: operationKeyHash(operationKey),
       planDigest,
       targets,
-    }, operation)
+    }, operation, coordinationOptions)
   }
 
   async getStatus(options: RequestOptions = {}) {
@@ -1237,15 +1244,15 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
       writeCoordination: {
-        coverage: "receipt-backed-single-step-reviewed-writes",
+        coverage: "receipt-backed-reviewed-writes",
         excludedWorkflows: [
-          "guild-scaffold",
           "legacy-member-moderation",
           "legacy-message-deletion",
           "ordinary-message-interactions",
         ],
         localFilesystemRequired: true,
         mode: "durable-exact-target",
+        resumableWorkflows: ["guild-scaffold"],
         sharedStateRootRequired: true,
       },
     }
@@ -2467,6 +2474,19 @@ export class ConnectorService {
     )
   }
 
+  async verifyGuildScaffold(
+    request: GuildScaffoldRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildScaffoldVerification> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildScaffoldService.verify(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planForumPost(
     request: ForumPostRequest,
     options: RequestOptions = {},
@@ -2789,13 +2809,49 @@ export class ConnectorService {
     planDigest: string,
     options: RequestOptions = {},
   ): Promise<GuildScaffoldResult> {
+    const normalized = normalizeGuildScaffoldRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild scaffold plan digest is invalid")
+    }
     const identity = await this.#verifyIdentity(options)
-    return this.#guildScaffoldService.execute(
+    const coordinationPlan = await this.#guildScaffoldService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new GuildScaffoldPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    const execute = () => this.#guildScaffoldService.execute(
       identity.application.id,
       identity.bot.id,
       request,
       planDigest,
       options,
+    )
+    if (
+      coordinationPlan.status === "completed"
+      || (
+        coordinationPlan.status === "already-current"
+        && coordinationPlan.operation.status === "unreserved"
+      )
+    ) {
+      return execute()
+    }
+    return this.#coordinateWrite(
+      "guild-scaffold",
+      request.operationKey,
+      coordinationPlan.operation.requestDigest,
+      [
+        writeGuildCollectionTarget("channels", normalized.guildId),
+        writeGuildCollectionTarget("roles", normalized.guildId),
+      ],
+      execute,
+      { releasePendingScaffoldOnVerifiedPause: true },
     )
   }
 

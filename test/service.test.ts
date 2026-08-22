@@ -33,6 +33,7 @@ import {
   ChannelCreationPlanChangedError,
   ConfigurationError,
   DiscordApiError,
+  GuildScaffoldPlanChangedError,
   InteractionRateLimitError,
   PolicyError,
 } from "../src/errors.js"
@@ -58,6 +59,7 @@ import type {
 } from "../src/types.js"
 import type {
   WriteCoordinationIntent,
+  WriteCoordinationRunOptions,
   WriteCoordinator,
 } from "../src/write-coordination.js"
 
@@ -92,10 +94,16 @@ const PASSTHROUGH_WRITE_COORDINATOR: WriteCoordinator = {
 
 class CapturingWriteCoordinator implements WriteCoordinator {
   readonly intents: WriteCoordinationIntent[] = []
+  readonly options: (WriteCoordinationRunOptions | undefined)[] = []
   readonly stop = new Error("coordination-captured")
 
-  async run<T>(intent: WriteCoordinationIntent): Promise<T> {
+  async run<T>(
+    intent: WriteCoordinationIntent,
+    _operation: () => Promise<T>,
+    options?: WriteCoordinationRunOptions,
+  ): Promise<T> {
     this.intents.push(intent)
+    this.options.push(options)
     throw this.stop
   }
 }
@@ -1647,6 +1655,132 @@ test("distinct connector facades coordinate through one production state root", 
     await readdir(`${auditFile}.coordination/claims`),
     [],
   )
+})
+
+test("distinct connector facades serialize resumable scaffold guild collections", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-scaffold-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const auditFile = join(root, "activity.jsonl")
+  const botRoleId = "700000000000000002"
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const roles = [
+    role(GUILD_ID, 0n, "@everyone"),
+    {
+      ...role(botRoleId, permissions, "connector"),
+      managed: true,
+      position: 10,
+      tags: { bot_id: BOT_ID },
+    },
+  ]
+  let createCalls = 0
+  let releaseCreate: (() => void) | undefined
+  let reportCreateStarted: (() => void) | undefined
+  const createStarted = new Promise<void>((resolvePromise) => {
+    reportCreateStarted = resolvePromise
+  })
+  const createRelease = new Promise<void>((resolvePromise) => {
+    releaseCreate = resolvePromise
+  })
+  const client: Partial<DiscordServiceClient> = {
+    async createGuildRole(guildId, input) {
+      assert.equal(guildId, GUILD_ID)
+      createCalls += 1
+      const created = {
+        ...role(CREATED_ROLE_ID, BigInt(input.permissions), input.name),
+        color: input.primaryColor,
+        colors: {
+          primary_color: input.primaryColor,
+          secondary_color: null,
+          tertiary_color: null,
+        },
+        hoist: input.hoist,
+        mentionable: input.mentionable,
+        position: 1,
+      }
+      roles.push(created)
+      reportCreateStarted?.()
+      await createRelease
+      return created
+    },
+    async getGuild() {
+      return { ...guild(), features: [], owner_id: "800000000000000001" }
+    },
+    async getGuildChannels() {
+      return []
+    },
+    async getGuildMember() {
+      return { roles: [botRoleId], user: bot() }
+    },
+    async getGuildRole(_guildId, roleId) {
+      const found = roles.find((entry) => entry.id === roleId)
+      assert.ok(found)
+      return found
+    },
+    async getGuildRoles() {
+      return roles
+    },
+  }
+  const shared = {
+    client,
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_AUDIT_FILE: auditFile,
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-22T04:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(11),
+      randomId: () => "activity-shared-scaffold",
+    },
+    roleAdministrationOptions: {
+      clock: () => new Date("2026-08-22T04:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(12),
+      randomId: () => "activity-shared-scaffold-role",
+    },
+    useDefaultWriteCoordinator: true,
+  } satisfies Parameters<typeof serviceFixture>[0]
+  const first = serviceFixture(shared).service
+  const second = serviceFixture(shared).service
+  const request = (suffix: string) => ({
+    auditReason: `Reviewed ${suffix} scaffold`,
+    channels: [{
+      key: `${suffix}-category`,
+      kind: "category" as const,
+      name: `${suffix} category`,
+    }],
+    guildId: GUILD_ID,
+    operationKey: `shared-scaffold-attempt-${suffix}-0001`,
+    roles: [{ key: `${suffix}-role`, name: `${suffix} role` }],
+    stepLimit: 1,
+  })
+  const firstRequest = request("first")
+  const secondRequest = request("second")
+  const [firstPlan, secondPlan] = await Promise.all([
+    first.planGuildScaffold(firstRequest),
+    second.planGuildScaffold(secondRequest),
+  ])
+
+  const running = first.executeGuildScaffold(firstRequest, firstPlan.digest)
+  await Promise.race([
+    createStarted,
+    running.then(() => {
+      throw new Error("first coordinated scaffold completed before mutation started")
+    }),
+  ])
+  const queued = assert.rejects(
+    () => second.executeGuildScaffold(secondRequest, secondPlan.digest),
+    GuildScaffoldPlanChangedError,
+  )
+  await new Promise<void>((resolvePromise) => setImmediate(resolvePromise))
+  assert.equal(createCalls, 1)
+  releaseCreate?.()
+  assert.equal((await running).status, "paused")
+  await queued
+  assert.equal(createCalls, 1)
+  assert.deepEqual(await readdir(`${auditFile}.coordination/claims`), [])
 })
 
 test("service verifies bot identity before delegating safe message interactions", async () => {
@@ -3920,9 +4054,21 @@ test("service verifies identity before an exact guild-scaffold no-op", async () 
     roles: [{ key: "support-role", name: "Support" }],
   }
 
+  const verification = await service.verifyGuildScaffold(request)
   const plan = await service.planGuildScaffold(request)
   const result = await service.executeGuildScaffold(request, plan.digest)
 
+  assert.equal(verification.status, "unrecorded")
+  assert.equal(verification.operation.receiptStatus, "unreserved")
+  assert.deepEqual(verification.steps.map((step) => step.state), [
+    "already-current",
+    "already-current",
+  ])
+  assert.doesNotMatch(JSON.stringify(verification), /Support|Reviewed exact/)
+  assert.equal(
+    JSON.stringify(verification).includes(request.operationKey),
+    false,
+  )
   assert.equal(plan.status, "already-current")
   assert.equal(result.status, "already-current")
   assert.equal(calls.application, 1)
@@ -3931,6 +4077,79 @@ test("service verifies identity before an exact guild-scaffold no-op", async () 
   assert.equal(calls.createRole, 0)
   assert.equal(operationStore.receipt, undefined)
   assert.deepEqual(writeCoordinator.intents, [])
+})
+
+test("service durably coordinates active guild scaffolds by request identity", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const botRoleId = "700000000000000002"
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildChannels() {
+        return []
+      },
+      async getGuildMember() {
+        return { roles: [botRoleId], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(botRoleId, permissions, "connector"),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-20T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-scaffold",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    auditReason: "Reviewed additive scaffold",
+    channels: [{ key: "support-category", kind: "category" as const, name: "Support" }],
+    guildId: GUILD_ID,
+    operationKey: "guild-scaffold-attempt-0001",
+    roles: [{ key: "support-role", name: "Support" }],
+  }
+  const plan = await service.planGuildScaffold(request)
+
+  await assert.rejects(
+    () => service.executeGuildScaffold(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  assert.equal(plan.status, "planned")
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "guild-scaffold",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.operation.requestDigest,
+    targets: [
+      { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+      { collection: "roles", guildId: GUILD_ID, kind: "guild-collection" },
+    ],
+  }])
+  assert.deepEqual(writeCoordinator.options, [{
+    releasePendingScaffoldOnVerifiedPause: true,
+  }])
+  assert.notEqual(plan.operation.requestDigest, plan.digest)
+  assert.equal(calls.createChannel, 0)
+  assert.equal(calls.createRole, 0)
+  assert.equal(operationStore.receipt, undefined)
 })
 
 test("service pins identity through native poll audit and reviewed creation", async () => {
@@ -4582,15 +4801,15 @@ test("service verifies identity once and reports scope without message reads", a
   assert.equal(status.bot.id, BOT_ID)
   assert.equal(status.guildPage.accessible, 1)
   assert.deepEqual(status.writeCoordination, {
-    coverage: "receipt-backed-single-step-reviewed-writes",
+    coverage: "receipt-backed-reviewed-writes",
     excludedWorkflows: [
-      "guild-scaffold",
       "legacy-member-moderation",
       "legacy-message-deletion",
       "ordinary-message-interactions",
     ],
     localFilesystemRequired: true,
     mode: "durable-exact-target",
+    resumableWorkflows: ["guild-scaffold"],
     sharedStateRootRequired: true,
   })
   assert.equal(guilds.guilds[0]?.id, GUILD_ID)

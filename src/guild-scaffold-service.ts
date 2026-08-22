@@ -250,6 +250,35 @@ export interface GuildScaffoldResult {
   status: "already-current" | "completed" | "paused"
 }
 
+export interface GuildScaffoldVerificationStep {
+  index: number
+  kind: GuildScaffoldStepKind
+  resourceId: string | null
+  state: GuildScaffoldStepState
+}
+
+export interface GuildScaffoldVerification {
+  applicationId: string
+  botId: string
+  checkedAt: string
+  counts: GuildScaffoldPlan["counts"]
+  evidence: {
+    callerRetainedRequestRequired: true
+    persistedDiscordContent: false
+    source: "live-discord-and-content-free-receipts"
+  }
+  guildId: string
+  operation: {
+    operationKeyHash: string
+    receiptStatus: OperationReceipt["status"] | "unreserved"
+    requestDigest: string
+  }
+  planDigest: string
+  schemaVersion: number
+  status: "incomplete" | "unrecorded" | "verified"
+  steps: GuildScaffoldVerificationStep[]
+}
+
 export interface GuildScaffoldServiceOptions {
   channelService: Pick<
     ChannelAdministrationService,
@@ -1269,7 +1298,7 @@ export class GuildScaffoldService {
         "A newly created category must be reviewed in a fresh plan before any child channel can be created",
         "No step is retried, rolled back, reordered, assigned, edited, or deleted",
         "An uncertain or drifting step permanently blocks this scaffold operation key",
-        "Serialization across different scaffold operation keys is process-local; do not run connector processes with overlapping scaffold scope",
+        "Scaffold execution must claim both guild role and channel collections before any write",
       ],
     }
   }
@@ -1286,6 +1315,51 @@ export class GuildScaffoldService {
       normalizeGuildScaffoldRequest(request),
       options,
     )
+  }
+
+  async verify(
+    applicationId: string,
+    botId: string,
+    request: GuildScaffoldRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildScaffoldVerification> {
+    const plan = await this.#planNormalized(
+      applicationId,
+      botId,
+      normalizeGuildScaffoldRequest(request),
+      options,
+    )
+    const status = plan.status === "completed"
+      ? "verified"
+      : plan.status === "already-current"
+        ? "unrecorded"
+        : "incomplete"
+    return {
+      applicationId,
+      botId,
+      checkedAt: plan.createdAt,
+      counts: plan.counts,
+      evidence: {
+        callerRetainedRequestRequired: true,
+        persistedDiscordContent: false,
+        source: "live-discord-and-content-free-receipts",
+      },
+      guildId: request.guildId,
+      operation: {
+        operationKeyHash: plan.operation.operationKeyHash,
+        receiptStatus: plan.operation.status,
+        requestDigest: plan.operation.requestDigest,
+      },
+      planDigest: plan.digest,
+      schemaVersion: SCHEMA_VERSION,
+      status,
+      steps: plan.steps.map((step) => ({
+        index: step.index,
+        kind: step.kind,
+        resourceId: step.existingResourceId,
+        state: step.state,
+      })),
+    }
   }
 
   async #finishTop(

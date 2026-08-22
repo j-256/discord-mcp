@@ -4196,6 +4196,7 @@ function serviceFixture(overrides: {
     forumTagPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
+    guildScaffoldVerify: 0,
     guildTemplateExecute: 0,
     guildTemplateList: 0,
     guildTemplatePlan: 0,
@@ -5460,6 +5461,36 @@ function serviceFixture(overrides: {
         status: "completed" as const,
       }
     },
+    async verifyGuildScaffold(request) {
+      calls.guildScaffoldVerify += 1
+      const planned = guildScaffoldPlan(request)
+      return {
+        applicationId: planned.applicationId,
+        botId: planned.botId,
+        checkedAt: planned.createdAt,
+        counts: planned.counts,
+        evidence: {
+          callerRetainedRequestRequired: true as const,
+          persistedDiscordContent: false as const,
+          source: "live-discord-and-content-free-receipts" as const,
+        },
+        guildId: request.guildId,
+        operation: {
+          operationKeyHash: planned.operation.operationKeyHash,
+          receiptStatus: planned.operation.status,
+          requestDigest: planned.operation.requestDigest,
+        },
+        planDigest: planned.digest,
+        schemaVersion: 1,
+        status: "incomplete" as const,
+        steps: planned.steps.map((step) => ({
+          index: step.index,
+          kind: step.kind,
+          resourceId: step.existingResourceId,
+          state: step.state,
+        })),
+      }
+    },
     async executeMemberModeration(request, planDigest) {
       if (overrides.administrationError) throw overrides.administrationError
       calls.administrationExecute += 1
@@ -5952,15 +5983,15 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: "ok",
         writeCoordination: {
-          coverage: "receipt-backed-single-step-reviewed-writes",
+          coverage: "receipt-backed-reviewed-writes",
           excludedWorkflows: [
-            "guild-scaffold",
             "legacy-member-moderation",
             "legacy-message-deletion",
             "ordinary-message-interactions",
           ],
           localFilesystemRequired: true,
           mode: "durable-exact-target",
+          resumableWorkflows: ["guild-scaffold"],
           sharedStateRootRequired: true,
         },
       }
@@ -6837,6 +6868,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_attachment_message",
       "plan_guild_scaffold",
       "execute_guild_scaffold",
+      "verify_guild_scaffold",
       "plan_member_role_change",
       "execute_member_role_change",
       "plan_member_voice_change",
@@ -7146,6 +7178,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     idempotentHint: true,
     openWorldHint: true,
     readOnlyHint: false,
+  })
+  const guildScaffoldVerificationTool = result.tools.find((tool) => (
+    tool.name === "verify_guild_scaffold"
+  ))
+  assert.deepEqual(guildScaffoldVerificationTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
   })
   const attachmentPlanTool = result.tools.find((tool) => (
     tool.name === "plan_attachment_message"
@@ -7540,12 +7581,14 @@ test("progressive discovery enables the complete reviewed guild-scaffold workflo
   assert.deepEqual(discovery.newlyEnabledToolNames, [
     "execute_guild_scaffold",
     "plan_guild_scaffold",
+    "verify_guild_scaffold",
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
       "plan_guild_scaffold",
       "execute_guild_scaffold",
+      "verify_guild_scaffold",
       "discover_discord_tools",
     ],
   )
@@ -8186,6 +8229,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     forumTagPlan: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
+    guildScaffoldVerify: 0,
     guildTemplateExecute: 0,
     guildTemplateList: 0,
     guildTemplatePlan: 0,
@@ -8559,15 +8603,15 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     name: "get_connector_status",
   }))
   assert.deepEqual(status.writeCoordination, {
-    coverage: "receipt-backed-single-step-reviewed-writes",
+    coverage: "receipt-backed-reviewed-writes",
     excludedWorkflows: [
-      "guild-scaffold",
       "legacy-member-moderation",
       "legacy-message-deletion",
       "ordinary-message-interactions",
     ],
     localFilesystemRequired: true,
     mode: "durable-exact-target",
+    resumableWorkflows: ["guild-scaffold"],
     sharedStateRootRequired: true,
   })
 
@@ -8576,7 +8620,8 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.ok(content && "text" in content)
   if (!content || !("text" in content)) throw new Error("Expected safety text")
   assert.match(content.text, /durable exact target claims/)
-  assert.match(content.text, /Guild scaffolds, legacy deletion and member moderation/)
+  assert.match(content.text, /Resumable guild scaffolds claim both guild role and channel collections/)
+  assert.match(content.text, /interruption with pending evidence leaves them quarantined/)
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {
@@ -15641,6 +15686,62 @@ test("MCP guild scaffolds validate bounded additive resource graphs", async (con
   assert.equal(tooSmall.isError, true)
   assert.equal(unsafeRole.isError, true)
   assert.equal(calls.guildScaffoldPlan, 1)
+})
+
+test("MCP guild scaffold verification returns only fresh content-free evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Private Review Space",
+      }],
+      guildId: GUILD_ID,
+      operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+      roles: [{
+        key: "reviewer-role",
+        name: "Private Reviewer",
+        permissions: ["VIEW_CHANNEL"],
+      }],
+      stepLimit: 2,
+    },
+    name: "verify_guild_scaffold",
+  })
+  const verification = structuredContent(result)
+
+  assert.equal(result.isError, undefined)
+  assert.equal(verification.status, "incomplete")
+  assert.equal(verification.guildId, GUILD_ID)
+  assert.equal(
+    (verification.operation as Record<string, unknown>).operationKeyHash,
+    OPERATION_KEY_HASH,
+  )
+  assert.deepEqual(verification.evidence, {
+    callerRetainedRequestRequired: true,
+    persistedDiscordContent: false,
+    source: "live-discord-and-content-free-receipts",
+  })
+  assert.deepEqual(verification.steps, [{
+    index: 0,
+    kind: "role",
+    resourceId: null,
+    state: "ready",
+  }, {
+    index: 1,
+    kind: "category",
+    resourceId: null,
+    state: "ready",
+  }])
+  assert.equal(calls.guildScaffoldVerify, 1)
+  assert.equal(calls.guildScaffoldPlan, 0)
+  assert.equal(calls.guildScaffoldExecute, 0)
+
+  const serialized = JSON.stringify(result)
+  assert.doesNotMatch(serialized, /Private Review Space|Private Reviewer/)
+  assert.equal(serialized.includes(AUDIT_REASON), false)
+  assert.equal(serialized.includes(GUILD_SCAFFOLD_OPERATION_KEY), false)
 })
 
 test("MCP guild scaffolds bind signed approval to the exact reviewed frontier", async (context) => {

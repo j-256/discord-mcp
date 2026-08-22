@@ -623,6 +623,87 @@ test("callback outcomes release settled claims and retain ambiguous claims", asy
   assert.equal((await coordinator.list()).claims[0]?.receiptState, "pending")
 })
 
+test("only a normally paused guild scaffold may release a matching pending receipt", async (context) => {
+  const normal = await fixture(context)
+  const scaffoldIntent = intent([
+    writeGuildCollectionTarget("channels", GUILD_ID),
+    writeGuildCollectionTarget("roles", GUILD_ID),
+  ], { kind: "guild-scaffold" })
+  const result = await normal.coordinator.run(
+    scaffoldIntent,
+    async () => {
+      await normal.operationStore.reserve(receipt("pending", {
+        kind: "guild-scaffold",
+      }))
+      return { status: "paused" as const }
+    },
+    { releasePendingScaffoldOnVerifiedPause: true },
+  )
+  assert.equal(result.status, "paused")
+  assert.deepEqual(await claimFiles(normal.directory), [])
+  assert.equal(
+    normal.operationStore.receipts.get(
+      `guild-scaffold\0${operationKeyHash(OPERATION_KEY)}`,
+    )?.status,
+    "pending",
+  )
+
+  const unsupported = await fixture(context)
+  let called = false
+  await assert.rejects(
+    () => unsupported.coordinator.run(
+      intent(),
+      async () => {
+        called = true
+        return "unsafe"
+      },
+      { releasePendingScaffoldOnVerifiedPause: true },
+    ),
+    /Only Discord guild scaffolds/,
+  )
+  assert.equal(called, false)
+  assert.deepEqual(await claimFiles(unsupported.directory), [])
+
+  const notPaused = await fixture(context)
+  await assert.rejects(
+    () => notPaused.coordinator.run(
+      scaffoldIntent,
+      async () => {
+        await notPaused.operationStore.reserve(receipt("pending", {
+          kind: "guild-scaffold",
+        }))
+        return { status: "completed" as const }
+      },
+      { releasePendingScaffoldOnVerifiedPause: true },
+    ),
+    WriteCoordinationQuarantinedError,
+  )
+  assert.equal(
+    (await notPaused.coordinator.list()).claims[0]?.state,
+    "review-required",
+  )
+
+  const interrupted = await fixture(context)
+  await assert.rejects(
+    () => interrupted.coordinator.run(
+      scaffoldIntent,
+      async () => {
+        await interrupted.operationStore.reserve(receipt("pending", {
+          kind: "guild-scaffold",
+        }))
+        throw new Error("interrupted")
+      },
+      { releasePendingScaffoldOnVerifiedPause: true },
+    ),
+    WriteCoordinationQuarantinedError,
+  )
+  assert.equal(
+    (await interrupted.coordinator.list()).claims[0]?.state,
+    "review-required",
+  )
+  assert.equal((await claimFiles(interrupted.directory)).length, 2)
+})
+
 test("claim cleanup failure reports safely and remains recoverable", async (context) => {
   const { coordinator, directory } = await fixture(context)
   try {

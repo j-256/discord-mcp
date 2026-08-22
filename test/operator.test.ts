@@ -194,15 +194,15 @@ function status(
     schemaVersion: 1,
     status: "ok",
     writeCoordination: {
-      coverage: "receipt-backed-single-step-reviewed-writes",
+      coverage: "receipt-backed-reviewed-writes",
       excludedWorkflows: [
-        "guild-scaffold",
         "legacy-member-moderation",
         "legacy-message-deletion",
         "ordinary-message-interactions",
       ],
       localFilesystemRequired: true,
       mode: "durable-exact-target",
+      resumableWorkflows: ["guild-scaffold"],
       sharedStateRootRequired: true,
     },
   }
@@ -345,6 +345,7 @@ function toolService(): DiscordToolService {
     planForumPost: unexpected,
     planThreadCreation: unexpected,
     planGuildScaffold: unexpected,
+    verifyGuildScaffold: unexpected,
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,

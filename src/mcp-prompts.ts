@@ -2139,6 +2139,7 @@ export function registerDiscordPrompts(
             "3. Present the verified application, bot, and guild identities; exact symbolic resource graph; canonical step order; resolved parent IDs; current and checkpoint states; ready frontier; named role permissions; guild and parent permission evidence; visible capacities; durable operation and request hashes; step limit; warnings; creation time; and keyed plan digest for review.",
             "4. Treat a scope failure, identity change, ambiguous or conflicting resource, incomplete or insufficient permission evidence, hierarchy or capacity failure, pending, failed, uncertain, or drifting checkpoint, spent operation binding, or changed intent as a blocker.",
             "5. A newly created category requires a fresh plan before child creation. Stop after reviewing this frontier. Do not call execute_guild_scaffold in this workflow, even if the plan appears correct.",
+            "6. For a later explicitly approved execution workflow, retain this exact request and operation key across every resume, then call verify_guild_scaffold with that same caller-retained input after completion for fresh content-free evidence. Do not call the execution or verification tool in this plan-only workflow.",
           ],
         ),
         "Plan-only Discord guild scaffold review",

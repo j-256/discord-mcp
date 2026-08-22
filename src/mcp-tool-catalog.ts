@@ -559,6 +559,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-scaffolds",
     workflow: "guild-scaffold",
   },
+  verify_guild_scaffold: {
+    keywords: ["blueprint", "checkpoint", "completion", "evidence", "guild", "scaffold", "verify"],
+    toolset: "guild-scaffolds",
+    workflow: "guild-scaffold",
+  },
   plan_guild_expression_change: {
     keywords: ["create", "delete", "emoji", "expression", "plan", "review", "sticker", "update"],
     toolset: "guild-expressions",

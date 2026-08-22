@@ -485,6 +485,78 @@ test("executes in resumable frontiers and completes without repeating prior writ
   assert.equal(state.channels.length, 2)
 })
 
+test("verifies durable scaffold progress without persisting caller intent", async () => {
+  const {
+    activities,
+    createService,
+    operationStore,
+    service,
+    state,
+  } = fixture()
+  const request = scaffoldRequest()
+  const initial = await service.verify(APPLICATION_ID, BOT_ID, request)
+
+  assert.equal(initial.status, "incomplete")
+  assert.equal(initial.operation.receiptStatus, "unreserved")
+  assert.deepEqual(initial.steps.map((step) => step.state), [
+    "ready",
+    "ready",
+    "waiting-for-parent",
+  ])
+  assert.equal(operationStore.receipts.size, 0)
+  assert.deepEqual(activities, [])
+
+  const firstPlan = await service.plan(APPLICATION_ID, BOT_ID, request)
+  await service.execute(APPLICATION_ID, BOT_ID, request, firstPlan.digest)
+  const paused = await createService({
+    scaffoldPlanKeyByte: 41,
+  }).verify(APPLICATION_ID, BOT_ID, request)
+  assert.equal(paused.status, "incomplete")
+  assert.equal(paused.operation.receiptStatus, "pending")
+
+  const secondService = createService({ scaffoldPlanKeyByte: 42 })
+  const secondPlan = await secondService.plan(APPLICATION_ID, BOT_ID, request)
+  await secondService.execute(APPLICATION_ID, BOT_ID, request, secondPlan.digest)
+  const activityCount = activities.length
+  const receiptCount = operationStore.receipts.size
+  const verified = await createService({
+    scaffoldPlanKeyByte: 43,
+  }).verify(APPLICATION_ID, BOT_ID, request)
+
+  assert.equal(verified.status, "verified")
+  assert.equal(verified.operation.receiptStatus, "completed")
+  assert.deepEqual(verified.counts, {
+    alreadyCurrent: 0,
+    completed: 3,
+    ready: 0,
+    total: 3,
+    waitingForParent: 0,
+  })
+  assert.deepEqual(verified.steps.map((step) => ({
+    kind: step.kind,
+    resourceId: step.resourceId,
+    state: step.state,
+  })), [
+    { kind: "role", resourceId: CREATED_ROLE_ID, state: "completed" },
+    { kind: "category", resourceId: CREATED_CATEGORY_ID, state: "completed" },
+    { kind: "text", resourceId: CREATED_CHANNEL_ID, state: "completed" },
+  ])
+  assert.deepEqual(verified.evidence, {
+    callerRetainedRequestRequired: true,
+    persistedDiscordContent: false,
+    source: "live-discord-and-content-free-receipts",
+  })
+  assert.equal(activities.length, activityCount)
+  assert.equal(operationStore.receipts.size, receiptCount)
+  assert.equal(state.roles.length, 3)
+  assert.equal(state.channels.length, 2)
+
+  const serialized = JSON.stringify(verified)
+  assert.doesNotMatch(serialized, /Private support queue|Support|customer-help/)
+  assert.doesNotMatch(serialized, /Reviewed additive support scaffold/)
+  assert.doesNotMatch(serialized, new RegExp(OPERATION_KEY))
+})
+
 test("resumes across process-local plan-key changes and adjustable reviewed frontiers", async () => {
   const { createService, state } = fixture()
   const firstRequest = scaffoldRequest({ stepLimit: 1 })

@@ -5228,6 +5228,7 @@ export interface DiscordToolService {
   planForumPost: ConnectorService["planForumPost"]
   planForumTagChange: ConnectorService["planForumTagChange"]
   planGuildScaffold: ConnectorService["planGuildScaffold"]
+  verifyGuildScaffold: ConnectorService["verifyGuildScaffold"]
   planGuildExpressionChange: ConnectorService["planGuildExpressionChange"]
   planGuildTemplateChange: ConnectorService["planGuildTemplateChange"]
   planGuildIntegrationDeletion: ConnectorService["planGuildIntegrationDeletion"]
@@ -10016,7 +10017,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Thread creation uses a separate exact parent-channel scope: call plan_thread_creation for a message-anchored, standalone public, or standalone private thread, review the exact source preview when present, resolved settings, complete permission evidence, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_thread_creation with identical inputs and the digest. A source message that already owns a thread produces a no-op without approval or durable records. Writes are never automatically retried, and forum or media parents, lifecycle changes, membership changes, and starter messages are excluded.",
       "Thread governance uses separate exact guild, thread, and optional member allowlists and never enumerates members. For one rename, archive, unarchive, lock, unlock, auto-archive, slowmode, invitation-policy, add-member, or remove-member change, call plan_thread_change, review the exact guild, parent, thread and optional member, minimized current and desired state, complete inherited permissions, action-specific MANAGE_THREADS, membership, send, or private-thread ownership authority, privacy projection, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_thread_change with identical inputs and the digest. Each execution performs one non-retried write and exact readback, never combines metadata fields or rolls back, and an uncertain outcome blocks later same-thread changes in the process.",
       "Forum-post creation uses a separate exact forum-channel scope: call plan_forum_post, review the exact title, starter content, tags, settings, notifications, audit reason, complete permission evidence, one-shot operation key hash, warnings, and keyed digest, then call execute_forum_post with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Guild scaffolds use a dedicated exact guild scope: call plan_guild_scaffold, review the verified application, bot, guild, exact additive role and channel graph, resolved parents, permissions, capacities, durable operation binding, ready frontier, step limit, warnings, and keyed digest, then call execute_guild_scaffold with identical inputs and the digest. Reuse the same operation key only for an intentional paused resume; an uncertain or drifting step permanently blocks it.",
+      "Guild scaffolds use a dedicated exact guild scope: call plan_guild_scaffold, review the verified application, bot, guild, exact additive role and channel graph, resolved parents, permissions, capacities, durable operation binding, ready frontier, step limit, warnings, and keyed digest, then call execute_guild_scaffold with identical inputs and the digest. Execution durably claims both guild role and channel collections; a normal verified pause releases the claims, while interruption or uncertain pending evidence requires review. Reuse the same operation key only for an intentional paused resume; an uncertain or drifting step permanently blocks it. After completion, call verify_guild_scaffold with the same caller-retained request and operation key for fresh content-free completion evidence.",
       "Member-role changes use separate exact guild and role allowlists: call plan_member_role_change, review the exact member and selected role, current and proposed role IDs, guild-level permission delta, bot and target hierarchy, permission-escalation and unknown-bit evidence, every changed direct-channel permission decision, thread-coverage warning, audit reason, one-shot operation key hash, and keyed digest, then call execute_member_role_change with identical inputs and the digest. Add and remove are both destructive reviewed changes. Never replace a member's complete role array or retry after reservation or uncertainty.",
       "Member voice audit uses separate exact guild and channel allowlists and never enumerates occupants. For a move, disconnect, server mute, server unmute, server deafen, or server undeafen, call plan_member_voice_change, review the exact member, minimized current state, ordinary voice source and destination, complete source and destination permissions, target destination access, strict local hierarchy, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_member_voice_change with identical inputs and the digest. Stage participants remain read-only. Writes are never retried or rolled back, and an uncertain outcome blocks later same-member changes in the process.",
       "Role creation is additive-only and exact-guild scoped: call plan_role_creation, review the exact named permissions, bot permission subset and hierarchy, complete role inventory, capacity, collisions, one-shot operation key hash, and keyed digest, then call execute_role_creation with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
@@ -15728,6 +15729,30 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         },
         requestState: signedState,
       })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("verify_guild_scaffold", server.registerTool(
+    "verify_guild_scaffold",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Verify one exact caller-retained Discord guild scaffold request against fresh live roles and channels plus content-free durable receipts. Returns only identities, hashes, counts, step kinds, states, resource IDs, and a fresh keyed plan digest; it does not write, reserve an operation, append activity, or persist the scaffold graph, names, topics, permissions, audit reason, or raw operation key.",
+      inputSchema: guildScaffoldPlanInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Verify Discord guild scaffold completion",
+    },
+    safeToolHandler("verify_guild_scaffold", async (
+      input: z.infer<typeof guildScaffoldPlanInputSchema>,
+      context,
+    ) => {
+      const result = await service.verifyGuildScaffold(
+        guildScaffoldRequest(input),
+        { signal: context.mcpReq.signal },
+      )
+      return toolResult(
+        result,
+        `Discord guild scaffold verification is ${result.status} in guild ${result.guildId} with ${result.counts.completed} checkpoint-backed steps`,
+      )
     }, secrets, observability),
   ))
 

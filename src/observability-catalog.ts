@@ -98,6 +98,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   plan_forum_post: "discord-read",
   plan_forum_tag_change: "discord-read",
   plan_guild_scaffold: "discord-read",
+  verify_guild_scaffold: "discord-read",
   plan_guild_expression_change: "discord-read",
   plan_guild_soundboard_change: "discord-read",
   plan_guild_template_change: "discord-read",

@@ -78,10 +78,15 @@ export interface WriteCoordinationIntent {
   targets: readonly WriteCoordinationTarget[]
 }
 
+export interface WriteCoordinationRunOptions {
+  releasePendingScaffoldOnVerifiedPause?: boolean
+}
+
 export interface WriteCoordinator {
   run<T>(
     intent: WriteCoordinationIntent,
     operation: () => Promise<T>,
+    options?: WriteCoordinationRunOptions,
   ): Promise<T>
 }
 
@@ -373,6 +378,44 @@ function normalizeIntent(intent: WriteCoordinationIntent): WriteCoordinationInte
     planDigest: intent.planDigest,
     targets: normalizeTargets(intent.targets),
   }
+}
+
+function releasePendingScaffoldOnVerifiedPause(
+  intent: WriteCoordinationIntent,
+  options: WriteCoordinationRunOptions | undefined,
+): boolean {
+  if (
+    options !== undefined
+    && (
+      typeof options !== "object"
+      || Array.isArray(options)
+      || Object.keys(options).some(
+        (key) => key !== "releasePendingScaffoldOnVerifiedPause",
+      )
+      || (
+        options.releasePendingScaffoldOnVerifiedPause !== undefined
+        && typeof options.releasePendingScaffoldOnVerifiedPause !== "boolean"
+      )
+    )
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord write coordination run options are invalid",
+    )
+  }
+  const release = options?.releasePendingScaffoldOnVerifiedPause === true
+  if (release && intent.kind !== "guild-scaffold") {
+    throw new WriteCoordinationStateError(
+      "Only Discord guild scaffolds may release a pending receipt after successful execution",
+    )
+  }
+  return release
+}
+
+function isVerifiedScaffoldPause(value: unknown): boolean {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && (value as { status?: unknown }).status === "paused"
 }
 
 export function writeResourceTarget(
@@ -1178,11 +1221,16 @@ export class FileWriteCoordinator implements WriteCoordinator {
   async run<T>(
     intentValue: WriteCoordinationIntent,
     operation: () => Promise<T>,
+    options?: WriteCoordinationRunOptions,
   ): Promise<T> {
     if (typeof operation !== "function") {
       throw new TypeError("Discord write coordination operation must be a function")
     }
     const intent = normalizeIntent(intentValue)
+    const releasePendingScaffold = releasePendingScaffoldOnVerifiedPause(
+      intent,
+      options,
+    )
     await this.#ensureDirectory(true)
     const claimId = this.#randomId()
     if (!CLAIM_ID_PATTERN.test(claimId)) {
@@ -1225,7 +1273,14 @@ export class FileWriteCoordinator implements WriteCoordinator {
         throw error
       }
       const evidence = await this.#receiptEvidence(record)
-      if (!safeRecoveryEvidence(evidence)) {
+      if (
+        !safeRecoveryEvidence(evidence)
+        && !(
+          releasePendingScaffold
+          && evidence === "pending"
+          && isVerifiedScaffoldPause(result)
+        )
+      ) {
         throw new WriteCoordinationQuarantinedError(record.claimId)
       }
       await this.#retireOwnedClaim(record)

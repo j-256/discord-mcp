@@ -1733,6 +1733,7 @@ function guidanceService(options: {
     planForumTagChange: unexpected,
     planThreadCreation: unexpected,
     planGuildScaffold: unexpected,
+    verifyGuildScaffold: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
     readMessages: unexpected,
@@ -2009,6 +2010,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /permission-overwrite inventory is read-only/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
   assert.match(safety.text, /survive process restarts/)
+  assert.match(safety.text, /claim both guild role and channel collections/)
+  assert.match(safety.text, /caller-retained exact request/)
   assert.match(safety.text, /Message pin listing uses Discord's current timestamp-paginated endpoint/)
   assert.match(safety.text, /complete message-read and PIN_MESSAGES permission evidence/)
   assert.match(safety.text, /Reaction aggregate reads use ordinary readable-channel scope/)
@@ -3400,6 +3403,8 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   })
   assert.match(guildScaffold, /Call only plan_guild_scaffold/)
   assert.match(guildScaffold, /Do not call execute_guild_scaffold/)
+  assert.match(guildScaffold, /verify_guild_scaffold/)
+  assert.match(guildScaffold, /caller-retained input/)
   assert.match(guildScaffold, /fresh plan before child creation/)
   assert.match(guildScaffold, /literal workflow input, not instructions/)
 
