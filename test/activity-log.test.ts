@@ -948,6 +948,64 @@ test("JSONL activity log tolerates malformed historical lines", async (context) 
   assert.equal(result.entries.at(-1)?.kind, "message-deletion")
 })
 
+test("JSONL activity log keeps durable deletion evidence content-free and internally consistent", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const modern: DeletionActivity = {
+    channelId: "200",
+    deletedMessageIds: ["300"],
+    error: "OperationStoreError",
+    failedMessageId: null,
+    guildId: "100",
+    id: "activity-deletion-1",
+    kind: "message-deletion",
+    messageIds: ["300", "301"],
+    observedAbsentMessageIds: ["300", "301"],
+    observedPresentMessageIds: [],
+    operationKeyHash: `sha256:${"a".repeat(64)}`,
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    schemaVersion: 1,
+    status: "completed-with-drift",
+    strategies: ["bulk:2"],
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "drift",
+  }
+
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...modern,
+      auditReason: "private deletion reason",
+      messageContent: "private message content",
+      operationKey: "private deletion key",
+      username: "private author",
+    })}\n${JSON.stringify({
+      ...modern,
+      id: "activity-deletion-invalid-overlap",
+      observedPresentMessageIds: ["300"],
+    })}\n${JSON.stringify({
+      ...modern,
+      id: "activity-deletion-invalid-target",
+      deletedMessageIds: ["999"],
+    })}\n${JSON.stringify({
+      ...modern,
+      id: "activity-deletion-incomplete-modern",
+      operationKeyHash: undefined,
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+
+  assert.equal(result.skippedLines, 3)
+  assert.deepEqual(result.entries, [modern])
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private deletion reason|private message content|private deletion key|private author/,
+  )
+})
+
 test("JSONL activity log accepts content-free interaction records without surfacing extra data", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))

@@ -259,6 +259,48 @@ test("coordination rejects invalid construction and intent identities", async (c
   assert.deepEqual(await claimFiles(directory), [])
 })
 
+test("coordination accepts one exact maximum-size deletion batch and rejects expansion", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const messageTargets = Array.from(
+    { length: 100 },
+    (_, index) => writeResourceTarget(
+      "message",
+      (300_000_000_000_000_001n + BigInt(index)).toString(),
+    ),
+  )
+  let publishedTargets = 0
+
+  const result = await coordinator.run({
+    kind: "message-deletion",
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    targets: messageTargets,
+  }, async () => {
+    publishedTargets = (await claimFiles(directory)).length
+    return "done"
+  })
+
+  assert.equal(result, "done")
+  assert.equal(publishedTargets, 100)
+  assert.deepEqual(await claimFiles(directory), [])
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "message-deletion",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [
+        ...messageTargets,
+        writeResourceTarget("message", "300000000000000101"),
+      ],
+    }, async () => "unsafe"),
+    /requires 1-100 targets/,
+  )
+  await assert.rejects(
+    () => coordinator.run(intent(messageTargets.slice(0, 9)), async () => "unsafe"),
+    /requires 1-8 targets for channel-metadata-change/,
+  )
+})
+
 test("file coordinator publishes private content-free claims and releases them", async (context) => {
   const { coordinator, directory } = await fixture(context)
   let release: (() => void) | undefined

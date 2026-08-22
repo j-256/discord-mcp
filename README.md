@@ -54,7 +54,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Every receipt-backed reviewed write acquires a durable content-free claim over its exact channel, message, member, role, webhook, integration, or guild collection targets before the final fresh plan can advance to reservation or mutation; resumable scaffolds claim both guild role and channel collections, and separate connector processes coordinate when they share the same local activity-state root
 - Claims never expire by age. A dead owner is reclaimed automatically only when its immutable receipt proves that no matching reservation exists or that the result is terminal; pending, uncertain, unreadable, or malformed state remains quarantined for operator review
 - Coordination state uses private atomically published records and stores only exact Discord identifiers, bounded target kinds, operation kind, operation-key hash, plan digest, PID, timestamp, and random claim ID. It never stores Discord content, names, audit reasons, payloads, URLs, local file paths, raw operation keys, or credentials
-- Durable coordination requires one shared local state root on a local filesystem. A normally paused scaffold releases its matching pending claim only after the callback returns successfully; interruption or uncertain execution leaves it quarantined. Legacy message deletion and member moderation plus ordinary message interactions retain their documented specialized semantics outside this boundary
+- Durable coordination requires one shared local state root on a local filesystem. A normally paused scaffold releases its matching pending claim only after the callback returns successfully; interruption or uncertain execution leaves it quarantined. Message deletion participates through exact message targets; member moderation and ordinary message interactions retain their documented specialized semantics outside this boundary
 - Pin listing uses Discord's current timestamp-paginated endpoint under ordinary read scope and never persists returned messages
 - Pin and unpin changes are disabled unless a separate toggle and non-empty exact channel allowlist are both configured; thread-parent scope never grants mutation authority
 - A content-bound keyed plan, signed MCP elicitation, host write approval, a final fresh plan, dedicated `PIN_MESSAGES` evidence, a durable one-shot receipt, pending content-free activity, one non-retried mutation, and exact state plus review-snapshot readback surround every pin change
@@ -1484,17 +1484,19 @@ The interaction tools return identifiers, jump URLs, status, activity IDs, and s
 ## Deletion workflow
 
 1. Use `read_messages` or `get_message` to identify exact message IDs.
-2. Call `plan_message_deletion` with one channel and those exact IDs.
-3. Review every author, timestamp, content preview, attachment filename, execution strategy, and plan digest.
-4. Call `delete_messages` with the unchanged channel, IDs, and digest.
-5. Approve the MCP confirmation only if every displayed message is intended.
-6. Review the returned activity ID and outcome.
+2. Call `plan_message_deletion` with one channel, those exact IDs, a Discord audit-log reason, and a unique one-shot operation key.
+3. Review the verified application, bot, guild, channel, optional thread parent and membership evidence, every author, message type, timestamp, content preview, attachment filename, complete permission decision, execution strategy, reason, operation-key hash, warning, and keyed plan digest.
+4. Call `delete_messages` with the identical reason, channel, IDs, operation key, and digest.
+5. Approve the signed MCP confirmation only if every displayed identity, message, permission, strategy, warning, reason, hash, and digest remains intended.
+6. Review the exact absence evidence, activity ID, and outcome before any related write.
 
-Outstanding plan digests expire with the MCP process and are invalid after a restart. A changed or missing message also invalidates the plan.
+Planning fetches each exact message and fails closed on malformed, mismatched, unknown, or Discord-documented non-deletable message types. It proves `VIEW_CHANNEL` and `READ_MESSAGE_HISTORY`, plus `CONNECT` for voice and Stage channels and exact private-thread membership where applicable. A bot-owned ordinary message can be deleted individually without `MANAGE_MESSAGES`; another author's message, an AutoMod action message, or any bulk request requires `MANAGE_MESSAGES`. Outstanding plan digests expire with the MCP process and are invalid after a restart. A changed or missing message, author identity, permission source, permission decision, role snapshot, guild or channel name, Message Content intent state, reason, target set, or strategy also invalidates the plan.
 
-Discord does not offer a conditional message-delete operation. The connector performs its final fresh read immediately before deletion, but a message can still be edited or removed in the narrow interval between that read and Discord processing the delete request. Exact IDs prevent a different message from being substituted at the target ID, and any resulting missing-message or partial failure is reported and journaled.
+The execute call verifies signed request state, rebuilds the complete plan, durably claims every exact message across connector processes sharing the state root, rebuilds the plan again inside that claim, atomically reserves the operation key, and appends pending content-free activity before mutation. Discord does not offer a conditional message-delete operation. The connector performs its final fresh read immediately before deletion, but a message can still be edited or removed in the narrow interval between that read and Discord processing the delete request. Exact IDs prevent a different message from being substituted at the target ID.
 
-Discord's bulk deletion endpoint is used only for messages safely inside its supported age window. The connector deletes other reviewed messages individually and stops bounded individual execution after a failure.
+Discord's bulk deletion endpoint is used only for two to 100 unique messages safely inside its supported age window and only with complete `MANAGE_MESSAGES` evidence. The connector deletes every other reviewed message individually and stops bounded individual execution after a failure. Mutation requests are never retried. Exact GET readback must prove every target absent through a 404: an ambiguous mutation followed by complete absence is `completed-with-drift`, a known failure with some targets remaining is `partial`, and a failed readback or ambiguous mutation with a surviving target is `uncertain`. Every reserved key remains spent, and unresolved uncertain work retains its exact durable claims for operator review.
+
+Durable receipts and activity contain only exact Discord identifiers, plan digest, operation-key hash, strategies, timestamps, fixed error codes, outcomes, and observed presence or absence. They never contain message content, attachment filenames or URLs, embeds, components, author profiles or names, guild or channel names, audit reasons, raw operation keys, response bodies, routes, or transport causes.
 
 ## Reviewed member-role changes
 

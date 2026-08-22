@@ -198,6 +198,7 @@ function message(overrides: Partial<DiscordMessage> = {}): DiscordMessage {
     },
     channel_id: CHANNEL_ID,
     content: "hello",
+    embeds: [],
     guild_id: GUILD_ID,
     id: MESSAGE_ID,
     timestamp: "2026-08-14T00:00:00.000Z",
@@ -1112,6 +1113,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         return [role(
           GUILD_ID,
           DISCORD_PERMISSIONS.MANAGE_GUILD
+            | DISCORD_PERMISSIONS.MANAGE_MESSAGES
             | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
             | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
             | DISCORD_PERMISSIONS.SEND_MESSAGES
@@ -1165,6 +1167,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_DELETIONS: "true",
       DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
@@ -1173,6 +1176,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+      DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
     },
     writeCoordinator,
@@ -1303,6 +1307,17 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     messageId: MESSAGE_ID,
     operationKey,
   }, digest))
+  const deletionRequest = {
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    messageIds: [MESSAGE_ID],
+    operationKey,
+  }
+  const deletionPlan = await service.planMessageDeletion(deletionRequest)
+  await captured(() => service.deleteMessages(
+    deletionRequest,
+    deletionPlan.digest,
+  ))
   await captured(() => service.executeAnnouncementCrosspost({
     channelId: CHANNEL_ID,
     messageId: MESSAGE_ID,
@@ -1405,7 +1420,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 29)
+  assert.equal(byKind.size, 30)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1468,6 +1483,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: CREATED_ROLE_ID, kind: "role" },
       ],
       "member-voice-change": [{ id: MEMBER_USER_ID, kind: "member" }],
+      "message-deletion": [{ id: MESSAGE_ID, kind: "message" }],
       "message-pin": [
         { id: CHANNEL_ID, kind: "channel" },
         { id: MESSAGE_ID, kind: "message" },
@@ -1525,15 +1541,13 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       ? integrationPlan.digest
       : entry.kind === "webhook-deletion"
         ? webhookPlan.digest
-        : entry.kind === "component-message"
-          ? componentPlan.digest
-          : digest
+        : entry.kind === "message-deletion"
+          ? deletionPlan.digest
+          : entry.kind === "component-message"
+            ? componentPlan.digest
+            : digest
     assert.equal(entry.planDigest, expectedDigest)
   }
-  await assert.rejects(
-    () => service.deleteMessages(CHANNEL_ID, [MESSAGE_ID], digest),
-    (error: unknown) => error !== writeCoordinator.stop,
-  )
   await assert.rejects(
     () => service.executeChannelCreation({
       auditReason: "reviewed",
@@ -1544,7 +1558,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 29)
+  assert.equal(writeCoordinator.intents.length, 30)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -4804,7 +4818,6 @@ test("service verifies identity once and reports scope without message reads", a
     coverage: "receipt-backed-reviewed-writes",
     excludedWorkflows: [
       "legacy-member-moderation",
-      "legacy-message-deletion",
       "ordinary-message-interactions",
     ],
     localFilesystemRequired: true,

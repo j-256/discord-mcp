@@ -169,6 +169,7 @@ const TARGET_HASH_PATTERN = /^[a-f0-9]{64}$/
 const MAX_CLAIM_BYTES = 16_384
 const MAX_RESOLUTION_BYTES = 32_768
 const MAX_TARGETS = 8
+const MAX_DELETION_TARGETS = 100
 const CLAIM_FILE = "claim.json"
 const ACKNOWLEDGEMENT_FILE = "acknowledgement.json"
 const RESOLUTION_REASON = "operator-reviewed"
@@ -277,10 +278,14 @@ function compareCanonicalText(left: string, right: string): number {
 
 function normalizeTargets(
   values: readonly WriteCoordinationTarget[] | unknown,
+  kind: OperationKind,
 ): WriteCoordinationTarget[] {
-  if (!Array.isArray(values) || values.length < 1 || values.length > MAX_TARGETS) {
+  const maximum = kind === "message-deletion"
+    ? MAX_DELETION_TARGETS
+    : MAX_TARGETS
+  if (!Array.isArray(values) || values.length < 1 || values.length > maximum) {
     throw new WriteCoordinationStateError(
-      `Discord write coordination requires 1-${MAX_TARGETS} targets`,
+      `Discord write coordination requires 1-${maximum} targets for ${kind}`,
     )
   }
   const byDescriptor = new Map<string, WriteCoordinationTarget>()
@@ -315,7 +320,7 @@ function parseClaim(value: unknown): WriteClaimRecord {
   ) {
     throw new WriteCoordinationStateError("Discord write claim has an invalid shape")
   }
-  const targets = normalizeTargets(record.targets)
+  const targets = normalizeTargets(record.targets, record.kind as OperationKind)
   if (
     !Array.isArray(record.targets)
     || targets.length !== record.targets.length
@@ -376,7 +381,7 @@ function normalizeIntent(intent: WriteCoordinationIntent): WriteCoordinationInte
     kind: intent.kind,
     operationKeyHash: intent.operationKeyHash,
     planDigest: intent.planDigest,
-    targets: normalizeTargets(intent.targets),
+    targets: normalizeTargets(intent.targets, intent.kind),
   }
 }
 

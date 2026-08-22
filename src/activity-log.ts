@@ -11,6 +11,8 @@ import {
   CONNECTOR_LIMITS,
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
+  DISCORD_LIMITS,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   FORUM_TAG_ACTIONS,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
@@ -57,7 +59,13 @@ const ROLE_CONFIGURATION_ACTIVITY_FIELDS: ReadonlySet<string> = new Set([
   "tertiaryColor",
 ])
 
-export type DeletionActivityStatus = "completed" | "failed" | "partial" | "pending"
+export type DeletionActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "partial"
+  | "pending"
+  | "uncertain"
 
 export interface DeletionActivity {
   channelId: string
@@ -68,11 +76,15 @@ export interface DeletionActivity {
   id: string
   kind: "message-deletion"
   messageIds: string[]
+  observedAbsentMessageIds?: string[]
+  observedPresentMessageIds?: string[]
+  operationKeyHash?: string
   planDigest: string
   schemaVersion: number
   status: DeletionActivityStatus
   strategies: string[]
   timestamp: string
+  verification?: "drift" | "match" | null
 }
 
 export type InteractionActivityKind =
@@ -873,15 +885,35 @@ function stringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string")
 }
 
+function positiveActivitySnowflake(value: string): boolean {
+  return DISCORD_SNOWFLAKE_PATTERN.test(value)
+    && BigInt(value) >= 1n
+    && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+}
+
 function parseDeletionActivity(value: unknown): DeletionActivity | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
+  const modern = [
+    "observedAbsentMessageIds",
+    "observedPresentMessageIds",
+    "operationKeyHash",
+    "verification",
+  ].some((field) => Object.hasOwn(record, field))
+    || ["completed-with-drift", "uncertain"].includes(String(record.status))
   if (
     record.schemaVersion !== SCHEMA_VERSION
     || ![undefined, "message-deletion"].includes(record.kind as string | undefined)
     || typeof record.id !== "string"
     || typeof record.timestamp !== "string"
-    || !["completed", "failed", "partial", "pending"].includes(String(record.status))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "partial",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
     || typeof record.channelId !== "string"
     || typeof record.guildId !== "string"
     || typeof record.planDigest !== "string"
@@ -890,8 +922,124 @@ function parseDeletionActivity(value: unknown): DeletionActivity | undefined {
     || !stringArray(record.strategies)
     || !(record.error === null || typeof record.error === "string")
     || !(record.failedMessageId === null || typeof record.failedMessageId === "string")
+    || (modern && (
+      typeof record.operationKeyHash !== "string"
+      || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+      || !stringArray(record.observedAbsentMessageIds)
+      || !stringArray(record.observedPresentMessageIds)
+      || ![null, "drift", "match"].includes(record.verification as string | null)
+      || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+      || Number.isNaN(Date.parse(record.timestamp))
+      || !positiveActivitySnowflake(record.channelId as string)
+      || !positiveActivitySnowflake(record.guildId as string)
+      || !(record.error === null || (
+        typeof record.error === "string"
+        && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+      ))
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest as string)
+      || ![
+        ...(record.messageIds as string[]),
+        ...(record.deletedMessageIds as string[]),
+        ...(record.observedAbsentMessageIds as string[]),
+        ...(record.observedPresentMessageIds as string[]),
+      ].every(positiveActivitySnowflake)
+      || (record.status === "pending" && (
+        record.error !== null
+        || (record.deletedMessageIds as string[]).length !== 0
+        || (record.observedAbsentMessageIds as string[]).length !== 0
+        || (record.observedPresentMessageIds as string[]).length !== 0
+        || record.verification !== null
+      ))
+      || (record.status === "completed" && record.verification !== "match")
+      || (
+        record.status === "completed-with-drift"
+        && record.verification !== "drift"
+      )
+      || (["completed", "completed-with-drift"].includes(String(record.status)) && (
+        (record.observedAbsentMessageIds as string[]).length
+          !== (record.messageIds as string[]).length
+        || (record.observedPresentMessageIds as string[]).length !== 0
+      ))
+      || (["failed", "partial", "uncertain"].includes(String(record.status)) && (
+        record.error === null
+        || record.verification !== null
+      ))
+    ))
   ) {
     return undefined
+  }
+  if (modern) {
+    const messageIds = record.messageIds as string[]
+    const deletedMessageIds = record.deletedMessageIds as string[]
+    const observedAbsentMessageIds = record.observedAbsentMessageIds as string[]
+    const observedPresentMessageIds = record.observedPresentMessageIds as string[]
+    const targetIds = new Set(messageIds)
+    const allEvidenceIds = [
+      ...deletedMessageIds,
+      ...observedAbsentMessageIds,
+      ...observedPresentMessageIds,
+    ]
+    const observationsComplete = observedAbsentMessageIds.length
+      + observedPresentMessageIds.length === messageIds.length
+    const strategyCounts = (record.strategies as string[]).map((strategy) => {
+      const match = /^(bulk|individual):([1-9][0-9]{0,2})$/.exec(strategy)
+      if (!match) return null
+      return {
+        count: Number(match[2]),
+        kind: match[1] as "bulk" | "individual",
+      }
+    })
+    if (
+      messageIds.length < 1
+      || messageIds.length > DISCORD_LIMITS.deletionMessages
+      || new Set(messageIds).size !== messageIds.length
+      || new Set(deletedMessageIds).size !== deletedMessageIds.length
+      || new Set(observedAbsentMessageIds).size !== observedAbsentMessageIds.length
+      || new Set(observedPresentMessageIds).size !== observedPresentMessageIds.length
+      || allEvidenceIds.some((messageId) => !targetIds.has(messageId))
+      || observedAbsentMessageIds.some((messageId) => (
+        observedPresentMessageIds.includes(messageId)
+      ))
+      || !(record.strategies as string[]).length
+      || (record.strategies as string[]).length > 2
+      || strategyCounts.some((strategy) => strategy === null)
+      || new Set(strategyCounts.map((strategy) => strategy?.kind)).size
+        !== strategyCounts.length
+      || strategyCounts.some((strategy) => (
+        strategy?.kind === "bulk" && strategy.count < 2
+      ))
+      || strategyCounts.reduce((total, strategy) => (
+        total + (strategy?.count || 0)
+      ), 0) !== messageIds.length
+      || (
+        record.failedMessageId !== null
+        && !targetIds.has(record.failedMessageId as string)
+      )
+      || (record.status === "pending" && record.failedMessageId !== null)
+      || (["completed", "completed-with-drift"].includes(String(record.status)) && (
+        record.failedMessageId !== null
+        || !observationsComplete
+      ))
+      || (record.status === "failed" && (
+        !observationsComplete
+        || observedAbsentMessageIds.length !== 0
+        || observedPresentMessageIds.length !== messageIds.length
+      ))
+      || (record.status === "partial" && (
+        !observationsComplete
+        || observedAbsentMessageIds.length === 0
+        || observedPresentMessageIds.length === 0
+      ))
+      || (record.status === "uncertain" && !(
+        (
+          observedAbsentMessageIds.length === 0
+          && observedPresentMessageIds.length === 0
+        )
+        || (observationsComplete && observedPresentMessageIds.length > 0)
+      ))
+    ) {
+      return undefined
+    }
   }
   return {
     channelId: record.channelId,
@@ -902,11 +1050,21 @@ function parseDeletionActivity(value: unknown): DeletionActivity | undefined {
     id: record.id,
     kind: "message-deletion",
     messageIds: [...record.messageIds],
+    ...(modern
+      ? {
+          observedAbsentMessageIds: [...record.observedAbsentMessageIds as string[]],
+          observedPresentMessageIds: [...record.observedPresentMessageIds as string[]],
+          operationKeyHash: record.operationKeyHash as string,
+        }
+      : {}),
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as DeletionActivityStatus,
     strategies: [...record.strategies],
     timestamp: record.timestamp,
+    ...(modern
+      ? { verification: record.verification as "drift" | "match" | null }
+      : {}),
   }
 }
 

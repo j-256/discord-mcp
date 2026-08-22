@@ -2792,14 +2792,18 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
 
   const deletion = promptText(await client.getPrompt({
     arguments: {
+      auditReason: "Reviewed exact deletion",
       channelId: CHANNEL_ID,
       messageIds: `${MESSAGE_ID},${SECOND_MESSAGE_ID}`,
+      operationKey: OPERATION_KEY,
     },
     name: MCP_PROMPT_NAMES.reviewMessageDeletion,
   }))
   assert.deepEqual(JSON.parse(deletion.split("\n")[1] || ""), {
+    auditReason: "Reviewed exact deletion",
     channelId: CHANNEL_ID,
     messageIds: [MESSAGE_ID, SECOND_MESSAGE_ID],
+    operationKey: OPERATION_KEY,
   })
   assert.match(deletion, /Call only plan_message_deletion/)
   assert.match(deletion, /Do not call delete_messages/)

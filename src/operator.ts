@@ -801,7 +801,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.deletionPolicy,
         "pass",
-        `Message deletion is constrained to ${config.deleteChannelIds.size} channels`,
+        `Message deletion is constrained to ${config.deleteChannelIds.size} exact channels with durable per-message coordination, one-shot execution, and exact absence readback`,
       ))
     }
     if (!config.allowForumPosts) {

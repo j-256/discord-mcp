@@ -197,7 +197,6 @@ function status(
       coverage: "receipt-backed-reviewed-writes",
       excludedWorkflows: [
         "legacy-member-moderation",
-        "legacy-message-deletion",
         "ordinary-message-interactions",
       ],
       localFilesystemRequired: true,

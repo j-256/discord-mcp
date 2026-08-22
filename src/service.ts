@@ -97,10 +97,14 @@ import {
 } from "./constants.js"
 import type {
   DeletionPlan,
+  DeletionRequest,
   DeletionResult,
   DeletionServiceOptions,
 } from "./deletion-service.js"
-import { DeletionService } from "./deletion-service.js"
+import {
+  DeletionService,
+  normalizeDeletionRequest,
+} from "./deletion-service.js"
 import type {
   DiscordClientOptions,
   GuildPageOptions,
@@ -114,6 +118,7 @@ import { DiscordClient } from "./discord-client.js"
 import {
   ConfigurationError,
   ComponentMessagePlanChangedError,
+  DeletionPlanChangedError,
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
@@ -937,6 +942,7 @@ export class ConnectorService {
     this.#deletionService = new DeletionService({
       activityStore: this.#activityStore,
       client: this.#client,
+      operationStore,
       policy: this.#policy,
       ...options.deletionOptions,
     })
@@ -1247,7 +1253,6 @@ export class ConnectorService {
         coverage: "receipt-backed-reviewed-writes",
         excludedWorkflows: [
           "legacy-member-moderation",
-          "legacy-message-deletion",
           "ordinary-message-interactions",
         ],
         localFilesystemRequired: true,
@@ -1908,12 +1913,17 @@ export class ConnectorService {
   }
 
   async planMessageDeletion(
-    channelId: string,
-    messageIds: readonly string[],
+    request: DeletionRequest,
     options: RequestOptions = {},
   ): Promise<DeletionPlan> {
-    await this.#verifyIdentity(options)
-    return this.#deletionService.plan(channelId, messageIds, options)
+    const identity = await this.#verifyIdentity(options)
+    return this.#deletionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
   }
 
   async listMessagePins(
@@ -3032,13 +3042,42 @@ export class ConnectorService {
   }
 
   async deleteMessages(
-    channelId: string,
-    messageIds: readonly string[],
+    request: DeletionRequest,
     planDigest: string,
     options: RequestOptions = {},
   ): Promise<DeletionResult> {
-    await this.#verifyIdentity(options)
-    return this.#deletionService.execute(channelId, messageIds, planDigest, options)
+    const normalized = normalizeDeletionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord message deletion plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const messageContentIntent = applicationMessageContentIntent(identity.application)
+    const coordinationPlan = await this.#deletionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      messageContentIntent,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new DeletionPlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    return this.#coordinateWrite(
+      "message-deletion",
+      request.operationKey,
+      planDigest,
+      normalized.messageIds.map((messageId) => (
+        writeResourceTarget("message", messageId)
+      )),
+      () => this.#deletionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        messageContentIntent,
+        request,
+        planDigest,
+        options,
+      ),
+    )
   }
 
   async executeMessagePin(

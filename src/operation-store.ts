@@ -42,6 +42,7 @@ export const OPERATION_KINDS = [
   "invite-deletion",
   "member-role-change",
   "member-voice-change",
+  "message-deletion",
   "message-pin",
   "native-interaction-command-change",
   "onboarding-change",

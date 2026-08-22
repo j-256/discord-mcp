@@ -62,6 +62,10 @@ import type {
   ChannelPermissionOverwriteRequest,
 } from "../src/channel-permission-overwrite-service.js"
 import type {
+  DeletionPlan,
+  DeletionRequest,
+} from "../src/deletion-service.js"
+import type {
   ForumPostPlan,
   ForumPostRequest,
 } from "../src/forum-post-service.js"
@@ -193,6 +197,8 @@ import {
   ChannelPermissionOverwriteOperationConflictError,
   ComponentMessageExecutionError,
   ComponentMessageOperationConflictError,
+  DeletionExecutionError,
+  DeletionOperationConflictError,
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
@@ -273,6 +279,7 @@ import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityConfig } from "../src/observability-config.js"
 import { OperationalTelemetry } from "../src/observability.js"
+import { operationKeyHash } from "../src/operation-store.js"
 import {
   DISCORD_PERMISSIONS,
   discordPermissionBitfield,
@@ -441,13 +448,32 @@ function rawMessage(content = "hello"): DiscordMessage {
   }
 }
 
-function plan(digest = DIGEST) {
-  return {
+function plan(
+  digest = DIGEST,
+  request: DeletionRequest = {
+    auditReason: AUDIT_REASON,
     channelId: CHANNEL_ID,
+    messageIds: [MESSAGE_ID],
+    operationKey: OPERATION_KEY,
+  },
+): DeletionPlan {
+  return {
+    application: {
+      id: APPLICATION_ID,
+      messageContentIntent: "enabled",
+    },
+    auditReason: request.auditReason,
+    bot: { id: BOT_ID },
+    channel: {
+      id: request.channelId,
+      name: "private-channel",
+      parentId: null,
+      type: 0,
+    },
     createdAt: "2026-08-14T00:00:00.000Z",
     digest,
-    guildId: GUILD_ID,
-    messageIds: [MESSAGE_ID],
+    guild: { id: GUILD_ID, name: "private-guild" },
+    messageIds: [...request.messageIds],
     messages: [{
       attachmentFilenames: [],
       author: {
@@ -462,13 +488,38 @@ function plan(digest = DIGEST) {
       id: MESSAGE_ID,
       timestamp: "2026-08-14T00:00:00.000Z",
       truncated: false,
+      type: 0,
+      url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${MESSAGE_ID}`,
     }],
+    operationKeyHash: operationKeyHash(request.operationKey),
     operations: [{
       kind: "individual" as const,
-      messageIds: [MESSAGE_ID],
+      messageIds: [...request.messageIds],
     }],
+    permission: {
+      administrator: false,
+      canReadMessages: true,
+      confidence: "complete",
+      connect: null,
+      effectivePermissions: "74752",
+      manageMessages: true,
+      permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
+      readMessageHistory: true,
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "MANAGE_MESSAGES",
+      ],
+      viewChannel: true,
+    },
+    privacy: {
+      persistence: "content-free",
+      previews: "transient-untrusted",
+    },
     schemaVersion: 1,
     status: "planned" as const,
+    warnings: ["Deletion is irreversible"],
   }
 }
 
@@ -4072,6 +4123,7 @@ function serviceFixture(overrides: {
   componentMessageError?: Error
   componentMessagePlanDigest?: string
   componentMessageWriteRequired?: boolean
+  deletionError?: Error
   forumPostError?: Error
   forumPostPlanDigest?: string
   forumTagEffect?: "change" | "none"
@@ -5262,16 +5314,21 @@ function serviceFixture(overrides: {
         warnings: [],
       }
     },
-    async deleteMessages(channelId, messageIds, planDigest) {
+    async deleteMessages(request, planDigest) {
+      if (overrides.deletionError) throw overrides.deletionError
       calls.delete += 1
       return {
         activityId: "activity-one",
-        channelId,
-        deletedMessageIds: [...messageIds],
+        channelId: request.channelId,
+        deletedMessageIds: [...request.messageIds],
         guildId: GUILD_ID,
+        observedAbsentMessageIds: [...request.messageIds],
+        operationKeyHash: operationKeyHash(request.operationKey),
         planDigest,
+        remainingMessageIds: [],
         schemaVersion: 1,
         status: "completed",
+        verifiedAbsent: true,
       }
     },
     describePolicy: fixturePolicy,
@@ -5986,7 +6043,6 @@ function serviceFixture(overrides: {
           coverage: "receipt-backed-reviewed-writes",
           excludedWorkflows: [
             "legacy-member-moderation",
-            "legacy-message-deletion",
             "ordinary-message-interactions",
           ],
           localFilesystemRequired: true,
@@ -6335,9 +6391,9 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
-    async planMessageDeletion() {
+    async planMessageDeletion(request) {
       calls.plan += 1
-      return plan(overrides.planDigest)
+      return plan(overrides.planDigest, request)
     },
     async planAttachmentMessage(request) {
       calls.attachmentPlan += 1
@@ -7367,8 +7423,10 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
   await assert.rejects(
     () => progressive.client.callTool({
       arguments: {
+        auditReason: AUDIT_REASON,
         channelId: CHANNEL_ID,
         messageIds: [MESSAGE_ID],
+        operationKey: OPERATION_KEY,
         planDigest: DIGEST,
       },
       name: "delete_messages",
@@ -8606,7 +8664,6 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     coverage: "receipt-backed-reviewed-writes",
     excludedWorkflows: [
       "legacy-member-moderation",
-      "legacy-message-deletion",
       "ordinary-message-interactions",
     ],
     localFilesystemRequired: true,
@@ -8808,8 +8865,10 @@ test("MCP observability reports successful, returned-error, and thrown-error too
   await client.callTool({ arguments: {}, name: "list_guilds" })
   const returnedError = await client.callTool({
     arguments: {
+      auditReason: AUDIT_REASON,
       channelId: CHANNEL_ID,
       messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
       planDigest: DIFFERENT_DIGEST,
     },
     name: "delete_messages",
@@ -9081,6 +9140,51 @@ test("MCP interaction errors distinguish uncertain external outcomes", async (co
   assert.equal(structuredContent(result).status, "outcome-uncertain")
 })
 
+test("MCP deletion plans require bounded exact reviewed intent", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
+    },
+    name: "plan_message_deletion",
+  })
+  const missingReason = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
+    },
+    name: "plan_message_deletion",
+  })
+  const missingKey = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      messageIds: [MESSAGE_ID],
+    },
+    name: "plan_message_deletion",
+  })
+  const duplicateTarget = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      messageIds: [MESSAGE_ID, MESSAGE_ID],
+      operationKey: OPERATION_KEY,
+    },
+    name: "plan_message_deletion",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(missingReason.isError, true)
+  assert.equal(missingKey.isError, true)
+  assert.equal(duplicateTarget.isError, true)
+  assert.equal(calls.plan, 1)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(OPERATION_KEY))
+})
+
 test("MCP deletion elicits exact confirmation before invoking the write service", async (context) => {
   let confirmationMessage = ""
   const { calls, client } = await connectedFixture(context, {
@@ -9095,8 +9199,10 @@ test("MCP deletion elicits exact confirmation before invoking the write service"
 
   const result = await client.callTool({
     arguments: {
+      auditReason: AUDIT_REASON,
       channelId: CHANNEL_ID,
       messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
       planDigest: DIGEST,
     },
     name: "delete_messages",
@@ -9106,6 +9212,10 @@ test("MCP deletion elicits exact confirmation before invoking the write service"
   assert.equal(calls.plan, 1)
   assert.equal(calls.delete, 1)
   assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Message .* type 0/)
+  assert.match(confirmationMessage, /Channel parent ID: none/)
+  assert.match(confirmationMessage, /Private-thread access: not-applicable/)
+  assert.match(confirmationMessage, /Plan created at: 2026-08-14T00:00:00.000Z/)
   assert.match(confirmationMessage, /Content: "hello"/)
   assert.match(confirmationMessage, new RegExp(DIGEST))
 })
@@ -9117,8 +9227,10 @@ test("MCP deletion stops without writing when confirmation is declined", async (
 
   const result = await client.callTool({
     arguments: {
+      auditReason: AUDIT_REASON,
       channelId: CHANNEL_ID,
       messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
       planDigest: DIGEST,
     },
     name: "delete_messages",
@@ -9138,8 +9250,10 @@ test("MCP deletion rejects an accepted confirmation without approval", async (co
 
   const result = await client.callTool({
     arguments: {
+      auditReason: AUDIT_REASON,
       channelId: CHANNEL_ID,
       messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
       planDigest: DIGEST,
     },
     name: "delete_messages",
@@ -9162,8 +9276,10 @@ test("MCP deletion refuses a changed plan before requesting confirmation", async
 
   const result = await client.callTool({
     arguments: {
+      auditReason: AUDIT_REASON,
       channelId: CHANNEL_ID,
       messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
       planDigest: DIGEST,
     },
     name: "delete_messages",
@@ -9173,6 +9289,108 @@ test("MCP deletion refuses a changed plan before requesting confirmation", async
   assert.equal(result.isError, true)
   assert.equal(confirmations, 0)
   assert.equal(calls.delete, 0)
+})
+
+test("MCP deletion signed state rejects changed reason, key, and target", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    messageIds: [MESSAGE_ID],
+    operationKey: OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "delete_messages",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, operationKey: "message-deletion-attempt-0002" },
+    { ...request, messageIds: [USER_ID] },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_deletion: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "delete_messages",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.delete, 0)
+})
+
+test("MCP deletion exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    messageIds: [MESSAGE_ID],
+    operationKey: OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      deletionError: new DeletionExecutionError(
+        "Discord message deletion outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "delete_messages",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-message-deletion",
+    channelId: CHANNEL_ID,
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      deletionError: new DeletionOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "delete_messages",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(OPERATION_KEY))
 })
 
 test("MCP attachment messages validate bounded local-file plans", async (context) => {

@@ -1208,6 +1208,16 @@ export class DeletionPlanChangedError extends Error {
   }
 }
 
+export class DeletionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord message deletion operation key has already been reserved")
+    this.name = "DeletionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
 export class DeletionExecutionError extends Error {
   readonly result: unknown
 
