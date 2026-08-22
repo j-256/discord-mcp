@@ -56,6 +56,7 @@ type McpToolWorkflow =
   | "member-voice-change"
   | "message-deletion"
   | "message-pin"
+  | "native-interaction-command"
   | "role-creation"
   | "role-configuration"
   | "scheduled-event-change"
@@ -206,6 +207,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["execute", "message", "pin", "state", "unpin"],
     toolset: "pins",
     workflow: "message-pin",
+  },
+  execute_native_interaction_command: {
+    keywords: ["application", "command", "execute", "install", "interaction", "remove", "slash"],
+    toolset: "native-interactions",
+    workflow: "native-interaction-command",
   },
   execute_role_creation: {
     keywords: ["create", "execute", "permission", "role"],
@@ -371,6 +377,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_message_pins: {
     keywords: ["list", "message", "paginated", "pin", "pinned"],
     toolset: "pins",
+  },
+  list_pending_discord_interactions: {
+    keywords: ["discord", "interaction", "pending", "private", "queue", "request"],
+    toolset: "native-interactions",
   },
   list_poll_answer_voters: {
     keywords: ["answer", "list", "poll", "user", "vote", "voter"],
@@ -539,6 +549,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "pins",
     workflow: "message-pin",
   },
+  plan_native_interaction_command: {
+    keywords: ["application", "command", "install", "interaction", "plan", "remove", "slash"],
+    toolset: "native-interactions",
+    workflow: "native-interaction-command",
+  },
   plan_role_creation: {
     keywords: ["create", "permission", "plan", "review", "role"],
     toolset: "role-creation",
@@ -579,6 +594,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   send_message: {
     keywords: ["create", "message", "reply", "send", "write"],
     toolset: "interactions",
+  },
+  respond_to_discord_interaction: {
+    keywords: ["discord", "interaction", "private", "reply", "respond"],
+    toolset: "native-interactions",
   },
 } satisfies Record<CanonicalMcpToolName, ToolCatalogMetadata>)
 

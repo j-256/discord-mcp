@@ -921,6 +921,190 @@ test("Discord client crossposts one exact message without a body or automatic re
   assert.throws(() => client.crosspostMessage("200", "bad"), /message ID/)
 })
 
+test("Discord client sends exact managed-command and unauthenticated Interaction contracts", async () => {
+  const interactionToken = "private.interaction-token"
+  const requests: Array<{
+    authorization: string | null
+    body: unknown
+    method: string
+    url: string
+  }> = []
+  const command = {
+    application_id: "100",
+    default_member_permissions: "0",
+    description: "Send a private request to the configured MCP workflow",
+    guild_id: "200",
+    id: "300",
+    name: "discord-mcp",
+    nsfw: false,
+    options: [{
+      description: "The private request to process",
+      max_length: 2_000,
+      min_length: 1,
+      name: "request",
+      required: true,
+      type: 3,
+    }],
+    type: 1,
+    version: "301",
+  }
+  const responses = [
+    jsonResponse([command]),
+    jsonResponse(command),
+    new Response(null, { status: 204 }),
+    new Response(null, { status: 204 }),
+    new Response(null, { status: 204 }),
+    jsonResponse({
+      application_id: "100",
+      attachments: [],
+      author: { bot: true, id: "500", username: "connector" },
+      channel_id: "600",
+      components: [],
+      content: "Reviewed response",
+      embeds: [],
+      flags: 64,
+      id: "700",
+      timestamp: "2026-08-22T00:00:00.000Z",
+      type: 20,
+      webhook_id: "100",
+    }),
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("Authorization"),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      const response = responses.shift()
+      if (!response) throw new Error("Unexpected request")
+      return response
+    },
+    token: TOKEN,
+  })
+
+  await client.listGuildApplicationCommands("100", "200")
+  await client.createGuildApplicationCommand("100", "200", {
+    defaultMemberPermissions: "0",
+    description: command.description,
+    name: command.name,
+    nsfw: false,
+    options: command.options,
+    type: 1,
+  })
+  await client.deleteGuildApplicationCommand("100", "200", "300")
+  await client.createDeferredInteractionResponse("400", interactionToken)
+  await client.createImmediateInteractionResponse(
+    "401",
+    interactionToken,
+    "Private rejection",
+  )
+  await client.editOriginalInteractionResponse(
+    "100",
+    interactionToken,
+    "Reviewed response",
+  )
+
+  assert.deepEqual(requests.map(({ authorization, method, url }) => ({
+    authorization,
+    method,
+    url,
+  })), [{
+    authorization: `Bot ${TOKEN}`,
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands`,
+  }, {
+    authorization: `Bot ${TOKEN}`,
+    method: "POST",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands`,
+  }, {
+    authorization: `Bot ${TOKEN}`,
+    method: "DELETE",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands/300`,
+  }, {
+    authorization: null,
+    method: "POST",
+    url: `${API_BASE_URL}/interactions/400/${interactionToken}/callback`,
+  }, {
+    authorization: null,
+    method: "POST",
+    url: `${API_BASE_URL}/interactions/401/${interactionToken}/callback`,
+  }, {
+    authorization: null,
+    method: "PATCH",
+    url: `${API_BASE_URL}/webhooks/100/${interactionToken}/messages/@original`,
+  }])
+  assert.deepEqual(requests[1]?.body, {
+    default_member_permissions: "0",
+    description: command.description,
+    name: command.name,
+    nsfw: false,
+    options: command.options,
+    type: 1,
+  })
+  assert.equal("contexts" in (requests[1]?.body as Record<string, unknown>), false)
+  assert.equal("integration_types" in (requests[1]?.body as Record<string, unknown>), false)
+  assert.deepEqual(requests[3]?.body, { data: { flags: 64 }, type: 5 })
+  assert.deepEqual(requests[4]?.body, {
+    data: {
+      allowed_mentions: {
+        parse: [],
+        replied_user: false,
+        roles: [],
+        users: [],
+      },
+      content: "Private rejection",
+      flags: 64,
+    },
+    type: 4,
+  })
+  assert.deepEqual(requests[5]?.body, {
+    allowed_mentions: {
+      parse: [],
+      replied_user: false,
+      roles: [],
+      users: [],
+    },
+    attachments: [],
+    components: [],
+    content: "Reviewed response",
+    embeds: [],
+  })
+})
+
+test("Discord client never retries or reveals an Interaction token after callback failure", async () => {
+  const interactionToken = "private.interaction-token"
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: interactionToken, retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createDeferredInteractionResponse("400", interactionToken),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.route.includes(interactionToken), false)
+      assert.equal(error.message.includes(interactionToken), false)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client sends exact permission-overwrite routes and encoded reasons", async () => {
   const requests: Array<{
     body: unknown

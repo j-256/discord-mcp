@@ -59,6 +59,14 @@ export interface PolicyDescription {
   memberVoiceChangesEnabled: boolean
   memberVoiceChannelIds: string[]
   memberVoiceGuildIds: string[]
+  nativeCommandChangesEnabled: boolean
+  nativeCommandName: string
+  nativeInteractionChannelIds: string[]
+  nativeInteractionGuildIds: string[]
+  nativeInteractionMaxPending: number
+  nativeInteractionsEnabled: boolean
+  nativeInteractionTtlSeconds: number
+  nativeInteractionUserIds: string[]
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
@@ -143,6 +151,8 @@ export class ScopePolicy {
   readonly #allowMemberRoleChanges: boolean
   readonly #allowMemberVoiceAudit: boolean
   readonly #allowMemberVoiceChanges: boolean
+  readonly #allowNativeCommandChanges: boolean
+  readonly #allowNativeInteractions: boolean
   readonly #allowOnboardingAudit: boolean
   readonly #allowOnboardingChanges: boolean
   readonly #allowPermissionOverwrites: boolean
@@ -200,6 +210,12 @@ export class ScopePolicy {
   readonly #memberRoleIds: ReadonlySet<string>
   readonly #memberVoiceChannelIds: ReadonlySet<string>
   readonly #memberVoiceGuildIds: ReadonlySet<string>
+  readonly #nativeCommandName: string
+  readonly #nativeInteractionChannelIds: ReadonlySet<string>
+  readonly #nativeInteractionGuildIds: ReadonlySet<string>
+  readonly #nativeInteractionMaxPending: number
+  readonly #nativeInteractionTtlSeconds: number
+  readonly #nativeInteractionUserIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
   readonly #onboardingGuildIds: ReadonlySet<string>
@@ -253,6 +269,8 @@ export class ScopePolicy {
     | "allowMemberRoleChanges"
     | "allowMemberVoiceAudit"
     | "allowMemberVoiceChanges"
+    | "allowNativeCommandChanges"
+    | "allowNativeInteractions"
     | "allowOnboardingAudit"
     | "allowOnboardingChanges"
     | "allowGuildScaffolds"
@@ -302,6 +320,12 @@ export class ScopePolicy {
     | "memberRoleIds"
     | "memberVoiceChannelIds"
     | "memberVoiceGuildIds"
+    | "nativeCommandName"
+    | "nativeInteractionChannelIds"
+    | "nativeInteractionGuildIds"
+    | "nativeInteractionMaxPending"
+    | "nativeInteractionTtlSeconds"
+    | "nativeInteractionUserIds"
     | "forumPostChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
@@ -343,6 +367,8 @@ export class ScopePolicy {
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
     this.#allowMemberVoiceAudit = config.allowMemberVoiceAudit ?? false
     this.#allowMemberVoiceChanges = config.allowMemberVoiceChanges ?? false
+    this.#allowNativeCommandChanges = config.allowNativeCommandChanges ?? false
+    this.#allowNativeInteractions = config.allowNativeInteractions ?? false
     this.#allowOnboardingAudit = config.allowOnboardingAudit ?? false
     this.#allowOnboardingChanges = config.allowOnboardingChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
@@ -401,6 +427,12 @@ export class ScopePolicy {
     this.#memberRoleIds = config.memberRoleIds ?? new Set()
     this.#memberVoiceChannelIds = config.memberVoiceChannelIds ?? new Set()
     this.#memberVoiceGuildIds = config.memberVoiceGuildIds ?? new Set()
+    this.#nativeCommandName = config.nativeCommandName ?? "discord-mcp"
+    this.#nativeInteractionChannelIds = config.nativeInteractionChannelIds ?? new Set()
+    this.#nativeInteractionGuildIds = config.nativeInteractionGuildIds ?? new Set()
+    this.#nativeInteractionMaxPending = config.nativeInteractionMaxPending ?? 25
+    this.#nativeInteractionTtlSeconds = config.nativeInteractionTtlSeconds ?? 600
+    this.#nativeInteractionUserIds = config.nativeInteractionUserIds ?? new Set()
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
     this.#onboardingGuildIds = config.onboardingGuildIds ?? new Set()
@@ -500,6 +532,18 @@ export class ScopePolicy {
         && this.#memberVoiceChannelIds.size > 0,
       memberVoiceChannelIds: [...this.#memberVoiceChannelIds].sort(),
       memberVoiceGuildIds: [...this.#memberVoiceGuildIds].sort(),
+      nativeCommandChangesEnabled: this.#allowNativeCommandChanges
+        && this.#nativeInteractionGuildIds.size > 0,
+      nativeCommandName: this.#nativeCommandName,
+      nativeInteractionChannelIds: [...this.#nativeInteractionChannelIds].sort(),
+      nativeInteractionGuildIds: [...this.#nativeInteractionGuildIds].sort(),
+      nativeInteractionMaxPending: this.#nativeInteractionMaxPending,
+      nativeInteractionsEnabled: this.#allowNativeInteractions
+        && this.#nativeInteractionGuildIds.size > 0
+        && this.#nativeInteractionChannelIds.size > 0
+        && this.#nativeInteractionUserIds.size > 0,
+      nativeInteractionTtlSeconds: this.#nativeInteractionTtlSeconds,
+      nativeInteractionUserIds: [...this.#nativeInteractionUserIds].sort(),
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
@@ -622,6 +666,53 @@ export class ScopePolicy {
   assertGuildAllowed(guildId: string): void {
     if (!this.guildAllowed(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the configured read scope`)
+    }
+  }
+
+  assertNativeCommandChangeAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowNativeCommandChanges) {
+      throw new PolicyError(
+        "Discord native Interaction command changes are disabled by connector configuration",
+      )
+    }
+    if (this.#nativeInteractionGuildIds.size === 0) {
+      throw new PolicyError(
+        "Discord native Interaction command changes require an exact guild allowlist",
+      )
+    }
+    if (!this.#nativeInteractionGuildIds.has(guildId)) {
+      throw new PolicyError(
+        `Discord guild ${guildId} is outside the native Interaction command scope`,
+      )
+    }
+  }
+
+  assertNativeInteractionAllowed(
+    guildId: string,
+    channelId: string,
+    userId: string,
+  ): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowNativeInteractions) {
+      throw new PolicyError(
+        "Discord native Interactions are disabled by connector configuration",
+      )
+    }
+    if (!this.#nativeInteractionGuildIds.has(guildId)) {
+      throw new PolicyError(
+        `Discord guild ${guildId} is outside the native Interaction scope`,
+      )
+    }
+    if (!this.#nativeInteractionChannelIds.has(channelId)) {
+      throw new PolicyError(
+        `Discord channel ${channelId} is outside the native Interaction scope`,
+      )
+    }
+    if (!this.#nativeInteractionUserIds.has(userId)) {
+      throw new PolicyError(
+        `Discord user ${userId} is outside the native Interaction scope`,
+      )
     }
   }
 

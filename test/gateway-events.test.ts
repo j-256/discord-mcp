@@ -77,12 +77,8 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
       state: "disabled",
     },
     enabled: false,
-    intents: [
-      "GUILDS",
-      "GUILD_MESSAGES",
-      "GUILD_MESSAGE_REACTIONS",
-      "GUILD_MESSAGE_POLLS",
-    ],
+    feedEnabled: false,
+    intents: [],
     privacy: {
       contentStored: false,
       persistent: false,
@@ -100,6 +96,15 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
   assert.throws(
     () => store({ allowedChannelIds: [], allowedGuildIds: [] }),
     /exact guild or channel scope/,
+  )
+  assert.throws(
+    () => new GatewayEventStore({
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set([GUILD_ID]),
+      enabled: false,
+      eventFeedEnabled: true,
+    }),
+    /requires an enabled Gateway connection/,
   )
 })
 

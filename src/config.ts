@@ -17,6 +17,9 @@ import {
   ENVIRONMENT_NAMES,
   GATEWAY_DEFAULTS,
   INTERACTION_DEFAULTS,
+  NATIVE_INTERACTION_COMMAND_NAME_PATTERN,
+  NATIVE_INTERACTION_DEFAULTS,
+  NATIVE_INTERACTION_LIMITS,
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
@@ -56,6 +59,8 @@ export interface ConnectorConfig {
   allowMemberRoleChanges: boolean
   allowMemberVoiceAudit: boolean
   allowMemberVoiceChanges: boolean
+  allowNativeCommandChanges: boolean
+  allowNativeInteractions: boolean
   allowOnboardingAudit: boolean
   allowOnboardingChanges: boolean
   allowPermissionOverwrites: boolean
@@ -110,6 +115,12 @@ export interface ConnectorConfig {
   memberRoleIds: ReadonlySet<string>
   memberVoiceChannelIds: ReadonlySet<string>
   memberVoiceGuildIds: ReadonlySet<string>
+  nativeCommandName: string
+  nativeInteractionChannelIds: ReadonlySet<string>
+  nativeInteractionGuildIds: ReadonlySet<string>
+  nativeInteractionMaxPending: number
+  nativeInteractionTtlSeconds: number
+  nativeInteractionUserIds: ReadonlySet<string>
   mcpToolsets: ReadonlySet<McpToolsetName>
   mcpToolSurface: McpToolSurface
   observability: ObservabilityConfig
@@ -412,6 +423,21 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.memberVoiceGuildIds,
     CONNECTOR_LIMITS.memberVoiceGuildAllowlist,
   )
+  const nativeInteractionGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.nativeInteractionGuildIds],
+    ENVIRONMENT_NAMES.nativeInteractionGuildIds,
+    CONNECTOR_LIMITS.nativeInteractionGuildAllowlist,
+  )
+  const nativeInteractionChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.nativeInteractionChannelIds],
+    ENVIRONMENT_NAMES.nativeInteractionChannelIds,
+    CONNECTOR_LIMITS.nativeInteractionChannelAllowlist,
+  )
+  const nativeInteractionUserIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.nativeInteractionUserIds],
+    ENVIRONMENT_NAMES.nativeInteractionUserIds,
+    CONNECTOR_LIMITS.nativeInteractionUserAllowlist,
+  )
   const protectedUserIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.protectedUserIds],
     ENVIRONMENT_NAMES.protectedUserIds,
@@ -478,6 +504,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.memberVoiceGuildIds, memberVoiceGuildIds],
+    [ENVIRONMENT_NAMES.nativeInteractionGuildIds, nativeInteractionGuildIds],
     [ENVIRONMENT_NAMES.threadGuildIds, threadGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
@@ -502,6 +529,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
     [ENVIRONMENT_NAMES.memberVoiceChannelIds, memberVoiceChannelIds],
+    [ENVIRONMENT_NAMES.nativeInteractionChannelIds, nativeInteractionChannelIds],
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
@@ -530,14 +558,49 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowGateway],
     ENVIRONMENT_NAMES.allowGateway,
   )
-  if (allowGateway && (!expectedApplicationId || !expectedBotId)) {
+  const allowNativeCommandChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowNativeCommandChanges],
+    ENVIRONMENT_NAMES.allowNativeCommandChanges,
+  )
+  const allowNativeInteractions = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowNativeInteractions],
+    ENVIRONMENT_NAMES.allowNativeInteractions,
+  )
+  if (
+    (allowGateway || allowNativeCommandChanges || allowNativeInteractions)
+    && (!expectedApplicationId || !expectedBotId)
+  ) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGateway} requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+      `Gateway and native Interaction features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
     )
   }
   if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGateway} requires an exact guild or channel read allowlist`,
+    )
+  }
+  if (
+    allowNativeCommandChanges
+    && nativeInteractionGuildIds.size === 0
+  ) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowNativeCommandChanges} requires ${ENVIRONMENT_NAMES.nativeInteractionGuildIds}`,
+    )
+  }
+  if (allowNativeInteractions && (
+    nativeInteractionGuildIds.size === 0
+    || nativeInteractionChannelIds.size === 0
+    || nativeInteractionUserIds.size === 0
+  )) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowNativeInteractions} requires exact native Interaction guild, channel, and user allowlists`,
+    )
+  }
+  const nativeCommandName = environment[ENVIRONMENT_NAMES.nativeCommandName]?.trim()
+    || NATIVE_INTERACTION_DEFAULTS.commandName
+  if (!NATIVE_INTERACTION_COMMAND_NAME_PATTERN.test(nativeCommandName)) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.nativeCommandName} must be 1-${NATIVE_INTERACTION_LIMITS.commandNameCharacters} lowercase ASCII letters, digits, hyphens, or underscores`,
     )
   }
   const allowAutomodAudit = parseBoolean(
@@ -796,6 +859,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
       ENVIRONMENT_NAMES.allowMemberRoleChanges,
     ),
+    allowNativeCommandChanges,
+    allowNativeInteractions,
     allowMemberVoiceAudit,
     allowMemberVoiceChanges,
     allowOnboardingAudit,
@@ -897,6 +962,24 @@ export function loadConnectorConfig(
     memberRoleIds,
     memberVoiceChannelIds,
     memberVoiceGuildIds,
+    nativeCommandName,
+    nativeInteractionChannelIds,
+    nativeInteractionGuildIds,
+    nativeInteractionMaxPending: parseInteger(
+      environment[ENVIRONMENT_NAMES.nativeInteractionMaxPending],
+      ENVIRONMENT_NAMES.nativeInteractionMaxPending,
+      NATIVE_INTERACTION_DEFAULTS.maximumPending,
+      1,
+      CONNECTOR_LIMITS.nativeInteractionMaxPending,
+    ),
+    nativeInteractionTtlSeconds: parseInteger(
+      environment[ENVIRONMENT_NAMES.nativeInteractionTtlSeconds],
+      ENVIRONMENT_NAMES.nativeInteractionTtlSeconds,
+      NATIVE_INTERACTION_DEFAULTS.ttlSeconds,
+      NATIVE_INTERACTION_LIMITS.minimumTtlSeconds,
+      NATIVE_INTERACTION_LIMITS.maximumTtlSeconds,
+    ),
+    nativeInteractionUserIds,
     mcpToolsets: parseMcpToolsets(
       environment[ENVIRONMENT_NAMES.toolsets],
       ENVIRONMENT_NAMES.toolsets,

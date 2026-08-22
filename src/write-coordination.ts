@@ -37,6 +37,7 @@ export const WRITE_COORDINATION_RESOURCE_KINDS = [
 ] as const
 
 export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
+  "application-commands",
   "automod",
   "channels",
   "emojis",

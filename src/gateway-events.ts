@@ -134,12 +134,13 @@ export interface GatewayStatusSnapshot {
     state: GatewayConnectionState
   }
   enabled: boolean
-  intents: readonly [
-    "GUILDS",
-    "GUILD_MESSAGES",
-    "GUILD_MESSAGE_REACTIONS",
-    "GUILD_MESSAGE_POLLS",
-  ]
+  feedEnabled: boolean
+  intents: readonly (
+    | "GUILDS"
+    | "GUILD_MESSAGES"
+    | "GUILD_MESSAGE_REACTIONS"
+    | "GUILD_MESSAGE_POLLS"
+  )[]
   privacy: {
     contentStored: false
     persistent: false
@@ -166,6 +167,7 @@ export interface GatewayEventStoreOptions {
   clock?: () => Date
   cursorNamespace?: string
   enabled: boolean
+  eventFeedEnabled?: boolean
 }
 
 interface StoredGatewayEvent extends ContentFreeGatewayEvent {
@@ -281,6 +283,7 @@ export class GatewayEventStore implements GatewayEventSource {
   #resumes = 0
   #state: GatewayConnectionState
   readonly enabled: boolean
+  readonly eventFeedEnabled: boolean
 
   constructor(options: GatewayEventStoreOptions) {
     const bufferSize = options.bufferSize ?? GATEWAY_DEFAULTS.eventBufferSize
@@ -297,14 +300,19 @@ export class GatewayEventStore implements GatewayEventSource {
     if (!CURSOR_NAMESPACE_PATTERN.test(cursorNamespace)) {
       throw new RangeError("Gateway cursor namespace must contain 8-64 URL-safe characters")
     }
+    const eventFeedEnabled = options.eventFeedEnabled ?? options.enabled
+    if (eventFeedEnabled && !options.enabled) {
+      throw new RangeError("Gateway event feed requires an enabled Gateway connection")
+    }
     if (
-      options.enabled
+      eventFeedEnabled
       && options.allowedGuildIds.size === 0
       && options.allowedChannelIds.size === 0
     ) {
       throw new RangeError("Enabled Gateway events require an exact guild or channel scope")
     }
     this.enabled = options.enabled
+    this.eventFeedEnabled = eventFeedEnabled
     this.#allowedChannelIds = new Set(options.allowedChannelIds)
     this.#allowedGuildIds = new Set(options.allowedGuildIds)
     this.#bufferSize = bufferSize
@@ -559,7 +567,7 @@ export class GatewayEventStore implements GatewayEventSource {
   }
 
   ingestDispatch(name: string, raw: unknown): boolean {
-    if (!this.enabled) return false
+    if (!this.eventFeedEnabled) return false
     switch (name) {
       case "GUILD_CREATE":
         this.#seedGuild(raw)
@@ -725,12 +733,15 @@ export class GatewayEventStore implements GatewayEventSource {
         state: this.#state,
       },
       enabled: this.enabled,
-      intents: [
-        "GUILDS",
-        "GUILD_MESSAGES",
-        "GUILD_MESSAGE_REACTIONS",
-        "GUILD_MESSAGE_POLLS",
-      ],
+      feedEnabled: this.eventFeedEnabled,
+      intents: this.eventFeedEnabled
+        ? [
+            "GUILDS" as const,
+            "GUILD_MESSAGES" as const,
+            "GUILD_MESSAGE_REACTIONS" as const,
+            "GUILD_MESSAGE_POLLS" as const,
+          ]
+        : [],
       privacy: {
         contentStored: false,
         persistent: false,
@@ -805,7 +816,7 @@ export class GatewayEventStore implements GatewayEventSource {
         returned: events.length,
       },
       schemaVersion: SCHEMA_VERSION,
-      status: this.enabled ? "ok" : "disabled",
+      status: this.eventFeedEnabled ? "ok" : "disabled",
     }
   }
 

@@ -4,8 +4,34 @@ export interface DiscordApplication {
   flags?: number
   flags_new?: string
   id: string
+  interactions_endpoint_url?: string | null
   name: string
   verify_key?: string
+}
+
+export interface DiscordApplicationCommandOption {
+  description: string
+  max_length?: number
+  min_length?: number
+  name: string
+  required?: boolean
+  type: number
+}
+
+export interface DiscordApplicationCommand {
+  application_id: string
+  contexts?: number[] | null
+  default_member_permissions?: string | null
+  description: string
+  dm_permission?: boolean
+  guild_id?: string
+  id: string
+  integration_types?: number[] | null
+  name: string
+  nsfw?: boolean
+  options?: DiscordApplicationCommandOption[]
+  type: number
+  version: string
 }
 
 export interface DiscordBan {
@@ -128,6 +154,7 @@ export interface DiscordGuildMember {
 }
 
 export interface DiscordMessage {
+  application_id?: string
   attachments?: DiscordAttachment[]
   author: DiscordUser
   channel_id: string
@@ -138,6 +165,12 @@ export interface DiscordMessage {
   flags?: number
   guild_id?: string
   id: string
+  interaction_metadata?: {
+    authorizing_integration_owners: Record<string, string>
+    id: string
+    type: number
+    user: DiscordUser
+  }
   mention_everyone?: boolean
   mention_roles?: string[]
   mentions?: DiscordUser[]

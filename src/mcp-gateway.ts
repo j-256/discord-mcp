@@ -11,10 +11,15 @@ import {
   MCP_RESOURCE_NAMES,
   MCP_RESOURCE_URIS,
 } from "./mcp-guidance-catalog.js"
+import type {
+  NativeInteractionChangeKind,
+  NativeInteractionSource,
+} from "./native-interaction-broker.js"
 import { redactedJson } from "./mcp-output.js"
 
 export interface GatewayMcpOptions {
   gateway: GatewayEventSource
+  nativeInteractions?: NativeInteractionSource
   notificationDelayMs?: number
   secrets: readonly (string | undefined)[]
   stderr?: Pick<NodeJS.WriteStream, "write">
@@ -37,6 +42,10 @@ const ASSISTANT_RESOURCE_ANNOTATIONS = Object.freeze({
 const SUBSCRIBABLE_GATEWAY_URIS: ReadonlySet<string> = new Set([
   MCP_RESOURCE_URIS.gatewayEvents,
   MCP_RESOURCE_URIS.gatewayStatus,
+])
+const SUBSCRIBABLE_NATIVE_INTERACTION_URIS: ReadonlySet<string> = new Set([
+  MCP_RESOURCE_URIS.nativeInteractionPending,
+  MCP_RESOURCE_URIS.nativeInteractionStatus,
 ])
 
 function gatewayEnvelope(
@@ -80,6 +89,14 @@ function uriForChange(kind: GatewayChangeKind): string {
     : MCP_RESOURCE_URIS.gatewayStatus
 }
 
+function uriForNativeInteractionChange(
+  kind: NativeInteractionChangeKind,
+): string {
+  return kind === "pending"
+    ? MCP_RESOURCE_URIS.nativeInteractionPending
+    : MCP_RESOURCE_URIS.nativeInteractionStatus
+}
+
 export function registerDiscordGatewayMcp(
   server: McpServer,
   options: GatewayMcpOptions,
@@ -120,12 +137,18 @@ export function registerDiscordGatewayMcp(
     ),
   )
 
-  if (!gateway.enabled) return
+  const nativeInteractions = options.nativeInteractions
+  if (!gateway.enabled && !nativeInteractions?.enabled) return
+
+  const subscribableUris = new Set<string>([
+    ...(gateway.enabled ? SUBSCRIBABLE_GATEWAY_URIS : []),
+    ...(nativeInteractions?.enabled ? SUBSCRIBABLE_NATIVE_INTERACTION_URIS : []),
+  ])
 
   const subscribedLegacyUris = new Set<string>()
   server.server.setRequestHandler("resources/subscribe", async (request) => {
     const uri = request.params.uri
-    if (!SUBSCRIBABLE_GATEWAY_URIS.has(uri)) {
+    if (!subscribableUris.has(uri)) {
       throw new ProtocolError(
         ProtocolErrorCode.InvalidParams,
         `Resource ${uri} does not support subscriptions`,
@@ -167,8 +190,7 @@ export function registerDiscordGatewayMcp(
     notificationStates.delete(uri)
   }
 
-  const onChange = (kind: GatewayChangeKind) => {
-    const uri = uriForChange(kind)
+  const onUriChange = (uri: string) => {
     const active = notificationStates.get(uri)
     if (active) {
       active.pending = true
@@ -181,11 +203,19 @@ export function registerDiscordGatewayMcp(
     })
   }
 
-  const unsubscribe = gateway.subscribe(onChange)
+  const unsubscribeGateway = gateway.enabled
+    ? gateway.subscribe((kind) => onUriChange(uriForChange(kind)))
+    : () => undefined
+  const unsubscribeNativeInteractions = nativeInteractions?.enabled
+    ? nativeInteractions.subscribe((kind) => onUriChange(
+        uriForNativeInteractionChange(kind),
+      ))
+    : () => undefined
   const previousOnClose = server.server.onclose
   server.server.onclose = () => {
     disposed = true
-    unsubscribe()
+    unsubscribeGateway()
+    unsubscribeNativeInteractions()
     for (const state of notificationStates.values()) clearTimeout(state.timer)
     notificationStates.clear()
     subscribedLegacyUris.clear()

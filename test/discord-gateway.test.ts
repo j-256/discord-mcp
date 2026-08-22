@@ -244,6 +244,81 @@ test("Gateway identifies with fixed nonprivileged intents and exposes no session
   await gateway.stop()
 })
 
+test("Interaction-only Gateway uses zero intents and routes payloads outside the event feed", async () => {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const handled: unknown[] = []
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    bufferSize: 10,
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "interaction1",
+    enabled: true,
+    eventFeedEnabled: false,
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowGateway: false,
+      allowNativeInteractions: true,
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+    eventStore,
+    interactionHandler: {
+      async ingestInteraction(payload) {
+        handled.push(payload)
+      },
+    },
+    random: () => 0,
+    scheduler,
+    webSocketFactory() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  const identify = payloads(socket)[0]
+  assert.equal((identify?.d as Record<string, unknown>).intents, 0)
+  ready(socket)
+  const interactionPayload = {
+    application_id: APPLICATION_ID,
+    id: "500000000000000001",
+    token: TOKEN,
+    type: 2,
+  }
+  socket.message({ d: interactionPayload, op: 0, s: 2, t: "INTERACTION_CREATE" })
+  socket.message({
+    d: {
+      channel_id: CHANNEL_ID,
+      content: TOKEN,
+      guild_id: GUILD_ID,
+      id: MESSAGE_ID,
+    },
+    op: 0,
+    s: 3,
+    t: "MESSAGE_CREATE",
+  })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(handled, [interactionPayload])
+  assert.equal(gateway.getStatus().feedEnabled, false)
+  assert.deepEqual(gateway.getStatus().intents, [])
+  assert.deepEqual(gateway.listEvents().events, [])
+  assert.equal(JSON.stringify(gateway.getStatus()).includes(TOKEN), false)
+  await gateway.stop()
+})
+
 test("Gateway accepts events only after READY identity validation and drops content", async () => {
   const { gateway, sockets } = fixture()
   gateway.start()

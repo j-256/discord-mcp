@@ -428,6 +428,50 @@ export interface AnnouncementCrosspostActivity {
   verification: "drift" | "match" | null
 }
 
+export type NativeInteractionCommandActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface NativeInteractionCommandActivity {
+  action: "install" | "remove"
+  commandId: string | null
+  error: string | null
+  guildId: string
+  id: string
+  kind: "native-interaction-command-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: NativeInteractionCommandActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
+export type NativeInteractionActivityStatus =
+  | "accepted"
+  | "expired"
+  | "rejected"
+  | "response-completed"
+  | "response-failed"
+  | "response-pending"
+  | "response-uncertain"
+
+export interface NativeInteractionActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  interactionId: string
+  kind: "native-interaction"
+  referenceHash: string
+  schemaVersion: number
+  status: NativeInteractionActivityStatus
+  timestamp: string
+  userId: string
+}
+
 export type WebhookDeletionActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -664,6 +708,8 @@ export type ActivityEntry =
   | MemberRoleActivity
   | MemberVoiceActivity
   | MessagePinActivity
+  | NativeInteractionCommandActivity
+  | NativeInteractionActivity
   | OnboardingActivity
   | PollActivity
   | RoleCreationActivity
@@ -1410,6 +1456,122 @@ function parseAnnouncementCrosspostActivity(
     status: record.status as AnnouncementCrosspostActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseNativeInteractionCommandActivity(
+  value: unknown,
+): NativeInteractionCommandActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "native-interaction-command-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["install", "remove"].includes(String(record.action))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || !(record.commandId === null || (
+      typeof record.commandId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.commandId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as "install" | "remove",
+    commandId: record.commandId as string | null,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "native-interaction-command-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as NativeInteractionCommandActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseNativeInteractionActivity(
+  value: unknown,
+): NativeInteractionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const status = String(record.status)
+  const errorStatus = ["rejected", "response-failed", "response-uncertain"].includes(status)
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "native-interaction"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "accepted",
+      "expired",
+      "rejected",
+      "response-completed",
+      "response-failed",
+      "response-pending",
+      "response-uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || typeof record.userId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.userId)
+    || typeof record.interactionId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.interactionId)
+    || typeof record.referenceHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.referenceHash)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || (errorStatus ? record.error === null : record.error !== null)
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    interactionId: record.interactionId,
+    kind: "native-interaction",
+    referenceHash: record.referenceHash,
+    schemaVersion: SCHEMA_VERSION,
+    status: status as NativeInteractionActivityStatus,
+    timestamp: record.timestamp,
+    userId: record.userId,
   }
 }
 
@@ -2493,6 +2655,8 @@ function parseStageInstanceActivity(
 
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAnnouncementCrosspostActivity(value)
+    || parseNativeInteractionCommandActivity(value)
+    || parseNativeInteractionActivity(value)
     || parseAttachmentMessageActivity(value)
     || parseAutoModerationActivity(value)
     || parseForumPostActivity(value)

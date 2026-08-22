@@ -15,11 +15,42 @@ import {
   MCP_RESOURCE_NAMES,
   MCP_RESOURCE_URIS,
 } from "../src/mcp-guidance-catalog.js"
+import type {
+  NativeInteractionChangeKind,
+  NativeInteractionChangeListener,
+  NativeInteractionSource,
+} from "../src/native-interaction-broker.js"
 
 const TOKEN = "test-discord-token"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const MESSAGE_ID = "300000000000000001"
+
+class NativeInteractionFeed implements NativeInteractionSource {
+  readonly enabled = true
+  readonly #listeners = new Set<NativeInteractionChangeListener>()
+
+  getStatus(): ReturnType<NativeInteractionSource["getStatus"]> {
+    throw new Error("Status read is outside this notification test")
+  }
+
+  async listPending(): ReturnType<NativeInteractionSource["listPending"]> {
+    throw new Error("Pending read is outside this notification test")
+  }
+
+  async respond(): ReturnType<NativeInteractionSource["respond"]> {
+    throw new Error("Response is outside this notification test")
+  }
+
+  subscribe(listener: NativeInteractionChangeListener): () => void {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
+  }
+
+  emit(kind: NativeInteractionChangeKind): void {
+    for (const listener of this.#listeners) listener(kind)
+  }
+}
 
 function feed(enabled = true): GatewayEventStore {
   return new GatewayEventStore({
@@ -34,17 +65,21 @@ function feed(enabled = true): GatewayEventStore {
 function createServer(
   gateway: GatewayEventStore,
   notificationDelayMs = 10,
+  nativeInteractions?: NativeInteractionSource,
 ): McpServer {
   const server = new McpServer(
     { name: "gateway-mcp-test", version: "1.0.0" },
     {
       capabilities: {
-        resources: gateway.enabled ? { subscribe: true } : {},
+        resources: gateway.enabled || nativeInteractions?.enabled
+          ? { subscribe: true }
+          : {},
       },
     },
   )
   registerDiscordGatewayMcp(server, {
     gateway,
+    ...(nativeInteractions ? { nativeInteractions } : {}),
     notificationDelayMs,
     secrets: [TOKEN],
   })
@@ -209,4 +244,39 @@ test("Modern subscriptions/listen receives only matching Gateway resource update
   })
   const notification = await nextNotification
   assert.equal(notification.params.uri, MCP_RESOURCE_URIS.gatewayEvents)
+})
+
+test("Native Interaction subscriptions work without the content-free Gateway feed", async (context) => {
+  const gateway = feed(false)
+  const interactions = new NativeInteractionFeed()
+  const server = createServer(gateway, 10, interactions)
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  const client = new Client(
+    { name: "native-interaction-client", version: "1.0.0" },
+    { capabilities: {} },
+  )
+  await client.connect(clientTransport)
+  context.after(async () => {
+    await client.close().catch(() => undefined)
+    await server.close().catch(() => undefined)
+  })
+
+  assert.equal(client.getServerCapabilities()?.resources?.subscribe, true)
+  const pendingNotification = notificationPromise(client)
+  await client.subscribeResource({
+    uri: MCP_RESOURCE_URIS.nativeInteractionPending,
+  })
+  await assert.rejects(
+    () => client.subscribeResource({ uri: MCP_RESOURCE_URIS.gatewayEvents }),
+    /does not support subscriptions/,
+  )
+
+  interactions.emit("status")
+  interactions.emit("pending")
+  const notification = await pendingNotification
+  assert.equal(
+    notification.params.uri,
+    MCP_RESOURCE_URIS.nativeInteractionPending,
+  )
 })

@@ -435,6 +435,48 @@ export class AnnouncementCrosspostExecutionError extends Error {
   }
 }
 
+export class NativeInteractionCommandPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord command inventory does not match the reviewed native Interaction command plan")
+    this.name = "NativeInteractionCommandPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class NativeInteractionCommandConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord native Interaction command operation key has already been reserved")
+    this.name = "NativeInteractionCommandConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class NativeInteractionCommandExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "NativeInteractionCommandExecutionError"
+    this.result = result
+  }
+}
+
+export class NativeInteractionResponseError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "NativeInteractionResponseError"
+    this.result = result
+  }
+}
+
 export class WebhookDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

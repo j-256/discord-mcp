@@ -167,6 +167,13 @@ import type {
 } from "./message-pin-service.js"
 import { MessagePinService } from "./message-pin-service.js"
 import type {
+  NativeInteractionCommandPlan,
+  NativeInteractionCommandRequest,
+  NativeInteractionCommandResult,
+  NativeInteractionCommandServiceOptions,
+} from "./native-interaction-command-service.js"
+import { NativeInteractionCommandService } from "./native-interaction-command-service.js"
+import type {
   MemberDirectoryListOptions,
   MemberDirectorySearchOptions,
 } from "./member-directory-service.js"
@@ -367,6 +374,8 @@ export interface DiscordServiceClient {
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildAutoModerationRule: DiscordClient["createGuildAutoModerationRule"]
   createGuildChannel: DiscordClient["createGuildChannel"]
+  createGuildApplicationCommand: DiscordClient["createGuildApplicationCommand"]
+  deleteGuildApplicationCommand: DiscordClient["deleteGuildApplicationCommand"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
@@ -421,6 +430,7 @@ export interface DiscordServiceClient {
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
+  listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
   listGuildBans: DiscordClient["listGuildBans"]
   listGuildInvites: DiscordClient["listGuildInvites"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
@@ -519,6 +529,10 @@ export interface ConnectorServiceOptions {
   interactionOptions?: Pick<
     InteractionServiceOptions,
     "clock" | "ledgerTtlMs" | "limiter" | "randomId"
+  >
+  nativeInteractionCommandOptions?: Pick<
+    NativeInteractionCommandServiceOptions,
+    "clock" | "planKey" | "randomId"
   >
   inviteOptions?: Pick<InviteServiceOptions, "clock" | "planKey" | "randomId">
   onboardingOptions?: Pick<OnboardingServiceOptions, "clock" | "planKey" | "randomId">
@@ -721,6 +735,7 @@ export class ConnectorService {
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberRoleService: MemberRoleService
   readonly #memberVoiceService: MemberVoiceService
+  readonly #nativeInteractionCommandService: NativeInteractionCommandService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
   readonly #forumPostService: ForumPostService
@@ -768,6 +783,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.announcementCrosspostOptions,
+    })
+    this.#nativeInteractionCommandService = new NativeInteractionCommandService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      commandName: options.config.nativeCommandName,
+      operationStore,
+      policy: this.#policy,
+      ...options.nativeInteractionCommandOptions,
     })
     this.#administrationService = new AdministrationService({
       activityStore: this.#activityStore,
@@ -1747,6 +1770,19 @@ export class ConnectorService {
     )
   }
 
+  async planNativeInteractionCommand(
+    request: NativeInteractionCommandRequest,
+    options: RequestOptions = {},
+  ): Promise<NativeInteractionCommandPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#nativeInteractionCommandService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async listChannelWebhooks(
     channelId: string,
     options: RequestOptions = {},
@@ -2615,6 +2651,27 @@ export class ConnectorService {
         identity.application.id,
         identity.bot.id,
         applicationMessageContentIntent(identity.application),
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeNativeInteractionCommand(
+    request: NativeInteractionCommandRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<NativeInteractionCommandResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "native-interaction-command-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("application-commands", request.guildId)],
+      () => this.#nativeInteractionCommandService.execute(
+        identity.application.id,
+        identity.bot.id,
         request,
         planDigest,
         options,

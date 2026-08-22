@@ -27,6 +27,8 @@ import {
   type MemberRoleActivity,
   type MemberVoiceActivity,
   type MessagePinActivity,
+  type NativeInteractionActivity,
+  type NativeInteractionCommandActivity,
   type OnboardingActivity,
   type PollActivity,
   type RoleCreationActivity,
@@ -440,6 +442,49 @@ function announcementCrosspost(
     verification: status === "completed"
       ? "match"
       : null,
+  }
+}
+
+function nativeInteractionCommand(
+  id: string,
+  status: NativeInteractionCommandActivity["status"],
+): NativeInteractionCommandActivity {
+  return {
+    action: "install",
+    commandId: status === "completed" ? "300" : null,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "native-interaction-command-change",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function nativeInteraction(
+  id: string,
+  status: NativeInteractionActivity["status"],
+): NativeInteractionActivity {
+  const errorStatus = ["rejected", "response-failed", "response-uncertain"]
+    .includes(status)
+  return {
+    channelId: "200",
+    error: errorStatus ? "response-uncertain" : null,
+    guildId: "100",
+    id,
+    interactionId: "300",
+    kind: "native-interaction",
+    referenceHash: `sha256:${"9".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    userId: "400",
   }
 }
 
@@ -1365,6 +1410,51 @@ test("JSONL activity log keeps announcement-crosspost evidence content-free", as
   assert.doesNotMatch(
     JSON.stringify(result),
     /private author|private channel|private announcement|private-operation/,
+  )
+})
+
+test("JSONL activity log keeps native Interaction command and response evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...nativeInteractionCommand("1", "pending"),
+    commandDescription: "must-not-persist",
+    operationKey: "must-never-reach-disk",
+  } as NativeInteractionCommandActivity)
+  await store.append({
+    ...nativeInteraction("2", "accepted"),
+    request: "private request text",
+    response: "private response text",
+    token: "private Interaction token",
+  } as NativeInteractionActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...nativeInteractionCommand("3", "completed"),
+      commandName: "private-command",
+      fullInventory: ["private inventory"],
+    })}\n${JSON.stringify({
+      ...nativeInteraction("4", "response-completed"),
+      request: "private historical request",
+      token: "private historical token",
+    })}\n${JSON.stringify({
+      ...nativeInteraction("5", "response-completed"),
+      error: "response-uncertain",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must-not-persist|must-never-reach-disk|private request text|private response text|private Interaction token/)
+  assert.deepEqual(result.entries.map(({ id }) => id), ["4", "3", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private-command|private inventory|private historical request|private historical token/,
   )
 })
 

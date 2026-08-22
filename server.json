@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, announcement-crossposts, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, announcement-crossposts, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, connector, deletion, forum-posts, gateway, guild-expressions, guild-scaffolds, guilds, interactions, invites, member-roles, members, messages, moderation, native-interactions, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
           "default": "all",
           "format": "string"
         },
@@ -85,6 +85,57 @@
           "name": "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
           "description": "Process-local content-free Gateway event capacity from 1 through 1000",
           "default": "100",
+          "format": "number"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES",
+          "description": "Enable reviewed installation or removal of the exact managed guild command",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS",
+          "description": "Enable exact-scope Discord Interaction ingress through Gateway delivery; requests zero intents unless the separate content-free event feed is enabled",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_NATIVE_COMMAND_NAME",
+          "description": "Exact managed guild command name using lowercase Discord command syntax",
+          "default": "discord-mcp",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS",
+          "description": "Exact guild IDs eligible for managed-command changes or native Interaction ingress",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS",
+          "description": "Exact channel IDs eligible for native Interaction ingress",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_NATIVE_INTERACTION_USER_IDS",
+          "description": "Exact user IDs eligible to submit the managed native Interaction command",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING",
+          "description": "Process-local pending native Interaction capacity from 1 through 100",
+          "default": "25",
+          "format": "number"
+        },
+        {
+          "name": "DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS",
+          "description": "Pending native Interaction lifetime from 30 through 840 seconds",
+          "default": "600",
           "format": "number"
         },
         {

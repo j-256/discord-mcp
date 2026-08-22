@@ -282,6 +282,9 @@ function serviceFixture(overrides: {
       throw new Error("unexpected")
     },
     async createGuildBan() {},
+    async createGuildApplicationCommand() {
+      throw new Error("Unexpected application-command creation")
+    },
     async createForumPost() {
       calls.createForumPost += 1
       throw new Error("Unexpected forum-post creation")
@@ -342,6 +345,9 @@ function serviceFixture(overrides: {
         tags: input.tags,
         type: 2,
       }
+    },
+    async deleteGuildApplicationCommand() {
+      throw new Error("Unexpected application-command deletion")
     },
     async createMessage(_channelId, input) {
       calls.createMessage += 1
@@ -502,6 +508,9 @@ function serviceFixture(overrides: {
     async listCurrentUserGuilds() {
       calls.guilds += 1
       return [guild()]
+    },
+    async listGuildApplicationCommands() {
+      throw new Error("Unexpected application-command listing")
     },
     async listGuildMembers() {
       return []

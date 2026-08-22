@@ -129,6 +129,14 @@ function status(
       memberVoiceChangesEnabled: false,
       memberVoiceChannelIds: [],
       memberVoiceGuildIds: [],
+      nativeCommandChangesEnabled: false,
+      nativeCommandName: "discord-mcp",
+      nativeInteractionChannelIds: [],
+      nativeInteractionGuildIds: [],
+      nativeInteractionMaxPending: 25,
+      nativeInteractionsEnabled: false,
+      nativeInteractionTtlSeconds: 600,
+      nativeInteractionUserIds: [],
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
@@ -201,6 +209,7 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     executeAnnouncementCrosspost: unexpected,
+    executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
@@ -217,6 +226,7 @@ function toolService(): DiscordToolService {
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
+    planNativeInteractionCommand: unexpected,
     getThreadMembership: unexpected,
     getThreadState: unexpected,
     planThreadChange: unexpected,
@@ -1912,6 +1922,61 @@ test("doctor reports the privacy-safe Gateway policy without opening a connectio
   )
 })
 
+test("doctor and setup explain native Interaction ingress and command boundaries", async () => {
+  const configuredEnvironment = environment({
+    DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES: "true",
+    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+    DISCORD_MCP_NATIVE_COMMAND_NAME: "ask",
+    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING: "7",
+    DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS: "180",
+    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: BOT_ID,
+  })
+  const report = await diagnoseConnector({
+    environment: configuredEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...configuredEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const command = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.nativeInteractionCommandPolicy,
+  )
+  const ingress = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
+  )
+  assert.equal(command?.status, "pass")
+  assert.match(command?.summary || "", /\/ask in 1 exact guilds/)
+  assert.match(command?.summary || "", /full-inventory readback/)
+  assert.equal(ingress?.status, "pass")
+  assert.match(ingress?.summary || "", /at most 7 requests for 180 seconds/)
+  assert.match(ingress?.summary || "", /intents-free Gateway connection/)
+  assert.match(ingress?.summary || "", /endpoint and command verification/)
+  assert.match(omitted.warnings.join("\n"), /native-interactions toolset/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.nativeInteractionCommandPolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+})
+
 test("doctor and setup report observability without opening collectors or exposing headers", async () => {
   const collectorHeader = "Bearer private-collector-credential"
   const configuredEnvironment = environment({
@@ -2483,6 +2548,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_message_deletion",
     "review_message_pin",
     "review_onboarding_change",
+    "review_pending_native_interactions",
     "review_role_configuration",
     "review_role_creation",
     "review_scheduled_event_change",
@@ -2503,6 +2569,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://gateway/events",
     "discord://gateway/status",
     "discord://guilds",
+    "discord://interactions/pending",
+    "discord://interactions/status",
     "discord://soundboard/defaults",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
@@ -2547,6 +2615,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_member_role_change",
     "execute_member_voice_change",
     "execute_message_pin",
+    "execute_native_interaction_command",
     "execute_onboarding_change",
     "execute_poll_end",
     "execute_role_configuration",

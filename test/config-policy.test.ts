@@ -228,6 +228,14 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    nativeCommandChangesEnabled: false,
+    nativeCommandName: "discord-mcp",
+    nativeInteractionChannelIds: [],
+    nativeInteractionGuildIds: [],
+    nativeInteractionMaxPending: 25,
+    nativeInteractionsEnabled: false,
+    nativeInteractionTtlSeconds: 600,
+    nativeInteractionUserIds: [],
     mentionUserCount: 0,
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
@@ -320,6 +328,102 @@ test("configuration keeps Gateway disabled and requires pinned bounded scope whe
       /must be an integer between 1 and 1000/,
     )
   }
+})
+
+test("configuration and policy isolate native Interaction ingress and command changes", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES: "true",
+    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+    DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_BOT_ID: "300000000000000002",
+    DISCORD_MCP_NATIVE_COMMAND_NAME: "private-request",
+    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING: "12",
+    DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS: "300",
+    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(config)
+
+  assert.equal(config.allowNativeCommandChanges, true)
+  assert.equal(config.allowNativeInteractions, true)
+  assert.equal(config.nativeCommandName, "private-request")
+  assert.deepEqual([...config.nativeInteractionGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.nativeInteractionChannelIds], [CHANNEL_ID])
+  assert.deepEqual([...config.nativeInteractionUserIds], [USER_ID])
+  assert.equal(config.nativeInteractionMaxPending, 12)
+  assert.equal(config.nativeInteractionTtlSeconds, 300)
+  enabled.assertNativeCommandChangeAllowed(GUILD_ID)
+  enabled.assertNativeInteractionAllowed(GUILD_ID, CHANNEL_ID, USER_ID)
+  assert.throws(
+    () => enabled.assertNativeCommandChangeAllowed(OTHER_GUILD_ID),
+    /configured read scope/,
+  )
+  assert.throws(
+    () => enabled.assertNativeInteractionAllowed(GUILD_ID, OTHER_CHANNEL_ID, USER_ID),
+    /outside the native Interaction scope/,
+  )
+  assert.throws(
+    () => enabled.assertNativeInteractionAllowed(GUILD_ID, CHANNEL_ID, "400000000000000002"),
+    /outside the native Interaction scope/,
+  )
+  assert.deepEqual(enabled.describe().nativeInteractionGuildIds, [GUILD_ID])
+  assert.deepEqual(enabled.describe().nativeInteractionChannelIds, [CHANNEL_ID])
+  assert.deepEqual(enabled.describe().nativeInteractionUserIds, [USER_ID])
+  assert.equal(enabled.describe().nativeCommandChangesEnabled, true)
+  assert.equal(enabled.describe().nativeInteractionsEnabled, true)
+
+  for (const environment of [
+    {
+      DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES: "true",
+      DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+      DISCORD_MCP_BOT_ID: "300000000000000002",
+    },
+    {
+      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+      DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+      DISCORD_MCP_BOT_ID: "300000000000000002",
+      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+    },
+    {
+      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
+    },
+    {
+      DISCORD_MCP_NATIVE_COMMAND_NAME: "Not Valid",
+    },
+    {
+      DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS: "29",
+    },
+    {
+      DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS: "841",
+    },
+    {
+      DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING: "101",
+    },
+  ]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        ...environment,
+      }, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  }
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
 })
 
 test("configuration rejects deletion channels outside a read channel allowlist", () => {
@@ -536,6 +640,14 @@ test("configuration and policy require an exact administration guild and protect
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    nativeCommandChangesEnabled: false,
+    nativeCommandName: "discord-mcp",
+    nativeInteractionChannelIds: [],
+    nativeInteractionGuildIds: [],
+    nativeInteractionMaxPending: 25,
+    nativeInteractionsEnabled: false,
+    nativeInteractionTtlSeconds: 600,
+    nativeInteractionUserIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -1908,6 +2020,14 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    nativeCommandChangesEnabled: false,
+    nativeCommandName: "discord-mcp",
+    nativeInteractionChannelIds: [],
+    nativeInteractionGuildIds: [],
+    nativeInteractionMaxPending: 25,
+    nativeInteractionsEnabled: false,
+    nativeInteractionTtlSeconds: 600,
+    nativeInteractionUserIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",

@@ -76,6 +76,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   memberVoiceChangePolicy: "member-voice-change-policy",
   messageContentIntent: "message-content-intent",
   messagePinPolicy: "message-pin-policy",
+  nativeInteractionCommandPolicy: "native-interaction-command-policy",
+  nativeInteractionIngressPolicy: "native-interaction-ingress-policy",
   nodeVersion: "node-version",
   onboardingAuditPolicy: "onboarding-audit-policy",
   onboardingChangePolicy: "onboarding-change-policy",
@@ -456,6 +458,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Guild expression audit and changes",
     ],
     [config.allowInteractions, "interactions", "Message interactions"],
+    [
+      config.allowNativeCommandChanges || config.allowNativeInteractions,
+      "native-interactions",
+      "Native Interaction command management and ingress",
+    ],
     [
       config.allowInviteAudit || config.allowInviteDeletions,
       "invites",
@@ -1577,6 +1584,28 @@ export async function diagnoseConnector(
         "pass",
         "Discord Gateway events are disabled",
       ))
+    checks.push(config.allowNativeCommandChanges
+      ? check(
+        DOCTOR_CHECK_IDS.nativeInteractionCommandPolicy,
+        "pass",
+        `Reviewed native Interaction command changes manage /${config.nativeCommandName} in ${config.nativeInteractionGuildIds.size} exact guilds with signed approval, one-shot mutation, and full-inventory readback`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.nativeInteractionCommandPolicy,
+        "pass",
+        "Native Interaction command changes are disabled",
+      ))
+    checks.push(config.allowNativeInteractions
+      ? check(
+        DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
+        "pass",
+        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with startup endpoint and command verification`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
+        "pass",
+        "Native Interaction ingress is disabled",
+      ))
     const exporter = config.observability.export
     const exporterSummary = config.observability.exportEnabled
       ? `OTLP/HTTP protobuf export is enabled with ${exporter?.endpointConfigured ? "explicit collector endpoints" : "the default loopback collector"} and ${exporter?.headersConfigured ? "configured authentication headers" : "no authentication headers"}`
@@ -1812,6 +1841,14 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.webhookChannelIds,
     ENVIRONMENT_NAMES.allowGateway,
     ENVIRONMENT_NAMES.gatewayEventBufferSize,
+    ENVIRONMENT_NAMES.allowNativeCommandChanges,
+    ENVIRONMENT_NAMES.allowNativeInteractions,
+    ENVIRONMENT_NAMES.nativeCommandName,
+    ENVIRONMENT_NAMES.nativeInteractionGuildIds,
+    ENVIRONMENT_NAMES.nativeInteractionChannelIds,
+    ENVIRONMENT_NAMES.nativeInteractionUserIds,
+    ENVIRONMENT_NAMES.nativeInteractionMaxPending,
+    ENVIRONMENT_NAMES.nativeInteractionTtlSeconds,
     ENVIRONMENT_NAMES.allowObservabilityExport,
     ENVIRONMENT_NAMES.observabilityLogs,
     ENVIRONMENT_NAMES.otelEndpoint,

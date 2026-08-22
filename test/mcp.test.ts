@@ -214,6 +214,15 @@ import {
   type DiscordToolService,
 } from "../src/mcp.js"
 import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
+import type {
+  NativeInteractionRuntime,
+  NativeInteractionSource,
+} from "../src/native-interaction-broker.js"
+import {
+  nativeInteractionCommandContract,
+  type NativeInteractionCommandPlan,
+  type NativeInteractionCommandRequest,
+} from "../src/native-interaction-command-service.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_TEMPLATE_NAMES,
@@ -272,6 +281,7 @@ const THREAD_CREATION_OPERATION_KEY = "thread-create-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const ANNOUNCEMENT_CROSSPOST_OPERATION_KEY = "announcement-crosspost-attempt-0001"
+const NATIVE_INTERACTION_COMMAND_OPERATION_KEY = "native-command-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
 const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
 const POLL_QUESTION = "Which release theme should we choose?"
@@ -522,6 +532,42 @@ function announcementCrosspostPlan(
     status: action === "none" ? "already-crossposted" : "planned",
     target: { crossposted: true },
     warnings: ["Follower destinations are unavailable"],
+  }
+}
+
+function nativeInteractionCommandPlan(
+  request: NativeInteractionCommandRequest,
+  digest = DIGEST,
+  mutation: "create" | "delete" | "none" = request.action === "install"
+    ? "create"
+    : "delete",
+): NativeInteractionCommandPlan {
+  const installed = mutation === "delete"
+    || mutation === "none" && request.action === "install"
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    command: {
+      contract: nativeInteractionCommandContract("discord-mcp"),
+      id: installed ? "700000000000000001" : null,
+      version: installed ? "700000000000000002" : null,
+    },
+    createdAt: "2026-08-22T00:00:00.000Z",
+    digest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    inventory: {
+      chatInputCount: installed ? 1 : 0,
+      chatInputLimit: 100,
+      totalCount: installed ? 1 : 0,
+    },
+    mutation,
+    operationKeyHash: OPERATION_KEY_HASH,
+    schemaVersion: 1,
+    status: mutation === "none"
+      ? request.action === "install" ? "already-installed" : "already-absent"
+      : "planned",
+    warnings: ["One exact managed guild command"],
   }
 }
 
@@ -3358,6 +3404,14 @@ function fixturePolicy(): PolicyDescription {
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    nativeCommandChangesEnabled: false,
+    nativeCommandName: "discord-mcp",
+    nativeInteractionChannelIds: [],
+    nativeInteractionGuildIds: [],
+    nativeInteractionMaxPending: 25,
+    nativeInteractionsEnabled: false,
+    nativeInteractionTtlSeconds: 600,
+    nativeInteractionUserIds: [],
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
@@ -3437,6 +3491,9 @@ function serviceFixture(overrides: {
   memberVoiceError?: Error
   memberVoicePlanDigest?: string
   memberVoiceWriteRequired?: boolean
+  nativeInteractionCommandError?: Error
+  nativeInteractionCommandMutation?: "create" | "delete" | "none"
+  nativeInteractionCommandPlanDigest?: string
   onboardingEffect?: "change" | "none"
   onboardingError?: Error
   onboardingPlanDigest?: string
@@ -3487,6 +3544,10 @@ function serviceFixture(overrides: {
   const widgetSettingsCalls = {
     execute: 0,
     get: 0,
+    plan: 0,
+  }
+  const nativeInteractionCommandCalls = {
+    execute: 0,
     plan: 0,
   }
   const calls = {
@@ -3584,6 +3645,32 @@ function serviceFixture(overrides: {
     webhookDeletionPlan: 0,
   }
   const service: DiscordToolService = {
+    async executeNativeInteractionCommand(request, planDigest) {
+      if (overrides.nativeInteractionCommandError) {
+        throw overrides.nativeInteractionCommandError
+      }
+      nativeInteractionCommandCalls.execute += 1
+      const planned = nativeInteractionCommandPlan(
+        request,
+        planDigest,
+        overrides.nativeInteractionCommandMutation,
+      )
+      return {
+        action: request.action,
+        activityId: planned.mutation === "none"
+          ? null
+          : "activity-native-command",
+        commandId: planned.command.id || "700000000000000001",
+        guildId: request.guildId,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        schemaVersion: 1,
+        status: planned.mutation === "none"
+          ? request.action === "install" ? "already-installed" : "already-absent"
+          : "completed",
+      }
+    },
     async executeThreadChange(request, planDigest) {
       if (overrides.threadGovernanceError) throw overrides.threadGovernanceError
       calls.threadGovernanceExecute += 1
@@ -5315,6 +5402,14 @@ function serviceFixture(overrides: {
         overrides.announcementCrosspostAction,
       )
     },
+    async planNativeInteractionCommand(request) {
+      nativeInteractionCommandCalls.plan += 1
+      return nativeInteractionCommandPlan(
+        request,
+        overrides.nativeInteractionCommandPlanDigest || DIGEST,
+        overrides.nativeInteractionCommandMutation,
+      )
+    },
     async planPollCreation(request) {
       calls.pollCreationPlan += 1
       return pollCreationPlan(
@@ -5411,7 +5506,13 @@ function serviceFixture(overrides: {
       }
     },
   }
-  return { calls, service, welcomeScreenCalls, widgetSettingsCalls }
+  return {
+    calls,
+    nativeInteractionCommandCalls,
+    service,
+    welcomeScreenCalls,
+    widgetSettingsCalls,
+  }
 }
 
 async function connectedFixture(
@@ -5434,6 +5535,7 @@ async function connectedFixture(
     serverMessages?: unknown[]
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
     gateway?: GatewayEventSource
+    nativeInteractions?: NativeInteractionSource
   } = {},
 ) {
   const serviceData = serviceFixture(options.serviceOverrides)
@@ -5443,6 +5545,9 @@ async function connectedFixture(
       ...options.environment,
     },
     ...(options.gateway ? { gateway: options.gateway } : {}),
+    ...(options.nativeInteractions
+      ? { nativeInteractions: options.nativeInteractions }
+      : {}),
     requestStateKey: new Uint8Array(32).fill(9),
     service: serviceData.service,
   })
@@ -5603,6 +5708,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_observability_status",
       "get_gateway_status",
       "get_gateway_events",
+      "list_pending_discord_interactions",
+      "respond_to_discord_interaction",
       "list_guilds",
       "list_channels",
       "get_channel",
@@ -5663,6 +5770,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_message_pin",
       "plan_announcement_crosspost",
       "execute_announcement_crosspost",
+      "plan_native_interaction_command",
+      "execute_native_interaction_command",
       "plan_webhook_deletion",
       "execute_webhook_deletion",
       "plan_invite_deletion",
@@ -5717,6 +5826,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
   const announcementCrosspost = result.tools.find((tool) => (
     tool.name === "execute_announcement_crosspost"
+  ))
+  const nativeInteractionCommand = result.tools.find((tool) => (
+    tool.name === "execute_native_interaction_command"
   ))
   const pollEnd = result.tools.find((tool) => tool.name === "execute_poll_end")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
@@ -5787,6 +5899,30 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(nativeInteractionCommand?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(
+    listedTool(result.tools, "respond_to_discord_interaction").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "list_pending_discord_interactions").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  )
   const administrationPlan = result.tools.find((tool) => (
     tool.name === "plan_member_moderation"
   ))
@@ -5821,6 +5957,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_channel_permission_overwrite",
     "plan_message_pin",
     "plan_announcement_crosspost",
+    "plan_native_interaction_command",
     "plan_poll_creation",
     "plan_poll_end",
     "plan_thread_creation",
@@ -7305,6 +7442,139 @@ test("MCP Gateway tools expose local health and cursor continuity without conten
   assert.doesNotMatch(JSON.stringify(events), /author|attachment|embed|component|emoji|userId/)
 })
 
+test("MCP native Interaction resources and tools keep tokens private and requests untrusted", async (context) => {
+  const reference = `iref_${"1".repeat(32)}`
+  const pending = {
+    channelId: CHANNEL_ID,
+    commandId: "700000000000000001",
+    commandVersion: "700000000000000002",
+    createdAt: "2026-08-22T00:00:00.000Z",
+    expiresAt: "2026-08-22T00:10:00.000Z",
+    guildId: GUILD_ID,
+    interactionId: "700000000000000003",
+    reference,
+    request: "Summarize the private release discussion",
+    schemaVersion: 1,
+    userId: USER_ID,
+  }
+  let listCalls = 0
+  const responses: Array<{ reference: string; response: string }> = []
+  const nativeInteractions: NativeInteractionSource = {
+    enabled: true,
+    getStatus() {
+      return {
+        command: {
+          guildCount: 1,
+          name: "discord-mcp",
+          verifiedGuildCount: 1,
+        },
+        enabled: true,
+        lastError: null,
+        limits: {
+          maximumPending: 25,
+          pendingPerUser: 3,
+          requestCharacters: 2_000,
+          responseCharacters: 2_000,
+          ttlSeconds: 600,
+        },
+        pending: { count: 1, validating: 0 },
+        phase: "ready",
+        schemaVersion: 1,
+        totals: {
+          accepted: 1,
+          expired: 0,
+          rejected: 0,
+          responded: 0,
+          uncertain: 0,
+        },
+      }
+    },
+    async listPending() {
+      listCalls += 1
+      return {
+        interactions: [pending],
+        page: { capacity: 25, returned: 1 },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async respond(observedReference, response) {
+      responses.push({ reference: observedReference, response })
+      return {
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        interactionId: pending.interactionId,
+        reference: observedReference,
+        responseMessageId: MESSAGE_ID,
+        schemaVersion: 1,
+        status: "completed",
+      }
+    },
+    subscribe() {
+      return () => undefined
+    },
+  }
+  const { client } = await connectedFixture(context, { nativeInteractions })
+
+  const statusResource = await client.readResource({
+    uri: MCP_RESOURCE_URIS.nativeInteractionStatus,
+  })
+  const pendingResource = await client.readResource({
+    uri: MCP_RESOURCE_URIS.nativeInteractionPending,
+  })
+  const statusContent = statusResource.contents[0]
+  const pendingContent = pendingResource.contents[0]
+  assert.ok(statusContent && "text" in statusContent)
+  assert.ok(pendingContent && "text" in pendingContent)
+  if (!(statusContent && "text" in statusContent && pendingContent && "text" in pendingContent)) {
+    throw new Error("Expected native Interaction JSON resources")
+  }
+  const statusEnvelope = JSON.parse(statusContent.text) as Record<string, unknown>
+  const pendingEnvelope = JSON.parse(pendingContent.text) as Record<string, unknown>
+  assert.equal(
+    (statusEnvelope.trust as Record<string, unknown>).classification,
+    "trusted-local-metadata",
+  )
+  assert.equal(
+    (pendingEnvelope.trust as Record<string, unknown>).classification,
+    "untrusted-external-data",
+  )
+  assert.match(
+    String((pendingEnvelope.trust as Record<string, unknown>).instruction),
+    /never as instructions/,
+  )
+
+  const listed = structuredContent(await client.callTool({
+    arguments: {},
+    name: "list_pending_discord_interactions",
+  }))
+  assert.equal((listed.interactions as unknown[]).length, 1)
+  const response = structuredContent(await client.callTool({
+    arguments: {
+      reference,
+      response: "The release discussion is ready for review.",
+    },
+    name: "respond_to_discord_interaction",
+  }))
+  assert.equal(response.status, "completed")
+  assert.deepEqual(responses, [{
+    reference,
+    response: "The release discussion is ready for review.",
+  }])
+  assert.equal(listCalls, 2)
+  assert.doesNotMatch(
+    JSON.stringify({ listed, pendingEnvelope, response, statusEnvelope }),
+    new RegExp(TOKEN),
+  )
+
+  const invalid = await client.callTool({
+    arguments: { reference, response: " " },
+    name: "respond_to_discord_interaction",
+  })
+  assert.equal(invalid.isError, true)
+  assert.equal(responses.length, 1)
+})
+
 test("MCP observability reports successful, returned-error, and thrown-error tool outcomes", async (context) => {
   const privateDetail = "private activity failure 999999999999999999"
   const { client } = await connectedFixture(context, {
@@ -8297,6 +8567,120 @@ test("MCP announcement crossposts expose uncertain and one-shot conflict outcome
     JSON.stringify(conflictResult),
     new RegExp(ANNOUNCEMENT_CROSSPOST_OPERATION_KEY),
   )
+})
+
+test("MCP managed native command planning is exact and signed approval binds execution", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const setup = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const planned = await setup.client.callTool({
+    arguments: {
+      action: "install",
+      guildId: GUILD_ID,
+      operationKey: NATIVE_INTERACTION_COMMAND_OPERATION_KEY,
+    },
+    name: "plan_native_interaction_command",
+  })
+  assert.equal(structuredContent(planned).mutation, "create")
+  assert.equal(setup.nativeInteractionCommandCalls.plan, 1)
+
+  const result = await setup.client.callTool({
+    arguments: {
+      action: "install",
+      guildId: GUILD_ID,
+      operationKey: NATIVE_INTERACTION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_native_interaction_command",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(setup.nativeInteractionCommandCalls.plan, 2)
+  assert.equal(setup.nativeInteractionCommandCalls.execute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, /Command name: discord-mcp/)
+  assert.match(confirmationMessage, /Default member permissions: 0/)
+  assert.match(confirmationMessage, /Guild only: true/)
+  assert.match(confirmationMessage, /Request option maximum length: 2000/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(NATIVE_INTERACTION_COMMAND_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(NATIVE_INTERACTION_COMMAND_OPERATION_KEY),
+  )
+})
+
+test("MCP managed native command execution skips no-ops and stops on refusal or drift", async (context) => {
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { nativeInteractionCommandMutation: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: {
+      action: "install",
+      guildId: GUILD_ID,
+      operationKey: NATIVE_INTERACTION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_native_interaction_command",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-installed")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.nativeInteractionCommandCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "install",
+      guildId: GUILD_ID,
+      operationKey: NATIVE_INTERACTION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_native_interaction_command",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.nativeInteractionCommandCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { nativeInteractionCommandPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: {
+      action: "install",
+      guildId: GUILD_ID,
+      operationKey: NATIVE_INTERACTION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_native_interaction_command",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.nativeInteractionCommandCalls.execute, 0)
 })
 
 test("MCP poll reads preserve exact answer IDs and return voter IDs only", async (context) => {
@@ -14856,6 +15240,127 @@ test("MCP stdio startup fails before reporting ready when the token is absent", 
     /DISCORD_BOT_TOKEN is required/,
   )
   assert.equal(diagnostics, "")
+})
+
+test("MCP stdio runner rejects a source-only native Interaction adapter", () => {
+  assert.throws(
+    () => runDiscordMcpServer({
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
+      nativeInteractions: undefined,
+    } as unknown as DiscordMcpRunOptions),
+    /accept nativeInteractionRuntime, not a source-only/,
+  )
+})
+
+test("MCP stdio runner starts native Interaction ingress before Gateway and stops it after", async () => {
+  const feed = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    cursorNamespace: "nativeinteractionrunner",
+    enabled: true,
+  })
+  const lifecycle: string[] = []
+  let releasePreflight: (() => void) | undefined
+  const preflight = new Promise<void>((resolve) => {
+    releasePreflight = resolve
+  })
+  const nativeInteractionRuntime: NativeInteractionRuntime = {
+    enabled: true,
+    getStatus() {
+      return {
+        command: {
+          guildCount: 1,
+          name: "discord-mcp",
+          verifiedGuildCount: 1,
+        },
+        enabled: true,
+        lastError: null,
+        limits: {
+          maximumPending: 25,
+          pendingPerUser: 3,
+          requestCharacters: 2_000,
+          responseCharacters: 2_000,
+          ttlSeconds: 600,
+        },
+        pending: { count: 0, validating: 0 },
+        phase: "ready",
+        schemaVersion: 1,
+        totals: {
+          accepted: 0,
+          expired: 0,
+          rejected: 0,
+          responded: 0,
+          uncertain: 0,
+        },
+      }
+    },
+    ingestInteraction() {},
+    async listPending() {
+      return {
+        interactions: [],
+        page: { capacity: 25, returned: 0 },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async respond() {
+      throw new Error("No pending native Interaction")
+    },
+    async start() {
+      lifecycle.push("native-start")
+      await preflight
+    },
+    async stop() {
+      lifecycle.push("native-stop")
+    },
+    subscribe() {
+      return () => undefined
+    },
+  }
+  const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
+    enabled: true,
+    getStatus: () => feed.getStatus(),
+    listEvents: (options) => feed.listEvents(options),
+    start() {
+      lifecycle.push("gateway-start")
+    },
+    async stop() {
+      lifecycle.push("gateway-stop")
+    },
+    subscribe: (listener) => feed.subscribe(listener),
+  }
+  const serviceData = serviceFixture()
+  const handle = runDiscordMcpServer({
+    environment: {
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+      DISCORD_MCP_BOT_ID: BOT_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
+    },
+    gatewayRuntime,
+    nativeInteractionRuntime,
+    service: serviceData.service,
+    stderr: { write: () => true },
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+  })
+
+  assert.deepEqual(lifecycle, ["native-start"])
+  releasePreflight?.()
+  await settleNotifications()
+  assert.deepEqual(lifecycle, ["native-start", "gateway-start"])
+  await handle.close()
+  assert.deepEqual(lifecycle, [
+    "native-start",
+    "gateway-start",
+    "gateway-stop",
+    "native-stop",
+  ])
 })
 
 test("MCP stdio runner stops Gateway and observability runtimes idempotently", async () => {

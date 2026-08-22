@@ -44,6 +44,7 @@ export const MCP_TOOLSET_NAMES = [
   "members",
   "messages",
   "moderation",
+  "native-interactions",
   "observability",
   "onboarding",
   "permission-overwrites",
@@ -92,6 +93,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowMemberRoleChanges: "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
   allowMemberVoiceAudit: "DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT",
   allowMemberVoiceChanges: "DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES",
+  allowNativeCommandChanges: "DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES",
+  allowNativeInteractions: "DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS",
   allowOnboardingAudit: "DISCORD_MCP_ALLOW_ONBOARDING_AUDIT",
   allowOnboardingChanges: "DISCORD_MCP_ALLOW_ONBOARDING_CHANGES",
   allowPinManagement: "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
@@ -147,6 +150,12 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   memberRoleIds: "DISCORD_MCP_MEMBER_ROLE_IDS",
   memberVoiceChannelIds: "DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS",
   memberVoiceGuildIds: "DISCORD_MCP_MEMBER_VOICE_GUILD_IDS",
+  nativeCommandName: "DISCORD_MCP_NATIVE_COMMAND_NAME",
+  nativeInteractionChannelIds: "DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS",
+  nativeInteractionGuildIds: "DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS",
+  nativeInteractionMaxPending: "DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING",
+  nativeInteractionTtlSeconds: "DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS",
+  nativeInteractionUserIds: "DISCORD_MCP_NATIVE_INTERACTION_USER_IDS",
   observabilityLogs: "DISCORD_MCP_OBSERVABILITY_LOGS",
   onboardingGuildIds: "DISCORD_MCP_ONBOARDING_GUILD_IDS",
   otelCompression: "OTEL_EXPORTER_OTLP_COMPRESSION",
@@ -375,6 +384,10 @@ export const CONNECTOR_LIMITS = Object.freeze({
   interactionMaxWritesPerMinute: 60,
   interactionMinWriteIntervalMs: 60_000,
   interactionNotificationUsers: 10,
+  nativeInteractionChannelAllowlist: 100,
+  nativeInteractionGuildAllowlist: 100,
+  nativeInteractionMaxPending: 100,
+  nativeInteractionUserAllowlist: 100,
   memberRoleAllowlist: 100,
   memberRoleImpactChannels: 50,
   memberVoiceChannelAllowlist: 100,
@@ -535,6 +548,26 @@ export const INTERACTION_DEFAULTS = Object.freeze({
   minWriteIntervalMs: 500,
 })
 
+export const NATIVE_INTERACTION_DEFAULTS = Object.freeze({
+  commandName: "discord-mcp",
+  maximumPending: 25,
+  pendingPerUser: 3,
+  requestCharacters: 2_000,
+  responseCharacters: 2_000,
+  tokenCharacters: 512,
+  ttlSeconds: 10 * 60,
+})
+
+export const NATIVE_INTERACTION_LIMITS = Object.freeze({
+  commandDescriptionCharacters: 100,
+  commandNameCharacters: 32,
+  commandOptionDescriptionCharacters: 100,
+  maximumTtlSeconds: 14 * 60,
+  minimumTtlSeconds: 30,
+})
+
+export const NATIVE_INTERACTION_COMMAND_NAME_PATTERN = /^[a-z0-9_-]{1,32}$/
+
 export const DISCORD_APPLICATION_FLAGS = Object.freeze({
   gatewayGuildMembers: 1n << 14n,
   gatewayGuildMembersLimited: 1n << 15n,
@@ -569,6 +602,7 @@ export const DISCORD_MESSAGE_REFERENCE_TYPES = Object.freeze({
 
 export const DISCORD_MESSAGE_FLAGS = Object.freeze({
   crossposted: 1 << 0,
+  ephemeral: 1 << 6,
   isCrosspost: 1 << 1,
 })
 

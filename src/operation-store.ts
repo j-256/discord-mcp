@@ -38,6 +38,7 @@ export const OPERATION_KINDS = [
   "member-role-change",
   "member-voice-change",
   "message-pin",
+  "native-interaction-command-change",
   "onboarding-change",
   "poll-create",
   "poll-end",

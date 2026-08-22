@@ -54,6 +54,8 @@ import type {
 } from "./observability.js"
 import type {
   DiscordApplication,
+  DiscordApplicationCommand,
+  DiscordApplicationCommandOption,
   DiscordBan,
   DiscordChannel,
   DiscordCreatedForumPost,
@@ -94,6 +96,15 @@ export interface DiscordClientOptions {
   requestTimeoutMs?: number
   sleep?: SleepImplementation
   token: string
+}
+
+export interface CreateGuildApplicationCommandInput {
+  defaultMemberPermissions: string
+  description: string
+  name: string
+  nsfw: boolean
+  options: readonly DiscordApplicationCommandOption[]
+  type: number
 }
 
 export interface GuildPageOptions extends RequestOptions {
@@ -970,6 +981,7 @@ export type ModifyGuildMemberVoiceInput =
   | { mute: boolean }
 
 interface RequestParameters extends RequestOptions {
+  authentication?: "bot" | "none"
   auditReason?: string
   automaticRateLimitRetry?: boolean
   body?: unknown
@@ -1056,6 +1068,8 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "add_thread_member",
   "crosspost_message",
   "create_guild_auto_moderation_rule",
+  "create_interaction_response",
+  "create_immediate_interaction_response",
   "create_guild_emoji",
   "create_guild_soundboard_sound",
   "create_guild_sticker",
@@ -1065,6 +1079,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_guild_soundboard_sound",
   "delete_guild_sticker",
   "delete_stage_instance",
+  "edit_original_interaction_response",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_soundboard_sound",
@@ -5620,9 +5635,11 @@ export class DiscordClient {
     const contentSensitive = CONTENT_SENSITIVE_REST_OPERATIONS.has(operation)
     const headers = new Headers({
       Accept: "application/json",
-      Authorization: `Bot ${this.#token}`,
       "User-Agent": DISCORD_USER_AGENT,
     })
+    if (parameters.authentication !== "none") {
+      headers.set("Authorization", `Bot ${this.#token}`)
+    }
     if (parameters.body !== undefined && parameters.multipartBody !== undefined) {
       throw new TypeError("Discord request cannot contain JSON and multipart bodies")
     }
@@ -5749,6 +5766,187 @@ export class DiscordClient {
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {
     return this.#request("get_current_user", "/users/@me", options)
+  }
+
+  listGuildApplicationCommands(
+    applicationId: string,
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand[]> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    return this.#request(
+      "list_guild_application_commands",
+      `/applications/${applicationId}/guilds/${guildId}/commands`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands",
+      },
+    )
+  }
+
+  createGuildApplicationCommand(
+    applicationId: string,
+    guildId: string,
+    input: CreateGuildApplicationCommandInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    return this.#request(
+      "create_guild_application_command",
+      `/applications/${applicationId}/guilds/${guildId}/commands`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          default_member_permissions: input.defaultMemberPermissions,
+          description: input.description,
+          name: input.name,
+          nsfw: input.nsfw,
+          options: input.options,
+          type: input.type,
+        },
+        diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async deleteGuildApplicationCommand(
+    applicationId: string,
+    guildId: string,
+    commandId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    assertSearchSnowflake(commandId, "Discord application-command ID")
+    await this.#request<void>(
+      "delete_guild_application_command",
+      `/applications/${applicationId}/guilds/${guildId}/commands/${commandId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands/{command.id}",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async createDeferredInteractionResponse(
+    interactionId: string,
+    interactionToken: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(interactionId, "Discord Interaction ID")
+    if (!/^[A-Za-z0-9._~-]{1,512}$/.test(interactionToken)) {
+      throw new RangeError("Discord Interaction token is invalid")
+    }
+    await this.#request<void>(
+      "create_interaction_response",
+      `/interactions/${interactionId}/${encodeURIComponent(interactionToken)}/callback`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        body: {
+          data: { flags: 64 },
+          type: 5,
+        },
+        diagnosticRoute: "/interactions/{interaction.id}/{interaction.token}/callback",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async createImmediateInteractionResponse(
+    interactionId: string,
+    interactionToken: string,
+    content: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(interactionId, "Discord Interaction ID")
+    if (!/^[A-Za-z0-9._~-]{1,512}$/.test(interactionToken)) {
+      throw new RangeError("Discord Interaction token is invalid")
+    }
+    if (
+      typeof content !== "string"
+      || content.length < 1
+      || content.length > 2_000
+      || !content.trim()
+      || content.includes("\0")
+    ) {
+      throw new RangeError("Discord Interaction response must be 1-2000 nonempty characters")
+    }
+    await this.#request<void>(
+      "create_immediate_interaction_response",
+      `/interactions/${interactionId}/${encodeURIComponent(interactionToken)}/callback`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        body: {
+          data: {
+            allowed_mentions: {
+              parse: [],
+              replied_user: false,
+              roles: [],
+              users: [],
+            },
+            content,
+            flags: 64,
+          },
+          type: 4,
+        },
+        diagnosticRoute: "/interactions/{interaction.id}/{interaction.token}/callback",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  editOriginalInteractionResponse(
+    applicationId: string,
+    interactionToken: string,
+    content: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(applicationId, "Discord Interaction application ID")
+    if (!/^[A-Za-z0-9._~-]{1,512}$/.test(interactionToken)) {
+      throw new RangeError("Discord Interaction token is invalid")
+    }
+    if (
+      typeof content !== "string"
+      || content.length < 1
+      || content.length > 2_000
+      || !content.trim()
+      || content.includes("\0")
+    ) {
+      throw new RangeError("Discord Interaction response must be 1-2000 nonempty characters")
+    }
+    return this.#request(
+      "edit_original_interaction_response",
+      `/webhooks/${applicationId}/${encodeURIComponent(interactionToken)}/messages/@original`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: {
+            parse: [],
+            replied_user: false,
+            roles: [],
+            users: [],
+          },
+          attachments: [],
+          components: [],
+          content,
+          embeds: [],
+        },
+        diagnosticRoute: "/webhooks/{application.id}/{interaction.token}/messages/@original",
+        suppressFailureCause: true,
+      },
+    )
   }
 
   getUser(userId: string, options: RequestOptions = {}): Promise<DiscordUser> {

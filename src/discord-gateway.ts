@@ -22,6 +22,10 @@ export interface GatewayRuntime extends GatewayEventSource {
   stop(): Promise<void>
 }
 
+export interface GatewayInteractionHandler {
+  ingestInteraction(payload: unknown): Promise<void> | void
+}
+
 export interface GatewaySocket {
   readonly readyState: number
   onclose: ((event: { code: number }) => void) | null
@@ -48,8 +52,9 @@ export interface DiscordGatewayOptions {
     | "expectedBotId"
     | "gatewayEventBufferSize"
     | "token"
-  >
+  > & Partial<Pick<ConnectorConfig, "allowNativeInteractions">>
   eventStore?: GatewayEventStore
+  interactionHandler?: GatewayInteractionHandler
   logger?: (message: string) => void
   random?: () => number
   scheduler?: GatewayScheduler
@@ -202,6 +207,7 @@ export class DiscordGateway implements GatewayRuntime {
   #heartbeatTimer: unknown
   readonly #identifyTimes: number[] = []
   #identifyTimer: unknown
+  readonly #interactionHandler: GatewayInteractionHandler | undefined
   readonly #logger: (message: string) => void
   #pendingReconnect: PendingReconnect | undefined
   #phaseTimer: unknown
@@ -235,6 +241,13 @@ export class DiscordGateway implements GatewayRuntime {
     ) {
       throw new RangeError("Enabled Discord Gateway requires an exact guild or channel scope")
     }
+    if (options.config.allowNativeInteractions && !options.interactionHandler) {
+      throw new RangeError(
+        "Enabled Discord native Interactions require an Interaction handler",
+      )
+    }
+    const connectionEnabled = options.config.allowGateway
+      || options.config.allowNativeInteractions === true
     this.#applicationId = options.applicationId
     this.#botId = botId
     this.#clock = options.clock || Date.now
@@ -242,11 +255,16 @@ export class DiscordGateway implements GatewayRuntime {
       allowedChannelIds: options.config.allowedChannelIds,
       allowedGuildIds: options.config.allowedGuildIds,
       bufferSize: options.config.gatewayEventBufferSize,
-      enabled: options.config.allowGateway,
+      enabled: connectionEnabled,
+      eventFeedEnabled: options.config.allowGateway,
     })
-    if (this.#eventStore.enabled !== options.config.allowGateway) {
+    if (
+      this.#eventStore.enabled !== connectionEnabled
+      || this.#eventStore.eventFeedEnabled !== options.config.allowGateway
+    ) {
       throw new RangeError("Gateway runtime and event store enabled states must match")
     }
+    this.#interactionHandler = options.interactionHandler
     this.#logger = options.logger || (() => undefined)
     this.#random = options.random || Math.random
     this.#scheduler = options.scheduler || defaultScheduler()
@@ -492,7 +510,9 @@ export class DiscordGateway implements GatewayRuntime {
     this.#eventStore.recordIdentify()
     this.#send({
       d: {
-        intents: DISCORD_GATEWAY_INTENT_MASK,
+        intents: this.#eventStore.eventFeedEnabled
+          ? DISCORD_GATEWAY_INTENT_MASK
+          : 0,
         properties: {
           browser: CONNECTOR_NAME,
           device: CONNECTOR_NAME,
@@ -559,6 +579,15 @@ export class DiscordGateway implements GatewayRuntime {
       return
     }
     if (!this.#resuming && this.#eventStore.getStatus().connection.state !== "ready") return
+    if (eventName === "INTERACTION_CREATE" && this.#interactionHandler) {
+      try {
+        void Promise.resolve(this.#interactionHandler.ingestInteraction(payload.d))
+          .catch(() => this.#logger("[gateway] native Interaction handling failed"))
+      } catch {
+        this.#logger("[gateway] native Interaction handling failed")
+      }
+      return
+    }
     this.#eventStore.ingestDispatch(eventName, payload.d)
   }
 
