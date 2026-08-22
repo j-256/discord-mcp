@@ -2874,6 +2874,114 @@ test("Discord client sends safe message, edit, and own-reaction wire contracts",
   ])
 })
 
+test("Discord client sends bounded encoded reaction lifecycle contracts", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      if (init?.method === "GET") {
+        return jsonResponse([{ bot: false, id: "401", username: "person" }])
+      }
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+
+  const users = await client.listReactionUsers("200", "300", "ship:500", {
+    after: "400",
+    limit: 25,
+    type: 1,
+  })
+  await client.deleteOwnReaction("200", "300", "🔥")
+  await client.deleteUserReaction("200", "300", "ship:500", "401")
+  await client.deleteAllMessageReactionsForEmoji("200", "300", "ship:500")
+  await client.deleteAllMessageReactions("200", "300")
+
+  assert.deepEqual(users, [{ bot: false, id: "401", username: "person" }])
+  assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: `${API_BASE_URL}/channels/200/messages/300/reactions/ship%3A500?after=400&limit=25&type=1`,
+    },
+    {
+      method: "DELETE",
+      url: `${API_BASE_URL}/channels/200/messages/300/reactions/%F0%9F%94%A5/@me`,
+    },
+    {
+      method: "DELETE",
+      url: `${API_BASE_URL}/channels/200/messages/300/reactions/ship%3A500/401`,
+    },
+    {
+      method: "DELETE",
+      url: `${API_BASE_URL}/channels/200/messages/300/reactions/ship%3A500`,
+    },
+    {
+      method: "DELETE",
+      url: `${API_BASE_URL}/channels/200/messages/300/reactions`,
+    },
+  ])
+})
+
+test("Discord client validates reaction inputs and exact success statuses", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      requests += 1
+      return init?.method === "GET"
+        ? new Response(null, { status: 204 })
+        : jsonResponse({ unexpected: true })
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(client.listReactionUsers("invalid", "300", "🔥"), /channel ID/)
+  await assert.rejects(client.listReactionUsers("200", "invalid", "🔥"), /message ID/)
+  await assert.rejects(
+    client.listReactionUsers("200", "300", "🔥", { limit: 101 }),
+    /between 1 and 100/,
+  )
+  await assert.rejects(
+    client.listReactionUsers("200", "300", "🔥", { type: 2 as 0 }),
+    /normal or burst/,
+  )
+  await assert.rejects(client.deleteUserReaction("200", "300", "🔥", "nope"), /user ID/)
+  assert.equal(requests, 0)
+
+  await assert.rejects(
+    client.addOwnReaction("200", "300", "private:500"),
+    (error: Error) => {
+      assert.match(error.message, /unexpected success status/)
+      assert.doesNotMatch(error.message, /private|500/)
+      return true
+    },
+  )
+  await assert.rejects(
+    client.listReactionUsers("200", "300", "private:500"),
+    /unexpected success status/,
+  )
+})
+
+test("Discord client does not automatically retry reviewed reaction removals", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "wait", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.deleteAllMessageReactions("200", "300"),
+    (error: DiscordApiError) => error.status === 429,
+  )
+  assert.equal(requests, 1)
+})
+
 test("Discord client sends one nonce-enforced native poll without automatic retries", async () => {
   const requests: Array<{ body: unknown; method: string; url: string }> = []
   const records: RecordedObservation[] = []

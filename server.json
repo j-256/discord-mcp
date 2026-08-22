@@ -570,7 +570,7 @@
         },
         {
           "name": "DISCORD_MCP_ALLOW_INTERACTIONS",
-          "description": "Enable bounded sends, own-message edits, and own-reaction adds in exact channels",
+          "description": "Enable bounded sends, own-message edits, and own-reaction addition or removal in exact channels",
           "default": "false",
           "choices": [
             "false",
@@ -598,6 +598,29 @@
           "description": "Process-local per-channel interaction spacing from 0 through 60000 milliseconds",
           "default": "500",
           "format": "number"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
+          "description": "Enable bounded ID-and-bot-only reaction user pages when an exact reaction-channel allowlist is also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_REACTION_MODERATION",
+          "description": "Enable reviewed user, emoji, or complete reaction removal when an exact reaction-channel allowlist and pinned identities are also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_REACTION_CHANNEL_IDS",
+          "description": "Exact channel or thread IDs eligible for reaction user audit and reviewed moderation",
+          "format": "string"
         },
         {
           "name": "DISCORD_MCP_ALLOW_DELETIONS",

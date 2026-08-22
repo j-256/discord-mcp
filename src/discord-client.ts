@@ -13,6 +13,7 @@ import {
   MEMBER_DIRECTORY_LIMITS,
   ONBOARDING_LIMITS,
   POLL_LIMITS,
+  REACTION_LIMITS,
   WELCOME_SCREEN_LIMITS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_SNOWFLAKE_MAX,
@@ -73,6 +74,7 @@ import type {
   DiscordMessageSearchResponse,
   DiscordPermissionOverwrite,
   DiscordPollVoters,
+  DiscordReactionType,
   DiscordRole,
   DiscordThreadList,
   DiscordThreadMember,
@@ -147,6 +149,12 @@ export interface MessagePageOptions extends MessageCursor, RequestOptions {
 export interface MessagePinPageOptions extends RequestOptions {
   before?: string
   limit?: number
+}
+
+export interface ReactionUserPageOptions extends RequestOptions {
+  after?: string
+  limit?: number
+  type?: DiscordReactionType
 }
 
 export interface DiscordChannelMetadata {
@@ -1156,6 +1164,7 @@ type QueryScalar = boolean | number | string
 type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
+  "add_own_reaction",
   "add_thread_member",
   "crosspost_message",
   "create_guild_auto_moderation_rule",
@@ -1173,6 +1182,10 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_guild_template",
   "delete_guild_integration",
   "delete_stage_instance",
+  "delete_all_message_reactions",
+  "delete_all_message_reactions_for_emoji",
+  "delete_own_reaction",
+  "delete_user_reaction",
   "edit_original_interaction_response",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
@@ -1195,6 +1208,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_soundboard_sounds",
   "list_guild_stickers",
   "list_guild_templates",
+  "list_reaction_users",
   "modify_guild_emoji",
   "modify_forum_tags",
   "modify_guild_soundboard_sound",
@@ -4866,6 +4880,23 @@ function assertPositiveSnowflake(value: string, name: string): void {
     || BigInt(value) > DISCORD_SNOWFLAKE_MAX
   ) {
     throw new RangeError(`${name} must be a positive Discord snowflake`)
+  }
+}
+
+function encodedReactionEmoji(emoji: string): string {
+  if (
+    typeof emoji !== "string"
+    || emoji.length < 1
+    || emoji.length > CONNECTOR_LIMITS.interactionEmojiCharacters
+  ) {
+    throw new RangeError(
+      `Discord reaction emoji must contain between 1 and ${CONNECTOR_LIMITS.interactionEmojiCharacters} characters`,
+    )
+  }
+  try {
+    return encodeURIComponent(emoji)
+  } catch (error) {
+    throw new RangeError("Discord reaction emoji contains invalid Unicode", { cause: error })
   }
 }
 
@@ -9139,21 +9170,134 @@ export class DiscordClient {
     emoji: string,
     options: RequestOptions = {},
   ): Promise<void> {
-    if (!emoji || emoji.length > CONNECTOR_LIMITS.interactionEmojiCharacters) {
-      throw new RangeError(
-        `Discord reaction emoji must contain between 1 and ${CONNECTOR_LIMITS.interactionEmojiCharacters} characters`,
-      )
-    }
-    let encodedEmoji: string
-    try {
-      encodedEmoji = encodeURIComponent(emoji)
-    } catch (error) {
-      throw new RangeError("Discord reaction emoji contains invalid Unicode", { cause: error })
-    }
+    assertPositiveSnowflake(channelId, "Discord reaction channel ID")
+    assertPositiveSnowflake(messageId, "Discord reaction message ID")
+    const encodedEmoji = encodedReactionEmoji(emoji)
     await this.#request<void>(
       "add_own_reaction",
       `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`,
-      options,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/reactions/{emoji}/@me",
+        expectedSuccessStatus: 204,
+      },
+    )
+  }
+
+  async deleteOwnReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord reaction channel ID")
+    assertPositiveSnowflake(messageId, "Discord reaction message ID")
+    const encodedEmoji = encodedReactionEmoji(emoji)
+    await this.#request<void>(
+      "delete_own_reaction",
+      `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/reactions/{emoji}/@me",
+        expectedSuccessStatus: 204,
+      },
+    )
+  }
+
+  async listReactionUsers(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+    options: ReactionUserPageOptions = {},
+  ): Promise<DiscordUser[]> {
+    assertPositiveSnowflake(channelId, "Discord reaction channel ID")
+    assertPositiveSnowflake(messageId, "Discord reaction message ID")
+    assertSearchSnowflake(options.after, "Discord reaction user cursor")
+    assertBoundedLimit(
+      options.limit,
+      REACTION_LIMITS.userPage,
+      "Discord reaction user page limit",
+    )
+    if (options.type !== undefined && options.type !== 0 && options.type !== 1) {
+      throw new RangeError("Discord reaction type must be normal or burst")
+    }
+    const encodedEmoji = encodedReactionEmoji(emoji)
+    const query = queryString({
+      after: options.after,
+      limit: options.limit,
+      type: options.type,
+    })
+    return this.#request<DiscordUser[]>(
+      "list_reaction_users",
+      `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}${query}`,
+      {
+        ...(options.signal ? { signal: options.signal } : {}),
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/reactions/{emoji}",
+        expectedSuccessStatus: 200,
+      },
+    )
+  }
+
+  async deleteUserReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord reaction channel ID")
+    assertPositiveSnowflake(messageId, "Discord reaction message ID")
+    assertPositiveSnowflake(userId, "Discord reaction user ID")
+    const encodedEmoji = encodedReactionEmoji(emoji)
+    await this.#request<void>(
+      "delete_user_reaction",
+      `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/${userId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/reactions/{emoji}/{user.id}",
+        expectedSuccessStatus: 204,
+      },
+    )
+  }
+
+  async deleteAllMessageReactionsForEmoji(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord reaction channel ID")
+    assertPositiveSnowflake(messageId, "Discord reaction message ID")
+    const encodedEmoji = encodedReactionEmoji(emoji)
+    await this.#request<void>(
+      "delete_all_message_reactions_for_emoji",
+      `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/reactions/{emoji}",
+        expectedSuccessStatus: 204,
+      },
+    )
+  }
+
+  async deleteAllMessageReactions(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord reaction channel ID")
+    assertPositiveSnowflake(messageId, "Discord reaction message ID")
+    await this.#request<void>(
+      "delete_all_message_reactions",
+      `/channels/${channelId}/messages/${messageId}/reactions`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}/reactions",
+        expectedSuccessStatus: 204,
+      },
     )
   }
 

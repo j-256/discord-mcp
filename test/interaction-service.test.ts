@@ -140,11 +140,30 @@ function fixture(options: {
     create: [] as CreateMessageInput[],
     edit: [] as EditMessageInput[],
     reaction: [] as string[],
+    reactionRemove: [] as string[],
+  }
+  let ownReaction: string | null = null
+  const reactionMessage = (messageId: string) => {
+    if (ownReaction === null) return message({ id: messageId, reactions: [] })
+    const custom = ownReaction.includes(":")
+    const [name, id] = custom ? ownReaction.split(":") : [ownReaction, null]
+    return message({
+      id: messageId,
+      reactions: [{
+        burst_colors: [],
+        count: 1,
+        count_details: { burst: 0, normal: 1 },
+        emoji: { animated: false, id, name },
+        me: true,
+        me_burst: false,
+      }],
+    })
   }
   const client: InteractionServiceClient = {
     async addOwnReaction(_channelId, _messageId, emoji) {
       calls.reaction.push(emoji)
       events.push("reaction")
+      ownReaction = emoji
     },
     async createMessage(_channelId, input) {
       calls.create.push(structuredClone(input))
@@ -156,6 +175,11 @@ function fixture(options: {
       events.push("edit")
       return message({ content: input.content })
     },
+    async deleteOwnReaction(_channelId, _messageId, emoji) {
+      calls.reactionRemove.push(emoji)
+      events.push("reaction-remove")
+      ownReaction = null
+    },
     async getChannel(channelId) {
       return channel({ id: channelId })
     },
@@ -166,7 +190,7 @@ function fixture(options: {
           id: REPLY_MESSAGE_ID,
         })
       }
-      return message({ id: messageId })
+      return reactionMessage(messageId)
     },
   }
   Object.assign(client, options.client)
@@ -540,6 +564,85 @@ test("reaction validates one emoji, verifies the target, and journals no emoji c
       messageId: MESSAGE_ID,
     }),
     /one Unicode emoji or name:snowflake/,
+  )
+})
+
+test("own reaction changes are idempotent and verify authoritative state", async () => {
+  const { calls, events, service, store } = fixture()
+  const reactionRequest = {
+    channelId: CHANNEL_ID,
+    emoji: "🔥",
+    messageId: MESSAGE_ID,
+  }
+
+  assert.equal((await service.addReaction(reactionRequest)).status, "completed")
+  assert.equal((await service.addReaction(reactionRequest)).status, "noop")
+  assert.equal((await service.removeOwnReaction(reactionRequest)).status, "completed")
+  assert.equal((await service.removeOwnReaction(reactionRequest)).status, "noop")
+
+  assert.deepEqual(calls.reaction, ["🔥"])
+  assert.deepEqual(calls.reactionRemove, ["🔥"])
+  assert.deepEqual(events, [
+    "audit:pending",
+    "reaction",
+    "audit:completed",
+    "audit:noop",
+    "audit:pending",
+    "reaction-remove",
+    "audit:completed",
+    "audit:noop",
+  ])
+  assert.deepEqual(store.entries.map(({ kind, status }) => ({ kind, status })), [
+    { kind: "reaction-add", status: "pending" },
+    { kind: "reaction-add", status: "completed" },
+    { kind: "reaction-add", status: "noop" },
+    { kind: "reaction-remove-own", status: "pending" },
+    { kind: "reaction-remove-own", status: "completed" },
+    { kind: "reaction-remove-own", status: "noop" },
+  ])
+  assert.equal(JSON.stringify(store.entries).includes("🔥"), false)
+})
+
+test("own reaction postcondition failures are uncertain and retain content-free evidence", async () => {
+  const add = fixture({
+    client: {
+      async addOwnReaction() {},
+    },
+  })
+  await assert.rejects(
+    () => add.service.addReaction({
+      channelId: CHANNEL_ID,
+      emoji: "🔥",
+      messageId: MESSAGE_ID,
+    }),
+    (error: unknown) => (
+      error instanceof InteractionExecutionError
+      && (error.result as { status: string }).status === "uncertain"
+    ),
+  )
+  assert.deepEqual(add.store.entries.map(({ status }) => status), [
+    "pending",
+    "uncertain",
+  ])
+  assert.equal(JSON.stringify(add.store.entries).includes("🔥"), false)
+
+  const remove = fixture()
+  await remove.service.addReaction({
+    channelId: CHANNEL_ID,
+    emoji: "🔥",
+    messageId: MESSAGE_ID,
+  })
+  remove.client.deleteOwnReaction = async () => undefined
+  await assert.rejects(
+    () => remove.service.removeOwnReaction({
+      channelId: CHANNEL_ID,
+      emoji: "🔥",
+      messageId: MESSAGE_ID,
+    }),
+    (error: unknown) => (
+      error instanceof InteractionExecutionError
+      && (error.result as { status: string }).status === "uncertain"
+    ),
   )
 })
 

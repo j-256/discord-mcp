@@ -46,6 +46,7 @@ export const OPERATION_KINDS = [
   "onboarding-change",
   "poll-create",
   "poll-end",
+  "reaction-moderation",
   "role-creation",
   "role-configuration",
   "scheduled-event-change",

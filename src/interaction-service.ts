@@ -39,15 +39,16 @@ import {
   stableString,
 } from "./normalize.js"
 import type { ScopePolicy } from "./policy.js"
+import {
+  normalizeReactionEmoji,
+  parseReactionAggregates,
+  type NormalizedReactionEmoji,
+} from "./reaction-service.js"
 import type {
   DiscordChannel,
   DiscordMessage,
   RequestOptions,
 } from "./types.js"
-
-const CUSTOM_EMOJI_PATTERN = /^[A-Za-z0-9_]{2,32}:[0-9]{1,20}$/
-const EMOJI_CONTROL_OR_SPACE_PATTERN = /[\u0000-\u0020\u007F]/u
-const EMOJI_CODE_POINT_PATTERN = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3)/u
 
 export interface SendMessageRequest {
   channelId: string
@@ -70,6 +71,8 @@ export interface AddReactionRequest {
   emoji: string
   messageId: string
 }
+
+export type RemoveOwnReactionRequest = AddReactionRequest
 
 export interface SendMessageResult {
   activityId: string
@@ -99,13 +102,20 @@ export interface AddReactionResult {
   guildId: string
   messageId: string
   schemaVersion: number
-  status: "completed"
+  status: "completed" | "noop"
   url: string
 }
 
+export type RemoveOwnReactionResult = AddReactionResult
+
 export interface InteractionServiceClient extends Pick<
   DiscordClient,
-  "addOwnReaction" | "createMessage" | "editMessage" | "getChannel" | "getMessage"
+  | "addOwnReaction"
+  | "createMessage"
+  | "deleteOwnReaction"
+  | "editMessage"
+  | "getChannel"
+  | "getMessage"
 > {}
 
 export interface InteractionServiceOptions {
@@ -126,6 +136,18 @@ interface SendLedgerEntry {
   promise: Promise<SendMessageResult>
 }
 
+function ownsNormalReaction(
+  message: DiscordMessage,
+  emoji: NormalizedReactionEmoji,
+): boolean {
+  const aggregate = parseReactionAggregates(message.reactions).find((entry) => (
+    emoji.kind === "custom"
+      ? entry.emoji.kind === "custom" && entry.emoji.id === emoji.id
+      : entry.emoji.kind === "unicode" && entry.emoji.name === emoji.name
+  ))
+  return aggregate?.me ?? false
+}
+
 function activityError(error: unknown): string {
   if (error instanceof DiscordApiError) {
     return `DiscordApiError status=${error.status} code=${error.code ?? "unknown"}`
@@ -135,22 +157,6 @@ function activityError(error: unknown): string {
 
 function failureStatus(error: unknown): Extract<InteractionActivityStatus, "failed" | "uncertain"> {
   return error instanceof DiscordApiError && error.status < 500 ? "failed" : "uncertain"
-}
-
-function validateEmoji(emoji: string): string {
-  if (
-    !emoji
-    || emoji.length > CONNECTOR_LIMITS.interactionEmojiCharacters
-    || EMOJI_CONTROL_OR_SPACE_PATTERN.test(emoji)
-  ) {
-    throw new RangeError("Discord reaction emoji is empty, too long, or contains whitespace or controls")
-  }
-  if (CUSTOM_EMOJI_PATTERN.test(emoji)) return emoji
-  const segments = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(emoji)]
-  if (segments.length !== 1 || !EMOJI_CODE_POINT_PATTERN.test(emoji)) {
-    throw new RangeError("Discord reaction emoji must be one Unicode emoji or name:snowflake")
-  }
-  return emoji
 }
 
 export function interactionNonce(channelId: string, idempotencyKey: string): string {
@@ -526,22 +532,84 @@ export class InteractionService {
     request: AddReactionRequest,
     options: RequestOptions = {},
   ): Promise<AddReactionResult> {
-    const emoji = validateEmoji(request.emoji)
+    return this.#setOwnReaction(request, true, options)
+  }
+
+  async removeOwnReaction(
+    request: RemoveOwnReactionRequest,
+    options: RequestOptions = {},
+  ): Promise<RemoveOwnReactionResult> {
+    return this.#setOwnReaction(request, false, options)
+  }
+
+  async #setOwnReaction(
+    request: AddReactionRequest,
+    desired: boolean,
+    options: RequestOptions,
+  ): Promise<AddReactionResult> {
+    const emoji = normalizeReactionEmoji(request.emoji)
     const { guildId } = await this.#channel(request.channelId, options)
-    await this.#message(request.channelId, guildId, request.messageId, options)
+    const existing = await this.#message(
+      request.channelId,
+      guildId,
+      request.messageId,
+      options,
+    )
     const activityId = this.#randomId()
+    const kind = desired ? "reaction-add" : "reaction-remove-own"
+    if (ownsNormalReaction(existing, emoji) === desired) {
+      await this.#activityStore.append(this.#activity({
+        activityId,
+        channelId: request.channelId,
+        guildId,
+        kind,
+        messageId: request.messageId,
+        status: "noop",
+      }))
+      return {
+        activityId,
+        channelId: request.channelId,
+        guildId,
+        messageId: request.messageId,
+        schemaVersion: SCHEMA_VERSION,
+        status: "noop",
+        url: discordMessageUrl(guildId, request.channelId, request.messageId),
+      }
+    }
     await this.#write({
       activityId,
       channelId: request.channelId,
       guildId,
-      kind: "reaction-add",
+      kind,
       messageId: request.messageId,
-      operation: () => this.#client.addOwnReaction(
-        request.channelId,
-        request.messageId,
-        emoji,
-        options,
-      ),
+      operation: async () => {
+        if (desired) {
+          await this.#client.addOwnReaction(
+            request.channelId,
+            request.messageId,
+            emoji.routeToken,
+            options,
+          )
+        } else {
+          await this.#client.deleteOwnReaction(
+            request.channelId,
+            request.messageId,
+            emoji.routeToken,
+            options,
+          )
+        }
+        const observed = await this.#message(
+          request.channelId,
+          guildId,
+          request.messageId,
+          options,
+        )
+        if (ownsNormalReaction(observed, emoji) !== desired) {
+          throw new InteractionIdentityError(
+            "Discord reaction state does not match the requested own-reaction change",
+          )
+        }
+      },
     })
     return {
       activityId,

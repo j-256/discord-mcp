@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 11
+export const OPERATOR_REPORT_SCHEMA_VERSION = 12
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -98,6 +98,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   pollCreationPolicy: "poll-creation-policy",
   pollEndPolicy: "poll-end-policy",
   pollVoterAuditPolicy: "poll-voter-audit-policy",
+  reactionModerationPolicy: "reaction-moderation-policy",
+  reactionUserAuditPolicy: "reaction-user-audit-policy",
   roleCreationPolicy: "role-creation-policy",
   roleConfigurationPolicy: "role-configuration-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
@@ -278,6 +280,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowPollVoterAudit && config.pollChannelIds.size === 0) {
     warnings.push("The poll-voter-audit toggle is enabled but voter inspection remains blocked because no exact poll-channel allowlist is configured")
+  }
+  if (config.allowReactionUserAudit && config.reactionChannelIds.size === 0) {
+    warnings.push("The reaction-user-audit toggle is enabled but identity inspection remains blocked because no exact reaction-channel allowlist is configured")
+  }
+  if (config.allowReactionModeration && config.reactionChannelIds.size === 0) {
+    warnings.push("The reaction-moderation toggle is enabled but moderation remains blocked because no exact reaction-channel allowlist is configured")
   }
   if (
     config.allowPermissionOverwrites
@@ -494,7 +502,13 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "guild-expressions",
       "Guild expression audit and changes",
     ],
-    [config.allowInteractions, "interactions", "Message interactions"],
+    [
+      config.allowInteractions
+        || config.allowReactionUserAudit
+        || config.allowReactionModeration,
+      "interactions",
+      "Message interactions and reaction lifecycle",
+    ],
     [
       config.allowIntegrationAudit || config.allowIntegrationDeletions,
       "integrations",
@@ -1016,6 +1030,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.pollEndPolicy,
         "pass",
         `Reviewed native poll ending is constrained to ${config.pollChannelIds.size} exact channels with live-count-bound approval, one-shot execution, and finalization-aware readback`,
+      ))
+    }
+    if (!config.allowReactionUserAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.reactionUserAuditPolicy,
+        "pass",
+        "Reaction user audit is disabled; aggregate reaction reads remain available through ordinary read scope",
+      ))
+    } else if (config.reactionChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.reactionUserAuditPolicy,
+        "warn",
+        "Reaction-user-audit toggle is enabled, but the required exact reaction-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.reactionUserAuditPolicy,
+        "pass",
+        `Reaction user audit is constrained to ${config.reactionChannelIds.size} exact channels with bounded ID-and-bot-only pages and no profile persistence`,
+      ))
+    }
+    if (!config.allowReactionModeration) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.reactionModerationPolicy,
+        "pass",
+        "Reviewed reaction moderation is disabled",
+      ))
+    } else if (config.reactionChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.reactionModerationPolicy,
+        "warn",
+        "Reaction-moderation toggle is enabled, but the required exact reaction-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.reactionModerationPolicy,
+        "pass",
+        `Reviewed reaction moderation is constrained to ${config.reactionChannelIds.size} exact channels with complete permission proof, exact-message coordination, signed approval, one-shot non-retried execution, content-free audit, and target-absence readback`,
       ))
     }
     if (!config.allowPermissionOverwrites) {
@@ -1958,6 +2010,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowPollCreation,
     ENVIRONMENT_NAMES.allowPollEnding,
     ENVIRONMENT_NAMES.pollChannelIds,
+    ENVIRONMENT_NAMES.allowReactionUserAudit,
+    ENVIRONMENT_NAMES.allowReactionModeration,
+    ENVIRONMENT_NAMES.reactionChannelIds,
     ENVIRONMENT_NAMES.allowPermissionOverwrites,
     ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
     ENVIRONMENT_NAMES.allowForumPosts,
@@ -2394,6 +2449,7 @@ export async function smokeConnector(
       ["send_message", false],
       ["add_reaction", false],
       ["edit_own_message", true],
+      ["remove_own_reaction", true],
     ] as const
     for (const [name, destructiveHint] of interactionAnnotations) {
       if (!selectedToolNames.includes(name)) continue

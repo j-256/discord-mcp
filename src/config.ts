@@ -75,6 +75,8 @@ export interface ConnectorConfig {
   allowPollCreation: boolean
   allowPollEnding: boolean
   allowPollVoterAudit: boolean
+  allowReactionModeration: boolean
+  allowReactionUserAudit: boolean
   allowRoleCreation: boolean
   allowRoleConfiguration: boolean
   allowScheduledEventAudit: boolean
@@ -139,6 +141,7 @@ export interface ConnectorConfig {
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
   pollChannelIds: ReadonlySet<string>
+  reactionChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
   roleConfigurationIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
@@ -377,6 +380,11 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.pollChannelIds],
     ENVIRONMENT_NAMES.pollChannelIds,
   )
+  const reactionChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.reactionChannelIds],
+    ENVIRONMENT_NAMES.reactionChannelIds,
+    CONNECTOR_LIMITS.reactionChannelAllowlist,
+  )
   const forumPostChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.forumPostChannelIds],
     ENVIRONMENT_NAMES.forumPostChannelIds,
@@ -564,6 +572,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
+    [ENVIRONMENT_NAMES.reactionChannelIds, reactionChannelIds],
     [ENVIRONMENT_NAMES.stageChannelIds, stageChannelIds],
     [ENVIRONMENT_NAMES.threadParentIds, threadParentIds],
     [ENVIRONMENT_NAMES.threadIds, threadIds],
@@ -585,6 +594,24 @@ export function loadConnectorConfig(
   const expectedBotId = botIdValue?.trim()
     ? parseId(botIdValue, ENVIRONMENT_NAMES.botId)
     : undefined
+  const allowReactionModeration = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowReactionModeration],
+    ENVIRONMENT_NAMES.allowReactionModeration,
+  )
+  const allowReactionUserAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowReactionUserAudit],
+    ENVIRONMENT_NAMES.allowReactionUserAudit,
+  )
+  if ((allowReactionModeration || allowReactionUserAudit) && reactionChannelIds.size === 0) {
+    throw new ConfigurationError(
+      "Reaction audit and moderation require an exact reaction-channel allowlist",
+    )
+  }
+  if (allowReactionModeration && (!expectedApplicationId || !expectedBotId)) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowReactionModeration} requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+    )
+  }
   const allowGateway = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGateway],
     ENVIRONMENT_NAMES.allowGateway,
@@ -953,6 +980,8 @@ export function loadConnectorConfig(
     allowPollCreation,
     allowPollEnding,
     allowPollVoterAudit,
+    allowReactionModeration,
+    allowReactionUserAudit,
     allowRoleCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowRoleCreation],
       ENVIRONMENT_NAMES.allowRoleCreation,
@@ -1074,6 +1103,7 @@ export function loadConnectorConfig(
     protectedUserIds,
     pinChannelIds,
     pollChannelIds,
+    reactionChannelIds,
     roleCreationGuildIds,
     roleConfigurationIds,
     scheduledEventGuildIds,

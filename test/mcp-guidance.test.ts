@@ -118,7 +118,14 @@ function rawMessage(content: string): DiscordMessage {
     mention_roles: [],
     mentions: [],
     pinned: false,
-    reactions: [{ count: 1, emoji: { name: "ok" }, me: false }],
+    reactions: [{
+      burst_colors: [],
+      count: 1,
+      count_details: { burst: 0, normal: 1 },
+      emoji: { name: "ok" },
+      me: false,
+      me_burst: false,
+    }],
     timestamp: "2026-08-19T00:00:00.000Z",
     tts: false,
     type: 0,
@@ -167,6 +174,7 @@ interface GuidanceCalls {
   messages: number
   onboarding: number
   permissionOverwrites: number
+  reactions: number
   roles: number
   scheduledEvents: number
   soundboardDefaults: number
@@ -211,6 +219,7 @@ function guidanceService(options: {
     messages: 0,
     onboarding: 0,
     permissionOverwrites: 0,
+    reactions: 0,
     roles: 0,
     scheduledEvents: 0,
     soundboardDefaults: 0,
@@ -303,6 +312,7 @@ function guidanceService(options: {
     executeWidgetSettingsChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
+    executeReactionModeration: unexpected,
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
@@ -1235,6 +1245,9 @@ function guidanceService(options: {
         pollCreationEnabled: false,
         pollEndingEnabled: false,
         pollVoterAuditEnabled: false,
+        reactionChannelIds: [],
+        reactionModerationEnabled: false,
+        reactionUserAuditEnabled: false,
         readChannelScope: "allowlist",
         readGuildScope: "allowlist",
         roleCreationEnabled: false,
@@ -1640,6 +1653,56 @@ function guidanceService(options: {
     listGuildMembers: unexpected,
     listMessagePins: unexpected,
     listPollAnswerVoters: unexpected,
+    async listMessageReactions(channelId, messageId) {
+      calls.reactions += 1
+      calls.lastChannelId = channelId
+      calls.lastMessageId = messageId
+      return {
+        channel: { id: channelId, parentId: null, type: 0 },
+        guildId: GUILD_ID,
+        message: {
+          id: messageId,
+          timestamp: "2026-08-19T00:00:00.000Z",
+          type: 0,
+          url: `https://discord.com/channels/${GUILD_ID}/${channelId}/${messageId}`,
+        },
+        privacy: {
+          omittedFields: [
+            "attachments",
+            "author",
+            "burstColors",
+            "components",
+            "content",
+            "embeds",
+            "memberProfiles",
+            "rawPayloads",
+            "userAvatars",
+            "userGlobalNames",
+            "userNames",
+          ],
+          persistence: "none",
+          profilesProjectedOut: true,
+          rawPayloads: "omitted",
+        },
+        reactions: [{
+          burstCount: 0,
+          count: 1,
+          emoji: {
+            animated: false,
+            id: EMOJI_ID,
+            kind: "custom",
+            name: "ok",
+            routeToken: `ok:${EMOJI_ID}`,
+          },
+          me: false,
+          meBurst: false,
+          normalCount: 1,
+        }],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    listReactionUsers: unexpected,
     async listRoles(guildId) {
       calls.roles += 1
       calls.lastGuildId = guildId
@@ -1658,6 +1721,7 @@ function guidanceService(options: {
     planMessagePin: unexpected,
     planPollCreation: unexpected,
     planPollEnd: unexpected,
+    planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
     planForumPost: unexpected,
     planForumTagChange: unexpected,
@@ -1666,6 +1730,7 @@ function guidanceService(options: {
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
     readMessages: unexpected,
+    removeOwnReaction: unexpected,
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
     sendMessage: unexpected,
@@ -1716,6 +1781,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.members
     + calls.onboarding
     + calls.permissionOverwrites
+    + calls.reactions
     + calls.roles
     + calls.scheduledEvents
     + calls.stageInstances
@@ -1831,6 +1897,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactMessage,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.messageReactions,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.messageReactions,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.exactMember,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactMember,
       },
@@ -1935,6 +2005,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /survive process restarts/)
   assert.match(safety.text, /Message pin listing uses Discord's current timestamp-paginated endpoint/)
   assert.match(safety.text, /complete message-read and PIN_MESSAGES permission evidence/)
+  assert.match(safety.text, /Reaction aggregate reads use ordinary readable-channel scope/)
+  assert.match(safety.text, /reason is local-only/)
+  assert.match(safety.text, /same-message uncertain outcomes remain quarantined/)
   assert.match(safety.text, /Attachment messages require separate exact channel/)
   assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
@@ -2460,6 +2533,23 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.doesNotMatch(exact.text, new RegExp(TOKEN))
   assert.match(exact.text, /hello \[redacted\]/)
 
+  const reactions = await readJsonResource(
+    client,
+    `discord://channels/${CHANNEL_ID}/messages/${MESSAGE_ID}/reactions`,
+  )
+  const reactionData = reactions.value.data as Record<string, unknown>
+  const reactionMessage = reactionData.message as Record<string, unknown>
+  assert.equal(reactionMessage.id, MESSAGE_ID)
+  assert.equal("content" in reactionMessage, false)
+  assert.equal("author" in reactionMessage, false)
+  assert.equal((reactionData.reactions as unknown[]).length, 1)
+  assert.equal(
+    ((reactionData.privacy as Record<string, unknown>).omittedFields as string[])
+      .includes("userNames"),
+    true,
+  )
+  assert.doesNotMatch(reactions.text, new RegExp(TOKEN))
+
   assert.equal(calls.guilds, 1)
   assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.integrations, 1)
@@ -2476,6 +2566,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.members, 1)
   assert.equal(calls.bans, 1)
   assert.equal(calls.permissionOverwrites, 1)
+  assert.equal(calls.reactions, 1)
   assert.equal(calls.roles, 2)
   assert.equal(calls.scheduledEvents, 1)
   assert.equal(calls.soundboardDefaults, 1)
@@ -2724,6 +2815,29 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(messagePin, /Call only plan_message_pin/)
   assert.match(messagePin, /Do not call execute_message_pin/)
   assert.match(messagePin, /PIN_MESSAGES/)
+
+  const reactionModerationRequest = {
+    auditReason: "Remove reviewed reaction",
+    channelId: CHANNEL_ID,
+    emoji: `ok:${EMOJI_ID}`,
+    messageId: MESSAGE_ID,
+    operationKey: OPERATION_KEY,
+    scope: "user",
+    userId: USER_ID,
+  }
+  const reactionModeration = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(reactionModerationRequest) },
+    name: MCP_PROMPT_NAMES.reviewReactionModeration,
+  }))
+  assert.deepEqual(
+    JSON.parse(reactionModeration.split("\n")[1] || ""),
+    reactionModerationRequest,
+  )
+  assert.match(reactionModeration, /Call only plan_reaction_moderation/)
+  assert.match(reactionModeration, /Do not call execute_reaction_moderation/)
+  assert.match(reactionModeration, /reason is local-only/)
+  assert.match(reactionModeration, /identity-blind/)
+  assert.match(reactionModeration, /removed reactions cannot be restored/)
 
   const announcementCrosspost = promptText(await client.getPrompt({
     arguments: {
@@ -3453,6 +3567,19 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Missing exact reaction user",
+          channelId: CHANNEL_ID,
+          emoji: `ok:${EMOJI_ID}`,
+          messageId: MESSAGE_ID,
+          operationKey: OPERATION_KEY,
+          scope: "user",
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewReactionModeration,
+    },
     {
       arguments: {
         guildId: GUILD_ID,

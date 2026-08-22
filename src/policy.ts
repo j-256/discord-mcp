@@ -93,6 +93,9 @@ export interface PolicyDescription {
   pollCreationEnabled: boolean
   pollEndingEnabled: boolean
   pollVoterAuditEnabled: boolean
+  reactionChannelIds: string[]
+  reactionModerationEnabled: boolean
+  reactionUserAuditEnabled: boolean
   readChannelScope: "all-visible" | "allowlist"
   readGuildScope: "all-visible" | "allowlist"
   roleCreationEnabled: boolean
@@ -171,6 +174,8 @@ export class ScopePolicy {
   readonly #allowPollCreation: boolean
   readonly #allowPollEnding: boolean
   readonly #allowPollVoterAudit: boolean
+  readonly #allowReactionModeration: boolean
+  readonly #allowReactionUserAudit: boolean
   readonly #allowGateway: boolean
   readonly #allowGuildExpressionAudit: boolean
   readonly #allowGuildExpressionChanges: boolean
@@ -243,6 +248,7 @@ export class ScopePolicy {
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
   readonly #pollChannelIds: ReadonlySet<string>
+  readonly #reactionChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
   readonly #roleConfigurationIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
@@ -306,6 +312,8 @@ export class ScopePolicy {
     | "allowPollCreation"
     | "allowPollEnding"
     | "allowPollVoterAudit"
+    | "allowReactionModeration"
+    | "allowReactionUserAudit"
     | "allowForumPosts"
     | "allowChannelCreation"
     | "allowRoleCreation"
@@ -363,6 +371,7 @@ export class ScopePolicy {
     | "permissionOverwriteChannelIds"
     | "pinChannelIds"
     | "pollChannelIds"
+    | "reactionChannelIds"
     | "roleCreationGuildIds"
     | "roleConfigurationIds"
     | "scheduledEventGuildIds"
@@ -407,6 +416,8 @@ export class ScopePolicy {
     this.#allowPollCreation = config.allowPollCreation ?? false
     this.#allowPollEnding = config.allowPollEnding ?? false
     this.#allowPollVoterAudit = config.allowPollVoterAudit ?? false
+    this.#allowReactionModeration = config.allowReactionModeration ?? false
+    this.#allowReactionUserAudit = config.allowReactionUserAudit ?? false
     this.#allowGateway = config.allowGateway ?? false
     this.#allowGuildExpressionAudit = config.allowGuildExpressionAudit ?? false
     this.#allowGuildExpressionChanges = config.allowGuildExpressionChanges ?? false
@@ -480,6 +491,7 @@ export class ScopePolicy {
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
     this.#pollChannelIds = config.pollChannelIds ?? new Set()
+    this.#reactionChannelIds = config.reactionChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
@@ -629,6 +641,11 @@ export class ScopePolicy {
       pollVoterAuditEnabled: this.#allowPollAudit
         && this.#allowPollVoterAudit
         && this.#pollChannelIds.size > 0,
+      reactionChannelIds: [...this.#reactionChannelIds].sort(),
+      reactionModerationEnabled: this.#allowReactionModeration
+        && this.#reactionChannelIds.size > 0,
+      reactionUserAuditEnabled: this.#allowReactionUserAudit
+        && this.#reactionChannelIds.size > 0,
       readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
       readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
       roleCreationEnabled: this.#allowRoleCreation
@@ -1417,6 +1434,40 @@ export class ScopePolicy {
       throw new PolicyError("Discord poll ending is disabled by connector configuration")
     }
     return guildId
+  }
+
+  assertChannelReactionAuditable(channel: DiscordChannel): string {
+    this.assertChannelReactionIdAuditable(channel.id)
+    return this.assertChannelReadable(channel)
+  }
+
+  assertChannelReactionIdAuditable(channelId: string): void {
+    if (!this.#allowReactionUserAudit) {
+      throw new PolicyError("Discord reaction-user audit is disabled by connector configuration")
+    }
+    if (this.#reactionChannelIds.size === 0) {
+      throw new PolicyError("Discord reaction-user audit requires an explicit channel allowlist")
+    }
+    if (!this.#reactionChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the reaction scope`)
+    }
+  }
+
+  assertChannelReactionModeratable(channel: DiscordChannel): string {
+    this.assertChannelReactionIdModeratable(channel.id)
+    return this.assertChannelReadable(channel)
+  }
+
+  assertChannelReactionIdModeratable(channelId: string): void {
+    if (!this.#allowReactionModeration) {
+      throw new PolicyError("Discord reaction moderation is disabled by connector configuration")
+    }
+    if (this.#reactionChannelIds.size === 0) {
+      throw new PolicyError("Discord reaction moderation requires an explicit channel allowlist")
+    }
+    if (!this.#reactionChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the reaction scope`)
+    }
   }
 
   assertChannelWebhookAuditable(channel: DiscordChannel): string {

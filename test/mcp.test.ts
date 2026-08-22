@@ -23,6 +23,7 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
+  REACTION_LIMITS,
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
 import type {
@@ -211,6 +212,8 @@ import {
   OnboardingOperationConflictError,
   PollExecutionError,
   PollOperationConflictError,
+  ReactionModerationExecutionError,
+  ReactionModerationOperationConflictError,
   RoleCreationExecutionError,
   RoleCreationOperationConflictError,
   RoleConfigurationExecutionError,
@@ -311,6 +314,7 @@ const CREATED_FORUM_TAG_ID = "385000000000000002"
 const THREAD_CREATION_OPERATION_KEY = "thread-create-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
+const REACTION_MODERATION_OPERATION_KEY = "reaction-moderation-attempt-0001"
 const ANNOUNCEMENT_CROSSPOST_OPERATION_KEY = "announcement-crosspost-attempt-0001"
 const NATIVE_INTERACTION_COMMAND_OPERATION_KEY = "native-command-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
@@ -3904,6 +3908,9 @@ function fixturePolicy(): PolicyDescription {
     pollCreationEnabled: false,
     pollEndingEnabled: false,
     pollVoterAuditEnabled: false,
+    reactionChannelIds: [],
+    reactionModerationEnabled: false,
+    reactionUserAuditEnabled: false,
     readChannelScope: "all-visible",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
@@ -3996,6 +4003,9 @@ function serviceFixture(overrides: {
   pollEndError?: Error
   pollEndPlanDigest?: string
   pollEndWriteRequired?: boolean
+  reactionModerationError?: Error
+  reactionModerationPlanDigest?: string
+  reactionModerationWriteRequired?: boolean
   roleCreationAction?: "create" | "none"
   roleCreationError?: Error
   roleCreationPlanDigest?: string
@@ -4107,6 +4117,11 @@ function serviceFixture(overrides: {
     pollGet: 0,
     pollVoters: 0,
     principalExplain: 0,
+    reactionModerationExecute: 0,
+    reactionModerationPlan: 0,
+    reactionUsers: 0,
+    reactions: 0,
+    removeOwnReaction: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
     roleConfigurationExecute: 0,
@@ -4136,6 +4151,99 @@ function serviceFixture(overrides: {
     webhookDeletionGet: 0,
     webhookDeletionList: 0,
     webhookDeletionPlan: 0,
+  }
+  const reactionModerationPlan = (
+    request: Parameters<DiscordToolService["planReactionModeration"]>[0],
+    digest: string,
+  ): Awaited<ReturnType<DiscordToolService["planReactionModeration"]>> => {
+    const writeRequired = overrides.reactionModerationWriteRequired ?? true
+    const custom = request.emoji?.match(/^([^:]+):([0-9]+)$/)
+    const emoji = request.scope === "all"
+      ? null
+      : custom
+        ? {
+            animated: false,
+            id: custom[2] as string,
+            kind: "custom" as const,
+            name: custom[1] as string,
+            routeToken: request.emoji as string,
+          }
+        : {
+            animated: false,
+            id: null,
+            kind: "unicode" as const,
+            name: request.emoji as string,
+            routeToken: request.emoji as string,
+          }
+    const reactions = writeRequired && emoji
+      ? [{
+          burstCount: 0,
+          count: 1,
+          emoji,
+          me: false,
+          meBurst: false,
+          normalCount: 1,
+        }]
+      : []
+    return {
+      action: writeRequired ? "remove" : "none",
+      applicationId: APPLICATION_ID,
+      auditReason: request.auditReason,
+      botId: BOT_ID,
+      channel: { id: request.channelId, parentId: null, type: 0 },
+      createdAt: "2026-08-22T00:00:00.000Z",
+      digest,
+      guild: { id: GUILD_ID, name: "Private guild name" },
+      message: {
+        id: request.messageId,
+        timestamp: "2026-08-22T00:00:00.000Z",
+        type: 0,
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+      },
+      operationKeyHash: OPERATION_KEY_HASH,
+      permission: {
+        administrator: false,
+        appliedRoleIds: [GUILD_ID],
+        canReadMessages: true,
+        confidence: "complete",
+        connect: null,
+        effectivePermissions: "9216",
+        manageMessages: true,
+        permissionSourceChannelId: request.channelId,
+        privateThreadAccess: "not-applicable",
+        readMessageHistory: true,
+        viewChannel: true,
+      },
+      privacy: {
+        omittedFields: [
+          "attachments",
+          "author",
+          "burstColors",
+          "components",
+          "content",
+          "embeds",
+          "memberProfiles",
+          "rawPayloads",
+          "userAvatars",
+          "userGlobalNames",
+          "userNames",
+        ],
+        persistence: "none",
+        profilesProjectedOut: true,
+        rawPayloads: "omitted",
+      },
+      reactions,
+      schemaVersion: 1,
+      status: writeRequired ? "planned" : "already-absent",
+      target: {
+        emoji,
+        scope: request.scope,
+        userBot: request.scope === "user" ? false : null,
+        userId: request.userId ?? null,
+      },
+      warnings: ["Local audit reason only"],
+      writeRequired,
+    }
   }
   const service: DiscordToolService = {
     async executeGuildIntegrationDeletion(request, planDigest) {
@@ -4979,6 +5087,19 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
       }
     },
+    async removeOwnReaction(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.removeOwnReaction += 1
+      return {
+        activityId: "activity-reaction-remove-own",
+        channelId: input.channelId,
+        guildId: GUILD_ID,
+        messageId: input.messageId,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
+      }
+    },
     async auditChannelRoleAccess(input) {
       calls.auditRoles += 1
       const actions = [...(input.actions || [
@@ -5232,6 +5353,26 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: planned.action === "none" ? "already-current" : "completed",
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+      }
+    },
+    async executeReactionModeration(request, planDigest) {
+      if (overrides.reactionModerationError) {
+        throw overrides.reactionModerationError
+      }
+      calls.reactionModerationExecute += 1
+      const planned = reactionModerationPlan(request, planDigest)
+      return {
+        activityId: planned.writeRequired ? "activity-reaction-moderation" : null,
+        channelId: request.channelId,
+        exactSnapshotMatched: true,
+        guildId: GUILD_ID,
+        messageId: request.messageId,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-absent",
+        targetAbsent: true,
+        url: planned.message.url,
       }
     },
     async executeAnnouncementCrosspost(request, planDigest) {
@@ -5885,6 +6026,105 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listMessageReactions(channelId, messageId) {
+      calls.reactions += 1
+      return {
+        channel: { id: channelId, parentId: null, type: 0 },
+        guildId: GUILD_ID,
+        message: {
+          id: messageId,
+          timestamp: "2026-08-22T00:00:00.000Z",
+          type: 0,
+          url: `https://discord.com/channels/${GUILD_ID}/${channelId}/${messageId}`,
+        },
+        privacy: {
+          omittedFields: [
+            "attachments",
+            "author",
+            "burstColors",
+            "components",
+            "content",
+            "embeds",
+            "memberProfiles",
+            "rawPayloads",
+            "userAvatars",
+            "userGlobalNames",
+            "userNames",
+          ],
+          persistence: "none",
+          profilesProjectedOut: true,
+          rawPayloads: "omitted",
+        },
+        reactions: [{
+          burstCount: 1,
+          count: 3,
+          emoji: {
+            animated: false,
+            id: USER_ID,
+            kind: "custom",
+            name: "party",
+            routeToken: `party:${USER_ID}`,
+          },
+          me: true,
+          meBurst: false,
+          normalCount: 2,
+        }],
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async listReactionUsers(channelId, messageId, emoji, options) {
+      calls.reactionUsers += 1
+      const custom = emoji.match(/^([^:]+):([0-9]+)$/)
+      return {
+        channelId,
+        emoji: custom
+          ? {
+              animated: false,
+              id: custom[2] as string,
+              kind: "custom",
+              name: custom[1] as string,
+              routeToken: emoji,
+            }
+          : {
+              animated: false,
+              id: null,
+              kind: "unicode",
+              name: emoji,
+              routeToken: emoji,
+            },
+        guildId: GUILD_ID,
+        messageId,
+        page: {
+          nextAfter: null,
+          requestedAfter: options?.after ?? null,
+          requestedLimit: options?.limit ?? 25,
+          returned: 1,
+        },
+        privacy: {
+          omittedFields: [
+            "attachments",
+            "author",
+            "burstColors",
+            "components",
+            "content",
+            "embeds",
+            "memberProfiles",
+            "rawPayloads",
+            "userAvatars",
+            "userGlobalNames",
+            "userNames",
+          ],
+          persistence: "none",
+          profilesProjectedOut: true,
+          rawPayloads: "omitted",
+        },
+        reactionType: options?.type === 1 ? "burst" : "normal",
+        schemaVersion: 1,
+        status: "ok",
+        users: [{ bot: false, id: USER_ID }],
+      }
+    },
     async listPollAnswerVoters(channelId, messageId, answerId, options) {
       calls.pollVoters += 1
       return {
@@ -6006,6 +6246,13 @@ function serviceFixture(overrides: {
         request,
         overrides.messagePinPlanDigest || DIGEST,
         overrides.messagePinAction,
+      )
+    },
+    async planReactionModeration(request) {
+      calls.reactionModerationPlan += 1
+      return reactionModerationPlan(
+        request,
+        overrides.reactionModerationPlanDigest || DIGEST,
       )
     },
     async planAnnouncementCrosspost(request) {
@@ -6354,6 +6601,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "read_messages",
       "search_messages",
       "get_message",
+      "list_message_reactions",
+      "list_reaction_users",
       "get_poll",
       "list_poll_answer_voters",
       "list_message_pins",
@@ -6377,6 +6626,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "send_message",
       "edit_own_message",
       "add_reaction",
+      "remove_own_reaction",
+      "plan_reaction_moderation",
+      "execute_reaction_moderation",
       "plan_poll_creation",
       "execute_poll_creation",
       "plan_poll_end",
@@ -6447,6 +6699,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
+  const reactionModeration = result.tools.find((tool) => (
+    tool.name === "execute_reaction_moderation"
+  ))
+  const removeOwnReaction = result.tools.find((tool) => (
+    tool.name === "remove_own_reaction"
+  ))
   const announcementCrosspost = result.tools.find((tool) => (
     tool.name === "execute_announcement_crosspost"
   ))
@@ -6502,6 +6760,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   for (const tool of [
     deletion,
     messagePin,
+    reactionModeration,
+    removeOwnReaction,
     pollEnd,
     webhookDeletion,
     integrationDeletion,
@@ -6580,6 +6840,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   for (const name of [
     "list_channel_permission_overwrites",
     "list_message_pins",
+    "list_message_reactions",
+    "list_reaction_users",
     "get_poll",
     "list_poll_answer_voters",
     "list_channel_webhooks",
@@ -7208,6 +7470,30 @@ test("progressive discovery enables the complete reviewed message-pin workflow",
   )
 })
 
+test("progressive discovery enables the complete reviewed reaction-moderation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_reaction_moderation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_reaction_moderation",
+    "plan_reaction_moderation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_reaction_moderation",
+      "execute_reaction_moderation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed announcement-crosspost workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -7737,6 +8023,11 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     pollGet: 0,
     pollVoters: 0,
     principalExplain: 0,
+    reactionModerationExecute: 0,
+    reactionModerationPlan: 0,
+    reactionUsers: 0,
+    reactions: 0,
+    removeOwnReaction: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
     roleConfigurationExecute: 0,
@@ -8347,6 +8638,50 @@ test("MCP observability reports successful, returned-error, and thrown-error too
   assert.equal(content.text.includes(TOKEN), false)
 })
 
+test("MCP reaction reads separate aggregate access from identity audit", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const emoji = `party:${USER_ID}`
+
+  const aggregates = await client.callTool({
+    arguments: { channelId: CHANNEL_ID, messageId: MESSAGE_ID },
+    name: "list_message_reactions",
+  })
+  const users = await client.callTool({
+    arguments: {
+      after: BOT_ID,
+      channelId: CHANNEL_ID,
+      emoji,
+      limit: 10,
+      messageId: MESSAGE_ID,
+      type: "burst",
+    },
+    name: "list_reaction_users",
+  })
+  const invalid = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emoji,
+      limit: REACTION_LIMITS.userPage + 1,
+      messageId: MESSAGE_ID,
+    },
+    name: "list_reaction_users",
+  })
+
+  const aggregateResult = structuredContent(aggregates)
+  const userResult = structuredContent(users)
+  assert.equal(aggregateResult.status, "ok")
+  assert.equal((aggregateResult.reactions as unknown[]).length, 1)
+  assert.equal("content" in (aggregateResult.message as Record<string, unknown>), false)
+  assert.equal(JSON.stringify(aggregateResult).includes("Private guild name"), false)
+  assert.equal(userResult.status, "ok")
+  assert.equal(userResult.reactionType, "burst")
+  assert.deepEqual(userResult.users, [{ bot: false, id: USER_ID }])
+  assert.equal(JSON.stringify(userResult).includes("username"), false)
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.reactions, 1)
+  assert.equal(calls.reactionUsers, 1)
+})
+
 test("MCP interaction tools enforce bounded schemas and invoke idempotent services", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -8374,6 +8709,14 @@ test("MCP interaction tools enforce bounded schemas and invoke idempotent servic
     },
     name: "add_reaction",
   })
+  const removedReaction = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emoji: "🔥",
+      messageId: MESSAGE_ID,
+    },
+    name: "remove_own_reaction",
+  })
   const invalid = await client.callTool({
     arguments: {
       channelId: CHANNEL_ID,
@@ -8386,10 +8729,12 @@ test("MCP interaction tools enforce bounded schemas and invoke idempotent servic
   assert.equal(structuredContent(sent).status, "completed")
   assert.equal(structuredContent(edited).status, "completed")
   assert.equal(structuredContent(reacted).status, "completed")
+  assert.equal(structuredContent(removedReaction).status, "completed")
   assert.equal(invalid.isError, true)
   assert.equal(calls.send, 1)
   assert.equal(calls.edit, 1)
   assert.equal(calls.addReaction, 1)
+  assert.equal(calls.removeOwnReaction, 1)
 })
 
 test("MCP interaction errors expose local retry timing without secrets", async (context) => {
@@ -8805,6 +9150,252 @@ test("MCP attachment messages expose uncertain and one-shot conflict outcomes sa
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(ATTACHMENT_OPERATION_KEY))
+})
+
+test("MCP reaction moderation accepts exact scope-specific plans", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const emoji = `party:${USER_ID}`
+  const common = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    operationKey: REACTION_MODERATION_OPERATION_KEY,
+  }
+
+  const all = await client.callTool({
+    arguments: { ...common, scope: "all" },
+    name: "plan_reaction_moderation",
+  })
+  const oneEmoji = await client.callTool({
+    arguments: { ...common, emoji, scope: "emoji" },
+    name: "plan_reaction_moderation",
+  })
+  const oneUser = await client.callTool({
+    arguments: { ...common, emoji, scope: "user", userId: USER_ID },
+    name: "plan_reaction_moderation",
+  })
+  const mixedAll = await client.callTool({
+    arguments: { ...common, emoji, scope: "all" },
+    name: "plan_reaction_moderation",
+  })
+  const missingUser = await client.callTool({
+    arguments: { ...common, emoji, scope: "user" },
+    name: "plan_reaction_moderation",
+  })
+
+  assert.equal(structuredContent(all).status, "planned")
+  assert.equal(structuredContent(oneEmoji).status, "planned")
+  assert.equal(structuredContent(oneUser).status, "planned")
+  assert.equal(mixedAll.isError, true)
+  assert.equal(missingUser.isError, true)
+  assert.equal(calls.reactionModerationPlan, 3)
+})
+
+test("MCP reaction moderation binds signed approval to the exact target", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const emoji = `party:${USER_ID}`
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      emoji,
+      messageId: MESSAGE_ID,
+      operationKey: REACTION_MODERATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      scope: "user",
+      userId: USER_ID,
+    },
+    name: "execute_reaction_moderation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.reactionModerationPlan, 1)
+  assert.equal(calls.reactionModerationExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, /Target scope: user/)
+  assert.match(confirmationMessage, /MANAGE_MESSAGES: true/)
+  assert.match(confirmationMessage, /Local audit reason:/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(confirmationMessage, /Author:/)
+  assert.doesNotMatch(confirmationMessage, /Content:/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(REACTION_MODERATION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(REACTION_MODERATION_OPERATION_KEY),
+  )
+})
+
+test("MCP reaction moderation skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    emoji: `party:${USER_ID}`,
+    messageId: MESSAGE_ID,
+    operationKey: REACTION_MODERATION_OPERATION_KEY,
+    planDigest: DIGEST,
+    scope: "emoji" as const,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { reactionModerationWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_reaction_moderation",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-absent")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.reactionModerationExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_reaction_moderation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.reactionModerationExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { reactionModerationPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_reaction_moderation",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.reactionModerationExecute, 0)
+})
+
+test("MCP reaction moderation signed state rejects target changes", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    emoji: `party:${USER_ID}`,
+    messageId: MESSAGE_ID,
+    operationKey: REACTION_MODERATION_OPERATION_KEY,
+    planDigest: DIGEST,
+    scope: "user" as const,
+    userId: USER_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_reaction_moderation",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, userId: BOT_ID },
+      inputResponses: {
+        confirm_reaction_moderation: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_reaction_moderation",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.reactionModerationExecute, 0)
+})
+
+test("MCP reaction moderation exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    operationKey: REACTION_MODERATION_OPERATION_KEY,
+    planDigest: DIGEST,
+    scope: "all" as const,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      reactionModerationError: new ReactionModerationExecutionError(
+        "Discord reaction-moderation outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_reaction_moderation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-reaction-moderation",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-22T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      reactionModerationError: new ReactionModerationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_reaction_moderation",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(REACTION_MODERATION_OPERATION_KEY),
+  )
 })
 
 test("MCP message pins list current timestamp-paginated pin pages", async (context) => {

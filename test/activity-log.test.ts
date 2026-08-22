@@ -34,6 +34,7 @@ import {
   type NativeInteractionCommandActivity,
   type OnboardingActivity,
   type PollActivity,
+  type ReactionModerationActivity,
   type RoleCreationActivity,
   type RoleConfigurationActivity,
   type ScheduledEventActivity,
@@ -98,6 +99,32 @@ function interaction(id: string, status: InteractionActivity["status"]): Interac
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
+  }
+}
+
+function reactionModeration(
+  id: string,
+  status: ReactionModerationActivity["status"],
+): ReactionModerationActivity {
+  return {
+    channelId: "200",
+    customEmojiId: "500",
+    emojiFingerprint: `hmac-sha256:${"a".repeat(64)}`,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "reaction-moderation",
+    messageId: "300",
+    operationKeyHash: `sha256:${"b".repeat(64)}`,
+    planDigest: `hmac-sha256:${"c".repeat(64)}`,
+    schemaVersion: 1,
+    scope: "user",
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    userId: "400",
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -914,6 +941,43 @@ test("JSONL activity log accepts content-free interaction records without surfac
 
   assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
   assert.doesNotMatch(JSON.stringify(result), /must-not-surface|secret/)
+})
+
+test("JSONL activity log retains only content-free reaction moderation evidence", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(reactionModeration("1", "pending"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...reactionModeration("2", "completed"),
+      auditReason: "private reason",
+      emoji: "private emoji text",
+      profile: { username: "private username" },
+      rawOperationKey: "private operation key",
+    })}\n`,
+    "utf8",
+  )
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...reactionModeration("3", "completed"),
+      emojiFingerprint: `sha256:${"d".repeat(64)}`,
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private reason|private emoji text|private username|private operation key/,
+  )
+  assert.equal(result.entries[0]?.kind, "reaction-moderation")
 })
 
 test("JSONL activity log strips profile data and reasons from member moderation records", async (context) => {

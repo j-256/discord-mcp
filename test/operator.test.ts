@@ -164,6 +164,9 @@ function status(
       pollCreationEnabled: false,
       pollEndingEnabled: false,
       pollVoterAuditEnabled: false,
+      reactionChannelIds: [],
+      reactionModerationEnabled: false,
+      reactionUserAuditEnabled: false,
       readChannelScope: "allowlist",
       readGuildScope: "allowlist",
       roleCreationEnabled: false,
@@ -237,6 +240,7 @@ function toolService(): DiscordToolService {
     executeWidgetSettingsChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
+    executeReactionModeration: unexpected,
     executeScheduledEventChange: unexpected,
     executeStageInstanceChange: unexpected,
     executeWebhookDeletion: unexpected,
@@ -321,11 +325,14 @@ function toolService(): DiscordToolService {
     listGuildMembers: unexpected,
     listMessagePins: unexpected,
     listPollAnswerVoters: unexpected,
+    listMessageReactions: unexpected,
+    listReactionUsers: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
     planMessagePin: unexpected,
     planPollCreation: unexpected,
     planPollEnd: unexpected,
+    planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
     planChannelCreation: unexpected,
     planChannelMetadataChange: unexpected,
@@ -337,6 +344,7 @@ function toolService(): DiscordToolService {
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
     readMessages: unexpected,
+    removeOwnReaction: unexpected,
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
     sendMessage: unexpected,
@@ -848,6 +856,59 @@ test("doctor and setup explain reviewed message-pin scope without Discord writes
   )
   assert.match(setup.warnings.join("\n"), /pin-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /pins toolset/)
+})
+
+test("doctor and setup explain privacy-safe reaction audit and moderation", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
+    DISCORD_MCP_ALLOW_REACTION_USER_AUDIT: "true",
+    DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const userAudit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.reactionUserAuditPolicy,
+  )
+  const moderation = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.reactionModerationPolicy,
+  )
+  assert.equal(userAudit?.status, "pass")
+  assert.match(userAudit?.summary || "", /bounded ID-and-bot-only pages/)
+  assert.equal(moderation?.status, "pass")
+  assert.match(moderation?.summary || "", /exact-message coordination/)
+  assert.match(moderation?.summary || "", /target-absence readback/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.reactionUserAuditPolicy,
+    )?.summary || "",
+    /aggregate reaction reads remain available/,
+  )
+  assert.match(omitted.warnings.join("\n"), /interactions toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_REACTION_MODERATION",
+    "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
+    "DISCORD_MCP_REACTION_CHANNEL_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
 })
 
 test("doctor and setup enforce reviewed announcement-crosspost prerequisites", async () => {
@@ -2759,6 +2820,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_message_pin",
     "review_onboarding_change",
     "review_pending_native_interactions",
+    "review_reaction_moderation",
     "review_role_configuration",
     "review_role_creation",
     "review_scheduled_event_change",
@@ -2788,6 +2850,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/access",
     "discord://channels/{channelId}/forum-tags",
     "discord://channels/{channelId}/messages/{messageId}",
+    "discord://channels/{channelId}/messages/{messageId}/reactions",
     "discord://channels/{channelId}/permission-overwrites",
     "discord://channels/{channelId}/webhooks",
     "discord://guilds/{guildId}/automod-rules",
@@ -2834,11 +2897,13 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_native_interaction_command",
     "execute_onboarding_change",
     "execute_poll_end",
+    "execute_reaction_moderation",
     "execute_role_configuration",
     "execute_scheduled_event_change",
     "execute_stage_instance_change",
     "execute_thread_change",
     "execute_webhook_deletion",
+    "remove_own_reaction",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)

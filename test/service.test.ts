@@ -247,6 +247,7 @@ function serviceFixture(overrides: {
   operationStore?: OperationStore
   permissionOverwriteOptions?: ConnectorServiceOptions["permissionOverwriteOptions"]
   pollOptions?: ConnectorServiceOptions["pollOptions"]
+  reactionOptions?: ConnectorServiceOptions["reactionOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
   roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
@@ -276,6 +277,7 @@ function serviceFixture(overrides: {
     removeMember: 0,
     user: 0,
   }
+  let ownReaction: string | null = null
   const client: DiscordServiceClient = {
     async addThreadMember() {
       throw new Error("Unexpected thread-member add")
@@ -283,8 +285,9 @@ function serviceFixture(overrides: {
     async addGuildMemberRole() {
       throw new Error("Unexpected member-role add")
     },
-    async addOwnReaction() {
+    async addOwnReaction(_channelId, _messageId, emoji) {
       calls.addReaction += 1
+      ownReaction = emoji
     },
     async bulkDeleteMessages() {},
     async crosspostMessage() {
@@ -387,6 +390,12 @@ function serviceFixture(overrides: {
     async createStageInstance() {
       throw new Error("Unexpected Stage-instance creation")
     },
+    async deleteAllMessageReactions() {
+      throw new Error("Unexpected reaction moderation")
+    },
+    async deleteAllMessageReactionsForEmoji() {
+      throw new Error("Unexpected reaction moderation")
+    },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
     async deleteGuildEmoji() {},
@@ -397,6 +406,12 @@ function serviceFixture(overrides: {
     async deleteStageInstance() {},
     async deleteInvite() {
       throw new Error("Unexpected invite deletion")
+    },
+    async deleteOwnReaction() {
+      ownReaction = null
+    },
+    async deleteUserReaction() {
+      throw new Error("Unexpected reaction moderation")
     },
     async deleteWebhook() {},
     async editChannelPermissionOverwrite() {},
@@ -507,7 +522,20 @@ function serviceFixture(overrides: {
       throw new Error("Unexpected Stage-instance lookup")
     },
     async getMessage() {
-      return message()
+      const customReaction = ownReaction?.includes(":") ?? false
+      const [reactionName, reactionId] = customReaction
+        ? ownReaction?.split(":") || []
+        : [ownReaction, null]
+      return message({
+        reactions: ownReaction === null ? [] : [{
+          burst_colors: [],
+          count: 1,
+          count_details: { burst: 0, normal: 1 },
+          emoji: { animated: false, id: reactionId ?? null, name: reactionName ?? null },
+          me: true,
+          me_burst: false,
+        }],
+      })
     },
     async getThreadMember(threadId, userId) {
       return {
@@ -580,6 +608,9 @@ function serviceFixture(overrides: {
     },
     async listPollAnswerVoters() {
       return { users: [] }
+    },
+    async listReactionUsers() {
+      throw new Error("Unexpected reaction-user lookup")
     },
     async listChannelWebhooks() {
       return []
@@ -732,6 +763,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.pollOptions
         ? { pollOptions: overrides.pollOptions }
+        : {}),
+      ...(overrides.reactionOptions
+        ? { reactionOptions: overrides.reactionOptions }
         : {}),
       ...(overrides.interactionOptions
         ? { interactionOptions: overrides.interactionOptions }
@@ -892,6 +926,149 @@ test("service rejects integration and webhook scope before identity access", asy
   )
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
+})
+
+test("service rejects reaction identity and moderation scope before identity access", async () => {
+  const { calls, service } = serviceFixture()
+  const request = {
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    operationKey: "reaction-preflight-0001",
+    scope: "all" as const,
+  }
+
+  await assert.rejects(
+    () => service.listReactionUsers(CHANNEL_ID, MESSAGE_ID, "👍"),
+    /reaction-user audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.planReactionModeration(request),
+    /reaction moderation is disabled/,
+  )
+  await assert.rejects(
+    () => service.executeReactionModeration(
+      request,
+      `hmac-sha256:${"a".repeat(64)}`,
+    ),
+    /reaction moderation is disabled/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const protectedFixture = serviceFixture({
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
+      DISCORD_MCP_PROTECTED_USER_IDS: MEMBER_USER_ID,
+      DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+    },
+  })
+  await assert.rejects(
+    () => protectedFixture.service.planReactionModeration({
+      ...request,
+      emoji: "👍",
+      scope: "user",
+      userId: MEMBER_USER_ID,
+    }),
+    /protected from administration/,
+  )
+  assert.equal(protectedFixture.calls.application, 0)
+  assert.equal(protectedFixture.calls.user, 0)
+})
+
+test("service exposes privacy-safe reaction reads and coordinates exact-message moderation", async () => {
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const operationStore = new MemoryOperationStore()
+  const reactions = [{
+    burst_colors: [],
+    count: 1,
+    count_details: { burst: 0, normal: 1 },
+    emoji: { animated: false, id: null, name: "👍" },
+    me: false,
+    me_burst: false,
+  }]
+  const { service } = serviceFixture({
+    client: {
+      async getGuildMember(_guildId, userId) {
+        return { roles: [], user: bot(userId) }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_MESSAGES
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        return message({
+          content: "private reaction message",
+          reactions,
+        })
+      },
+      async listReactionUsers() {
+        return [{
+          avatar: "private-avatar",
+          id: MEMBER_USER_ID,
+          username: "private-reactor",
+        }]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
+      DISCORD_MCP_ALLOW_REACTION_USER_AUDIT: "true",
+      DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+    },
+    operationStore,
+    reactionOptions: { planKey: new Uint8Array(32).fill(7) },
+    writeCoordinator,
+  })
+
+  const inventory = await service.listMessageReactions(CHANNEL_ID, MESSAGE_ID)
+  assert.equal(inventory.reactions.length, 1)
+  assert.equal(JSON.stringify(inventory).includes("private reaction message"), false)
+  const users = await service.listReactionUsers(
+    CHANNEL_ID,
+    MESSAGE_ID,
+    "👍",
+    { limit: 1 },
+  )
+  assert.deepEqual(users.users, [{ bot: false, id: MEMBER_USER_ID }])
+  assert.equal(JSON.stringify(users).includes("private-reactor"), false)
+
+  const moderationRequest = {
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    operationKey: "reaction-coordination-operation-0001",
+    scope: "all" as const,
+  }
+  const plan = await service.planReactionModeration(moderationRequest)
+  await assert.rejects(
+    () => service.executeReactionModeration(moderationRequest, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "reaction-moderation",
+    operationKeyHash: operationKeyHash(moderationRequest.operationKey),
+    planDigest: plan.digest,
+    targets: [{ id: MESSAGE_ID, kind: "message" }],
+  }])
+
+  const changedReaction = reactions[0]
+  assert.ok(changedReaction)
+  changedReaction.count = 2
+  changedReaction.count_details = { burst: 0, normal: 2 }
+  await assert.rejects(
+    () => service.executeReactionModeration(moderationRequest, plan.digest),
+    /fresh Discord reaction snapshot/,
+  )
+  assert.equal(writeCoordinator.intents.length, 1)
 })
 
 test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {

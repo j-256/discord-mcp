@@ -121,6 +121,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowPollCreation: "DISCORD_MCP_ALLOW_POLL_CREATION",
   allowPollEnding: "DISCORD_MCP_ALLOW_POLL_ENDING",
   allowPollVoterAudit: "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
+  allowReactionModeration: "DISCORD_MCP_ALLOW_REACTION_MODERATION",
+  allowReactionUserAudit: "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
   allowRoleCreation: "DISCORD_MCP_ALLOW_ROLE_CREATION",
   allowRoleConfiguration: "DISCORD_MCP_ALLOW_ROLE_CONFIGURATION",
   allowScheduledEventAudit: "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
@@ -200,6 +202,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   protectedUserIds: "DISCORD_MCP_PROTECTED_USER_IDS",
   pinChannelIds: "DISCORD_MCP_PIN_CHANNEL_IDS",
   pollChannelIds: "DISCORD_MCP_POLL_CHANNEL_IDS",
+  reactionChannelIds: "DISCORD_MCP_REACTION_CHANNEL_IDS",
   permissionOverwriteChannelIds: "DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS",
   roleCreationGuildIds: "DISCORD_MCP_ROLE_CREATION_GUILD_IDS",
   roleConfigurationIds: "DISCORD_MCP_ROLE_CONFIGURATION_IDS",
@@ -351,6 +354,18 @@ export const POLL_LIMITS = Object.freeze({
   voterPageDefault: 25,
 })
 
+export const REACTION_TYPES = Object.freeze({
+  burst: 1,
+  normal: 0,
+})
+
+export const REACTION_LIMITS = Object.freeze({
+  aggregatesPerMessage: 100,
+  burstColorsPerReaction: 16,
+  userPage: 100,
+  userPageDefault: 25,
+})
+
 export const INVITE_LIMITS = Object.freeze({
   codeCharacters: 256,
   cursorCharacters: 512,
@@ -447,6 +462,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   scaffoldSymbolCharacters: 32,
   profileBytes: 16_384,
   protectedUserAllowlist: 100,
+  reactionChannelAllowlist: 100,
   roleConfigurationAllowlist: 100,
   searchFilterIds: 25,
   searchFilterStrings: 25,

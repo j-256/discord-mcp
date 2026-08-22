@@ -261,6 +261,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     pollCreationEnabled: false,
     pollEndingEnabled: false,
     pollVoterAuditEnabled: false,
+    reactionChannelIds: [],
+    reactionModerationEnabled: false,
+    reactionUserAuditEnabled: false,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
@@ -772,6 +775,9 @@ test("configuration and policy require an exact administration guild and protect
     pollCreationEnabled: false,
     pollEndingEnabled: false,
     pollVoterAuditEnabled: false,
+    reactionChannelIds: [],
+    reactionModerationEnabled: false,
+    reactionUserAuditEnabled: false,
     readChannelScope: "all-visible",
     readGuildScope: "all-visible",
     roleCreationEnabled: false,
@@ -2299,6 +2305,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     pollCreationEnabled: false,
     pollEndingEnabled: false,
     pollVoterAuditEnabled: false,
+    reactionChannelIds: [],
+    reactionModerationEnabled: false,
+    reactionUserAuditEnabled: false,
     readChannelScope: "allowlist",
     readGuildScope: "allowlist",
     roleCreationEnabled: false,
@@ -2757,5 +2766,83 @@ test("scope policy attenuates native search to exact configured channel IDs", ()
   assert.deepEqual(
     open.constrainSearchChannelIds([thirdChannelId], 500),
     [thirdChannelId],
+  )
+})
+
+test("configuration and policy isolate reaction identities and moderation to exact channels", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_REACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_REACTION_CHANNEL_IDS must be a subset/,
+  )
+  for (const enabled of [
+    "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
+    "DISCORD_MCP_ALLOW_REACTION_MODERATION",
+  ]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        [enabled]: "true",
+      }, { homeDirectory: "/test/home" }),
+      /exact reaction-channel allowlist/,
+    )
+  }
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
+      DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+  )
+
+  const auditConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_REACTION_USER_AUDIT: "true",
+    DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const auditPolicy = new ScopePolicy(auditConfig)
+  assert.equal(auditPolicy.assertChannelReactionAuditable(channel()), GUILD_ID)
+  assert.throws(
+    () => auditPolicy.assertChannelReactionAuditable(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the reaction scope/,
+  )
+  assert.throws(
+    () => auditPolicy.assertChannelReactionModeratable(channel()),
+    /reaction moderation is disabled/,
+  )
+  assert.equal(auditPolicy.describe().reactionUserAuditEnabled, true)
+  assert.equal(auditPolicy.describe().reactionModerationEnabled, false)
+
+  const moderationConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
+    DISCORD_MCP_APPLICATION_ID: "300000000000000001",
+    DISCORD_MCP_BOT_ID: "300000000000000002",
+    DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const moderationPolicy = new ScopePolicy(moderationConfig)
+  assert.equal(
+    moderationPolicy.assertChannelReactionModeratable(channel()),
+    GUILD_ID,
+  )
+  assert.equal(moderationPolicy.describe().reactionModerationEnabled, true)
+  assert.equal(moderationPolicy.describe().reactionUserAuditEnabled, false)
+  assert.deepEqual(moderationPolicy.describe().reactionChannelIds, [CHANNEL_ID])
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_REACTION_CHANNEL_IDS: Array.from(
+        { length: CONNECTOR_LIMITS.reactionChannelAllowlist + 1 },
+        (_, index) => String(600000000000000000n + BigInt(index)),
+      ).join(","),
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/,
   )
 })

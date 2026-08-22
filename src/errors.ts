@@ -1009,6 +1009,42 @@ export class PollExecutionError extends Error {
   }
 }
 
+export class ReactionEvidenceError extends Error {
+  override name = "ReactionEvidenceError"
+}
+
+export class ReactionModerationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord reaction snapshot does not match the reviewed plan")
+    this.name = "ReactionModerationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ReactionModerationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord reaction-moderation operation key has already been reserved")
+    this.name = "ReactionModerationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ReactionModerationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ReactionModerationExecutionError"
+    this.result = result
+  }
+}
+
 export class MemberRolePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

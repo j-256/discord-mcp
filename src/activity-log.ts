@@ -75,7 +75,11 @@ export interface DeletionActivity {
   timestamp: string
 }
 
-export type InteractionActivityKind = "message-edit" | "message-send" | "reaction-add"
+export type InteractionActivityKind =
+  | "message-edit"
+  | "message-send"
+  | "reaction-add"
+  | "reaction-remove-own"
 export type InteractionActivityStatus = "completed" | "failed" | "noop" | "pending" | "uncertain"
 
 export interface InteractionActivity {
@@ -760,6 +764,33 @@ export interface ForumTagActivity {
   verification: "match" | null
 }
 
+export type ReactionModerationActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+const REACTION_EMOJI_FINGERPRINT_PATTERN = /^hmac-sha256:[a-f0-9]{64}$/
+
+export interface ReactionModerationActivity {
+  channelId: string
+  customEmojiId: string | null
+  emojiFingerprint: string | null
+  error: string | null
+  guildId: string
+  id: string
+  kind: "reaction-moderation"
+  messageId: string
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  scope: "all" | "emoji" | "user"
+  status: ReactionModerationActivityStatus
+  timestamp: string
+  userId: string | null
+  verification: "drift" | "match" | null
+}
+
 export type ActivityEntry =
   | AnnouncementCrosspostActivity
   | AttachmentMessageActivity
@@ -783,6 +814,7 @@ export type ActivityEntry =
   | NativeInteractionActivity
   | OnboardingActivity
   | PollActivity
+  | ReactionModerationActivity
   | RoleCreationActivity
   | RoleConfigurationActivity
   | ScheduledEventActivity
@@ -862,7 +894,12 @@ function parseInteractionActivity(value: unknown): InteractionActivity | undefin
     record.schemaVersion !== SCHEMA_VERSION
     || typeof record.id !== "string"
     || typeof record.timestamp !== "string"
-    || !["message-edit", "message-send", "reaction-add"].includes(String(record.kind))
+    || ![
+      "message-edit",
+      "message-send",
+      "reaction-add",
+      "reaction-remove-own",
+    ].includes(String(record.kind))
     || !["completed", "failed", "noop", "pending", "uncertain"].includes(String(record.status))
     || typeof record.channelId !== "string"
     || typeof record.guildId !== "string"
@@ -2041,6 +2078,95 @@ function parseIntegrationDeletionActivity(
   }
 }
 
+function parseReactionModerationActivity(
+  value: unknown,
+): ReactionModerationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "reaction-moderation"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || !["all", "emoji", "user"].includes(String(record.scope))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || typeof record.messageId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.messageId)
+    || !(record.customEmojiId === null || (
+      typeof record.customEmojiId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.customEmojiId)
+    ))
+    || !(record.userId === null || (
+      typeof record.userId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.userId)
+    ))
+    || !(record.emojiFingerprint === null || (
+      typeof record.emojiFingerprint === "string"
+      && REACTION_EMOJI_FINGERPRINT_PATTERN.test(record.emojiFingerprint)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.scope === "all" && (
+      record.customEmojiId !== null
+      || record.emojiFingerprint !== null
+      || record.userId !== null
+    ))
+    || (record.scope === "emoji" && (
+      record.emojiFingerprint === null
+      || record.userId !== null
+    ))
+    || (record.scope === "user" && (
+      record.emojiFingerprint === null
+      || record.userId === null
+    ))
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || !["drift", "match"].includes(String(record.verification))
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    customEmojiId: record.customEmojiId as string | null,
+    emojiFingerprint: record.emojiFingerprint as string | null,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "reaction-moderation",
+    messageId: record.messageId,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    scope: record.scope as ReactionModerationActivity["scope"],
+    status: record.status as ReactionModerationActivityStatus,
+    timestamp: record.timestamp,
+    userId: record.userId as string | null,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseInviteDeletionActivity(
   value: unknown,
 ): InviteDeletionActivity | undefined {
@@ -2946,6 +3072,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseWidgetSettingsActivity(value)
     || parseWebhookDeletionActivity(value)
     || parseIntegrationDeletionActivity(value)
+    || parseReactionModerationActivity(value)
     || parseInviteDeletionActivity(value)
     || parseOnboardingActivity(value)
     || parseMemberRoleActivity(value)

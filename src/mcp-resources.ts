@@ -212,6 +212,8 @@ export function registerDiscordResources(
           "",
           "Authenticated widget-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD evidence, and complete bounded role, channel, overwrite, and authenticated settings evidence. It returns exact enabled and nullable channel state, @everyone visibility and invite-generation capability, optional guild-object cross-checks, explicit privacy and public-exposure projections, and unknown-field counts without channel names, invite codes or URLs, member or presence data, or raw payloads. It never calls anonymous widget JSON or image endpoints. Reviewed complete-state replacement requires an additional change toggle, a supported direct channel visible to @everyone when one is selected, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried complete PATCH with an audit-log reason, authoritative response validation, and a fresh authenticated readback. Enabling the widget or selecting a different non-null channel also requires a separate public-exposure toggle because the Server Profile, widget data, presence-bearing member summaries, and invite generation may become public. Disabling does not prove that the Server Profile returned to Private Profile, so manual restoration may be required. Same-guild uncertain outcomes fail closed, and channel names, audit reasons, channel IDs, raw operation keys, settings payloads, and raw evidence are never persisted.",
           "",
+          "Reaction aggregate reads use ordinary readable-channel scope and return strict normal and burst counts plus only the connector's own reaction flags, with message content, authors, profiles, burst colors, unknown fields, and raw payloads omitted. User enumeration requires a separate feature gate and exact reaction-channel allowlist, returns only bounded user IDs and bot flags, and persists nothing. Adding or removing the connector's own normal reaction uses the ordinary interaction scope, checks the precondition, skips an already-satisfied state without consuming the write limiter, journals before mutation, and verifies fresh aggregate state. Removing another user's normal reaction, all normal and burst reactions for one emoji, or every reaction requires a separate moderation gate and exact channel allowlist, complete VIEW_CHANNEL, READ_MESSAGE_HISTORY, MANAGE_MESSAGES, conditional CONNECT, and private-thread evidence, a fresh matching keyed plan, signed approval, durable exact-message coordination, a one-shot reservation, pending content-free records, one non-retried deletion, and target-absence plus exact aggregate readback. Emoji and all scopes are identity-blind and can remove reactions from locally protected users; protected-user IDs guard only exact user scope. The reason is local-only transient review context and is neither sent nor persisted because Discord does not document audit-log reason support for reaction endpoints; emoji text is never persisted, same-message uncertain outcomes remain quarantined, and removed reactions cannot be restored by the connector.",
+          "",
           "Message interactions require a separate exact channel allowlist, suppress notifications by default, and require a stable idempotency key for retries.",
           "",
           "Attachment messages require separate exact channel and canonical local-directory scopes. Planning performs a bounded stable read of one owned regular file and binds its bytes, path, exact message fields, reply, notifications, and complete permissions into a keyed plan. Execution requires fresh byte-matching plans, signed approval, a unique one-shot operation key, the shared anti-spam guard, pending content-free records, one non-retried multipart request, and exact message readback. It never accepts URLs or base64, persists file or message content, returns an attachment URL, retries, or rolls back.",
@@ -1012,6 +1014,31 @@ export function registerDiscordResources(
         templateSnowflake(variables, "messageId"),
         { signal: context.mcpReq.signal },
       )),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.messageReactions,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.messageReactions, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Strict aggregate reaction state for one exact message in a readable Discord channel. User identities, message content, author data, profiles, burst colors, raw payloads, and persistence are omitted.",
+      mimeType: "application/json",
+      title: "Discord message reaction aggregates",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listMessageReactions(
+        templateSnowflake(variables, "channelId"),
+        templateSnowflake(variables, "messageId"),
+        { signal: context.mcpReq.signal },
+      ),
     ),
   )
 }

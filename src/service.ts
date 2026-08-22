@@ -96,11 +96,13 @@ import type {
   MessagePinPageOptions,
   MessagePageOptions,
   PollVoterPageOptions,
+  ReactionUserPageOptions,
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
 import {
   ConfigurationError,
   IntegrationDeletionPlanChangedError,
+  ReactionModerationPlanChangedError,
   WebhookDeletionPlanChangedError,
 } from "./errors.js"
 import type {
@@ -166,10 +168,24 @@ import type {
   AddReactionRequest,
   EditOwnMessageRequest,
   InteractionServiceOptions,
+  RemoveOwnReactionRequest,
+  RemoveOwnReactionResult,
   SendMessageRequest,
 } from "./interaction-service.js"
 import { InteractionService } from "./interaction-service.js"
 import { InteractionLimiter } from "./interaction-limiter.js"
+import type {
+  MessageReactionInventoryResult,
+  ReactionModerationPlan,
+  ReactionModerationRequest,
+  ReactionModerationResult,
+  ReactionServiceOptions,
+  ReactionUserPageResult,
+} from "./reaction-service.js"
+import {
+  normalizeReactionModerationRequest,
+  ReactionService,
+} from "./reaction-service.js"
 import type {
   InviteDeletionPlan,
   InviteDeletionRequest,
@@ -431,6 +447,8 @@ export interface DiscordServiceClient {
   createPoll: DiscordClient["createPoll"]
   createThreadFromMessage: DiscordClient["createThreadFromMessage"]
   createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
+  deleteAllMessageReactions: DiscordClient["deleteAllMessageReactions"]
+  deleteAllMessageReactionsForEmoji: DiscordClient["deleteAllMessageReactionsForEmoji"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
@@ -442,6 +460,8 @@ export interface DiscordServiceClient {
   deleteGuildIntegration: DiscordClient["deleteGuildIntegration"]
   deleteStageInstance: DiscordClient["deleteStageInstance"]
   deleteInvite: DiscordClient["deleteInvite"]
+  deleteOwnReaction: DiscordClient["deleteOwnReaction"]
+  deleteUserReaction: DiscordClient["deleteUserReaction"]
   deleteWebhook: DiscordClient["deleteWebhook"]
   endPoll: DiscordClient["endPoll"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
@@ -489,6 +509,7 @@ export interface DiscordServiceClient {
   listGuildTemplates: DiscordClient["listGuildTemplates"]
   listMessagePins: DiscordClient["listMessagePins"]
   listPollAnswerVoters: DiscordClient["listPollAnswerVoters"]
+  listReactionUsers: DiscordClient["listReactionUsers"]
   listChannelWebhooks: DiscordClient["listChannelWebhooks"]
   listMessages: DiscordClient["listMessages"]
   listDefaultSoundboardSounds: DiscordClient["listDefaultSoundboardSounds"]
@@ -619,6 +640,7 @@ export interface ConnectorServiceOptions {
   permissionOptions?: Pick<PermissionServiceOptions, "clock">
   pollOptions?: Pick<PollServiceOptions, "clock" | "planKey" | "randomId">
   policy?: ScopePolicy
+  reactionOptions?: Pick<ReactionServiceOptions, "clock" | "planKey" | "randomId">
   roleAdministrationOptions?: Pick<
     RoleAdministrationServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -810,6 +832,7 @@ export class ConnectorService {
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
   readonly #pollService: PollService
+  readonly #reactionService: ReactionService
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
   readonly #scheduledEventService: ScheduledEventService
@@ -1049,6 +1072,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.pollOptions,
+    })
+    this.#reactionService = new ReactionService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.reactionOptions,
     })
     this.#threadCreationService = new ThreadCreationService({
       activityStore: this.#activityStore,
@@ -1859,12 +1889,55 @@ export class ConnectorService {
     return this.#messagePinService.list(channelId, options)
   }
 
+  async listMessageReactions(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<MessageReactionInventoryResult> {
+    await this.#verifyIdentity(options)
+    return this.#reactionService.listMessageReactions(channelId, messageId, options)
+  }
+
+  async listReactionUsers(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+    options: ReactionUserPageOptions = {},
+  ): Promise<ReactionUserPageResult> {
+    this.#policy.assertChannelReactionIdAuditable(channelId)
+    await this.#verifyIdentity(options)
+    return this.#reactionService.listReactionUsers(
+      channelId,
+      messageId,
+      emoji,
+      options,
+    )
+  }
+
   async planMessagePin(
     request: MessagePinRequest,
     options: RequestOptions = {},
   ): Promise<MessagePinPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#messagePinService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planReactionModeration(
+    request: ReactionModerationRequest,
+    options: RequestOptions = {},
+  ): Promise<ReactionModerationPlan> {
+    const normalized = normalizeReactionModerationRequest(request)
+    this.#policy.assertChannelReactionIdModeratable(request.channelId)
+    if (normalized.userId !== null) {
+      this.#policy.assertUserNotProtected(normalized.userId)
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#reactionService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -2843,6 +2916,56 @@ export class ConnectorService {
     )
   }
 
+  async executeReactionModeration(
+    request: ReactionModerationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ReactionModerationResult> {
+    const normalized = normalizeReactionModerationRequest(request)
+    this.#policy.assertChannelReactionIdModeratable(request.channelId)
+    if (normalized.userId !== null) {
+      this.#policy.assertUserNotProtected(normalized.userId)
+    }
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord reaction-moderation plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#reactionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new ReactionModerationPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#reactionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "reaction-moderation",
+      request.operationKey,
+      planDigest,
+      [writeResourceTarget("message", request.messageId)],
+      () => this.#reactionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
   async executeAnnouncementCrosspost(
     request: AnnouncementCrosspostRequest,
     planDigest: string,
@@ -3273,6 +3396,14 @@ export class ConnectorService {
   ) {
     await this.#verifyIdentity(options)
     return this.#interactionService.addReaction(request, options)
+  }
+
+  async removeOwnReaction(
+    request: RemoveOwnReactionRequest,
+    options: RequestOptions = {},
+  ): Promise<RemoveOwnReactionResult> {
+    await this.#verifyIdentity(options)
+    return this.#interactionService.removeOwnReaction(request, options)
   }
 
   listActivity(limit?: number): Promise<ActivityList> {

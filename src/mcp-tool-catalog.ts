@@ -54,6 +54,7 @@ type McpToolWorkflow =
   | "onboarding-change"
   | "poll-creation"
   | "poll-end"
+  | "reaction-moderation"
   | "member-moderation"
   | "member-role-change"
   | "member-voice-change"
@@ -209,6 +210,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["close", "end", "execute", "expire", "poll"],
     toolset: "polls",
     workflow: "poll-end",
+  },
+  execute_reaction_moderation: {
+    keywords: ["emoji", "execute", "message", "moderate", "reaction", "remove"],
+    toolset: "interactions",
+    workflow: "reaction-moderation",
   },
   execute_member_moderation: {
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
@@ -408,6 +414,14 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["answer", "list", "poll", "user", "vote", "voter"],
     toolset: "polls",
   },
+  list_message_reactions: {
+    keywords: ["aggregate", "count", "emoji", "list", "message", "reaction"],
+    toolset: "interactions",
+  },
+  list_reaction_users: {
+    keywords: ["emoji", "identity", "list", "reaction", "user"],
+    toolset: "interactions",
+  },
   list_guild_audit_entries: {
     keywords: ["action", "actor", "audit", "guild", "history", "moderation"],
     toolset: "audit-logs",
@@ -584,6 +598,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "polls",
     workflow: "poll-end",
   },
+  plan_reaction_moderation: {
+    keywords: ["emoji", "message", "moderate", "plan", "reaction", "remove", "review"],
+    toolset: "interactions",
+    workflow: "reaction-moderation",
+  },
   plan_message_deletion: {
     keywords: ["delete", "exact ids", "plan", "remove", "review"],
     toolset: "deletion",
@@ -627,6 +646,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   read_messages: {
     keywords: ["channel", "history", "list", "message", "read"],
     toolset: "messages",
+  },
+  remove_own_reaction: {
+    keywords: ["emoji", "own", "reaction", "remove", "undo"],
+    toolset: "interactions",
   },
   search_messages: {
     keywords: ["author", "content", "filter", "guild", "message", "search"],

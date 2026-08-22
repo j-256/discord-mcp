@@ -183,13 +183,35 @@ export interface DiscordMessage {
   nonce?: number | string | null
   pinned?: boolean
   poll?: DiscordPoll
-  reactions?: unknown[]
+  reactions?: DiscordReaction[]
   referenced_message?: DiscordMessage | null
   timestamp: string
   tts?: boolean
   type: number
   webhook_id?: string
 }
+
+export interface DiscordPartialEmoji {
+  animated?: boolean
+  id?: string | null
+  name?: string | null
+}
+
+export interface DiscordReactionCountDetails {
+  burst: number
+  normal: number
+}
+
+export interface DiscordReaction {
+  burst_colors: string[]
+  count: number
+  count_details: DiscordReactionCountDetails
+  emoji: DiscordPartialEmoji
+  me: boolean
+  me_burst: boolean
+}
+
+export type DiscordReactionType = 0 | 1
 
 export interface DiscordPollMedia {
   emoji?: {
