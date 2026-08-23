@@ -21,6 +21,7 @@ import {
   DISCORD_SCHEDULED_EVENT_STATUSES,
   DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS,
   type DiscordAutoModerationRuleSummary,
+  type DiscordApplicationEmojiSummary,
   type DiscordGuildIntegrationSummary,
   type DiscordGuildTemplateSummary,
   type DiscordScheduledEventSummary,
@@ -40,6 +41,9 @@ import {
 import { GatewayChannelLayoutStore } from "../src/gateway-channel-layout.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import type {
+  ApplicationOperationReceipt,
+  ApplicationOperationReservation,
+  ApplicationOperationStore,
   OperationReceipt,
   OperationStore,
 } from "../src/operation-store.js"
@@ -125,6 +129,30 @@ class MemoryOperationStore implements OperationStore {
   async reserve(receipt: OperationReceipt) {
     if (this.receipt) return { created: false, receipt: this.receipt }
     this.receipt = receipt
+    return { created: true, receipt }
+  }
+}
+
+class MemoryApplicationOperationStore
+  extends MemoryOperationStore
+  implements ApplicationOperationStore {
+  applicationReceipt: ApplicationOperationReceipt | undefined
+
+  async finishApplication(receipt: ApplicationOperationReceipt): Promise<void> {
+    this.applicationReceipt = receipt
+  }
+
+  async getApplication(): Promise<ApplicationOperationReceipt | undefined> {
+    return this.applicationReceipt
+  }
+
+  async reserveApplication(
+    receipt: ApplicationOperationReceipt,
+  ): Promise<ApplicationOperationReservation> {
+    if (this.applicationReceipt) {
+      return { created: false, receipt: this.applicationReceipt }
+    }
+    this.applicationReceipt = receipt
     return { created: true, receipt }
   }
 }
@@ -251,6 +279,7 @@ function role(
 
 function serviceFixture(overrides: {
   application?: DiscordApplication
+  applicationEmojiOptions?: ConnectorServiceOptions["applicationEmojiOptions"]
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
@@ -336,6 +365,9 @@ function serviceFixture(overrides: {
     async createGuildBan() {},
     async createGuildApplicationCommand() {
       throw new Error("Unexpected application-command creation")
+    },
+    async createApplicationEmoji() {
+      throw new Error("Unexpected application emoji creation")
     },
     async createForumPost() {
       calls.createForumPost += 1
@@ -446,6 +478,9 @@ function serviceFixture(overrides: {
     async deleteAllMessageReactionsForEmoji() {
       throw new Error("Unexpected reaction moderation")
     },
+    async deleteApplicationEmoji() {
+      throw new Error("Unexpected application emoji deletion")
+    },
     async deleteChannelPermissionOverwrite() {},
     async deleteMessage() {},
     async deleteGuildEmoji() {},
@@ -491,6 +526,9 @@ function serviceFixture(overrides: {
     async getCurrentApplication() {
       calls.application += 1
       return overrides.application || application()
+    },
+    async getApplicationEmoji() {
+      throw new Error("Unexpected application emoji lookup")
     },
     async getCurrentUser() {
       calls.user += 1
@@ -645,6 +683,9 @@ function serviceFixture(overrides: {
     async listGuildEmojis() {
       return []
     },
+    async listApplicationEmojis() {
+      throw new Error("Unexpected application emoji inventory")
+    },
     async listGuildStickers() {
       return []
     },
@@ -733,6 +774,9 @@ function serviceFixture(overrides: {
         requiresColons: true,
         roleIds: input.roleIds ? [...input.roleIds] : [],
       }
+    },
+    async modifyApplicationEmoji() {
+      throw new Error("Unexpected application emoji modification")
     },
     async modifyGuildAutoModerationRule() {
       throw new Error("Unexpected AutoMod rule modification")
@@ -843,6 +887,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.attachmentMessageOptions
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
+        : {}),
+      ...(overrides.applicationEmojiOptions
+        ? { applicationEmojiOptions: overrides.applicationEmojiOptions }
         : {}),
       ...(overrides.automodOptions
         ? { automodOptions: overrides.automodOptions }
@@ -1376,6 +1423,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOW_DELETIONS: "true",
       DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
       DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
+      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
+      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
       DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
       DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
@@ -1509,6 +1558,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     expressionId: AUTOMOD_RULE_ID,
     guildId: GUILD_ID,
     kind: "emoji",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeApplicationEmojiChange({
+    acknowledgeGlobalImpact: true,
+    action: "delete",
+    emojiId: AUTOMOD_RULE_ID,
     operationKey,
   }, digest))
   await captured(() => service.executeGuildProfileChange({
@@ -1754,7 +1809,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 40)
+  assert.equal(byKind.size, 41)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1767,6 +1822,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
         { id: FOLLOWER_WEBHOOK_ID, kind: "webhook" },
       ],
+      "application-emoji-change": [{
+        applicationId: APPLICATION_ID,
+        collection: "emojis",
+        kind: "application-collection",
+      }],
       "attachment-message": [{ id: CHANNEL_ID, kind: "channel" }],
       "component-message": [{ id: CHANNEL_ID, kind: "channel" }],
       "automod-change": [{
@@ -1947,7 +2007,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 40)
+  assert.equal(writeCoordinator.intents.length, 41)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -3311,6 +3371,86 @@ test("service pins identity through privacy-safe guild expression reads and revi
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "guild-expression-change")
   assert.equal(operationStore.receipt?.resourceId, expressionId)
+})
+
+test("service pins application emoji scope to verified identity and coordinates reviewed changes", async () => {
+  const emojiId = "915000000000000001"
+  const operationStore = new MemoryApplicationOperationStore()
+  let inventory: DiscordApplicationEmojiSummary[] = [{
+    animated: false,
+    available: true,
+    id: emojiId,
+    managed: false,
+    name: "wave",
+    requiresColons: true,
+    unknownFieldCount: 0,
+    uploaderProjectedOut: true,
+  }]
+  let getCalls = 0
+  let inventoryCalls = 0
+  let renameCalls = 0
+  const { calls, service } = serviceFixture({
+    applicationEmojiOptions: {
+      clock: () => new Date("2026-08-23T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(31),
+      randomId: () => "activity-application-emoji-change",
+    },
+    client: {
+      async getApplicationEmoji(applicationId, requestedEmojiId) {
+        assert.equal(applicationId, APPLICATION_ID)
+        getCalls += 1
+        const found = inventory.find((entry) => entry.id === requestedEmojiId)
+        if (!found) throw new Error("Unexpected missing application emoji")
+        return found
+      },
+      async listApplicationEmojis(applicationId) {
+        assert.equal(applicationId, APPLICATION_ID)
+        inventoryCalls += 1
+        return { items: inventory, unknownFieldCount: 0 }
+      },
+      async modifyApplicationEmoji(applicationId, requestedEmojiId, input) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.equal(requestedEmojiId, emojiId)
+        renameCalls += 1
+        inventory = inventory.map((entry) => entry.id === requestedEmojiId
+          ? { ...entry, name: input.name }
+          : entry)
+        return inventory[0]!
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
+      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+    },
+    operationStore,
+  })
+  const request = {
+    action: "rename" as const,
+    emojiId,
+    name: "hello",
+    operationKey: "application-emoji-service-attempt-0001",
+  }
+
+  const listed = await service.listApplicationEmojis()
+  const exact = await service.getApplicationEmoji(emojiId)
+  const plan = await service.planApplicationEmojiChange(request)
+  const result = await service.executeApplicationEmojiChange(request, plan.digest)
+
+  assert.equal(listed.applicationId, APPLICATION_ID)
+  assert.equal(exact.emoji.emojiId, emojiId)
+  assert.equal(plan.applicationId, APPLICATION_ID)
+  assert.equal(plan.botId, BOT_ID)
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed?.name, "hello")
+  assert.equal(inventoryCalls, 3)
+  assert.equal(getCalls, 2)
+  assert.equal(renameCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.applicationReceipt?.kind, "application-emoji-change")
+  assert.equal(operationStore.applicationReceipt?.applicationId, APPLICATION_ID)
+  assert.equal(operationStore.applicationReceipt?.resourceId, emojiId)
 })
 
 test("service pins identity through privacy-safe AutoMod reads and reviewed changes", async () => {

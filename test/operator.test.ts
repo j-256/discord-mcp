@@ -75,6 +75,10 @@ function status(
     policy: {
       administrationEnabled: false,
       administrationGuildIds: [],
+      applicationEmojiAuditEnabled: false,
+      applicationEmojiChangesEnabled: false,
+      applicationEmojiCreationEnabled: false,
+      applicationEmojiRootCount: 0,
       announcementCrosspostChannelIds: [],
       announcementCrosspostsEnabled: false,
       announcementSubscriptionAuditEnabled: false,
@@ -262,6 +266,7 @@ function toolService(): DiscordToolService {
     auditRoleOrder: unexpected,
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
+    executeApplicationEmojiChange: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeRoleOrder: unexpected,
@@ -298,6 +303,7 @@ function toolService(): DiscordToolService {
     planThreadChange: unexpected,
     planForumTagChange: unexpected,
     getGuildExpression: unexpected,
+    getApplicationEmoji: unexpected,
     getGuildSoundboardSound: unexpected,
     listGuildTemplates: unexpected,
     listGuildIntegrations: unexpected,
@@ -316,6 +322,7 @@ function toolService(): DiscordToolService {
     listAnnouncementSubscriptions: unexpected,
     listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
+    listApplicationEmojis: unexpected,
     listDefaultSoundboardSounds: unexpected,
     listGuildSoundboardSounds: unexpected,
     listAutoModerationRules: unexpected,
@@ -335,6 +342,7 @@ function toolService(): DiscordToolService {
     planGuildSettingsChange: unexpected,
     planGuildProfileChange: unexpected,
     planGuildExpressionChange: unexpected,
+    planApplicationEmojiChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
     planSoundboardChange: unexpected,
@@ -1991,6 +1999,60 @@ test("doctor and setup explain privacy-safe reviewed guild expression scope", as
   )
   assert.match(setup.warnings.join("\n"), /creation remains blocked/)
   assert.match(omitted.warnings.join("\n"), /guild-expressions toolset/)
+})
+
+test("doctor and setup explain identity-bound reviewed application emoji scope", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-emojis-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const canonicalRoot = await realpath(root)
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
+    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_EMOJI_ROOTS: canonicalRoot,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const missingRootEnvironment = environment({
+    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
+    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+  })
+  const missingRoot = await diagnoseConnector({
+    environment: missingRootEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: missingRootEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationEmojiAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /verified pinned current application/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /application-wide coordination/)
+  assert.match(changes?.summary || "", /1 canonical creation roots/)
+  assert.equal(
+    missingRoot.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /creation remains blocked/)
+  assert.match(omitted.warnings.join("\n"), /application-emojis toolset/)
 })
 
 test("doctor and setup explain privacy-safe reviewed scheduled event scope", async (context) => {
@@ -3764,6 +3826,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "inspect_guild_ban",
     "review_announcement_crosspost",
     "review_announcement_subscription",
+    "review_application_emoji_change",
     "review_attachment_message",
     "review_automod_change",
     "review_channel_clone",
@@ -3806,6 +3869,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "summarize_channel",
   ])
   assert.deepEqual(report.resourceUris, [
+    "discord://application/emojis",
     "discord://connector/activity",
     "discord://connector/observability",
     "discord://connector/policy",
@@ -3857,6 +3921,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "edit_own_message",
     "execute_announcement_crosspost",
     "execute_announcement_subscription",
+    "execute_application_emoji_change",
     "execute_automod_change",
     "execute_channel_clone",
     "execute_channel_metadata_change",

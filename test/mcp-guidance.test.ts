@@ -35,6 +35,8 @@ import type {
 } from "../src/types.js"
 
 const TOKEN = "test-discord-token"
+const APPLICATION_ID = "500000000000000001"
+const BOT_ID = "600000000000000001"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const SECOND_CHANNEL_ID = "200000000000000002"
@@ -57,6 +59,7 @@ const PRIVATE_WELCOME_SCREEN_TEXT = "private-welcome-screen-copy"
 const PRIVATE_CHANNEL_TOPIC = "private-channel-roadmap"
 const PRIVATE_FORUM_TAG_NAME = "private-forum-tag"
 const EMOJI_ID = "370000000000000001"
+const APPLICATION_EMOJI_ID = "375000000000000001"
 const STICKER_ID = "380000000000000001"
 const AUTOMOD_RULE_ID = "385000000000000001"
 const SCHEDULED_EVENT_ID = "390000000000000001"
@@ -158,6 +161,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 interface GuidanceCalls {
   activity: number
   announcementSubscriptions: number
+  applicationEmojis: number
   automod: number
   bans: number
   channelAccess: number
@@ -208,6 +212,7 @@ function guidanceService(options: {
   const calls: GuidanceCalls = {
     activity: 0,
     announcementSubscriptions: 0,
+    applicationEmojis: 0,
     automod: 0,
     bans: 0,
     channelAccess: 0,
@@ -475,6 +480,7 @@ function guidanceService(options: {
     },
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
+    executeApplicationEmojiChange: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
@@ -509,6 +515,7 @@ function guidanceService(options: {
     planNativeInteractionCommand: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
+    getApplicationEmoji: unexpected,
     planThreadChange: unexpected,
     getGuildExpression: unexpected,
     async getGuildSoundboardSound(guildId, soundId) {
@@ -1507,7 +1514,40 @@ function guidanceService(options: {
         status: "ok",
       }
     },
+    async listApplicationEmojis() {
+      calls.applicationEmojis += 1
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        emojis: [{
+          animated: false,
+          available: true,
+          emojiId: APPLICATION_EMOJI_ID,
+          managed: false,
+          name: "reviewed_application_emoji",
+          requiresColons: true,
+          unknownFieldCount: 0,
+          uploaderProjectedOut: true as const,
+        }],
+        page: { returned: 1, safetyLimit: 2_000 },
+        privacy: {
+          omittedFields: [
+            "cdnUrl" as const,
+            "imageBytes" as const,
+            "rawDiscordObject" as const,
+            "roleIds" as const,
+            "uploaderId" as const,
+            "uploaderProfile" as const,
+          ],
+          privateFieldsProjectedOut: true as const,
+        },
+        responseUnknownFieldCount: 0,
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     planGuildExpressionChange: unexpected,
+    planApplicationEmojiChange: unexpected,
     planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
     planChannelOrder: unexpected,
@@ -1522,6 +1562,10 @@ function guidanceService(options: {
       return {
         administrationEnabled: false,
         administrationGuildIds: [],
+        applicationEmojiAuditEnabled: false,
+        applicationEmojiChangesEnabled: false,
+        applicationEmojiCreationEnabled: false,
+        applicationEmojiRootCount: 0,
         announcementCrosspostChannelIds: [],
         announcementCrosspostsEnabled: false,
         announcementSubscriptionAuditEnabled: false,
@@ -2236,6 +2280,7 @@ async function connectedFixture(
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
     + calls.announcementSubscriptions
+    + calls.applicationEmojis
     + calls.automod
     + calls.bans
     + calls.channelAccess
@@ -2311,6 +2356,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
     resources.resources.map(({ name, uri }) => ({ name, uri })).sort((a, b) => a.name.localeCompare(b.name)),
     [
       { name: MCP_RESOURCE_NAMES.activity, uri: MCP_RESOURCE_URIS.activity },
+      {
+        name: MCP_RESOURCE_NAMES.applicationEmojis,
+        uri: MCP_RESOURCE_URIS.applicationEmojis,
+      },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
       { name: MCP_RESOURCE_NAMES.gatewayStatus, uri: MCP_RESOURCE_URIS.gatewayStatus },
@@ -2542,6 +2591,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /manual restoration may be required/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
+  assert.match(safety.text, /Application emoji inventory is bound to the verified pinned current application/)
+  assert.match(safety.text, /explicit global-impact acknowledgement/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /New rules are always disabled/)
   assert.match(safety.text, /Scheduled-event inventory requires a separate exact guild allowlist/)
@@ -2612,6 +2663,31 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     (guilds.value.trust as Record<string, unknown>).classification,
     "untrusted-external-data",
   )
+
+  const applicationEmojis = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.applicationEmojis,
+  )
+  const applicationEmojiData = applicationEmojis.value.data as Record<string, unknown>
+  const applicationEmoji = (
+    applicationEmojiData.emojis as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(applicationEmojiData.applicationId, APPLICATION_ID)
+  assert.equal(applicationEmojiData.botId, BOT_ID)
+  assert.equal(applicationEmoji?.emojiId, APPLICATION_EMOJI_ID)
+  assert.deepEqual(Object.keys(applicationEmoji || {}).sort(), [
+    "animated",
+    "available",
+    "emojiId",
+    "managed",
+    "name",
+    "requiresColons",
+    "unknownFieldCount",
+    "uploaderProjectedOut",
+  ])
+  assert.equal("imageBytes" in (applicationEmoji || {}), false)
+  assert.equal("uploaderId" in (applicationEmoji || {}), false)
+  assert.doesNotMatch(applicationEmojis.text, /cdn\.discordapp\.com|https?:\/\//)
 
   const defaultSoundboard = await readJsonResource(
     client,
@@ -3178,6 +3254,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.doesNotMatch(reactions.text, new RegExp(TOKEN))
 
   assert.equal(calls.guilds, 1)
+  assert.equal(calls.applicationEmojis, 1)
   assert.equal(calls.announcementSubscriptions, 1)
   assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.integrations, 1)
@@ -3852,6 +3929,48 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(channelMetadata, /Do not call execute_channel_metadata_change/)
   assert.match(channelMetadata, /complete current and desired metadata/)
   assert.match(channelMetadata, /VIEW_CHANNEL and MANAGE_CHANNELS/)
+
+  const applicationEmoji = promptText(await client.getPrompt({
+    arguments: {
+      action: "create",
+      filePath: "/srv/discord-application-emojis/reviewed.png",
+      name: "reviewed_application_emoji",
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
+  }))
+  assert.deepEqual(JSON.parse(applicationEmoji.split("\n")[1] || ""), {
+    action: "create",
+    filePath: "/srv/discord-application-emojis/reviewed.png",
+    name: "reviewed_application_emoji",
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(applicationEmoji, /Call only plan_application_emoji_change/)
+  assert.match(applicationEmoji, /Do not call execute_application_emoji_change/)
+  assert.match(applicationEmoji, /verified application and bot/)
+  assert.match(applicationEmoji, /complete inventory digest and capacity/)
+  assert.match(applicationEmoji, /lack of audit-log reason support/)
+  assert.match(applicationEmoji, /uncertain same-application predecessor/)
+
+  const applicationEmojiDeletion = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgeGlobalImpact: "true",
+      action: "delete",
+      emojiId: APPLICATION_EMOJI_ID,
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(applicationEmojiDeletion.split("\n")[1] || ""),
+    {
+      acknowledgeGlobalImpact: true,
+      action: "delete",
+      emojiId: APPLICATION_EMOJI_ID,
+      operationKey: OPERATION_KEY,
+    },
+  )
+  assert.match(applicationEmojiDeletion, /missing global-impact acknowledgement/)
 
   const guildExpression = promptText(await client.getPrompt({
     arguments: {
@@ -4969,6 +5088,34 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         webhookId: WEBHOOK_ID,
       },
       name: MCP_PROMPT_NAMES.reviewWebhookDeletion,
+    },
+    {
+      arguments: {
+        action: "create",
+        applicationId: APPLICATION_ID,
+        filePath: "/srv/discord-application-emojis/reviewed.png",
+        name: "reviewed_application_emoji",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
+    },
+    {
+      arguments: {
+        action: "delete",
+        emojiId: APPLICATION_EMOJI_ID,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
+    },
+    {
+      arguments: {
+        acknowledgeGlobalImpact: "true",
+        action: "rename",
+        emojiId: APPLICATION_EMOJI_ID,
+        name: "reviewed_application_emoji",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
     },
     {
       arguments: {

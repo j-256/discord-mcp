@@ -166,6 +166,7 @@ const LIMIT_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
 ])
 
 const STORAGE_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
+  "applicationEmojiRoots",
   "attachmentRoots",
   "auditFile",
   "guildExpressionRoots",

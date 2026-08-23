@@ -851,6 +851,42 @@ export class IntegrationEvidenceError extends Error {
   override name = "IntegrationEvidenceError"
 }
 
+export class ApplicationEmojiPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord application emoji snapshot does not match the reviewed plan")
+    this.name = "ApplicationEmojiPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ApplicationEmojiOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord application emoji operation key has already been reserved")
+    this.name = "ApplicationEmojiOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ApplicationEmojiExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ApplicationEmojiExecutionError"
+    this.result = result
+  }
+}
+
+export class ApplicationEmojiEvidenceError extends Error {
+  override name = "ApplicationEmojiEvidenceError"
+}
+
 export class GuildExpressionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

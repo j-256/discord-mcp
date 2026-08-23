@@ -18,6 +18,7 @@ import { OperationStoreError } from "../src/errors.js"
 import {
   FileOperationStore,
   operationKeyHash,
+  type ApplicationOperationReceipt,
   type OperationReceipt,
 } from "../src/operation-store.js"
 
@@ -46,6 +47,28 @@ function receipt(
     timestamp: status === "pending"
       ? "2026-08-20T00:00:00.000Z"
       : "2026-08-20T00:00:01.000Z",
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function applicationReceipt(
+  status: ApplicationOperationReceipt["status"] = "pending",
+): ApplicationOperationReceipt {
+  return {
+    activityId: "application-emoji-activity-0001",
+    applicationId: GUILD_ID,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.400.unknown"
+      : null,
+    kind: "application-emoji-change",
+    operationKeyHash: operationKeyHash("application-emoji-operation-0001"),
+    planDigest: PLAN_DIGEST,
+    resourceId: ["completed", "uncertain"].includes(status) ? CHANNEL_ID : null,
+    schemaVersion: 1,
+    status,
+    timestamp: status === "pending"
+      ? "2026-08-23T00:00:00.000Z"
+      : "2026-08-23T00:00:01.000Z",
     verification: status === "completed" ? "match" : null,
   }
 }
@@ -99,6 +122,63 @@ test("file operation store reserves once and records a private terminal receipt"
   for (const file of receiptFiles) {
     assert.equal((await lstat(file)).mode & 0o777, 0o600)
   }
+})
+
+test("file operation store keeps application receipts application-scoped and content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = applicationReceipt()
+
+  assert.deepEqual(await store.reserveApplication(pending), {
+    created: true,
+    receipt: pending,
+  })
+  assert.deepEqual(
+    await store.getApplication(pending.kind, pending.operationKeyHash),
+    pending,
+  )
+  const completed = applicationReceipt("completed")
+  await store.finishApplication(completed)
+  assert.deepEqual(
+    await store.getApplication(pending.kind, pending.operationKeyHash),
+    completed,
+  )
+  await store.finishApplication(completed)
+
+  const operationDirectories = await readdir(directory)
+  assert.equal(operationDirectories.length, 1)
+  const operationDirectory = join(directory, operationDirectories[0] as string)
+  const text = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.match(text, /"applicationId":"100000000000000001"/)
+  assert.doesNotMatch(text, /guildId|emoji name|local path|application-emoji-operation-0001/)
+  assert.equal((await lstat(directory)).mode & 0o777, 0o700)
+  assert.equal((await lstat(operationDirectory)).mode & 0o777, 0o700)
+})
+
+test("file operation store rejects malformed application receipt identity and outcomes", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const store = new FileOperationStore(join(root, "receipts"))
+
+  await assert.rejects(
+    store.reserveApplication({
+      ...applicationReceipt(),
+      applicationId: "invalid",
+    }),
+    OperationStoreError,
+  )
+  await assert.rejects(
+    store.reserveApplication({
+      ...applicationReceipt(),
+      resourceId: CHANNEL_ID,
+    }),
+    OperationStoreError,
+  )
 })
 
 test("file operation store atomically selects one concurrent reservation", async (context) => {

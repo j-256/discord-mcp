@@ -14,6 +14,7 @@ import {
   JsonlActivityLog,
   type AnnouncementCrosspostActivity,
   type AnnouncementSubscriptionActivity,
+  type ApplicationEmojiActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
   type ChannelCloneActivity,
@@ -1031,6 +1032,34 @@ function guildExpression(
     kind: "guild-expression-change",
     operationKeyHash: `sha256:${"9".repeat(64)}`,
     planDigest: `hmac-sha256:${"a".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function applicationEmoji(
+  id: string,
+  status: ApplicationEmojiActivity["status"],
+): ApplicationEmojiActivity {
+  return {
+    action: "create",
+    applicationId: "100",
+    emojiId: ["completed", "completed-with-drift", "uncertain"].includes(status)
+      ? "300"
+      : null,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    id,
+    kind: "application-emoji-change",
+    operationKeyHash: `sha256:${"d".repeat(64)}`,
+    planDigest: `hmac-sha256:${"e".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -3176,6 +3205,69 @@ test("JSONL activity log keeps guild expression evidence content-free", async (c
       "expressionId",
       "expressionKind",
       "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps application emoji evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-application-emoji-name",
+    "private-application-emoji-path",
+    "private-image-bytes",
+    "private-operation-key",
+    "private-uploader-profile",
+  ]
+
+  await store.append(applicationEmoji("1", "pending"))
+  await store.append({
+    ...applicationEmoji("2", "completed"),
+    filePath: privateValues[1],
+    imageBytes: privateValues[2],
+    name: privateValues[0],
+    operationKey: privateValues[3],
+    uploaderProfile: privateValues[4],
+  } as ApplicationEmojiActivity)
+  await store.append({
+    ...applicationEmoji("4", "completed"),
+    error: "OperationStoreError",
+  })
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...applicationEmoji("3", "completed"),
+      emojiId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["4", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "applicationId",
+      "emojiId",
+      "error",
       "id",
       "kind",
       "operationKeyHash",

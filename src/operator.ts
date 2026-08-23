@@ -64,7 +64,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 18
+export const OPERATOR_REPORT_SCHEMA_VERSION = 19
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -72,6 +72,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   announcementCrosspostPolicy: "announcement-crosspost-policy",
   announcementSubscriptionAuditPolicy: "announcement-subscription-audit-policy",
   announcementSubscriptionChangePolicy: "announcement-subscription-change-policy",
+  applicationEmojiAuditPolicy: "application-emoji-audit-policy",
+  applicationEmojiChangePolicy: "application-emoji-change-policy",
   applicationIdentity: "application-identity",
   attachmentPolicy: "attachment-policy",
   automodAuditPolicy: "automod-audit-policy",
@@ -639,6 +641,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("Guild-expression updates and deletions are enabled, but creation remains blocked because no canonical local roots are configured")
   }
+  if (
+    config.allowApplicationEmojiChanges
+    && config.applicationEmojiRoots.length === 0
+  ) {
+    warnings.push("Application-emoji rename and deletion are enabled, but creation remains blocked because no canonical local roots are configured")
+  }
   if (config.allowScheduledEventAudit && config.scheduledEventGuildIds.size === 0) {
     warnings.push("The scheduled-event audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
   }
@@ -676,6 +684,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
+    [
+      config.allowApplicationEmojiAudit || config.allowApplicationEmojiChanges,
+      "application-emojis",
+      "Application emoji audit and reviewed changes",
+    ],
     [config.allowAttachments, "attachments", "Attachment messages"],
     [
       config.allowAutomodAudit || config.allowAutomodChanges,
@@ -2145,6 +2158,38 @@ export async function diagnoseConnector(
         `Privacy-safe guild emoji and sticker inventory is constrained to ${config.guildExpressionGuildIds.size} exact guilds`,
       ))
     }
+    if (!config.allowApplicationEmojiAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationEmojiAuditPolicy,
+        "pass",
+        "Privacy-safe application emoji inventory is disabled",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationEmojiAuditPolicy,
+        "pass",
+        "Privacy-safe application emoji inventory is bound to the verified pinned current application",
+      ))
+    }
+    if (!config.allowApplicationEmojiChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
+        "pass",
+        "Reviewed application emoji changes are disabled",
+      ))
+    } else if (config.applicationEmojiRoots.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
+        "warn",
+        "Reviewed application emoji rename and deletion are enabled, but creation is blocked because canonical local roots are empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
+        "pass",
+        `Reviewed application emoji changes are bound to the verified pinned current application and ${config.applicationEmojiRoots.length} canonical creation roots with application-wide coordination, one-shot execution, and exact metadata or absence readback`,
+      ))
+    }
     if (!config.allowGuildExpressionChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.guildExpressionChangePolicy,
@@ -2646,6 +2691,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowGuildExpressionChanges,
     ENVIRONMENT_NAMES.guildExpressionGuildIds,
     ENVIRONMENT_NAMES.guildExpressionRoots,
+    ENVIRONMENT_NAMES.allowApplicationEmojiAudit,
+    ENVIRONMENT_NAMES.allowApplicationEmojiChanges,
+    ENVIRONMENT_NAMES.applicationEmojiRoots,
     ENVIRONMENT_NAMES.allowScheduledEventAudit,
     ENVIRONMENT_NAMES.allowScheduledEventChanges,
     ENVIRONMENT_NAMES.allowScheduledEventUserAudit,

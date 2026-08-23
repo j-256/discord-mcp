@@ -24,6 +24,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 
 export const MCP_TOOLSET_NAMES = [
   "activity",
+  "application-emojis",
   "announcement-crossposts",
   "announcement-subscriptions",
   "attachments",
@@ -164,6 +165,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
   allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
+  allowApplicationEmojiAudit: "DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT",
+  allowApplicationEmojiChanges: "DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES",
   allowAnnouncementCrossposts: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
   allowAnnouncementSubscriptionAudit: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT",
   allowAnnouncementSubscriptionChanges: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES",
@@ -242,6 +245,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowWidgetSettingsAudit: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT",
   allowWidgetSettingsChanges: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES",
   applicationId: "DISCORD_MCP_APPLICATION_ID",
+  applicationEmojiRoots: "DISCORD_MCP_APPLICATION_EMOJI_ROOTS",
   attachmentChannelIds: "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
   attachmentMaxBytes: "DISCORD_MCP_ATTACHMENT_MAX_BYTES",
   attachmentRoots: "DISCORD_MCP_ATTACHMENT_ROOTS",
@@ -334,6 +338,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
 
 export const DISCORD_LIMITS = Object.freeze({
   allowedMentionUsers: 100,
+  applicationEmojis: 2_000,
   attachmentBytes: 10 * 1_024 * 1_024,
   attachmentDescriptionCharacters: 1_024,
   attachmentFilenameCharacters: 240,

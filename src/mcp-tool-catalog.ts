@@ -39,6 +39,7 @@ type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
 type McpToolWorkflow =
   | "announcement-crosspost"
   | "announcement-subscription"
+  | "application-emoji-change"
   | "attachment-message"
   | "automod-change"
   | "channel-cloning"
@@ -149,6 +150,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["announcement", "execute", "follow", "subscribe", "unsubscribe", "webhook"],
     toolset: "announcement-subscriptions",
     workflow: "announcement-subscription",
+  },
+  execute_application_emoji_change: {
+    keywords: ["application", "create", "delete", "emoji", "execute", "rename"],
+    toolset: "application-emojis",
+    workflow: "application-emoji-change",
   },
   execute_message_forward: {
     keywords: ["copy", "execute", "forward", "message", "snapshot"],
@@ -428,6 +434,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["exact", "fetch", "message", "read"],
     toolset: "messages",
   },
+  get_application_emoji: {
+    keywords: ["application", "emoji", "exact", "get", "lookup"],
+    toolset: "application-emojis",
+  },
   get_observability_status: {
     keywords: ["health", "metrics", "observability", "telemetry", "traces"],
     toolset: "observability",
@@ -459,6 +469,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_active_threads: {
     keywords: ["active", "forum", "list", "thread"],
     toolset: "threads",
+  },
+  list_application_emojis: {
+    keywords: ["application", "emoji", "inventory", "list"],
+    toolset: "application-emojis",
   },
   list_automod_rules: {
     keywords: ["automod", "inventory", "list", "moderation", "policy", "rule"],
@@ -642,6 +656,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["access", "channel", "member", "overwrite", "permission", "plan", "review", "role"],
     toolset: "permission-overwrites",
     workflow: "channel-permission-overwrite",
+  },
+  plan_application_emoji_change: {
+    keywords: ["application", "create", "delete", "emoji", "plan", "rename", "review"],
+    toolset: "application-emojis",
+    workflow: "application-emoji-change",
   },
   plan_forum_post: {
     keywords: ["create", "forum", "plan", "post", "review", "thread"],

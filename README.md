@@ -122,11 +122,11 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 
 | Area | Selected capabilities |
 | --- | --- |
-| Discovery and reads | Guilds, channels, roles, effective permissions, member-safe audits, message history, indexed search, threads, forums, polls, reactions, audit history, integrations, invites, templates, expressions, soundboard, events, Stage instances, onboarding, Welcome Screens, profiles, settings, and webhooks |
+| Discovery and reads | Guilds, channels, roles, effective permissions, member-safe audits, message history, indexed search, threads, forums, polls, reactions, audit history, integrations, invites, templates, guild and application-owned emojis, stickers, soundboard, events, Stage instances, onboarding, Welcome Screens, profiles, settings, and webhooks |
 | Messages and communities | Idempotent sends and edits, exact pins, reactions, announcement crossposts and subscriptions, immutable forwarding, attachments, static Components V2, forum posts, thread creation, native polls, and exact deletion |
 | Guild structure | Additive channels and roles, resumable scaffolds, atomic channel cloning, relative channel and role ordering, channel metadata, permission overwrites, forum tags, role configuration, guild settings, and guild profile text |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
-| Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
+| Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
 | Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic presets, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).

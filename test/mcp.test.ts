@@ -38,6 +38,12 @@ import type {
   AnnouncementSubscriptionRequest,
 } from "../src/announcement-subscription-service.js"
 import type {
+  ApplicationEmojiChangeRequest,
+  ApplicationEmojiPlan,
+  ApplicationEmojiPrivacyProjection,
+  ProjectedApplicationEmoji,
+} from "../src/application-emoji-service.js"
+import type {
   AttachmentMessagePlan,
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
@@ -230,6 +236,8 @@ import {
   AnnouncementCrosspostOperationConflictError,
   AnnouncementSubscriptionExecutionError,
   AnnouncementSubscriptionOperationConflictError,
+  ApplicationEmojiExecutionError,
+  ApplicationEmojiOperationConflictError,
   AttachmentMessageExecutionError,
   AttachmentMessageOperationConflictError,
   AutoModerationExecutionError,
@@ -460,6 +468,9 @@ const EMOJI_ID = "380000000000000001"
 const STICKER_ID = "390000000000000001"
 const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
 const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
+const APPLICATION_EMOJI_ID = "381000000000000001"
+const APPLICATION_EMOJI_OPERATION_KEY = "application-emoji-attempt-0001"
+const APPLICATION_EMOJI_PATH = "/test/discord-mcp/reviewed-application-emoji.png"
 const SOUNDBOARD_SOUND_ID = "391000000000000001"
 const SOUNDBOARD_OPERATION_KEY = "soundboard-change-attempt-0001"
 const SOUNDBOARD_PATH = "/test/discord-mcp/reviewed-sound.mp3"
@@ -2841,6 +2852,117 @@ function guildTemplatePlan(
       "Template codes and use URLs are intentionally omitted",
       "The full private inventory is freshness-bound",
     ],
+  }
+}
+
+function applicationEmojiPrivacy(): ApplicationEmojiPrivacyProjection {
+  return {
+    omittedFields: [
+      "cdnUrl",
+      "imageBytes",
+      "rawDiscordObject",
+      "roleIds",
+      "uploaderId",
+      "uploaderProfile",
+    ],
+    privateFieldsProjectedOut: true,
+  }
+}
+
+function projectedApplicationEmoji(
+  emojiId = APPLICATION_EMOJI_ID,
+  name = "reviewed_application_emoji",
+): ProjectedApplicationEmoji {
+  return {
+    animated: false,
+    available: true,
+    emojiId,
+    managed: false,
+    name,
+    requiresColons: true,
+    unknownFieldCount: 0,
+    uploaderProjectedOut: true,
+  }
+}
+
+function applicationEmojiPlan(
+  request: ApplicationEmojiChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ApplicationEmojiPlan {
+  const existing = request.action === "create"
+    || request.action === "delete" && effect === "none"
+    ? null
+    : projectedApplicationEmoji(
+        request.emojiId,
+        request.action === "rename" && effect === "none"
+          ? request.name
+          : "current_application_emoji",
+      )
+  const desired = request.action === "delete"
+    ? null
+    : request.action === "create"
+      ? {
+          ...projectedApplicationEmoji(APPLICATION_EMOJI_ID, request.name),
+          emojiId: null,
+        }
+      : {
+          ...existing!,
+          name: request.name,
+        }
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    desired,
+    digest,
+    effect,
+    emojiId: request.action === "create" ? null : request.emojiId,
+    existing,
+    file: request.action === "create"
+      ? {
+          contentDigest: `hmac-sha256:${"d".repeat(64)}`,
+          review: {
+            animated: false,
+            canonicalPath: request.filePath,
+            containedByConfiguredRoot: true,
+            durationSeconds: null,
+            format: "png",
+            height: 64,
+            mediaType: "image/png",
+            ownerMatchesProcess: true,
+            regularFile: true,
+            singleLink: true,
+            sizeBytes: 128,
+            stableRead: true,
+            width: 64,
+          },
+        }
+      : null,
+    inventory: {
+      digest: `hmac-sha256:${"e".repeat(64)}`,
+      returned: 1,
+      safetyLimit: 2_000,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: applicationEmojiPrivacy(),
+    risks: [
+      "Application-wide collection change",
+      "Image bytes cannot be read back",
+      "No documented audit-log reason support",
+      "One-shot operation key",
+    ],
+    schemaVersion: 1,
+    status: effect === "change"
+      ? "planned"
+      : request.action === "delete" ? "already-absent" : "already-current",
+    verification: {
+      imageBytesReadableAfterWrite: false,
+      metadataReadback: "exact-application-emoji",
+    },
+    warnings: ["Application emoji metadata and paths are untrusted data"],
+    writeRequired: effect === "change",
   }
 }
 
@@ -5238,6 +5360,10 @@ function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
     administrationGuildIds: [],
+    applicationEmojiAuditEnabled: false,
+    applicationEmojiChangesEnabled: false,
+    applicationEmojiCreationEnabled: false,
+    applicationEmojiRootCount: 0,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -5401,6 +5527,9 @@ function serviceFixture(overrides: {
   announcementSubscriptionError?: Error
   announcementSubscriptionPlanDigest?: string
   announcementSubscriptionWriteRequired?: boolean
+  applicationEmojiEffect?: "change" | "none"
+  applicationEmojiError?: Error
+  applicationEmojiPlanDigest?: string
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -5557,6 +5686,10 @@ function serviceFixture(overrides: {
     announcementSubscriptionExecute: 0,
     announcementSubscriptionList: 0,
     announcementSubscriptionPlan: 0,
+    applicationEmojiExecute: 0,
+    applicationEmojiGet: 0,
+    applicationEmojiList: 0,
+    applicationEmojiPlan: 0,
     autoModerationExecute: 0,
     autoModerationGet: 0,
     autoModerationList: 0,
@@ -5767,6 +5900,66 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async executeApplicationEmojiChange(request, planDigest) {
+      if (overrides.applicationEmojiError) throw overrides.applicationEmojiError
+      calls.applicationEmojiExecute += 1
+      const planned = applicationEmojiPlan(
+        request,
+        planDigest,
+        overrides.applicationEmojiEffect,
+      )
+      const emojiId = request.action === "create"
+        ? APPLICATION_EMOJI_ID
+        : request.emojiId
+      return {
+        action: request.action,
+        activityId: planned.effect === "none" ? null : "activity-application-emoji",
+        applicationId: APPLICATION_ID,
+        emojiId,
+        observed: request.action === "delete"
+          ? null
+          : { ...planned.desired, emojiId } as ProjectedApplicationEmoji,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.effect === "none"
+          ? request.action === "delete" ? "already-absent" : "already-current"
+          : "completed",
+      }
+    },
+    async getApplicationEmoji(emojiId) {
+      calls.applicationEmojiGet += 1
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        emoji: projectedApplicationEmoji(emojiId),
+        privacy: applicationEmojiPrivacy(),
+        responseUnknownFieldCount: 0,
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async listApplicationEmojis() {
+      calls.applicationEmojiList += 1
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        emojis: [projectedApplicationEmoji()],
+        page: { returned: 1, safetyLimit: 2_000 },
+        privacy: applicationEmojiPrivacy(),
+        responseUnknownFieldCount: 0,
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async planApplicationEmojiChange(request) {
+      calls.applicationEmojiPlan += 1
+      return applicationEmojiPlan(
+        request,
+        overrides.applicationEmojiPlanDigest || DIGEST,
+        overrides.applicationEmojiEffect,
+      )
+    },
     async auditChannelOrder(guildId) {
       calls.auditChannelOrder += 1
       const planned = channelOrderingPlan(channelOrderingInput({ guildId }))
@@ -8674,6 +8867,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_guild_integrations",
       "get_channel_webhook",
       "list_guild_emojis",
+      "list_application_emojis",
+      "get_application_emoji",
       "get_guild_emoji",
       "list_guild_stickers",
       "get_guild_sticker",
@@ -8734,6 +8929,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_guild_profile_change",
       "execute_guild_profile_change",
       "plan_guild_expression_change",
+      "plan_application_emoji_change",
+      "execute_application_emoji_change",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
       "execute_guild_soundboard_change",
@@ -8831,6 +9028,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
+  const applicationEmoji = result.tools.find((tool) => (
+    tool.name === "execute_application_emoji_change"
+  ))
   const soundboard = result.tools.find((tool) => (
     tool.name === "execute_guild_soundboard_change"
   ))
@@ -8887,6 +9087,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     widgetSettings,
     guildSettings,
     guildExpression,
+    applicationEmoji,
     soundboard,
     scheduledEvent,
     channelMetadata,
@@ -9000,6 +9201,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_guild_widget_settings",
     "get_guild_settings",
     "list_guild_emojis",
+    "list_application_emojis",
+    "get_application_emoji",
     "get_guild_emoji",
     "list_guild_stickers",
     "get_guild_sticker",
@@ -9036,6 +9239,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_guild_widget_settings_change",
     "plan_guild_settings_change",
     "plan_guild_expression_change",
+    "plan_application_emoji_change",
     "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
     "plan_role_configuration",
@@ -10405,6 +10609,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     announcementSubscriptionExecute: 0,
     announcementSubscriptionList: 0,
     announcementSubscriptionPlan: 0,
+    applicationEmojiExecute: 0,
+    applicationEmojiGet: 0,
+    applicationEmojiList: 0,
+    applicationEmojiPlan: 0,
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
@@ -16748,6 +16956,326 @@ test("MCP channel metadata execution exposes uncertainty and content-free confli
   assert.equal(
     structuredContent(stateResult).status,
     "coordination-state-error",
+  )
+})
+
+test("MCP application emoji reads and plans expose only identity-bound privacy-safe evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const inventory = await client.callTool({
+    arguments: {},
+    name: "list_application_emojis",
+  })
+  const exact = await client.callTool({
+    arguments: { emojiId: APPLICATION_EMOJI_ID },
+    name: "get_application_emoji",
+  })
+  const callerSelectedApplication = await client.callTool({
+    arguments: { applicationId: OTHER_GUILD_ID },
+    name: "list_application_emojis",
+  })
+  const invalidLookup = await client.callTool({
+    arguments: { emojiId: "invalid" },
+    name: "get_application_emoji",
+  })
+
+  const listed = (
+    structuredContent(inventory).emojis as Array<Record<string, unknown>>
+  )[0]
+  const selected = structuredContent(exact).emoji as Record<string, unknown>
+  assert.deepEqual(Object.keys(listed || {}).sort(), [
+    "animated",
+    "available",
+    "emojiId",
+    "managed",
+    "name",
+    "requiresColons",
+    "unknownFieldCount",
+    "uploaderProjectedOut",
+  ])
+  assert.deepEqual(Object.keys(selected).sort(), Object.keys(listed || {}).sort())
+  assert.equal(listed?.emojiId, APPLICATION_EMOJI_ID)
+  assert.equal(structuredContent(inventory).applicationId, APPLICATION_ID)
+  assert.equal(structuredContent(inventory).botId, BOT_ID)
+  assert.deepEqual(structuredContent(inventory).page, {
+    returned: 1,
+    safetyLimit: 2_000,
+  })
+  for (const value of [inventory, exact]) {
+    const serialized = JSON.stringify(value)
+    assert.doesNotMatch(serialized, /cdn\.discordapp\.com|https?:\/\//)
+  }
+  for (const value of [listed, selected]) {
+    assert.equal(Object.hasOwn(value || {}, "imageBytes"), false)
+    assert.equal(Object.hasOwn(value || {}, "uploaderId"), false)
+    assert.equal(Object.hasOwn(value || {}, "uploaderProfile"), false)
+  }
+  assert.equal(callerSelectedApplication.isError, true)
+  assert.equal(invalidLookup.isError, true)
+
+  const validRequests = [
+    {
+      action: "create",
+      filePath: APPLICATION_EMOJI_PATH,
+      name: "reviewed_application_emoji",
+      operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    },
+    {
+      action: "rename",
+      emojiId: APPLICATION_EMOJI_ID,
+      name: "renamed_application_emoji",
+      operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    },
+    {
+      acknowledgeGlobalImpact: true,
+      action: "delete",
+      emojiId: APPLICATION_EMOJI_ID,
+      operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    },
+  ]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_application_emoji_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      new RegExp(APPLICATION_EMOJI_OPERATION_KEY),
+    )
+  }
+
+  const invalidRequests = [
+    { ...validRequests[0], image: "data:image/png;base64,AAAA" },
+    { ...validRequests[0], imageUrl: "https://cdn.example/reviewed.png" },
+    { ...validRequests[0], filePath: "relative/reviewed.png" },
+    { ...validRequests[0], applicationId: OTHER_GUILD_ID },
+    { ...validRequests[1], name: "invalid-name" },
+    { ...validRequests[2], acknowledgeGlobalImpact: false },
+    {
+      action: "delete",
+      emojiId: APPLICATION_EMOJI_ID,
+      operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    },
+    { ...validRequests[2], auditReason: AUDIT_REASON },
+    { ...validRequests[2], operationKey: "short" },
+  ]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_application_emoji_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.applicationEmojiList, 1)
+  assert.equal(calls.applicationEmojiGet, 1)
+  assert.equal(calls.applicationEmojiPlan, validRequests.length)
+})
+
+test("MCP application emoji execution binds signed approval to exact application-wide evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      filePath: APPLICATION_EMOJI_PATH,
+      name: "reviewed_application_emoji",
+      operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_application_emoji_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).emojiId, APPLICATION_EMOJI_ID)
+  assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+  assert.equal(calls.applicationEmojiPlan, 1)
+  assert.equal(calls.applicationEmojiExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    APPLICATION_EMOJI_PATH,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Complete inventory digest:/)
+  assert.match(confirmationMessage, /Discord audit-log reason: unsupported/)
+  assert.match(confirmationMessage, /Regular owned single-link file: true/)
+  assert.match(confirmationMessage, /This application-wide operation affects every installation/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(APPLICATION_EMOJI_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(APPLICATION_EMOJI_OPERATION_KEY),
+  )
+})
+
+test("MCP application emoji execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    action: "rename",
+    emojiId: APPLICATION_EMOJI_ID,
+    name: "reviewed_application_emoji",
+    operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { applicationEmojiEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_emoji_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.applicationEmojiExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_emoji_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.applicationEmojiExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { applicationEmojiPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_emoji_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.applicationEmojiExecute, 0)
+})
+
+test("MCP application emoji signed state rejects changed global targets", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    acknowledgeGlobalImpact: true,
+    action: "delete" as const,
+    emojiId: APPLICATION_EMOJI_ID,
+    operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_application_emoji_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, emojiId: USER_ID },
+    { ...request, operationKey: "application-emoji-attempt-0002" },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_application_emoji_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_application_emoji_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.applicationEmojiExecute, 0)
+})
+
+test("MCP application emoji execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    acknowledgeGlobalImpact: true,
+    action: "delete",
+    emojiId: APPLICATION_EMOJI_ID,
+    operationKey: APPLICATION_EMOJI_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationEmojiError: new ApplicationEmojiExecutionError(
+        `Discord application emoji outcome is uncertain: ${TOKEN}`,
+        { error: TOKEN, status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_emoji_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.doesNotMatch(JSON.stringify(uncertainResult), new RegExp(TOKEN))
+
+  const receipt = {
+    activityId: "activity-application-emoji",
+    applicationId: APPLICATION_ID,
+    emojiId: APPLICATION_EMOJI_ID,
+    error: null,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationEmojiError: new ApplicationEmojiOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_emoji_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(APPLICATION_EMOJI_OPERATION_KEY),
   )
 })
 

@@ -26,6 +26,7 @@ import {
   WriteCoordinationStateError,
 } from "../src/errors.js"
 import {
+  FileOperationStore,
   operationKeyHash,
   type OperationKind,
   type OperationReceipt,
@@ -34,6 +35,7 @@ import {
 } from "../src/operation-store.js"
 import {
   FileWriteCoordinator,
+  writeApplicationCollectionTarget,
   writeCoordinationTargetHash,
   writeGuildCollectionTarget,
   writeResourceTarget,
@@ -42,6 +44,7 @@ import {
 } from "../src/write-coordination.js"
 
 const CHANNEL_ID = "200000000000000001"
+const APPLICATION_ID = "150000000000000001"
 const OTHER_CHANNEL_ID = "200000000000000002"
 const GUILD_ID = "100000000000000001"
 const MESSAGE_ID = "300000000000000001"
@@ -107,7 +110,7 @@ function intent(
 function receipt(
   status: OperationReceipt["status"],
   options: {
-    kind?: OperationKind
+    kind?: OperationReceipt["kind"]
     operationKey?: string
     planDigest?: string
   } = {},
@@ -193,6 +196,10 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   const integration = writeResourceTarget("integration", MESSAGE_ID)
   const integrations = writeGuildCollectionTarget("integrations", GUILD_ID)
   const webhooks = writeGuildCollectionTarget("webhooks", GUILD_ID)
+  const applicationEmojis = writeApplicationCollectionTarget(
+    "emojis",
+    APPLICATION_ID,
+  )
 
   assert.deepEqual(channel, { id: CHANNEL_ID, kind: "channel" })
   assert.deepEqual(collection, {
@@ -211,6 +218,11 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
     guildId: GUILD_ID,
     kind: "guild-collection",
   })
+  assert.deepEqual(applicationEmojis, {
+    applicationId: APPLICATION_ID,
+    collection: "emojis",
+    kind: "application-collection",
+  })
   assert.match(writeCoordinationTargetHash(channel), /^[a-f0-9]{64}$/)
   assert.equal(
     writeCoordinationTargetHash(channel),
@@ -223,6 +235,10 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   assert.throws(() => writeResourceTarget("channel", "invalid"), /target is invalid/)
   assert.throws(
     () => writeGuildCollectionTarget("channels", "invalid"),
+    /target is invalid/,
+  )
+  assert.throws(
+    () => writeApplicationCollectionTarget("emojis", "invalid"),
     /target is invalid/,
   )
 })
@@ -257,6 +273,73 @@ test("coordination rejects invalid construction and intent identities", async (c
     WriteCoordinationStateError,
   )
   assert.deepEqual(await claimFiles(directory), [])
+
+  await assert.rejects(
+    () => invalidClaimId.run(intent([
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ]), async () => "unsafe"),
+    /target scope does not match its operation/,
+  )
+  await assert.rejects(
+    () => invalidClaimId.run(intent([
+      writeGuildCollectionTarget("emojis", GUILD_ID),
+    ], {
+      kind: "application-emoji-change",
+    }), async () => "unsafe"),
+    /target scope does not match its operation/,
+  )
+  await assert.rejects(
+    () => invalidClaimId.run(intent([
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+      writeApplicationCollectionTarget("emojis", GUILD_ID),
+    ], {
+      kind: "application-emoji-change",
+    }), async () => "unsafe"),
+    /requires one application collection target/,
+  )
+})
+
+test("application emoji claims use one application-wide target", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "coordination")
+  const operationStore = new FileOperationStore(join(root, "operations"))
+  const coordinator = new FileWriteCoordinator(directory, operationStore)
+  const target = writeApplicationCollectionTarget("emojis", APPLICATION_ID)
+  const operationKeyHashValue = operationKeyHash(OPERATION_KEY)
+  const result = await coordinator.run(intent([target], {
+    kind: "application-emoji-change",
+  }), async () => {
+    const pending = {
+      activityId: "application-emoji-activity-0001",
+      applicationId: APPLICATION_ID,
+      error: null,
+      kind: "application-emoji-change" as const,
+      operationKeyHash: operationKeyHashValue,
+      planDigest: PLAN_DIGEST,
+      resourceId: null,
+      schemaVersion: 1 as const,
+      status: "pending" as const,
+      timestamp: "2026-08-23T00:00:00.000Z",
+      verification: null,
+    }
+    await operationStore.reserveApplication(pending)
+    await operationStore.finishApplication({
+      ...pending,
+      resourceId: MESSAGE_ID,
+      status: "completed",
+      timestamp: "2026-08-23T00:00:01.000Z",
+      verification: "match",
+    })
+    return "application-wide"
+  })
+
+  assert.equal(result, "application-wide")
+  assert.deepEqual(await claimFiles(directory), [])
+  assert.notEqual(
+    writeCoordinationTargetHash(target),
+    writeCoordinationTargetHash(writeGuildCollectionTarget("emojis", APPLICATION_ID)),
+  )
 })
 
 test("coordination accepts one exact maximum-size deletion batch and rejects expansion", async (context) => {
@@ -584,6 +667,31 @@ test("unreadable receipt evidence remains quarantined", async (context) => {
   assert.equal(listed.claims[0]?.state, "review-required")
   await assert.rejects(
     () => coordinator.run(intent(undefined, {
+      operationKey: OTHER_OPERATION_KEY,
+      planDigest: OTHER_PLAN_DIGEST,
+    }), async () => "unsafe"),
+    WriteCoordinationQuarantinedError,
+  )
+})
+
+test("application claims stay quarantined when application receipt evidence is unsupported", async (context) => {
+  const { directory, operationStore } = await fixture(context)
+  const target = writeApplicationCollectionTarget("emojis", APPLICATION_ID)
+  await writeStaleClaim({
+    directory,
+    kind: "application-emoji-change",
+    targets: [target],
+  })
+  const coordinator = new FileWriteCoordinator(directory, operationStore, {
+    processAlive: () => false,
+  })
+
+  const [listed] = (await coordinator.list()).claims
+  assert.equal(listed?.receiptState, "unreadable")
+  assert.equal(listed?.state, "review-required")
+  await assert.rejects(
+    () => coordinator.run(intent([target], {
+      kind: "application-emoji-change",
       operationKey: OTHER_OPERATION_KEY,
       planDigest: OTHER_PLAN_DIGEST,
     }), async () => "unsafe"),

@@ -11,7 +11,10 @@ import { join } from "node:path"
 import test from "node:test"
 
 import { readAttachmentFileSnapshot } from "../src/attachment-file.js"
-import { readGuildExpressionFileSnapshot } from "../src/guild-expression-file.js"
+import {
+  readApplicationEmojiFileSnapshot,
+  readGuildExpressionFileSnapshot,
+} from "../src/guild-expression-file.js"
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 
@@ -194,6 +197,34 @@ test("emoji snapshots detect every supported format from reviewed local bytes", 
       roots: [root],
     })
     assert.equal(animatedAvif.review.animated, true)
+  } finally {
+    await cleanup()
+  }
+})
+
+test("application emoji snapshots reuse image validation with a separate digest domain", async () => {
+  const { cleanup, root } = await fixture()
+  try {
+    const filePath = join(root, "application-emoji.png")
+    await writeFile(filePath, png({ height: 64, width: 64 }), { mode: 0o600 })
+    const planKey = randomBytes(32)
+    const application = await readApplicationEmojiFileSnapshot({
+      filePath,
+      planKey,
+      roots: [root],
+    })
+    const guild = await readGuildExpressionFileSnapshot({
+      filePath,
+      kind: "emoji",
+      planKey,
+      roots: [root],
+    })
+
+    assert.equal(application.review.format, "png")
+    assert.equal(application.review.width, 64)
+    assert.equal(application.review.height, 64)
+    assert.notEqual(application.binding, guild.binding)
+    assert.notEqual(application.contentDigest, guild.contentDigest)
   } finally {
     await cleanup()
   }

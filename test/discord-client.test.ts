@@ -12,6 +12,7 @@ import {
   DiscordClient,
 } from "../src/discord-client.js"
 import {
+  ApplicationEmojiEvidenceError,
   ChannelMetadataEvidenceError,
   DiscordApiError,
   MemberVoiceEvidenceError,
@@ -5161,6 +5162,173 @@ test("Discord client validates expression writes before fetching and does not re
     /must contain a name, description, or tags/,
   )
   assert.equal(requests, 1)
+})
+
+test("Discord client projects application emoji envelopes without uploader or image data", async () => {
+  const privateProfile = "private-application-emoji-uploader"
+  const privateUrl = "https://cdn.discord.test/private-application-emoji"
+  const requests: string[] = []
+  const payload = {
+    animated: true,
+    available: false,
+    id: "300",
+    image_url: privateUrl,
+    managed: false,
+    name: "wave",
+    require_colons: true,
+    roles: [],
+    user: {
+      avatar: "private-avatar",
+      global_name: privateProfile,
+      id: "500",
+      username: privateProfile,
+    },
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      const url = String(input)
+      requests.push(url)
+      return jsonResponse(url.endsWith("/emojis")
+        ? { future_envelope_field: "discarded", items: [payload] }
+        : payload)
+    },
+    token: TOKEN,
+  })
+
+  const inventory = await client.listApplicationEmojis("100")
+  const exact = await client.getApplicationEmoji("100", "300")
+
+  assert.deepEqual(inventory, {
+    items: [{
+      animated: true,
+      available: false,
+      id: "300",
+      managed: false,
+      name: "wave",
+      requiresColons: true,
+      unknownFieldCount: 1,
+      uploaderProjectedOut: true,
+    }],
+    unknownFieldCount: 1,
+  })
+  assert.deepEqual(exact, inventory.items[0])
+  assert.deepEqual(requests, [
+    `${API_BASE_URL}/applications/100/emojis`,
+    `${API_BASE_URL}/applications/100/emojis/300`,
+  ])
+  const serialized = JSON.stringify({ exact, inventory })
+  assert.doesNotMatch(serialized, new RegExp(privateProfile))
+  assert.doesNotMatch(serialized, new RegExp(privateUrl))
+  assert.doesNotMatch(serialized, /private-avatar/)
+
+  const malformed = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      ...payload,
+      roles: ["400"],
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    malformed.getApplicationEmoji("100", "300"),
+    ApplicationEmojiEvidenceError,
+  )
+})
+
+test("Discord client sends exact application emoji writes without audit reasons or retries", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({
+        body,
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      return jsonResponse({
+        animated: false,
+        available: true,
+        id: "300",
+        managed: false,
+        name: (body as Record<string, unknown>).name,
+        require_colons: true,
+        roles: [],
+        user: { id: "500" },
+      })
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  await client.createApplicationEmoji("100", {
+    bytes: new Uint8Array([1, 2, 3]),
+    format: "png",
+    name: "wave",
+  })
+  await client.modifyApplicationEmoji("100", "300", { name: "hello" })
+  await client.deleteApplicationEmoji("100", "300")
+
+  assert.deepEqual(requests, [{
+    body: {
+      image: "data:image/png;base64,AQID",
+      name: "wave",
+    },
+    method: "POST",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/emojis`,
+  }, {
+    body: { name: "hello" },
+    method: "PATCH",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/emojis/300`,
+  }, {
+    body: null,
+    method: "DELETE",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/emojis/300`,
+  }])
+
+  let attempts = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      attempts += 1
+      return jsonResponse({ message: "private detail", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.modifyApplicationEmoji("100", "300", { name: "hello" }),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && !error.message.includes("private detail")
+    ),
+  )
+  assert.equal(attempts, 1)
+  await assert.rejects(
+    rateLimited.createApplicationEmoji("100", {
+      bytes: new Uint8Array(),
+      format: "png",
+      name: "wave",
+    }),
+    /emoji bytes/,
+  )
+  await assert.rejects(
+    rateLimited.modifyApplicationEmoji("100", "300", { name: "bad-name" }),
+    /ASCII letters/,
+  )
+  assert.equal(attempts, 1)
 })
 
 test("Discord client projects bounded soundboard inventories without audio or creator profiles", async () => {

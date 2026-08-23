@@ -1,6 +1,7 @@
 export * from "./activity-log.js"
 export * from "./announcement-crosspost-service.js"
 export * from "./announcement-subscription-service.js"
+export * from "./application-emoji-service.js"
 export * from "./audit-log-service.js"
 export * from "./administration-service.js"
 export * from "./attachment-file.js"

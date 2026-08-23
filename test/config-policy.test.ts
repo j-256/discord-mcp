@@ -164,6 +164,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
   assert.deepEqual(new ScopePolicy(config).describe(), {
     administrationEnabled: false,
     administrationGuildIds: [],
+    applicationEmojiAuditEnabled: false,
+    applicationEmojiChangesEnabled: false,
+    applicationEmojiCreationEnabled: false,
+    applicationEmojiRootCount: 0,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -739,6 +743,10 @@ test("configuration and policy require an exact administration guild and protect
   assert.deepEqual(policy.describe(), {
     administrationEnabled: true,
     administrationGuildIds: [GUILD_ID],
+    applicationEmojiAuditEnabled: false,
+    applicationEmojiChangesEnabled: false,
+    applicationEmojiCreationEnabled: false,
+    applicationEmojiRootCount: 0,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -3038,6 +3046,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
   assert.deepEqual(policy.describe(), {
     administrationEnabled: false,
     administrationGuildIds: [],
+    applicationEmojiAuditEnabled: false,
+    applicationEmojiChangesEnabled: false,
+    applicationEmojiCreationEnabled: false,
+    applicationEmojiRootCount: 0,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -3302,6 +3314,58 @@ test("configuration and policy isolate guild expression audit, changes, and loca
       () => loadConnectorConfig({
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_GUILD_EXPRESSION_ROOTS: "relative/path",
+      }, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
+})
+
+test("configuration and policy bind application emojis to pinned identity and local roots", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-application-emoji-"))
+  const root = await realpath(temporary)
+  try {
+    const config = loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_APPLICATION_ID: "900000000000000001",
+      DISCORD_MCP_BOT_ID: "900000000000000002",
+      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
+      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+      DISCORD_MCP_APPLICATION_EMOJI_ROOTS: JSON.stringify([root]),
+    }, { homeDirectory: "/test/home" })
+    const scoped = new ScopePolicy(config)
+
+    assert.equal(config.allowApplicationEmojiAudit, true)
+    assert.equal(config.allowApplicationEmojiChanges, true)
+    assert.deepEqual(config.applicationEmojiRoots, [root])
+    scoped.assertApplicationEmojiAuditable()
+    scoped.assertApplicationEmojiChangeAllowed()
+    const description = scoped.describe()
+    assert.equal(description.applicationEmojiAuditEnabled, true)
+    assert.equal(description.applicationEmojiChangesEnabled, true)
+    assert.equal(description.applicationEmojiCreationEnabled, true)
+    assert.equal(description.applicationEmojiRootCount, 1)
+    assert.equal(JSON.stringify(description).includes(root), false)
+
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+      }, { homeDirectory: "/test/home" }),
+      /requires DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
+      }, { homeDirectory: "/test/home" }),
+      /requires DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_APPLICATION_EMOJI_ROOTS: "relative/path",
       }, { homeDirectory: "/test/home" }),
       ConfigurationError,
     )

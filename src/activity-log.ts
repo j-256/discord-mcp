@@ -800,6 +800,28 @@ export interface GuildExpressionActivity {
   verification: "drift" | "match" | null
 }
 
+export type ApplicationEmojiActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ApplicationEmojiActivity {
+  action: "create" | "delete" | "rename"
+  applicationId: string
+  emojiId: string | null
+  error: string | null
+  id: string
+  kind: "application-emoji-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: ApplicationEmojiActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type SoundboardActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1075,6 +1097,7 @@ export interface ReactionModerationActivity {
 export type ActivityEntry =
   | AnnouncementCrosspostActivity
   | AnnouncementSubscriptionActivity
+  | ApplicationEmojiActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
   | ChannelCloneActivity
@@ -3414,6 +3437,78 @@ function parseGuildExpressionActivity(
   }
 }
 
+function parseApplicationEmojiActivity(
+  value: unknown,
+): ApplicationEmojiActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "application-emoji-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["create", "delete", "rename"].includes(String(record.action))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || !(record.emojiId === null || (
+      typeof record.emojiId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.emojiId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.action === "create" ? record.emojiId !== null : record.emojiId === null
+    ))
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (["completed", "completed-with-drift"].includes(String(record.status)) && (
+      record.emojiId === null
+      || record.verification !== (record.status === "completed" ? "match" : "drift")
+    ))
+    || (record.status === "failed" && (
+      record.error === null
+      || record.verification !== null
+      || (record.action === "create" ? record.emojiId !== null : record.emojiId === null)
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action: record.action as ApplicationEmojiActivity["action"],
+    applicationId: record.applicationId,
+    emojiId: record.emojiId,
+    error: record.error,
+    id: record.id,
+    kind: "application-emoji-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ApplicationEmojiActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseScheduledEventActivity(
   value: unknown,
 ): ScheduledEventActivity | undefined {
@@ -4339,6 +4434,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
+    || parseApplicationEmojiActivity(value)
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)

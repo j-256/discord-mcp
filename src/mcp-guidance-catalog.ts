@@ -2,6 +2,7 @@ import type { McpToolsetName } from "./constants.js"
 
 export const MCP_RESOURCE_NAMES = Object.freeze({
   activity: "connector_activity",
+  applicationEmojis: "application_emojis",
   defaultSoundboard: "default_soundboard_sounds",
   guilds: "scoped_guilds",
   gatewayEvents: "gateway_events",
@@ -15,6 +16,7 @@ export const MCP_RESOURCE_NAMES = Object.freeze({
 
 export const MCP_RESOURCE_URIS = Object.freeze({
   activity: "discord://connector/activity",
+  applicationEmojis: "discord://application/emojis",
   defaultSoundboard: "discord://soundboard/defaults",
   guilds: "discord://guilds",
   gatewayEvents: "discord://gateway/events",
@@ -103,6 +105,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   inspectGuildBan: "inspect_guild_ban",
   reviewAnnouncementCrosspost: "review_announcement_crosspost",
   reviewAnnouncementSubscription: "review_announcement_subscription",
+  reviewApplicationEmojiChange: "review_application_emoji_change",
   reviewInviteDeletion: "review_invite_deletion",
   reviewOnboardingChange: "review_onboarding_change",
   reviewWelcomeScreenChange: "review_welcome_screen_change",
@@ -154,6 +157,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.inspectGuildBan]: "bans",
   [MCP_PROMPT_NAMES.reviewAnnouncementCrosspost]: "announcement-crossposts",
   [MCP_PROMPT_NAMES.reviewAnnouncementSubscription]: "announcement-subscriptions",
+  [MCP_PROMPT_NAMES.reviewApplicationEmojiChange]: "application-emojis",
   [MCP_PROMPT_NAMES.reviewInviteDeletion]: "invites",
   [MCP_PROMPT_NAMES.reviewOnboardingChange]: "onboarding",
   [MCP_PROMPT_NAMES.reviewWelcomeScreenChange]: "welcome-screen",

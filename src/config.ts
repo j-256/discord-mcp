@@ -45,6 +45,8 @@ export interface ConnectorConfig {
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
+  allowApplicationEmojiAudit: boolean
+  allowApplicationEmojiChanges: boolean
   allowAnnouncementCrossposts: boolean
   allowAnnouncementSubscriptionAudit: boolean
   allowAnnouncementSubscriptionChanges: boolean
@@ -121,6 +123,7 @@ export interface ConnectorConfig {
   allowWidgetPublicExposure: boolean
   allowWidgetSettingsAudit: boolean
   allowWidgetSettingsChanges: boolean
+  applicationEmojiRoots: readonly string[]
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
@@ -986,6 +989,24 @@ function loadConnectorEnvironmentConfig(
       `${ENVIRONMENT_NAMES.allowGuildExpressionChanges} requires ${ENVIRONMENT_NAMES.allowGuildExpressionAudit}`,
     )
   }
+  const allowApplicationEmojiAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowApplicationEmojiAudit],
+    ENVIRONMENT_NAMES.allowApplicationEmojiAudit,
+  )
+  const allowApplicationEmojiChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowApplicationEmojiChanges],
+    ENVIRONMENT_NAMES.allowApplicationEmojiChanges,
+  )
+  if (allowApplicationEmojiChanges && !allowApplicationEmojiAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowApplicationEmojiChanges} requires ${ENVIRONMENT_NAMES.allowApplicationEmojiAudit}`,
+    )
+  }
+  if (allowApplicationEmojiAudit && (!expectedApplicationId || !expectedBotId)) {
+    throw new ConfigurationError(
+      `Application emoji audit requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+    )
+  }
   const allowGuildTemplateAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGuildTemplateAudit],
     ENVIRONMENT_NAMES.allowGuildTemplateAudit,
@@ -1218,6 +1239,8 @@ function loadConnectorEnvironmentConfig(
 
   return {
     adminGuildIds,
+    allowApplicationEmojiAudit,
+    allowApplicationEmojiChanges,
     announcementCrosspostChannelIds,
     announcementSubscriptionSourceChannelIds,
     announcementSubscriptionTargetChannelIds,
@@ -1348,6 +1371,10 @@ function loadConnectorEnvironmentConfig(
     allowWidgetPublicExposure,
     allowWidgetSettingsAudit,
     allowWidgetSettingsChanges,
+    applicationEmojiRoots: parseOwnedRoots(
+      environment[ENVIRONMENT_NAMES.applicationEmojiRoots],
+      ENVIRONMENT_NAMES.applicationEmojiRoots,
+    ),
     auditFile: resolveConnectorAuditFile(environment, options),
     attachmentChannelIds,
     attachmentMaxBytes: parseInteger(

@@ -56,12 +56,23 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "widget-settings",
 ] as const
 
+export const WRITE_COORDINATION_APPLICATION_COLLECTIONS = [
+  "emojis",
+] as const
+
 export type WriteCoordinationResourceKind =
   typeof WRITE_COORDINATION_RESOURCE_KINDS[number]
 export type WriteCoordinationGuildCollection =
   typeof WRITE_COORDINATION_GUILD_COLLECTIONS[number]
+export type WriteCoordinationApplicationCollection =
+  typeof WRITE_COORDINATION_APPLICATION_COLLECTIONS[number]
 
 export type WriteCoordinationTarget =
+  | {
+    applicationId: string
+    collection: WriteCoordinationApplicationCollection
+    kind: "application-collection"
+  }
   | {
     id: string
     kind: WriteCoordinationResourceKind
@@ -233,6 +244,25 @@ function parseTarget(value: unknown): WriteCoordinationTarget {
     throw new WriteCoordinationStateError("Discord write target is not an object")
   }
   const record = value as Record<string, unknown>
+  if (record.kind === "application-collection") {
+    if (
+      !exactKeys(record, ["applicationId", "collection", "kind"])
+      || typeof record.applicationId !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+      || typeof record.collection !== "string"
+      || !(WRITE_COORDINATION_APPLICATION_COLLECTIONS as readonly string[])
+        .includes(record.collection)
+    ) {
+      throw new WriteCoordinationStateError(
+        "Discord application-collection write target is invalid",
+      )
+    }
+    return {
+      applicationId: record.applicationId,
+      collection: record.collection as WriteCoordinationApplicationCollection,
+      kind: "application-collection",
+    }
+  }
   if (record.kind === "guild-collection") {
     if (
       !exactKeys(record, ["collection", "guildId", "kind"])
@@ -266,9 +296,13 @@ function parseTarget(value: unknown): WriteCoordinationTarget {
 }
 
 function targetDescriptor(target: WriteCoordinationTarget): string {
-  return target.kind === "guild-collection"
-    ? `guild-collection\0${target.guildId}\0${target.collection}`
-    : `resource\0${target.kind}\0${target.id}`
+  if (target.kind === "application-collection") {
+    return `application-collection\0${target.applicationId}\0${target.collection}`
+  }
+  if (target.kind === "guild-collection") {
+    return `guild-collection\0${target.guildId}\0${target.collection}`
+  }
+  return `resource\0${target.kind}\0${target.id}`
 }
 
 function compareCanonicalText(left: string, right: string): number {
@@ -292,7 +326,20 @@ function normalizeTargets(
   const byDescriptor = new Map<string, WriteCoordinationTarget>()
   for (const value of values) {
     const target = parseTarget(value)
+    if (
+      (kind === "application-emoji-change")
+        !== (target.kind === "application-collection")
+    ) {
+      throw new WriteCoordinationStateError(
+        "Discord write coordination target scope does not match its operation",
+      )
+    }
     byDescriptor.set(targetDescriptor(target), target)
+  }
+  if (kind === "application-emoji-change" && byDescriptor.size !== 1) {
+    throw new WriteCoordinationStateError(
+      "Discord application emoji coordination requires one application collection target",
+    )
   }
   return [...byDescriptor.entries()]
     .sort(([left], [right]) => compareCanonicalText(left, right))
@@ -436,6 +483,17 @@ export function writeGuildCollectionTarget(
   guildId: string,
 ): WriteCoordinationTarget {
   return parseTarget({ collection, guildId, kind: "guild-collection" })
+}
+
+export function writeApplicationCollectionTarget(
+  collection: WriteCoordinationApplicationCollection,
+  applicationId: string,
+): WriteCoordinationTarget {
+  return parseTarget({
+    applicationId,
+    collection,
+    kind: "application-collection",
+  })
 }
 
 export function writeCoordinationTargetHash(target: WriteCoordinationTarget): string {
@@ -929,10 +987,19 @@ export class FileWriteCoordinator implements WriteCoordinator {
 
   async #receiptEvidence(record: WriteClaimRecord): Promise<ReceiptEvidence> {
     try {
-      const receipt = await this.#operationStore.get(
-        record.kind,
-        record.operationKeyHash,
-      )
+      if (
+        record.kind === "application-emoji-change"
+        && !this.#operationStore.getApplication
+      ) return "unreadable"
+      const receipt = record.kind === "application-emoji-change"
+        ? await this.#operationStore.getApplication!(
+          record.kind,
+          record.operationKeyHash,
+        )
+        : await this.#operationStore.get(
+          record.kind,
+          record.operationKeyHash,
+        )
       if (!receipt) return "missing"
       if (receipt.planDigest !== record.planDigest) return "different-plan"
       return receipt.status

@@ -12,6 +12,10 @@ import type { DiscordChannel, DiscordGuild } from "./types.js"
 export interface PolicyDescription {
   administrationEnabled: boolean
   administrationGuildIds: string[]
+  applicationEmojiAuditEnabled: boolean
+  applicationEmojiChangesEnabled: boolean
+  applicationEmojiCreationEnabled: boolean
+  applicationEmojiRootCount: number
   announcementCrosspostChannelIds: string[]
   announcementCrosspostsEnabled: boolean
   announcementSubscriptionAuditEnabled: boolean
@@ -179,6 +183,8 @@ export class ScopePolicy {
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
+  readonly #allowApplicationEmojiAudit: boolean
+  readonly #allowApplicationEmojiChanges: boolean
   readonly #allowAnnouncementCrossposts: boolean
   readonly #allowAnnouncementSubscriptionAudit: boolean
   readonly #allowAnnouncementSubscriptionChanges: boolean
@@ -262,6 +268,7 @@ export class ScopePolicy {
   readonly #attachmentChannelIds: ReadonlySet<string>
   readonly #attachmentMaxBytes: number
   readonly #attachmentRoots: readonly string[]
+  readonly #applicationEmojiRoots: readonly string[]
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
@@ -341,6 +348,8 @@ export class ScopePolicy {
   > & Partial<Pick<
     ConnectorConfig,
     | "allowAnnouncementCrossposts"
+    | "allowApplicationEmojiAudit"
+    | "allowApplicationEmojiChanges"
     | "allowAnnouncementSubscriptionAudit"
     | "allowAnnouncementSubscriptionChanges"
     | "allowAttachments"
@@ -425,6 +434,7 @@ export class ScopePolicy {
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
     | "attachmentRoots"
+    | "applicationEmojiRoots"
     | "automodAlertChannelIds"
     | "automodGuildIds"
     | "banAuditGuildIds"
@@ -481,6 +491,8 @@ export class ScopePolicy {
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
+    this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
+    this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
     this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
     this.#allowAnnouncementSubscriptionAudit = config.allowAnnouncementSubscriptionAudit
       ?? false
@@ -569,6 +581,7 @@ export class ScopePolicy {
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
     this.#attachmentRoots = config.attachmentRoots ?? []
+    this.#applicationEmojiRoots = config.applicationEmojiRoots ?? []
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
@@ -637,6 +650,13 @@ export class ScopePolicy {
     return {
       administrationEnabled: this.#allowAdministration && this.#adminGuildIds.size > 0,
       administrationGuildIds: [...this.#adminGuildIds].sort(),
+      applicationEmojiAuditEnabled: this.#allowApplicationEmojiAudit,
+      applicationEmojiChangesEnabled: this.#allowApplicationEmojiAudit
+        && this.#allowApplicationEmojiChanges,
+      applicationEmojiCreationEnabled: this.#allowApplicationEmojiAudit
+        && this.#allowApplicationEmojiChanges
+        && this.#applicationEmojiRoots.length > 0,
+      applicationEmojiRootCount: this.#applicationEmojiRoots.length,
       announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
       announcementCrosspostsEnabled: this.#allowAnnouncementCrossposts
         && this.#announcementCrosspostChannelIds.size > 0,
@@ -1419,6 +1439,19 @@ export class ScopePolicy {
     this.assertGuildExpressionAuditable(guildId)
     if (!this.#allowGuildExpressionChanges) {
       throw new PolicyError("Discord guild expression changes are disabled by connector configuration")
+    }
+  }
+
+  assertApplicationEmojiAuditable(): void {
+    if (!this.#allowApplicationEmojiAudit) {
+      throw new PolicyError("Discord application emoji audit is disabled by connector configuration")
+    }
+  }
+
+  assertApplicationEmojiChangeAllowed(): void {
+    this.assertApplicationEmojiAuditable()
+    if (!this.#allowApplicationEmojiChanges) {
+      throw new PolicyError("Discord application emoji changes are disabled by connector configuration")
     }
   }
 

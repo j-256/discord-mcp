@@ -76,6 +76,8 @@ async function writeConfig(
 test("configuration document is strict, typed, canonical, and non-secret", () => {
   const valid = document({
     capabilities: {
+      applicationEmojiAudit: true,
+      applicationEmojiChanges: true,
       attachments: true,
       interactions: true,
     },
@@ -92,6 +94,9 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     scopes: {
       attachmentChannelIds: [CHANNEL_ID],
       interactionChannelIds: [CHANNEL_ID],
+    },
+    storage: {
+      applicationEmojiRoots: ["/srv/discord-application-emojis"],
     },
   })
   assert.deepEqual(parseConnectorConfigDocument(valid, valid.name), valid)
@@ -153,6 +158,8 @@ test("configuration activation allows only referenced secrets and maps typed pol
   const before = { ...source }
   const configured = document({
     capabilities: {
+      applicationEmojiAudit: true,
+      applicationEmojiChanges: true,
       attachments: true,
       interactions: true,
     },
@@ -165,6 +172,9 @@ test("configuration activation allows only referenced secrets and maps typed pol
       attachmentChannelIds: [CHANNEL_ID],
       interactionChannelIds: [CHANNEL_ID],
     },
+    storage: {
+      applicationEmojiRoots: ["/srv/discord-application-emojis"],
+    },
   })
 
   const environment = activateConnectorConfigDocument(configured, source)
@@ -174,6 +184,12 @@ test("configuration activation allows only referenced secrets and maps typed pol
   assert.equal(environment[ENVIRONMENT_NAMES.token], TOKEN)
   assert.equal(environment[ENVIRONMENT_NAMES.otelHeaders], "x-api-key=telemetry-secret")
   assert.equal(environment[ENVIRONMENT_NAMES.allowAttachments], "true")
+  assert.equal(environment[ENVIRONMENT_NAMES.allowApplicationEmojiAudit], "true")
+  assert.equal(environment[ENVIRONMENT_NAMES.allowApplicationEmojiChanges], "true")
+  assert.equal(
+    environment[ENVIRONMENT_NAMES.applicationEmojiRoots],
+    '["/srv/discord-application-emojis"]',
+  )
   assert.equal(environment[ENVIRONMENT_NAMES.attachmentChannelIds], CHANNEL_ID)
   assert.equal(environment[ENVIRONMENT_NAMES.attachmentMaxBytes], "1024")
   assert.equal(environment[ENVIRONMENT_NAMES.allowedGuildIds], GUILD_ID)

@@ -28,6 +28,7 @@ export const OPERATION_KEY_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
 export const OPERATION_KINDS = [
   "announcement-crosspost",
   "announcement-subscription",
+  "application-emoji-change",
   "attachment-message",
   "automod-change",
   "channel-clone",
@@ -72,6 +73,8 @@ export const OPERATION_KINDS = [
 ] as const
 
 export type OperationKind = typeof OPERATION_KINDS[number]
+export type ApplicationOperationKind = "application-emoji-change"
+export type GuildOperationKind = Exclude<OperationKind, ApplicationOperationKind>
 export type OperationReceiptStatus = "completed" | "failed" | "pending" | "uncertain"
 export type OperationVerification = "drift" | "match" | null
 
@@ -79,7 +82,21 @@ export interface OperationReceipt {
   activityId: string
   error: string | null
   guildId: string
-  kind: OperationKind
+  kind: GuildOperationKind
+  operationKeyHash: string
+  planDigest: string
+  resourceId: string | null
+  schemaVersion: 1
+  status: OperationReceiptStatus
+  timestamp: string
+  verification: OperationVerification
+}
+
+export interface ApplicationOperationReceipt {
+  activityId: string
+  applicationId: string
+  error: string | null
+  kind: ApplicationOperationKind
   operationKeyHash: string
   planDigest: string
   resourceId: string | null
@@ -96,15 +113,57 @@ export interface OperationReservation {
 
 export interface OperationStore {
   finish(receipt: OperationReceipt): Promise<void>
-  get(kind: OperationKind, operationKeyHash: string): Promise<OperationReceipt | undefined>
+  finishApplication?(receipt: ApplicationOperationReceipt): Promise<void>
+  get(kind: GuildOperationKind, operationKeyHash: string): Promise<OperationReceipt | undefined>
+  getApplication?(
+    kind: ApplicationOperationKind,
+    operationKeyHash: string,
+  ): Promise<ApplicationOperationReceipt | undefined>
   reserve(receipt: OperationReceipt): Promise<OperationReservation>
+  reserveApplication?(
+    receipt: ApplicationOperationReceipt,
+  ): Promise<ApplicationOperationReservation>
 }
+
+export interface ApplicationOperationReservation {
+  created: boolean
+  receipt: ApplicationOperationReceipt
+}
+
+export interface ApplicationOperationStore extends OperationStore {
+  finishApplication(receipt: ApplicationOperationReceipt): Promise<void>
+  getApplication(
+    kind: ApplicationOperationKind,
+    operationKeyHash: string,
+  ): Promise<ApplicationOperationReceipt | undefined>
+  reserveApplication(
+    receipt: ApplicationOperationReceipt,
+  ): Promise<ApplicationOperationReservation>
+}
+
+const GUILD_OPERATION_KINDS = OPERATION_KINDS.filter(
+  (kind): kind is GuildOperationKind => kind !== "application-emoji-change",
+)
 
 const OPERATION_RECEIPT_SCHEMA_VERSION = 1
 const RECEIPT_KEYS = [
   "activityId",
   "error",
   "guildId",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "resourceId",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+] as const
+
+const APPLICATION_RECEIPT_KEYS = [
+  "activityId",
+  "applicationId",
+  "error",
   "kind",
   "operationKeyHash",
   "planDigest",
@@ -133,7 +192,7 @@ function parseReceipt(value: unknown): OperationReceipt {
   if (
     Object.keys(record).sort().join("\0") !== [...RECEIPT_KEYS].sort().join("\0")
     || record.schemaVersion !== OPERATION_RECEIPT_SCHEMA_VERSION
-    || !OPERATION_KINDS.includes(record.kind as OperationKind)
+    || !GUILD_OPERATION_KINDS.includes(record.kind as GuildOperationKind)
     || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
     || typeof record.activityId !== "string"
     || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.activityId)
@@ -198,7 +257,90 @@ function parseReceipt(value: unknown): OperationReceipt {
     activityId: record.activityId,
     error: record.error,
     guildId: record.guildId,
-    kind: record.kind as OperationKind,
+    kind: record.kind as GuildOperationKind,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    resourceId: record.resourceId,
+    schemaVersion: OPERATION_RECEIPT_SCHEMA_VERSION,
+    status: record.status as OperationReceiptStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as OperationVerification,
+  }
+}
+
+function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new OperationStoreError("Discord application operation receipt is not an object")
+  }
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).sort().join("\0")
+      !== [...APPLICATION_RECEIPT_KEYS].sort().join("\0")
+    || record.schemaVersion !== OPERATION_RECEIPT_SCHEMA_VERSION
+    || record.kind !== "application-emoji-change"
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.activityId !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.activityId)
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.resourceId === null || (
+      typeof record.resourceId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.resourceId)
+    ))
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || !validTimestamp(record.timestamp)
+  ) {
+    throw new OperationStoreError("Discord application operation receipt has an invalid shape")
+  }
+  if (record.status === "pending" && (
+    record.error !== null
+    || record.resourceId !== null
+    || record.verification !== null
+  )) {
+    throw new OperationStoreError(
+      "Pending Discord application operation receipt contains terminal state",
+    )
+  }
+  if (record.status === "completed" && (
+    record.error !== null
+    || record.resourceId === null
+    || !["drift", "match"].includes(String(record.verification))
+  )) {
+    throw new OperationStoreError(
+      "Completed Discord application operation receipt lacks verified state",
+    )
+  }
+  if (record.status === "failed" && (
+    record.error === null
+    || record.resourceId !== null
+  )) {
+    throw new OperationStoreError(
+      "Failed Discord application operation receipt has invalid outcome state",
+    )
+  }
+  if (record.status === "uncertain" && record.error === null) {
+    throw new OperationStoreError(
+      "Uncertain Discord application operation receipt lacks an error category",
+    )
+  }
+  if (record.status !== "completed" && record.verification !== null) {
+    throw new OperationStoreError(
+      "Incomplete Discord application operation receipt contains verification state",
+    )
+  }
+  return {
+    activityId: record.activityId,
+    applicationId: record.applicationId,
+    error: record.error,
+    kind: "application-emoji-change",
     operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,
     resourceId: record.resourceId,
@@ -239,6 +381,43 @@ function sameTerminal(left: OperationReceipt, right: OperationReceipt): boolean 
     && left.verification === right.verification
 }
 
+function assertApplicationIdentity(
+  pending: ApplicationOperationReceipt,
+  terminal: ApplicationOperationReceipt,
+): void {
+  if (
+    pending.activityId !== terminal.activityId
+    || pending.applicationId !== terminal.applicationId
+    || pending.kind !== terminal.kind
+    || pending.operationKeyHash !== terminal.operationKeyHash
+    || pending.planDigest !== terminal.planDigest
+  ) {
+    throw new OperationStoreError(
+      "Discord application operation terminal receipt changed reserved identity",
+    )
+  }
+  if (terminal.status === "pending") {
+    throw new OperationStoreError(
+      "Discord application operation terminal receipt is still pending",
+    )
+  }
+}
+
+function sameApplicationTerminal(
+  left: ApplicationOperationReceipt,
+  right: ApplicationOperationReceipt,
+): boolean {
+  return left.activityId === right.activityId
+    && left.applicationId === right.applicationId
+    && left.error === right.error
+    && left.kind === right.kind
+    && left.operationKeyHash === right.operationKeyHash
+    && left.planDigest === right.planDigest
+    && left.resourceId === right.resourceId
+    && left.status === right.status
+    && left.verification === right.verification
+}
+
 export function operationKeyHash(operationKey: string): string {
   if (
     typeof operationKey !== "string"
@@ -267,7 +446,10 @@ function receiptStem(kind: OperationKind, hash: string): string {
   return `${kind}-${hash.slice("sha256:".length)}`
 }
 
-async function readReceiptFile(file: string): Promise<OperationReceipt | undefined> {
+async function readReceiptFile<T = OperationReceipt>(
+  file: string,
+  parser: (value: unknown) => T = parseReceipt as (value: unknown) => T,
+): Promise<T | undefined> {
   let before: BigIntStats
   try {
     before = await lstat(file, { bigint: true })
@@ -330,7 +512,7 @@ async function readReceiptFile(file: string): Promise<OperationReceipt | undefin
       throw new OperationStoreError("Discord operation receipt is not one complete record")
     }
     try {
-      return parseReceipt(JSON.parse(lines[0]) as unknown)
+      return parser(JSON.parse(lines[0]) as unknown)
     } catch (error) {
       if (error instanceof OperationStoreError) throw error
       throw new OperationStoreError("Discord operation receipt is not valid JSON", { cause: error })
@@ -367,7 +549,10 @@ async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-async function writeExclusive(file: string, receipt: OperationReceipt): Promise<boolean> {
+async function writeExclusive(
+  file: string,
+  receipt: OperationReceipt | ApplicationOperationReceipt,
+): Promise<boolean> {
   let handle
   try {
     handle = await open(file, "wx", 0o600)
@@ -397,7 +582,7 @@ async function publishReceiptDirectory(
   parent: string,
   target: string,
   receiptFile: string,
-  receipt: OperationReceipt,
+  receipt: OperationReceipt | ApplicationOperationReceipt,
 ): Promise<boolean> {
   let staging: string
   try {
@@ -448,19 +633,20 @@ async function assertPrivateDirectory(
   return true
 }
 
-async function readTerminalReceipt(
+async function readTerminalReceipt<T = OperationReceipt>(
   directory: string,
   receiptFile: string,
-): Promise<OperationReceipt | undefined> {
+  parser: (value: unknown) => T = parseReceipt as (value: unknown) => T,
+): Promise<T | undefined> {
   if (!await assertPrivateDirectory(directory, true)) return undefined
-  const receipt = await readReceiptFile(join(directory, receiptFile))
+  const receipt = await readReceiptFile(join(directory, receiptFile), parser)
   if (!receipt) {
     throw new OperationStoreError("Discord operation terminal directory has no receipt")
   }
   return receipt
 }
 
-export class FileOperationStore implements OperationStore {
+export class FileOperationStore implements ApplicationOperationStore {
   readonly #directory: string
 
   constructor(directory: string) {
@@ -490,7 +676,7 @@ export class FileOperationStore implements OperationStore {
   }
 
   async get(
-    kind: OperationKind,
+    kind: GuildOperationKind,
     hash: string,
   ): Promise<OperationReceipt | undefined> {
     if (!await this.#assertDirectory(false)) return undefined
@@ -563,6 +749,114 @@ export class FileOperationStore implements OperationStore {
     assertIdentity(pending, existing)
     if (!sameTerminal(existing, normalized)) {
       throw new OperationStoreError("Discord operation already has a different terminal receipt")
+    }
+  }
+
+  async getApplication(
+    kind: ApplicationOperationKind,
+    hash: string,
+  ): Promise<ApplicationOperationReceipt | undefined> {
+    if (!await this.#assertDirectory(false)) return undefined
+    const paths = this.#paths(kind, hash)
+    if (!await assertPrivateDirectory(paths.operation, true)) return undefined
+    const [pending, terminal] = await Promise.all([
+      readReceiptFile(paths.pending, parseApplicationReceipt),
+      readTerminalReceipt(
+        paths.terminalDirectory,
+        "receipt.json",
+        parseApplicationReceipt,
+      ),
+    ])
+    if (!pending) {
+      throw new OperationStoreError(
+        "Discord application operation directory has no reservation",
+      )
+    }
+    if (pending.status !== "pending") {
+      throw new OperationStoreError(
+        "Discord application operation reservation is not pending",
+      )
+    }
+    if (!terminal) return pending
+    assertApplicationIdentity(pending, terminal)
+    return terminal
+  }
+
+  async reserveApplication(
+    receipt: ApplicationOperationReceipt,
+  ): Promise<ApplicationOperationReservation> {
+    const normalized = parseApplicationReceipt(receipt)
+    if (normalized.status !== "pending") {
+      throw new OperationStoreError(
+        "Discord application operation reservation must be pending",
+      )
+    }
+    await this.#assertDirectory(true)
+    const paths = this.#paths(normalized.kind, normalized.operationKeyHash)
+    const created = await publishReceiptDirectory(
+      this.#directory,
+      paths.operation,
+      "pending.json",
+      normalized,
+    )
+    if (created) return { created: true, receipt: normalized }
+    const existing = await this.getApplication(
+      normalized.kind,
+      normalized.operationKeyHash,
+    )
+    if (!existing) {
+      throw new OperationStoreError(
+        "Discord application operation reservation disappeared",
+      )
+    }
+    return { created: false, receipt: existing }
+  }
+
+  async finishApplication(receipt: ApplicationOperationReceipt): Promise<void> {
+    const normalized = parseApplicationReceipt(receipt)
+    if (normalized.status === "pending") {
+      throw new OperationStoreError(
+        "Discord application operation terminal receipt cannot be pending",
+      )
+    }
+    await this.#assertDirectory(true)
+    const paths = this.#paths(normalized.kind, normalized.operationKeyHash)
+    if (!await assertPrivateDirectory(paths.operation, true)) {
+      throw new OperationStoreError(
+        "Discord application operation has no reservation",
+      )
+    }
+    const pending = await readReceiptFile(
+      paths.pending,
+      parseApplicationReceipt,
+    )
+    if (!pending) {
+      throw new OperationStoreError(
+        "Discord application operation has no reservation",
+      )
+    }
+    assertApplicationIdentity(pending, normalized)
+    if (await publishReceiptDirectory(
+      paths.operation,
+      paths.terminalDirectory,
+      "receipt.json",
+      normalized,
+    )) return
+    const existing = await readTerminalReceipt(
+      paths.terminalDirectory,
+      "receipt.json",
+      parseApplicationReceipt,
+    )
+    if (!existing) {
+      throw new OperationStoreError(
+        "Discord application operation terminal receipt disappeared",
+      )
+    }
+    assertApplicationIdentity(pending, existing)
+    if (!sameApplicationTerminal(existing, normalized)) {
+      throw new OperationStoreError(
+        "Discord application operation already has a different terminal receipt",
+      )
     }
   }
 }

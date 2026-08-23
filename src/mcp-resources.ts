@@ -263,6 +263,8 @@ export function registerDiscordResources(
           "",
           "Guild emoji and sticker inventory requires a separate exact guild allowlist and returns bounded stable metadata plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. CDN URLs, image bytes, uploader profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local files from dedicated roots, detects the actual container format and animation state, records dimensions where encoded, enforces byte limits plus sticker dimensions and duration, requires fresh VERIFIED or PARTNERED feature evidence for Lottie, and binds the file snapshot into the digest. Every create, update, or delete requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Name collisions, missing role references, managed emoji mutation, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, retries, rolls back, or persists expression content.",
           "",
+          "Application emoji inventory is bound to the verified pinned current application, accepts no caller-supplied application ID, and projects image bytes, CDN URLs, roles, uploader identities and profiles, and unknown raw fields out. Changes require separate audit and change gates. Creation accepts only bounded canonical owned local image files from dedicated roots and binds the stable file snapshot into the keyed plan. Every create, rename, or delete requires a fresh matching complete-inventory plan, signed approval, an application-wide durable claim, one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Deletion also requires explicit global-impact acknowledgement because application emojis span every installation. Name collisions, capacity, incomplete evidence, managed state, and same-application uncertain outcomes fail closed. Discord documents no audit-log reason support for these routes, and no operation accepts a URL or base64 payload, retries, rolls back, or persists names, paths, image data, or uploader identity.",
+          "",
           "Soundboard inventory requires a separate feature gate, and guild inventory requires an exact guild allowlist plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. Audio bytes, CDN URLs, creator profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local MP3 or Ogg files from dedicated roots, validates container structure and duration, and binds the stable file snapshot into the keyed plan. Every create, metadata update, or delete requires fresh matching evidence, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Normalized-name collisions, missing custom emoji references, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, plays audio, retries, rolls back, or persists sound content.",
           "",
           "AutoMod inventory requires a separate exact guild allowlist. Bounded list results expose policy-entry counts and reference health without policy strings; exact lookup returns the projected policy transiently for deliberate review. Action-execution content, matched content, matched keywords, and unknown raw fields are never exposed or persisted. Changes require an additional feature gate, complete MANAGE_GUILD evidence, MODERATE_MEMBERS for timeout actions, strict trigger-action compatibility, exact role and channel references, and separately allowlisted visible text or announcement channels for alerts. New rules are always disabled; policy updates and deletion require a disabled rule; enabling and disabling are separate reviewed actions. Every change requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact state or absence readback. Same-guild uncertain outcomes fail closed; no operation retries, rolls back, or persists policy names, strings, audit reasons, or raw operation keys.",
@@ -361,6 +363,27 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listDefaultSoundboardSounds({
+        signal: context.mcpReq.signal,
+      }),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.applicationEmojis,
+    MCP_RESOURCE_URIS.applicationEmojis,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded privacy-safe emoji inventory owned by the verified current Discord application. Image bytes, CDN URLs, roles, uploader identities and profiles, and unknown raw fields are omitted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord application emojis",
+    },
+    (uri, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listApplicationEmojis({
         signal: context.mcpReq.signal,
       }),
     ),

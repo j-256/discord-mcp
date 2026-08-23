@@ -55,6 +55,12 @@ export interface ReadGuildExpressionFileOptions {
   roots: readonly string[]
 }
 
+export interface ReadApplicationEmojiFileOptions {
+  filePath: string
+  planKey: Uint8Array
+  roots: readonly string[]
+}
+
 export class GuildExpressionFileError extends Error {
   override name = "GuildExpressionFileError"
 }
@@ -537,8 +543,11 @@ function stickerDetails(bytes: Uint8Array): MediaDetails {
   return details
 }
 
-export async function readGuildExpressionFileSnapshot(
-  options: ReadGuildExpressionFileOptions,
+async function readExpressionFileSnapshot(
+  options: ReadGuildExpressionFileOptions & {
+    description: string
+    digestDomain: string
+  },
 ): Promise<GuildExpressionFileSnapshot> {
   if (options.kind !== "emoji" && options.kind !== "sticker") {
     throw new RangeError("Discord guild expression kind must be emoji or sticker")
@@ -546,8 +555,8 @@ export async function readGuildExpressionFileSnapshot(
   let snapshot: OwnedLocalFileSnapshot
   try {
     snapshot = await readOwnedLocalFileSnapshot({
-      description: `Discord ${options.kind}`,
-      digestDomain: `discord-mcp-guild-expression-${options.kind}.v1`,
+      description: options.description,
+      digestDomain: options.digestDomain,
       filePath: options.filePath,
       maxBytes: options.kind === "emoji"
         ? DISCORD_LIMITS.emojiBytes
@@ -573,4 +582,25 @@ export async function readGuildExpressionFileSnapshot(
       ...details,
     },
   }
+}
+
+export async function readGuildExpressionFileSnapshot(
+  options: ReadGuildExpressionFileOptions,
+): Promise<GuildExpressionFileSnapshot> {
+  return readExpressionFileSnapshot({
+    ...options,
+    description: `Discord ${options.kind}`,
+    digestDomain: `discord-mcp-guild-expression-${options.kind}.v1`,
+  })
+}
+
+export async function readApplicationEmojiFileSnapshot(
+  options: ReadApplicationEmojiFileOptions,
+): Promise<GuildExpressionFileSnapshot> {
+  return readExpressionFileSnapshot({
+    ...options,
+    description: "Discord application emoji",
+    digestDomain: "discord-mcp-application-emoji.v1",
+    kind: "emoji",
+  })
 }

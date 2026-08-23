@@ -4,6 +4,18 @@ import type {
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
 import type {
+  ApplicationEmojiChangeRequest,
+  ApplicationEmojiInventoryResult,
+  ApplicationEmojiLookupResult,
+  ApplicationEmojiPlan,
+  ApplicationEmojiResult,
+  ApplicationEmojiServiceOptions,
+} from "./application-emoji-service.js"
+import {
+  ApplicationEmojiService,
+  normalizeApplicationEmojiChangeRequest,
+} from "./application-emoji-service.js"
+import type {
   AnnouncementCrosspostPlan,
   AnnouncementCrosspostRequest,
   AnnouncementCrosspostResult,
@@ -536,6 +548,7 @@ import {
 } from "./operation-store.js"
 import {
   FileWriteCoordinator,
+  writeApplicationCollectionTarget,
   writeCoordinationDirectory,
   writeGuildCollectionTarget,
   writeResourceTarget,
@@ -559,12 +572,14 @@ export interface DiscordServiceClient {
   addGuildMemberRole: DiscordClient["addGuildMemberRole"]
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
+  createApplicationEmoji: DiscordClient["createApplicationEmoji"]
   crosspostMessage: DiscordClient["crosspostMessage"]
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildAutoModerationRule: DiscordClient["createGuildAutoModerationRule"]
   createGuildChannel: DiscordClient["createGuildChannel"]
   createGuildApplicationCommand: DiscordClient["createGuildApplicationCommand"]
   deleteGuildApplicationCommand: DiscordClient["deleteGuildApplicationCommand"]
+  deleteApplicationEmoji: DiscordClient["deleteApplicationEmoji"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
@@ -603,6 +618,7 @@ export interface DiscordServiceClient {
   editComponentMessage: DiscordClient["editComponentMessage"]
   editMessage: DiscordClient["editMessage"]
   getChannel: DiscordClient["getChannel"]
+  getApplicationEmoji: DiscordClient["getApplicationEmoji"]
   getGuildForumTags: DiscordClient["getGuildForumTags"]
   getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
@@ -631,6 +647,7 @@ export interface DiscordServiceClient {
   getThreadState: DiscordClient["getThreadState"]
   getUser: DiscordClient["getUser"]
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
+  listApplicationEmojis: DiscordClient["listApplicationEmojis"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
@@ -654,6 +671,7 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyApplicationEmoji: DiscordClient["modifyApplicationEmoji"]
   modifyCurrentMemberNickname: DiscordClient["modifyCurrentMemberNickname"]
   modifyGuildMemberNickname: DiscordClient["modifyGuildMemberNickname"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
@@ -707,6 +725,10 @@ export interface ConnectorServiceOptions {
     "clock" | "planKey" | "randomId"
   >
   activityStore?: ActivityStore
+  applicationEmojiOptions?: Pick<
+    ApplicationEmojiServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   announcementCrosspostOptions?: Pick<
     AnnouncementCrosspostServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -988,6 +1010,7 @@ export class ConnectorService {
   readonly #announcementCrosspostService: AnnouncementCrosspostService
   readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
+  readonly #applicationEmojiService: ApplicationEmojiService
   readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
@@ -1067,6 +1090,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.announcementCrosspostOptions,
+    })
+    this.#applicationEmojiService = new ApplicationEmojiService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      fileRoots: options.config.applicationEmojiRoots,
+      operationStore,
+      policy: this.#policy,
+      ...options.applicationEmojiOptions,
     })
     this.#announcementSubscriptionService = new AnnouncementSubscriptionService({
       activityStore: this.#activityStore,
@@ -2401,6 +2432,30 @@ export class ConnectorService {
     return this.#guildExpressionService.list(identity.bot.id, guildId, kind, options)
   }
 
+  async listApplicationEmojis(
+    options: RequestOptions = {},
+  ): Promise<ApplicationEmojiInventoryResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationEmojiService.list(
+      identity.application.id,
+      identity.bot.id,
+      options,
+    )
+  }
+
+  async getApplicationEmoji(
+    emojiId: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEmojiLookupResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationEmojiService.get(
+      identity.application.id,
+      identity.bot.id,
+      emojiId,
+      options,
+    )
+  }
+
   async listAutoModerationRules(
     guildId: string,
     options: RequestOptions = {},
@@ -2694,6 +2749,20 @@ export class ConnectorService {
   ): Promise<GuildExpressionPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#guildExpressionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planApplicationEmojiChange(
+    request: ApplicationEmojiChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEmojiPlan> {
+    normalizeApplicationEmojiChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationEmojiService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -4310,6 +4379,31 @@ export class ConnectorService {
         request.guildId,
       )],
       () => this.#guildExpressionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeApplicationEmojiChange(
+    request: ApplicationEmojiChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEmojiResult> {
+    normalizeApplicationEmojiChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord application emoji plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "application-emoji-change",
+      request.operationKey,
+      planDigest,
+      [writeApplicationCollectionTarget("emojis", identity.application.id)],
+      () => this.#applicationEmojiService.execute(
         identity.application.id,
         identity.bot.id,
         request,

@@ -15,6 +15,14 @@
           "type": "boolean",
           "description": "Enable administration policy"
         },
+        "applicationEmojiAudit": {
+          "type": "boolean",
+          "description": "Enable application emoji audit policy"
+        },
+        "applicationEmojiChanges": {
+          "type": "boolean",
+          "description": "Enable application emoji changes policy"
+        },
         "announcementCrossposts": {
           "type": "boolean",
           "description": "Enable announcement crossposts policy"
@@ -1224,6 +1232,16 @@
       "default": {},
       "type": "object",
       "properties": {
+        "applicationEmojiRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "description": "Owned local roots for application emoji roots"
+        },
         "attachmentRoots": {
           "maxItems": 32,
           "type": "array",
@@ -1287,12 +1305,13 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 51,
+          "maxItems": 52,
           "type": "array",
           "items": {
             "type": "string",
             "enum": [
               "activity",
+              "application-emojis",
               "announcement-crossposts",
               "announcement-subscriptions",
               "attachments",

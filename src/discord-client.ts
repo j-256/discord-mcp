@@ -32,6 +32,7 @@ import {
   type DiscordStaticComponent,
 } from "./component-layout.js"
 import {
+  ApplicationEmojiEvidenceError,
   AutoModerationEvidenceError,
   ChannelMetadataEvidenceError,
   DiscordApiError,
@@ -647,6 +648,22 @@ export interface DiscordGuildEmojiSummary {
   roleIds: string[]
 }
 
+export interface DiscordApplicationEmojiSummary {
+  animated: boolean
+  available: boolean
+  id: string
+  managed: boolean
+  name: string
+  requiresColons: boolean
+  unknownFieldCount: number
+  uploaderProjectedOut: true
+}
+
+export interface DiscordApplicationEmojiInventory {
+  items: DiscordApplicationEmojiSummary[]
+  unknownFieldCount: number
+}
+
 export interface DiscordGuildStickerSummary {
   available: boolean
   creatorUserId: string | null
@@ -1113,6 +1130,16 @@ export interface CreateGuildEmojiInput {
   roleIds: readonly string[]
 }
 
+export interface CreateApplicationEmojiInput {
+  bytes: Uint8Array
+  format: EmojiFileFormat
+  name: string
+}
+
+export interface ModifyApplicationEmojiInput {
+  name: string
+}
+
 export interface ModifyGuildEmojiInput {
   name?: string
   roleIds?: readonly string[]
@@ -1304,6 +1331,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "add_own_reaction",
   "add_thread_member",
   "crosspost_message",
+  "create_application_emoji",
   "create_component_message",
   "create_guild_auto_moderation_rule",
   "create_interaction_response",
@@ -1314,6 +1342,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_guild_template",
   "create_stage_instance",
   "create_webhook",
+  "delete_application_emoji",
   "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
   "delete_guild_soundboard_sound",
@@ -1329,6 +1358,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "edit_component_message",
   "edit_original_interaction_response",
   "follow_announcement_channel",
+  "get_application_emoji",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_profile",
@@ -1344,6 +1374,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_welcome_screen",
   "list_guild_invites",
   "list_guild_integrations",
+  "list_application_emojis",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_guild_emojis",
@@ -1353,6 +1384,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_templates",
   "list_guild_scheduled_event_users",
   "list_reaction_users",
+  "modify_application_emoji",
   "modify_guild_emoji",
   "modify_forum_tags",
   "modify_guild_soundboard_sound",
@@ -1820,6 +1852,17 @@ const ONBOARDING_OPTION_KEYS = [
   "title",
 ] as const
 const ONBOARDING_EMOJI_KEYS = ["animated", "id", "name"] as const
+const APPLICATION_EMOJI_KEYS = [
+  "animated",
+  "available",
+  "id",
+  "managed",
+  "name",
+  "require_colons",
+  "roles",
+  "user",
+] as const
+const APPLICATION_EMOJI_INVENTORY_KEYS = ["items"] as const
 const ONBOARDING_INPUT_KEYS = [
   "defaultChannelIds",
   "enabled",
@@ -3396,6 +3439,61 @@ function projectGuildEmoji(value: unknown): DiscordGuildEmojiSummary {
     throw new GuildExpressionEvidenceError("Discord returned an invalid guild emoji object", {
       cause: error,
     })
+  }
+}
+
+function applicationEmojiEvidenceError(
+  options?: ErrorOptions,
+): ApplicationEmojiEvidenceError {
+  return new ApplicationEmojiEvidenceError(
+    "Discord returned invalid application emoji evidence",
+    options,
+  )
+}
+
+function projectApplicationEmoji(value: unknown): DiscordApplicationEmojiSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw applicationEmojiEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const roles = record.roles
+  const user = record.user
+  if (
+    typeof record.id !== "string"
+    || typeof record.name !== "string"
+    || !Array.isArray(roles)
+    || roles.length !== 0
+    || !user
+    || typeof user !== "object"
+    || Array.isArray(user)
+    || typeof (user as Record<string, unknown>).id !== "string"
+    || !(record.animated === undefined || typeof record.animated === "boolean")
+    || !(record.available === undefined || typeof record.available === "boolean")
+    || !(record.managed === undefined || typeof record.managed === "boolean")
+    || !(record.require_colons === undefined || typeof record.require_colons === "boolean")
+  ) {
+    throw applicationEmojiEvidenceError()
+  }
+  try {
+    assertPositiveSnowflake(record.id, "Discord application emoji ID")
+    assertPositiveSnowflake(
+      (user as Record<string, unknown>).id as string,
+      "Discord application emoji uploader ID",
+    )
+    assertGuildExpressionName(record.name, "emoji")
+  } catch (error) {
+    if (error instanceof ApplicationEmojiEvidenceError) throw error
+    throw applicationEmojiEvidenceError({ cause: error })
+  }
+  return {
+    animated: record.animated === true,
+    available: record.available !== false,
+    id: record.id,
+    managed: record.managed === true,
+    name: record.name,
+    requiresColons: record.require_colons !== false,
+    unknownFieldCount: countUnknownFields(record, APPLICATION_EMOJI_KEYS),
+    uploaderProjectedOut: true,
   }
 }
 
@@ -6352,6 +6450,28 @@ function assertCreateGuildEmojiInput(input: CreateGuildEmojiInput): void {
   assertGuildEmojiRoleIds(input.roleIds)
 }
 
+function assertCreateApplicationEmojiInput(input: CreateApplicationEmojiInput): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord application emoji creation input must be an object")
+  }
+  assertGuildExpressionName(input.name, "emoji")
+  assertGuildExpressionBytes(
+    input.bytes,
+    DISCORD_LIMITS.emojiBytes,
+    "emoji",
+  )
+  if (!Object.hasOwn(EMOJI_FORMAT_MEDIA_TYPES, input.format)) {
+    throw new RangeError("Discord application emoji format is unsupported")
+  }
+}
+
+function assertModifyApplicationEmojiInput(input: ModifyApplicationEmojiInput): void {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RangeError("Discord application emoji update input must be an object")
+  }
+  assertGuildExpressionName(input.name, "emoji")
+}
+
 function assertModifyGuildEmojiInput(input: ModifyGuildEmojiInput): void {
   if (
     !input
@@ -8297,6 +8417,106 @@ export class DiscordClient {
       { ...options, suppressFailureCause: true },
     )
     return projectGuildRoleMemberCounts(response)
+  }
+
+  async listApplicationEmojis(
+    applicationId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEmojiInventory> {
+    assertPositiveSnowflake(applicationId, "Discord application emoji application ID")
+    const response = await this.#request<unknown>(
+      "list_application_emojis",
+      `/applications/${applicationId}/emojis`,
+      options,
+    )
+    if (!response || typeof response !== "object" || Array.isArray(response)) {
+      throw applicationEmojiEvidenceError()
+    }
+    const record = response as Record<string, unknown>
+    if (
+      !Array.isArray(record.items)
+      || record.items.length > DISCORD_LIMITS.applicationEmojis
+    ) {
+      throw applicationEmojiEvidenceError()
+    }
+    return {
+      items: record.items.map(projectApplicationEmoji),
+      unknownFieldCount: countUnknownFields(
+        record,
+        APPLICATION_EMOJI_INVENTORY_KEYS,
+      ),
+    }
+  }
+
+  async getApplicationEmoji(
+    applicationId: string,
+    emojiId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEmojiSummary> {
+    assertPositiveSnowflake(applicationId, "Discord application emoji application ID")
+    assertPositiveSnowflake(emojiId, "Discord application emoji ID")
+    const response = await this.#request<unknown>(
+      "get_application_emoji",
+      `/applications/${applicationId}/emojis/${emojiId}`,
+      options,
+    )
+    return projectApplicationEmoji(response)
+  }
+
+  async createApplicationEmoji(
+    applicationId: string,
+    input: CreateApplicationEmojiInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEmojiSummary> {
+    assertPositiveSnowflake(applicationId, "Discord application emoji application ID")
+    assertCreateApplicationEmojiInput(input)
+    const mediaType = EMOJI_FORMAT_MEDIA_TYPES[input.format]
+    const image = `data:${mediaType};base64,${Buffer.from(input.bytes).toString("base64")}`
+    const response = await this.#request<unknown>(
+      "create_application_emoji",
+      `/applications/${applicationId}/emojis`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: { image, name: input.name },
+      },
+    )
+    return projectApplicationEmoji(response)
+  }
+
+  async modifyApplicationEmoji(
+    applicationId: string,
+    emojiId: string,
+    input: ModifyApplicationEmojiInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEmojiSummary> {
+    assertPositiveSnowflake(applicationId, "Discord application emoji application ID")
+    assertPositiveSnowflake(emojiId, "Discord application emoji ID")
+    assertModifyApplicationEmojiInput(input)
+    const response = await this.#request<unknown>(
+      "modify_application_emoji",
+      `/applications/${applicationId}/emojis/${emojiId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: { name: input.name },
+      },
+    )
+    return projectApplicationEmoji(response)
+  }
+
+  async deleteApplicationEmoji(
+    applicationId: string,
+    emojiId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(applicationId, "Discord application emoji application ID")
+    assertPositiveSnowflake(emojiId, "Discord application emoji ID")
+    await this.#request<void>(
+      "delete_application_emoji",
+      `/applications/${applicationId}/emojis/${emojiId}`,
+      { ...options, automaticRateLimitRetry: false },
+    )
   }
 
   async listGuildEmojis(
