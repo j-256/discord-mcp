@@ -92,6 +92,9 @@ function status(
       channelCreationGuildIds: [],
       channelMetadataChangesEnabled: false,
       channelMetadataIds: [],
+      channelOrderingAuditEnabled: false,
+      channelOrderingChangesEnabled: false,
+      channelOrderingGuildIds: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
       forumPostChannelIds: [],
@@ -231,6 +234,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    auditChannelOrder: unexpected,
     auditForumTags: unexpected,
     auditRoleOrder: unexpected,
     executeAnnouncementCrosspost: unexpected,
@@ -315,6 +319,7 @@ function toolService(): DiscordToolService {
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelOrder: unexpected,
     executeChannelMetadataChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
@@ -359,6 +364,7 @@ function toolService(): DiscordToolService {
     planComponentMessage: unexpected,
     planChannelCreation: unexpected,
     planChannelMetadataChange: unexpected,
+    planChannelOrder: unexpected,
     planChannelPermissionOverwrite: unexpected,
     planForumPost: unexpected,
     planThreadCreation: unexpected,
@@ -2193,6 +2199,50 @@ test("doctor and setup separate role-order audit from reviewed changes", async (
   }
 })
 
+test("doctor and setup separate channel-order audit from reviewed changes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
+    DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelOrderingAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact guilds/)
+  assert.match(audit?.summary || "", /obfuscation-safe Gateway layout/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /signed approval/)
+  assert.match(changes?.summary || "", /newer complete Gateway verification/)
+  assert.match(omitted.warnings.join("\n"), /channel-ordering toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT",
+    "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES",
+    "DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
 test("doctor and setup explain reviewed member-role scope without Discord writes", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
@@ -3036,6 +3086,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_automod_change",
     "review_channel_creation",
     "review_channel_metadata_change",
+    "review_channel_order",
     "review_channel_permission_overwrite",
     "review_forum_post",
     "review_forum_tag_change",
@@ -3090,6 +3141,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/webhooks",
     "discord://guilds/{guildId}/automod-rules",
     "discord://guilds/{guildId}/bans/{userId}",
+    "discord://guilds/{guildId}/channel-order",
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
     "discord://guilds/{guildId}/emojis",
@@ -3118,6 +3170,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_announcement_subscription",
     "execute_automod_change",
     "execute_channel_metadata_change",
+    "execute_channel_order",
     "execute_channel_permission_overwrite",
     "execute_component_message",
     "execute_forum_tag_change",
@@ -3150,6 +3203,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
+  assert.equal(report.readOnlyTools.includes("audit_channel_order"), true)
+  assert.equal(report.readOnlyTools.includes("plan_channel_order"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("audit_forum_tags"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_tag_change"), true)

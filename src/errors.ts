@@ -267,6 +267,46 @@ export class ChannelMetadataEvidenceError extends Error {
   override name = "ChannelMetadataEvidenceError"
 }
 
+export class ChannelOrderingPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord channel layout does not match the reviewed ordering plan")
+    this.name = "ChannelOrderingPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelOrderingOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord channel-ordering operation key has already been reserved")
+    this.name = "ChannelOrderingOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelOrderingExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelOrderingExecutionError"
+    this.result = result
+  }
+}
+
+export class ChannelOrderingEvidenceError extends Error {
+  override name = "ChannelOrderingEvidenceError"
+}
+
+export class ChannelOrderingVerificationTimeoutError extends Error {
+  override name = "ChannelOrderingVerificationTimeoutError"
+}
+
 export class ForumTagPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

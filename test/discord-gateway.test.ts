@@ -19,6 +19,7 @@ import { GatewayEventStore } from "../src/gateway-events.js"
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "100000000000000002"
 const GUILD_ID = "200000000000000001"
+const ORDERING_GUILD_ID = "200000000000000002"
 const CHANNEL_ID = "300000000000000001"
 const MESSAGE_ID = "400000000000000001"
 const TOKEN = "test-discord-token"
@@ -342,14 +343,14 @@ test("Layout-only Gateway requests only GUILDS and ingests a content-free seed",
     config: {
       allowedChannelIds: new Set(),
       allowedGuildIds: new Set([GUILD_ID]),
+      allowChannelOrderingAudit: true,
       allowGateway: false,
-      allowNativeInteractions: true,
+      channelOrderingGuildIds: new Set([GUILD_ID]),
       expectedBotId: BOT_ID,
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
     eventStore,
-    interactionHandler: { ingestInteraction() {} },
     random: () => 0,
     scheduler,
     webSocketFactory() {
@@ -390,6 +391,26 @@ test("Layout-only Gateway requests only GUILDS and ingests a content-free seed",
   assert.deepEqual(gateway.listEvents().events, [])
   assert.doesNotMatch(JSON.stringify(gateway.getChannelLayout(GUILD_ID)), new RegExp(TOKEN))
   await gateway.stop()
+})
+
+test("Gateway layout scope unions event-feed and channel-order guilds", () => {
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    config: {
+      allowedChannelIds: new Set(),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowChannelOrderingAudit: true,
+      allowGateway: true,
+      channelOrderingGuildIds: new Set([ORDERING_GUILD_ID]),
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+  })
+
+  assert.equal(gateway.getChannelLayoutStatus().guilds.scoped, 2)
+  assert.equal(gateway.getChannelLayout(GUILD_ID).state, "pending")
+  assert.equal(gateway.getChannelLayout(ORDERING_GUILD_ID).state, "pending")
 })
 
 test("Gateway accepts events only after READY identity validation and drops content", async () => {

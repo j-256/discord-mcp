@@ -58,7 +58,10 @@ export interface DiscordGatewayOptions {
     | "expectedBotId"
     | "gatewayEventBufferSize"
     | "token"
-  > & Partial<Pick<ConnectorConfig, "allowNativeInteractions">>
+  > & Partial<Pick<
+    ConnectorConfig,
+    "allowChannelOrderingAudit" | "allowNativeInteractions" | "channelOrderingGuildIds"
+  >>
   eventStore?: GatewayEventStore
   interactionHandler?: GatewayInteractionHandler
   logger?: (message: string) => void
@@ -253,7 +256,12 @@ export class DiscordGateway implements GatewayRuntime {
       )
     }
     const connectionEnabled = options.config.allowGateway
+      || options.config.allowChannelOrderingAudit
       || options.config.allowNativeInteractions === true
+    const layoutGuildIds = new Set(options.config.channelOrderingGuildIds ?? [])
+    if (options.config.allowGateway) {
+      for (const guildId of options.config.allowedGuildIds) layoutGuildIds.add(guildId)
+    }
     this.#applicationId = options.applicationId
     this.#botId = botId
     this.#clock = options.clock || Date.now
@@ -263,10 +271,12 @@ export class DiscordGateway implements GatewayRuntime {
       bufferSize: options.config.gatewayEventBufferSize,
       enabled: connectionEnabled,
       eventFeedEnabled: options.config.allowGateway,
+      layoutGuildIds,
     })
     if (
       this.#eventStore.enabled !== connectionEnabled
       || this.#eventStore.eventFeedEnabled !== options.config.allowGateway
+      || this.#eventStore.getChannelLayoutStatus().guilds.scoped !== layoutGuildIds.size
     ) {
       throw new RangeError("Gateway runtime and event store enabled states must match")
     }

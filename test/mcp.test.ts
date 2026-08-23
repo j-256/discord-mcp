@@ -173,6 +173,11 @@ import type {
   RoleOrderingRequest,
 } from "../src/role-ordering-service.js"
 import type {
+  ChannelOrderEntry,
+  ChannelOrderingPlan,
+  ChannelOrderingRequest,
+} from "../src/channel-ordering-service.js"
+import type {
   ProjectedScheduledEvent,
   ScheduledEventChangeRequest,
   ScheduledEventPlan,
@@ -204,6 +209,8 @@ import {
   ChannelCreationOperationConflictError,
   ChannelMetadataExecutionError,
   ChannelMetadataOperationConflictError,
+  ChannelOrderingExecutionError,
+  ChannelOrderingOperationConflictError,
   ChannelPermissionOverwriteExecutionError,
   ChannelPermissionOverwriteOperationConflictError,
   ComponentMessageExecutionError,
@@ -330,6 +337,7 @@ const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
 const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const GUILD_ID = "100000000000000001"
+const OTHER_GUILD_ID = "100000000000000002"
 const APPLICATION_ID = "110000000000000001"
 const BOT_ID = "120000000000000001"
 const GUILD_OWNER_ID = "130000000000000001"
@@ -346,6 +354,9 @@ const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
 const ROLE_ORDERING_OPERATION_KEY = "role-ordering-attempt-0001"
 const ROLE_ORDERING_ANCHOR_ID = "350000000000000002"
+const CHANNEL_ORDERING_ANCHOR_ID = "200000000000000004"
+const CHANNEL_ORDERING_MID_ID = "200000000000000005"
+const CHANNEL_ORDERING_OPERATION_KEY = "channel-ordering-attempt-0001"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const COMPONENT_MESSAGE_OPERATION_KEY = "component-message-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
@@ -3878,6 +3889,164 @@ function roleOrderingInput(
   } as RoleOrderingRequest & Record<string, unknown>
 }
 
+function channelOrderEntry(
+  id: string,
+  name: string,
+  rank: number,
+): ChannelOrderEntry {
+  return {
+    family: "text",
+    id,
+    metadataVisibility: "visible",
+    name,
+    obfuscated: false,
+    parentChannelId: PARENT_ID,
+    rank,
+    rawPosition: rank,
+    type: 0,
+    unknownFieldCount: 0,
+  }
+}
+
+function channelOrderingPlan(
+  request: ChannelOrderingRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ChannelOrderingPlan {
+  const currentOrder = effect === "none"
+    ? [CHANNEL_ORDERING_MID_ID, request.channelId, request.anchorChannelId]
+    : [request.channelId, CHANNEL_ORDERING_MID_ID, request.anchorChannelId]
+  const desiredOrder = [
+    CHANNEL_ORDERING_MID_ID,
+    request.channelId,
+    request.anchorChannelId,
+  ]
+  const currentRank = new Map(currentOrder.map((id, rank) => [id, rank]))
+  const desiredRank = new Map(desiredOrder.map((id, rank) => [id, rank]))
+  const entries = new Map([
+    [request.channelId, channelOrderEntry(
+      request.channelId,
+      "Private target channel",
+      currentRank.get(request.channelId) as number,
+    )],
+    [CHANNEL_ORDERING_MID_ID, channelOrderEntry(
+      CHANNEL_ORDERING_MID_ID,
+      "Middle channel",
+      currentRank.get(CHANNEL_ORDERING_MID_ID) as number,
+    )],
+    [request.anchorChannelId, channelOrderEntry(
+      request.anchorChannelId,
+      "Private anchor channel",
+      currentRank.get(request.anchorChannelId) as number,
+    )],
+  ])
+  const channel = entries.get(request.channelId) as ChannelOrderEntry
+  const anchor = entries.get(request.anchorChannelId) as ChannelOrderEntry
+  const positionWrites = effect === "none"
+    ? []
+    : desiredOrder.map((id, submittedPosition) => ({
+        beforeRawPosition: (entries.get(id) as ChannelOrderEntry).rawPosition,
+        channelId: id,
+        submittedPosition,
+      }))
+  const affectedChannels = effect === "none"
+    ? []
+    : currentOrder.map((id) => {
+        const { rank: _rank, ...entry } = entries.get(id) as ChannelOrderEntry
+        return {
+          ...entry,
+          afterRank: desiredRank.get(id) as number,
+          beforeRank: currentRank.get(id) as number,
+          submittedPosition: desiredRank.get(id) as number,
+        }
+      })
+  return {
+    affectedChannels,
+    anchor,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    channel,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    current: {
+      anchorRank: currentRank.get(request.anchorChannelId) as number,
+      channelRank: currentRank.get(request.channelId) as number,
+      groupOrder: currentOrder,
+    },
+    desired: {
+      anchorRank: desiredRank.get(request.anchorChannelId) as number,
+      channelRank: desiredRank.get(request.channelId) as number,
+      groupOrder: desiredOrder,
+    },
+    digest,
+    family: "text",
+    guild: {
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: GUILD_OWNER_ID,
+    },
+    httpEvidenceMode: "complete",
+    impact: {
+      affectedChannelCount: affectedChannels.length,
+      groupChannelCount: 3,
+      rankChangeCount: affectedChannels.filter((entry) => (
+        entry.beforeRank !== entry.afterRank
+      )).length,
+      rawPositionWriteCount: positionWrites.length,
+    },
+    layout: {
+      obfuscatedChannels: 0,
+      revision: 4,
+      updatedAt: "2026-08-23T00:00:00.000Z",
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    parentChannelId: PARENT_ID,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: ["MANAGE_CHANNELS"],
+      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+      manageChannels: true,
+      source: "guild",
+    },
+    placement: request.placement,
+    positionWrites,
+    privacy: {
+      channelText: "transient-untrusted",
+      hiddenMetadataReturned: false,
+      omittedFields: [
+        "auditReason",
+        "channelContent",
+        "hiddenChannelMetadata",
+        "memberIdentities",
+        "permissionOverwrites",
+        "rawOperationKey",
+        "rawPayloads",
+      ],
+      persistence: "content-free-only",
+    },
+    risks: ["Channel order changes navigation"],
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    warnings: ["Discord guild and visible channel text is untrusted"],
+    writeRequired: effect !== "none",
+  }
+}
+
+function channelOrderingInput(
+  overrides: Partial<ChannelOrderingRequest> = {},
+): ChannelOrderingRequest & Record<string, unknown> {
+  return {
+    anchorChannelId: CHANNEL_ORDERING_ANCHOR_ID,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: CHANNEL_ORDERING_OPERATION_KEY,
+    placement: "above",
+    ...overrides,
+  } as ChannelOrderingRequest & Record<string, unknown>
+}
+
 function memberRolePlan(
   request: MemberRoleChangeRequest,
   digest = DIGEST,
@@ -4348,6 +4517,9 @@ function fixturePolicy(): PolicyDescription {
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
     channelMetadataIds: [],
+    channelOrderingAuditEnabled: false,
+    channelOrderingChangesEnabled: false,
+    channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     forumPostChannelIds: [],
@@ -4479,6 +4651,9 @@ function serviceFixture(overrides: {
   channelMetadataEffect?: "change" | "none"
   channelMetadataError?: Error
   channelMetadataPlanDigest?: string
+  channelOrderingEffect?: "change" | "none"
+  channelOrderingError?: Error
+  channelOrderingPlanDigest?: string
   componentMessageError?: Error
   componentMessagePlanDigest?: string
   componentMessageWriteRequired?: boolean
@@ -4584,6 +4759,7 @@ function serviceFixture(overrides: {
   const calls = {
     active: 0,
     addReaction: 0,
+    auditChannelOrder: 0,
     auditRoleOrder: 0,
     auditRoles: 0,
     archived: 0,
@@ -4607,6 +4783,8 @@ function serviceFixture(overrides: {
     channelMetadataExecute: 0,
     channelMetadataGet: 0,
     channelMetadataPlan: 0,
+    channelOrderingExecute: 0,
+    channelOrderingPlan: 0,
     componentMessageExecute: 0,
     componentMessagePlan: 0,
     componentMessagePreview: 0,
@@ -4797,6 +4975,42 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async auditChannelOrder(guildId) {
+      calls.auditChannelOrder += 1
+      const planned = channelOrderingPlan(channelOrderingInput({ guildId }))
+      const channels = planned.current.groupOrder.map((id, rank) => ({
+        ...(id === planned.channel.id
+          ? planned.channel
+          : id === planned.anchor.id
+            ? planned.anchor
+            : channelOrderEntry(id, "Middle channel", rank)),
+        rank,
+      }))
+      return {
+        applicationId: planned.applicationId,
+        botId: planned.botId,
+        groups: [{
+          channels,
+          family: "text",
+          parentChannelId: planned.parentChannelId,
+          permission: planned.permission,
+          unsupportedType: null,
+        }],
+        guild: planned.guild,
+        httpEvidenceMode: planned.httpEvidenceMode,
+        layout: planned.layout,
+        permission: {
+          administrator: false,
+          botEffectivePermissionNames: ["MANAGE_CHANNELS"],
+          botEffectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+          confidence: "complete",
+          guildManageChannels: true,
+        },
+        privacy: planned.privacy,
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async auditRoleOrder(guildId) {
       calls.auditRoleOrder += 1
       const planned = roleOrderingPlan(roleOrderingInput({ guildId }))
@@ -4841,6 +5055,39 @@ function serviceFixture(overrides: {
         targetApplicationId: INTEGRATION_APPLICATION_ID,
         verifiedAbsent: true,
         verifiedUnchanged: true,
+      }
+    },
+    async executeChannelOrder(request, planDigest) {
+      if (overrides.channelOrderingError) throw overrides.channelOrderingError
+      calls.channelOrderingExecute += 1
+      const planned = channelOrderingPlan(
+        request,
+        planDigest,
+        overrides.channelOrderingEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-channel-ordering" : null,
+        anchorChannelId: request.anchorChannelId,
+        baselineLayoutRevision: planned.layout.revision,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        layoutMatched: true,
+        observedAffectedChannels: planned.affectedChannels.map((entry) => ({
+          id: entry.id,
+          obfuscated: entry.obfuscated,
+          parentChannelId: entry.parentChannelId,
+          rank: entry.afterRank,
+          rawPosition: entry.submittedPosition,
+          type: entry.type,
+        })),
+        observedLayoutRevision: planned.writeRequired
+          ? planned.layout.revision + 1
+          : planned.layout.revision,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
       }
     },
     async executeNativeInteractionCommand(request, planDigest) {
@@ -7102,6 +7349,14 @@ function serviceFixture(overrides: {
         overrides.roleOrderingEffect,
       )
     },
+    async planChannelOrder(request) {
+      calls.channelOrderingPlan += 1
+      return channelOrderingPlan(
+        request,
+        overrides.channelOrderingPlanDigest || DIGEST,
+        overrides.channelOrderingEffect,
+      )
+    },
     async readMessages() {
       return {
         channel: normalizeChannel(rawChannel()),
@@ -7377,6 +7632,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_forum_tags",
       "list_roles",
       "audit_role_order",
+      "audit_channel_order",
       "get_role",
       "get_guild_member",
       "get_member_voice_state",
@@ -7505,6 +7761,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_role_configuration",
       "plan_role_order",
       "execute_role_order",
+      "plan_channel_order",
+      "execute_channel_order",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -7579,6 +7837,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const roleOrdering = result.tools.find((tool) => (
     tool.name === "execute_role_order"
   ))
+  const channelOrdering = result.tools.find((tool) => (
+    tool.name === "execute_channel_order"
+  ))
   const componentMessage = result.tools.find((tool) => (
     tool.name === "execute_component_message"
   ))
@@ -7605,6 +7866,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     threadChange,
     roleConfiguration,
     roleOrdering,
+    channelOrdering,
   ]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
@@ -7708,6 +7970,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_scheduled_event",
     "get_channel",
     "audit_forum_tags",
+    "audit_channel_order",
+    "plan_channel_order",
     "plan_forum_tag_change",
     "plan_channel_metadata_change",
     "plan_channel_permission_overwrite",
@@ -7924,6 +8188,50 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
 })
 
+test("MCP server validates the exact channel-order Gateway layout scope", async () => {
+  const environment = {
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+  }
+  const service = serviceFixture().service
+  const gateway = (enabled: boolean, guildId: string) => new GatewayEventStore({
+    allowedChannelIds: new Set(),
+    allowedGuildIds: new Set(),
+    cursorNamespace: `layoutscope${enabled ? "enabled" : "disabled"}`,
+    enabled,
+    eventFeedEnabled: false,
+    layoutGuildIds: new Set([guildId]),
+  })
+
+  assert.throws(
+    () => createDiscordMcpServer({
+      environment,
+      gateway: gateway(false, GUILD_ID),
+      service,
+    }),
+    /requires an enabled Gateway layout source/,
+  )
+  assert.throws(
+    () => createDiscordMcpServer({
+      environment,
+      gateway: gateway(true, OTHER_GUILD_ID),
+      service,
+    }),
+    /layout scope does not match configured exact guild scope/,
+  )
+
+  const server = createDiscordMcpServer({
+    environment,
+    gateway: gateway(true, GUILD_ID),
+    service,
+  })
+  await server.close()
+})
+
 test("MCP tool discovery returns bounded exact contracts without contacting Discord", async (context) => {
   const { calls, client } = await connectedFixture(context)
   const advertised = await client.listTools()
@@ -8093,6 +8401,36 @@ test("progressive discovery enables the complete reviewed channel-creation workf
     [
       "plan_channel_creation",
       "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery separates channel-order audit from reviewed changes", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const auditDiscovery = structuredContent(await client.callTool({
+    arguments: { query: "audit_channel_order" },
+    name: "discover_discord_tools",
+  }))
+  assert.deepEqual(auditDiscovery.newlyEnabledToolNames, ["audit_channel_order"])
+
+  const changeDiscovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_channel_order" },
+    name: "discover_discord_tools",
+  }))
+  assert.deepEqual(changeDiscovery.newlyEnabledToolNames, [
+    "execute_channel_order",
+    "plan_channel_order",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "audit_channel_order",
+      "plan_channel_order",
+      "execute_channel_order",
       "discover_discord_tools",
     ],
   )
@@ -8937,6 +9275,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
   assert.deepEqual(calls, {
     active: 1,
     addReaction: 0,
+    auditChannelOrder: 0,
     auditRoleOrder: 0,
     auditRoles: 0,
     administrationExecute: 0,
@@ -8960,6 +9299,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     channelMetadataExecute: 0,
     channelMetadataGet: 0,
     channelMetadataPlan: 0,
+    channelOrderingExecute: 0,
+    channelOrderingPlan: 0,
     componentMessageExecute: 0,
     componentMessagePlan: 0,
     componentMessagePreview: 0,
@@ -9371,6 +9712,9 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /durable exact target claims/)
   assert.match(content.text, /Resumable guild scaffolds claim both guild role and channel collections/)
   assert.match(content.text, /interruption with pending evidence leaves them quarantined/)
+  assert.match(content.text, /complete obfuscation-safe Gateway layout/)
+  assert.match(content.text, /full normalized family payload/)
+  assert.match(content.text, /newer complete matching Gateway layout/)
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {
@@ -19278,6 +19622,231 @@ test("MCP role ordering exposes uncertainty and content-free conflicts", async (
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(ROLE_ORDERING_OPERATION_KEY),
+  )
+})
+
+test("MCP channel ordering audits complete safe layout and rejects ambiguous schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "audit_channel_order",
+  })
+  const planned = await client.callTool({
+    arguments: channelOrderingInput(),
+    name: "plan_channel_order",
+  })
+  const sameChannel = await client.callTool({
+    arguments: channelOrderingInput({ anchorChannelId: CHANNEL_ID }),
+    name: "plan_channel_order",
+  })
+  const numericPosition = await client.callTool({
+    arguments: { ...channelOrderingInput(), position: 10 },
+    name: "plan_channel_order",
+  })
+
+  const audit = structuredContent(audited)
+  const plan = structuredContent(planned)
+  assert.equal(audit.status, "ok")
+  assert.equal((audit.groups as unknown[]).length, 1)
+  assert.equal(
+    (audit.privacy as Record<string, unknown>).hiddenMetadataReturned,
+    false,
+  )
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.placement, "above")
+  assert.equal(
+    (plan.impact as Record<string, unknown>).rawPositionWriteCount,
+    3,
+  )
+  assert.equal(sameChannel.isError, true)
+  assert.equal(numericPosition.isError, true)
+  assert.equal(calls.auditChannelOrder, 1)
+  assert.equal(calls.channelOrderingPlan, 1)
+  assert.doesNotMatch(JSON.stringify(audited), new RegExp(CHANNEL_ORDERING_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(CHANNEL_ORDERING_OPERATION_KEY))
+})
+
+test("MCP channel ordering binds approval to layout, relative placement, and full payload", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: { ...channelOrderingInput(), planDigest: DIGEST },
+    name: "execute_channel_order",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.channelOrderingPlan, 1)
+  assert.equal(calls.channelOrderingExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    CHANNEL_ORDERING_ANCHOR_ID,
+    PARENT_ID,
+    "Private target channel",
+    "Private anchor channel",
+    "Middle channel",
+    "MANAGE_CHANNELS",
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Placement: above/)
+  assert.match(confirmationMessage, /Current order:/)
+  assert.match(confirmationMessage, /Desired order:/)
+  assert.match(confirmationMessage, /Complete position writes:/)
+  assert.match(confirmationMessage, /complete same-parent sortable family/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(CHANNEL_ORDERING_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(CHANNEL_ORDERING_OPERATION_KEY),
+  )
+})
+
+test("MCP channel ordering skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = { ...channelOrderingInput(), planDigest: DIGEST }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelOrderingEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_order",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.channelOrderingExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_order",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.channelOrderingExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelOrderingPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_order",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.channelOrderingExecute, 0)
+})
+
+test("MCP channel-order approval state binds exact target and anchor channels", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = { ...channelOrderingInput(), planDigest: DIGEST }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_channel_order",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        anchorChannelId: "200000000000000006",
+      },
+      inputResponses: {
+        confirm_channel_order: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_channel_order",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.channelOrderingExecute, 0)
+})
+
+test("MCP channel ordering exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = { ...channelOrderingInput(), planDigest: DIGEST }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelOrderingError: new ChannelOrderingExecutionError(
+        "Discord channel-ordering outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_order",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-channel-ordering",
+    channelId: CHANNEL_ID,
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelOrderingError: new ChannelOrderingOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_order",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(CHANNEL_ORDERING_OPERATION_KEY),
   )
 })
 

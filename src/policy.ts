@@ -34,6 +34,9 @@ export interface PolicyDescription {
   channelCreationGuildIds: string[]
   channelMetadataChangesEnabled: boolean
   channelMetadataIds: string[]
+  channelOrderingAuditEnabled: boolean
+  channelOrderingChangesEnabled: boolean
+  channelOrderingGuildIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
   forumPostChannelIds: string[]
@@ -167,6 +170,8 @@ export class ScopePolicy {
   readonly #allowBanAudit: boolean
   readonly #allowChannelCreation: boolean
   readonly #allowChannelMetadataChanges: boolean
+  readonly #allowChannelOrderingAudit: boolean
+  readonly #allowChannelOrderingChanges: boolean
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowInviteAudit: boolean
@@ -233,6 +238,7 @@ export class ScopePolicy {
   readonly #banAuditGuildIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #channelMetadataIds: ReadonlySet<string>
+  readonly #channelOrderingGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
@@ -306,6 +312,8 @@ export class ScopePolicy {
     | "allowAutomodChanges"
     | "allowBanAudit"
     | "allowChannelMetadataChanges"
+    | "allowChannelOrderingAudit"
+    | "allowChannelOrderingChanges"
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
@@ -364,6 +372,7 @@ export class ScopePolicy {
     | "announcementSubscriptionSourceChannelIds"
     | "announcementSubscriptionTargetChannelIds"
     | "channelMetadataIds"
+    | "channelOrderingGuildIds"
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
     | "attachmentRoots"
@@ -428,6 +437,8 @@ export class ScopePolicy {
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
     this.#allowBanAudit = config.allowBanAudit ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
+    this.#allowChannelOrderingAudit = config.allowChannelOrderingAudit ?? false
+    this.#allowChannelOrderingChanges = config.allowChannelOrderingChanges ?? false
     this.#allowChannelMetadataChanges = config.allowChannelMetadataChanges ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
@@ -497,6 +508,7 @@ export class ScopePolicy {
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#channelMetadataIds = config.channelMetadataIds ?? new Set()
+    this.#channelOrderingGuildIds = config.channelOrderingGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
@@ -589,6 +601,12 @@ export class ScopePolicy {
       channelMetadataChangesEnabled: this.#allowChannelMetadataChanges
         && this.#channelMetadataIds.size > 0,
       channelMetadataIds: [...this.#channelMetadataIds].sort(),
+      channelOrderingAuditEnabled: this.#allowChannelOrderingAudit
+        && this.#channelOrderingGuildIds.size > 0,
+      channelOrderingChangesEnabled: this.#allowChannelOrderingAudit
+        && this.#allowChannelOrderingChanges
+        && this.#channelOrderingGuildIds.size > 0,
+      channelOrderingGuildIds: [...this.#channelOrderingGuildIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       gatewayEnabled: this.#allowGateway,
@@ -1142,6 +1160,26 @@ export class ScopePolicy {
     }
     if (!this.#roleOrderingGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the role-ordering scope`)
+    }
+  }
+
+  assertChannelOrderingAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowChannelOrderingAudit) {
+      throw new PolicyError("Discord channel-ordering audit is disabled by connector configuration")
+    }
+    if (this.#channelOrderingGuildIds.size === 0) {
+      throw new PolicyError("Discord channel-ordering audit requires an explicit guild allowlist")
+    }
+    if (!this.#channelOrderingGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the channel-ordering scope`)
+    }
+  }
+
+  assertChannelOrderingChangeable(guildId: string): void {
+    this.assertChannelOrderingAuditable(guildId)
+    if (!this.#allowChannelOrderingChanges) {
+      throw new PolicyError("Discord channel-ordering changes are disabled by connector configuration")
     }
   }
 

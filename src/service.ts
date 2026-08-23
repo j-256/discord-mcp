@@ -90,6 +90,17 @@ import {
   normalizeChannelMetadataChangeRequest,
 } from "./channel-metadata-service.js"
 import type {
+  ChannelOrderAuditResult,
+  ChannelOrderingPlan,
+  ChannelOrderingRequest,
+  ChannelOrderingResult,
+  ChannelOrderingServiceOptions,
+} from "./channel-ordering-service.js"
+import {
+  ChannelOrderingService,
+  normalizeChannelOrderingRequest,
+} from "./channel-ordering-service.js"
+import type {
   ChannelPermissionOverwriteListOptions,
   ChannelPermissionOverwriteListResult,
   ChannelPermissionOverwritePlan,
@@ -128,6 +139,7 @@ import type {
 import { DiscordClient } from "./discord-client.js"
 import {
   AnnouncementSubscriptionPlanChangedError,
+  ChannelOrderingPlanChangedError,
   ConfigurationError,
   ComponentMessagePlanChangedError,
   DeletionPlanChangedError,
@@ -139,6 +151,10 @@ import {
   WebhookCreationPlanChangedError,
   WebhookDeletionPlanChangedError,
 } from "./errors.js"
+import {
+  GatewayChannelLayoutStore,
+  type GatewayChannelLayoutSource,
+} from "./gateway-channel-layout.js"
 import type {
   ForumPostPlan,
   ForumPostRequest,
@@ -591,6 +607,7 @@ export interface DiscordServiceClient {
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
   modifyGuildSoundboardSound: DiscordClient["modifyGuildSoundboardSound"]
   modifyGuildRole: DiscordClient["modifyGuildRole"]
+  modifyGuildChannelPositions: DiscordClient["modifyGuildChannelPositions"]
   modifyGuildRolePositions: DiscordClient["modifyGuildRolePositions"]
   modifyGuildTemplate: DiscordClient["modifyGuildTemplate"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
@@ -654,6 +671,10 @@ export interface ConnectorServiceOptions {
     ChannelMetadataServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  channelOrderingOptions?: Pick<
+    ChannelOrderingServiceOptions,
+    "clock" | "planKey" | "randomId" | "verificationTimeoutMs"
+  >
   client?: DiscordServiceClient
   clientOptions?: Omit<DiscordClientOptions, "token">
   config: ConnectorConfig
@@ -666,6 +687,7 @@ export interface ConnectorServiceOptions {
     ForumTagServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  gateway?: GatewayChannelLayoutSource
   guildScaffoldOptions?: Pick<
     GuildScaffoldServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -887,6 +909,7 @@ export class ConnectorService {
   readonly #banAuditService: BanAuditService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #channelMetadataService: ChannelMetadataService
+  readonly #channelOrderingService: ChannelOrderingService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
   readonly #deletionService: DeletionService
@@ -986,6 +1009,17 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelMetadataOptions,
+    })
+    this.#channelOrderingService = new ChannelOrderingService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      layoutSource: options.gateway ?? new GatewayChannelLayoutStore({
+        enabled: false,
+        guildIds: new Set(),
+      }),
+      operationStore,
+      policy: this.#policy,
+      ...options.channelOrderingOptions,
     })
     this.#forumTagService = new ForumTagService({
       activityStore: this.#activityStore,
@@ -1411,6 +1445,19 @@ export class ConnectorService {
   ): Promise<RoleOrderAuditResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#roleOrderingService.audit(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async auditChannelOrder(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelOrderAuditResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelOrderingService.audit(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -2628,6 +2675,20 @@ export class ConnectorService {
     )
   }
 
+  async planChannelOrder(
+    request: ChannelOrderingRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelOrderingPlan> {
+    normalizeChannelOrderingRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelOrderingService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildScaffold(
     request: GuildScaffoldRequest,
     options: RequestOptions = {},
@@ -2925,6 +2986,56 @@ export class ConnectorService {
         writeGuildCollectionTarget("roles", request.guildId),
       ],
       () => this.#roleOrderingService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeChannelOrder(
+    request: ChannelOrderingRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelOrderingResult> {
+    normalizeChannelOrderingRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord channel-ordering plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#channelOrderingService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new ChannelOrderingPlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#channelOrderingService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "channel-ordering",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget("channel", request.anchorChannelId),
+        ...(coordinationPlan.parentChannelId
+          ? [writeResourceTarget("channel", coordinationPlan.parentChannelId)]
+          : []),
+        writeGuildCollectionTarget("channels", request.guildId),
+      ],
+      () => this.#channelOrderingService.execute(
         identity.application.id,
         identity.bot.id,
         request,

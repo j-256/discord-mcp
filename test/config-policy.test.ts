@@ -181,6 +181,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
     channelMetadataIds: [],
+    channelOrderingAuditEnabled: false,
+    channelOrderingChangesEnabled: false,
+    channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     forumPostChannelIds: [],
@@ -735,6 +738,9 @@ test("configuration and policy require an exact administration guild and protect
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
     channelMetadataIds: [],
+    channelOrderingAuditEnabled: false,
+    channelOrderingChangesEnabled: false,
+    channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     forumPostChannelIds: [],
@@ -1704,6 +1710,86 @@ test("configuration and policy separate role-order audit from exact-guild change
   )
 })
 
+test("configuration and policy separate channel-order audit from exact-guild changes", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+      DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /require DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const auditConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: ROLE_ID,
+    DISCORD_MCP_BOT_ID: USER_ID,
+    DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const audit = new ScopePolicy(auditConfig)
+  audit.assertChannelOrderingAuditable(GUILD_ID)
+  assert.throws(
+    () => audit.assertChannelOrderingChangeable(GUILD_ID),
+    /changes are disabled/,
+  )
+  assert.deepEqual(audit.describe().channelOrderingGuildIds, [GUILD_ID])
+  assert.equal(audit.describe().channelOrderingAuditEnabled, true)
+  assert.equal(audit.describe().channelOrderingChangesEnabled, false)
+
+  const changesConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: ROLE_ID,
+    DISCORD_MCP_BOT_ID: USER_ID,
+    DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const changes = new ScopePolicy(changesConfig)
+  changes.assertChannelOrderingChangeable(GUILD_ID)
+  assert.equal(changes.describe().channelOrderingChangesEnabled, true)
+  assert.throws(
+    () => changes.assertChannelOrderingAuditable(OTHER_GUILD_ID),
+    /configured read scope/,
+  )
+
+  const excessiveGuildIds = Array.from(
+    { length: CONNECTOR_LIMITS.channelOrderingGuildAllowlist + 1 },
+    (_, index) => (610_000_000_000_000_000n + BigInt(index)).toString(),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: excessiveGuildIds,
+    }, { homeDirectory: "/test/home" }),
+    /must contain at most 100 unique IDs/,
+  )
+})
+
 test("configuration and policy isolate exact guild scaffold authority", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -2443,6 +2529,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
     channelMetadataIds: [],
+    channelOrderingAuditEnabled: false,
+    channelOrderingChangesEnabled: false,
+    channelOrderingGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
     forumPostChannelIds: [],

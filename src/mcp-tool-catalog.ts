@@ -43,6 +43,7 @@ type McpToolWorkflow =
   | "automod-change"
   | "channel-creation"
   | "channel-metadata-change"
+  | "channel-ordering"
   | "channel-permission-overwrite"
   | "component-message"
   | "forum-post"
@@ -102,6 +103,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["access", "audit", "channel", "matrix", "permissions", "role"],
     toolset: "permissions",
   },
+  audit_channel_order: {
+    keywords: ["above", "audit", "channel", "layout", "obfuscated", "order", "position"],
+    toolset: "channel-ordering",
+  },
   audit_role_order: {
     keywords: ["audit", "hierarchy", "holder", "order", "permission", "position", "role"],
     toolset: "role-ordering",
@@ -149,6 +154,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "configure", "execute", "metadata", "name", "nsfw", "slowmode", "topic"],
     toolset: "channel-metadata",
     workflow: "channel-metadata-change",
+  },
+  execute_channel_order: {
+    keywords: ["above", "below", "channel", "execute", "layout", "order", "position"],
+    toolset: "channel-ordering",
+    workflow: "channel-ordering",
   },
   execute_channel_permission_overwrite: {
     keywords: ["access", "channel", "execute", "member", "overwrite", "permission", "role"],
@@ -565,6 +575,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "configure", "metadata", "name", "nsfw", "plan", "review", "slowmode", "topic"],
     toolset: "channel-metadata",
     workflow: "channel-metadata-change",
+  },
+  plan_channel_order: {
+    keywords: ["above", "below", "channel", "layout", "order", "plan", "position", "review"],
+    toolset: "channel-ordering",
+    workflow: "channel-ordering",
   },
   plan_channel_permission_overwrite: {
     keywords: ["access", "channel", "member", "overwrite", "permission", "plan", "review", "role"],

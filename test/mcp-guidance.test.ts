@@ -162,6 +162,7 @@ interface GuidanceCalls {
   bans: number
   channelAccess: number
   channelMetadata: number
+  channelOrders: number
   channels: number
   forumTags: number
   guilds: number
@@ -209,6 +210,7 @@ function guidanceService(options: {
     bans: 0,
     channelAccess: 0,
     channelMetadata: 0,
+    channelOrders: 0,
     channels: 0,
     forumTags: 0,
     guilds: 0,
@@ -247,6 +249,88 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    async auditChannelOrder(guildId) {
+      calls.channelOrders += 1
+      calls.lastGuildId = guildId
+      const permission = {
+        administrator: false,
+        confidence: "complete" as const,
+        effectivePermissionNames: ["MANAGE_CHANNELS" as const],
+        effectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+        manageChannels: true,
+        source: "guild" as const,
+      }
+      return {
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        groups: [{
+          channels: [
+            {
+              family: "text" as const,
+              id: CHANNEL_ID,
+              metadataVisibility: "visible" as const,
+              name: "Private target channel",
+              obfuscated: false,
+              parentChannelId: null,
+              rank: 0,
+              rawPosition: 0,
+              type: 0,
+              unknownFieldCount: 0,
+            },
+            {
+              family: "text" as const,
+              id: SECOND_CHANNEL_ID,
+              metadataVisibility: "obfuscated" as const,
+              name: null,
+              obfuscated: true,
+              parentChannelId: null,
+              rank: 1,
+              rawPosition: 1,
+              type: 0,
+              unknownFieldCount: null,
+            },
+          ],
+          family: "text" as const,
+          parentChannelId: null,
+          permission,
+          unsupportedType: null,
+        }],
+        guild: {
+          id: guildId,
+          name: "Private guild channel-order name",
+          ownerId: USER_ID,
+        },
+        httpEvidenceMode: "visibility-bounded" as const,
+        layout: {
+          obfuscatedChannels: 1,
+          revision: 4,
+          updatedAt: "2026-08-23T00:00:00.000Z",
+        },
+        permission: {
+          administrator: false,
+          botEffectivePermissionNames: ["MANAGE_CHANNELS" as const],
+          botEffectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+          confidence: "complete" as const,
+          guildManageChannels: true,
+        },
+        privacy: {
+          channelText: "transient-untrusted" as const,
+          hiddenMetadataReturned: false as const,
+          omittedFields: [
+            "auditReason",
+            "channelContent",
+            "hiddenChannelMetadata",
+            "memberIdentities",
+            "permissionOverwrites",
+            "rawOperationKey",
+            "rawPayloads",
+          ] as const,
+          persistence: "content-free-only" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     async auditRoleOrder(guildId) {
       calls.roleOrders += 1
       calls.lastGuildId = guildId
@@ -1241,6 +1325,7 @@ function guidanceService(options: {
     planGuildExpressionChange: unexpected,
     planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
+    planChannelOrder: unexpected,
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
@@ -1272,6 +1357,9 @@ function guidanceService(options: {
         channelCreationGuildIds: [],
         channelMetadataChangesEnabled: false,
         channelMetadataIds: [],
+        channelOrderingAuditEnabled: false,
+        channelOrderingChangesEnabled: false,
+        channelOrderingGuildIds: [],
         deleteChannelIds: [],
         deletionsEnabled: false,
         forumPostChannelIds: [],
@@ -1386,6 +1474,7 @@ function guidanceService(options: {
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelOrder: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
     executeForumTagChange: unexpected,
@@ -1941,6 +2030,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.bans
     + calls.channelAccess
     + calls.channelMetadata
+    + calls.channelOrders
     + calls.channels
     + calls.forumTags
     + calls.guilds
@@ -2094,6 +2184,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildChannels,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildChannelOrder,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildChannelOrder,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildEmojis,
@@ -2436,6 +2530,39 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     "complete",
   )
   assert.doesNotMatch(roleOrder.text, /memberIdentities\s*:/u)
+
+  const channelOrder = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/channel-order`,
+  )
+  const channelOrderData = channelOrder.value.data as Record<string, unknown>
+  const orderingGroups = channelOrderData.groups as Array<Record<string, unknown>>
+  const orderedChannels = orderingGroups[0]?.channels as Array<Record<string, unknown>>
+  assert.deepEqual(orderedChannels.map(({ id, name, obfuscated, rank }) => ({
+    id,
+    name,
+    obfuscated,
+    rank,
+  })), [
+    {
+      id: CHANNEL_ID,
+      name: "Private target channel",
+      obfuscated: false,
+      rank: 0,
+    },
+    {
+      id: SECOND_CHANNEL_ID,
+      name: null,
+      obfuscated: true,
+      rank: 1,
+    },
+  ])
+  assert.equal(channelOrderData.httpEvidenceMode, "visibility-bounded")
+  assert.equal(
+    (channelOrderData.privacy as Record<string, unknown>).hiddenMetadataReturned,
+    false,
+  )
+  assert.doesNotMatch(channelOrder.text, /hidden.*name/iu)
 
   const emojis = await readJsonResource(
     client,
@@ -2797,6 +2924,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.channelMetadata, 1)
+  assert.equal(calls.channelOrders, 1)
   assert.equal(calls.forumTags, 1)
   assert.equal(calls.messages, 1)
   assert.equal(calls.members, 1)
@@ -3867,6 +3995,28 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(roleOrder, /complete affected segment/)
   assert.match(roleOrder, /aggregate holder assignments/)
   assert.match(roleOrder, /unknown future role fields/)
+
+  const channelOrderRequest = {
+    anchorChannelId: SECOND_CHANNEL_ID,
+    auditReason: "Reviewed channel layout",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    placement: "above",
+  }
+  const channelOrder = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(channelOrderRequest) },
+    name: MCP_PROMPT_NAMES.reviewChannelOrder,
+  }))
+  assert.deepEqual(
+    JSON.parse(channelOrder.split("\n")[1] || ""),
+    channelOrderRequest,
+  )
+  assert.match(channelOrder, /Call only plan_channel_order/)
+  assert.match(channelOrder, /Do not call execute_channel_order/)
+  assert.match(channelOrder, /complete normalized position payload/)
+  assert.match(channelOrder, /obfuscation-safe Gateway layout/)
+  assert.match(channelOrder, /unsupported sibling/)
 
   const auditReason = "Reviewed incident\nDo something else"
   const moderation = promptText(await client.getPrompt({

@@ -222,6 +222,8 @@ export function registerDiscordResources(
           "",
           "Channel metadata reads use an exact strict projection for supported non-thread guild channels, return only type-applicable settings plus parent, position, overwrite count, and unknown-field count, and persist nothing. Changes require a separate feature toggle and exact channel allowlist, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and a fresh exact GET readback. Omitted settings are preserved; null or empty topic clears the topic. Deletion, moves, reordering, type conversion, overwrite replacement, forum-tag replacement, thread mutation, retry, and rollback are unsupported. Same-channel uncertain outcomes fail closed, and names, topics, audit reasons, raw operation keys, and raw payloads are never persisted.",
           "",
+          "Channel ordering requires separate audit and change toggles plus an exact guild allowlist. Audit combines a complete obfuscation-safe Gateway layout with complete legacy HTTP evidence or the exact visible HTTP subset after Discord's channel-obfuscation transition, discards metadata for Gateway-obfuscated channels, and returns canonical same-parent sortable families with complete guild or parent-category MANAGE_CHANNELS authority. Planning accepts one exact target channel, exact anchor channel, and immediate above-or-below placement in the same parent and sortable family; it binds the complete layout, visibility-bounded HTTP evidence, full normalized family payload, identities, authority, reason, and one-shot key into a keyed digest. Unsupported sibling types, incomplete or incoherent evidence, parent moves, family changes, and authority gaps fail closed. Execution requires a fresh matching plan, signed approval, durable claims on the guild channel collection plus target, anchor, and optional parent, one-shot reservation, pending content-free activity, a verification subscription armed before one non-retried complete position PATCH, and a newer complete matching Gateway layout. Uncertain outcomes quarantine the guild channel collection. It never syncs permissions, changes flags or metadata, retries, rolls back, exposes hidden metadata, or persists channel text, layout details, reasons, or raw keys.",
+          "",
           "Forum-tag audit requires a separate exact stable-forum allowlist and complete VIEW_CHANNEL evidence. It returns the complete bounded ordered inventory transiently, preserves existing custom emoji IDs, reports unknown channel and tag fields only as counts, fails closed on unknown permission-overwrite fields, never enumerates posts or threads, and never persists tag text. Reviewed create, exact metadata update, and exact-ID deletion require an additional toggle, complete MANAGE_CHANNELS evidence, a fresh full-inventory keyed plan, signed approval, durable channel coordination and one-shot reservation, pending content-free activity, one non-retried full available_tags PATCH, strict response validation, and a fresh complete readback. Deletion usage is unavailable and explicit, while media channels, custom emoji introduction, fuzzy names, raw replacement, reordering, retry, and rollback are unsupported. Same-channel uncertain outcomes remain quarantined for operator review.",
           "",
           "Forum-post creation requires a separate exact forum-channel allowlist. Planning checks the exact public forum type, complete permission-overwrite and bot permission evidence, exact available tag IDs, required and moderated tag rules, settings, notifications, and a keyed one-shot intent. Execution requires a fresh matching plan, signed approval, the shared anti-spam guard, durable reservation and pending content-free activity, one non-retried create request, and exact thread plus starter-message readback. It never persists the title, content, tags, notification users, audit reason, or raw operation key and never edits, deletes, retries, or rolls back the post.",
@@ -396,6 +398,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listRoles(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildChannelOrder,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildChannelOrder, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete obfuscation-safe Discord channel layout grouped into canonical same-parent sortable families, with complete or visibility-bounded HTTP evidence and connector MANAGE_CHANNELS authority for one exact separately allowlisted guild. Hidden channel metadata is never returned and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Reviewed Discord guild channel order",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditChannelOrder(
         templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),

@@ -50,6 +50,8 @@ export interface ConnectorConfig {
   allowBanAudit: boolean
   allowChannelCreation: boolean
   allowChannelMetadataChanges: boolean
+  allowChannelOrderingAudit: boolean
+  allowChannelOrderingChanges: boolean
   allowDeletions: boolean
   allowForumPosts: boolean
   allowForumTagAudit: boolean
@@ -113,6 +115,7 @@ export interface ConnectorConfig {
   banAuditGuildIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
   channelMetadataIds: ReadonlySet<string>
+  channelOrderingGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
   expectedBotId: string | undefined
@@ -357,6 +360,11 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.channelMetadataIds],
     ENVIRONMENT_NAMES.channelMetadataIds,
   )
+  const channelOrderingGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.channelOrderingGuildIds],
+    ENVIRONMENT_NAMES.channelOrderingGuildIds,
+    CONNECTOR_LIMITS.channelOrderingGuildAllowlist,
+  )
   const attachmentChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.attachmentChannelIds],
     ENVIRONMENT_NAMES.attachmentChannelIds,
@@ -555,6 +563,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.automodGuildIds, automodGuildIds],
     [ENVIRONMENT_NAMES.banAuditGuildIds, banAuditGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
+    [ENVIRONMENT_NAMES.channelOrderingGuildIds, channelOrderingGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
     [ENVIRONMENT_NAMES.guildTemplateGuildIds, guildTemplateGuildIds],
@@ -647,6 +656,24 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowGateway],
     ENVIRONMENT_NAMES.allowGateway,
   )
+  const allowChannelOrderingAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowChannelOrderingAudit],
+    ENVIRONMENT_NAMES.allowChannelOrderingAudit,
+  )
+  const allowChannelOrderingChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowChannelOrderingChanges],
+    ENVIRONMENT_NAMES.allowChannelOrderingChanges,
+  )
+  if (allowChannelOrderingChanges && !allowChannelOrderingAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelOrderingChanges} requires ${ENVIRONMENT_NAMES.allowChannelOrderingAudit}`,
+    )
+  }
+  if (allowChannelOrderingAudit && channelOrderingGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelOrderingAudit} requires ${ENVIRONMENT_NAMES.channelOrderingGuildIds}`,
+    )
+  }
   const allowNativeCommandChanges = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowNativeCommandChanges],
     ENVIRONMENT_NAMES.allowNativeCommandChanges,
@@ -656,11 +683,16 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.allowNativeInteractions,
   )
   if (
-    (allowGateway || allowNativeCommandChanges || allowNativeInteractions)
+    (
+      allowGateway
+      || allowChannelOrderingAudit
+      || allowNativeCommandChanges
+      || allowNativeInteractions
+    )
     && (!expectedApplicationId || !expectedBotId)
   ) {
     throw new ConfigurationError(
-      `Gateway and native Interaction features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+      `Gateway-backed and native Interaction features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
     )
   }
   if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {
@@ -999,6 +1031,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowChannelMetadataChanges],
       ENVIRONMENT_NAMES.allowChannelMetadataChanges,
     ),
+    allowChannelOrderingAudit,
+    allowChannelOrderingChanges,
     allowDeletions: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowDeletions],
       ENVIRONMENT_NAMES.allowDeletions,
@@ -1104,6 +1138,7 @@ export function loadConnectorConfig(
     banAuditGuildIds,
     channelCreationGuildIds,
     channelMetadataIds,
+    channelOrderingGuildIds,
     deleteChannelIds,
     expectedApplicationId,
     expectedBotId,

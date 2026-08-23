@@ -104,6 +104,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   reactionUserAuditPolicy: "reaction-user-audit-policy",
   roleCreationPolicy: "role-creation-policy",
   roleConfigurationPolicy: "role-configuration-policy",
+  channelOrderingAuditPolicy: "channel-ordering-audit-policy",
+  channelOrderingChangePolicy: "channel-ordering-change-policy",
   roleOrderingAuditPolicy: "role-ordering-audit-policy",
   roleOrderingChangePolicy: "role-ordering-change-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
@@ -349,6 +351,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowChannelMetadataChanges && config.channelMetadataIds.size === 0) {
     warnings.push("The channel-metadata toggle is enabled but metadata changes remain blocked because an exact channel allowlist is required")
+  }
+  if (config.allowChannelOrderingAudit && config.channelOrderingGuildIds.size === 0) {
+    warnings.push("The channel-ordering audit toggle is enabled but layout inspection remains blocked because no exact guild allowlist is configured")
+  }
+  if (config.allowChannelOrderingChanges && config.channelOrderingGuildIds.size === 0) {
+    warnings.push("The channel-ordering change toggle is enabled but layout changes remain blocked because no exact guild allowlist is configured")
   }
   if (config.allowRoleCreation && config.roleCreationGuildIds.size === 0) {
     warnings.push("The role-creation toggle is enabled but role creation remains blocked because no role-creation guild allowlist is configured")
@@ -603,6 +611,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowRoleCreation, "role-creation", "Role creation"],
     [config.allowRoleConfiguration, "role-configuration", "Role configuration"],
     [
+      config.allowChannelOrderingAudit || config.allowChannelOrderingChanges,
+      "channel-ordering",
+      "Channel-order audit and reviewed changes",
+    ],
+    [
       config.allowRoleOrderingAudit || config.allowRoleOrderingChanges,
       "role-ordering",
       "Role-order audit and reviewed changes",
@@ -827,6 +840,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.channelMetadataPolicy,
         "pass",
         `Reviewed channel metadata changes are constrained to ${config.channelMetadataIds.size} exact channels with partial one-shot execution and complete response plus fresh readback verification`,
+      ))
+    }
+    if (!config.allowChannelOrderingAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelOrderingAuditPolicy,
+        "pass",
+        "Channel-order audit is disabled",
+      ))
+    } else if (config.channelOrderingGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelOrderingAuditPolicy,
+        "warn",
+        "Channel-order audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelOrderingAuditPolicy,
+        "pass",
+        `Channel-order audit is constrained to ${config.channelOrderingGuildIds.size} exact guilds with a complete obfuscation-safe Gateway layout, bounded HTTP evidence, and MANAGE_CHANNELS authority`,
+      ))
+    }
+    if (!config.allowChannelOrderingChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
+        "pass",
+        "Reviewed channel-order changes are disabled",
+      ))
+    } else if (config.channelOrderingGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
+        "warn",
+        "Channel-order changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
+        "pass",
+        `Reviewed channel-order changes are constrained to ${config.channelOrderingGuildIds.size} exact guilds with signed approval, one-shot execution, durable channel-collection coordination, and newer complete Gateway verification`,
       ))
     }
     if (!config.allowDeletions) {
@@ -2144,6 +2195,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.channelCreationGuildIds,
     ENVIRONMENT_NAMES.allowChannelMetadataChanges,
     ENVIRONMENT_NAMES.channelMetadataIds,
+    ENVIRONMENT_NAMES.allowChannelOrderingAudit,
+    ENVIRONMENT_NAMES.allowChannelOrderingChanges,
+    ENVIRONMENT_NAMES.channelOrderingGuildIds,
     ENVIRONMENT_NAMES.allowRoleCreation,
     ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowRoleConfiguration,

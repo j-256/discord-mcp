@@ -995,6 +995,11 @@ export interface CreateGuildChannelInput {
   type: number
 }
 
+export interface ModifyGuildChannelPositionInput {
+  id: string
+  position: number
+}
+
 export interface CreateGuildRoleInput {
   hoist: boolean
   mentionable: boolean
@@ -1273,6 +1278,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_webhook",
   "modify_stage_instance",
   "modify_guild_onboarding",
+  "modify_guild_channel_positions",
   "modify_guild_role_positions",
   "modify_guild_welcome_screen",
   "modify_channel_metadata",
@@ -5595,6 +5601,44 @@ function modifyGuildRolePositionsBody(
   })
 }
 
+function modifyGuildChannelPositionsBody(
+  positions: readonly ModifyGuildChannelPositionInput[],
+): Array<{ id: string; position: number }> {
+  if (
+    !Array.isArray(positions)
+    || positions.length < 1
+    || positions.length > DISCORD_LIMITS.guildChannels
+  ) {
+    throw new RangeError(
+      `Discord channel-position input must contain 1-${DISCORD_LIMITS.guildChannels} entries`,
+    )
+  }
+  const ids = new Set<string>()
+  return positions.map((position) => {
+    if (
+      !position
+      || typeof position !== "object"
+      || Array.isArray(position)
+      || Object.keys(position).sort().join("\0") !== "id\0position"
+      || typeof position.id !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(position.id)
+      || BigInt(position.id) < 1n
+      || BigInt(position.id) > DISCORD_SNOWFLAKE_MAX
+      || ids.has(position.id)
+      || !Number.isSafeInteger(position.position)
+      || position.position < 0
+      || position.position >= DISCORD_LIMITS.guildChannels
+    ) {
+      throw new RangeError("Discord channel-position input contains an invalid entry")
+    }
+    ids.add(position.id)
+    return {
+      id: position.id,
+      position: position.position,
+    }
+  })
+}
+
 function assertGuildExpressionName(name: string, kind: "emoji" | "sticker"): void {
   const maximum = kind === "emoji"
     ? DISCORD_LIMITS.emojiNameCharacters
@@ -7055,6 +7099,32 @@ export class DiscordClient {
         type: input.type,
       },
     })
+  }
+
+  modifyGuildChannelPositions(
+    guildId: string,
+    positions: readonly ModifyGuildChannelPositionInput[],
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord channel-ordering guild ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord channel-ordering audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request<void>(
+      "modify_guild_channel_positions",
+      `/guilds/${guildId}/channels`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: modifyGuildChannelPositionsBody(positions),
+        diagnosticRoute: "/guilds/{guild.id}/channels",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   createForumPost(

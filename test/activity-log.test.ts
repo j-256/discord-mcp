@@ -18,6 +18,7 @@ import {
   type AutoModerationActivity,
   type ChannelCreationActivity,
   type ChannelMetadataActivity,
+  type ChannelOrderingActivity,
   type ChannelPermissionOverwriteActivity,
   type ComponentMessageActivity,
   type DeletionActivity,
@@ -300,6 +301,32 @@ function roleOrdering(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function channelOrdering(
+  id: string,
+  status: ChannelOrderingActivity["status"],
+): ChannelOrderingActivity {
+  return {
+    anchorChannelId: "251",
+    baselineRevision: 4,
+    channelId: "250",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "channel-ordering",
+    observedRevision: status === "completed" ? 5 : null,
+    operationKeyHash: `sha256:${"8".repeat(64)}`,
+    parentChannelId: "200",
+    placement: "above",
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -1386,6 +1413,83 @@ test("JSONL activity log keeps role-ordering evidence content-free", async (cont
       "placement",
       "planDigest",
       "roleId",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps channel-ordering evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-name",
+    "private-operation-key",
+    "private-overwrites",
+    "private-layout-payload",
+  ]
+
+  await store.append(channelOrdering("1", "pending"))
+  await store.append({
+    ...channelOrdering("2", "completed"),
+    auditReason: privateValues[0],
+    channelName: privateValues[1],
+    operationKey: privateValues[2],
+    overwrites: privateValues[3],
+    rawLayout: privateValues[4],
+  } as ChannelOrderingActivity)
+  await appendFile(
+    file,
+    [
+      {
+        ...channelOrdering("3", "completed"),
+        placement: "sideways",
+      },
+      {
+        ...channelOrdering("4", "completed"),
+        observedRevision: 4,
+      },
+      {
+        ...channelOrdering("5", "completed"),
+        anchorChannelId: "250",
+      },
+      {
+        ...channelOrdering("6", "completed"),
+        parentChannelId: "250",
+      },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 4)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "anchorChannelId",
+      "baselineRevision",
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "observedRevision",
+      "operationKeyHash",
+      "parentChannelId",
+      "placement",
+      "planDigest",
       "schemaVersion",
       "status",
       "timestamp",

@@ -37,6 +37,7 @@ import {
   InteractionRateLimitError,
   PolicyError,
 } from "../src/errors.js"
+import { GatewayChannelLayoutStore } from "../src/gateway-channel-layout.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import type {
   OperationReceipt,
@@ -240,6 +241,7 @@ function serviceFixture(overrides: {
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
   channelMetadataOptions?: ConnectorServiceOptions["channelMetadataOptions"]
+  channelOrderingOptions?: ConnectorServiceOptions["channelOrderingOptions"]
   componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
@@ -249,6 +251,7 @@ function serviceFixture(overrides: {
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   guildTemplateOptions?: ConnectorServiceOptions["guildTemplateOptions"]
+  gateway?: ConnectorServiceOptions["gateway"]
   integrationOptions?: ConnectorServiceOptions["integrationOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
@@ -704,6 +707,9 @@ function serviceFixture(overrides: {
     async modifyGuildRole() {
       throw new Error("Unexpected role configuration")
     },
+    async modifyGuildChannelPositions() {
+      throw new Error("Unexpected channel ordering")
+    },
     async modifyGuildRolePositions() {
       throw new Error("Unexpected role ordering")
     },
@@ -787,6 +793,9 @@ function serviceFixture(overrides: {
       ...(overrides.channelMetadataOptions
         ? { channelMetadataOptions: overrides.channelMetadataOptions }
         : {}),
+      ...(overrides.channelOrderingOptions
+        ? { channelOrderingOptions: overrides.channelOrderingOptions }
+        : {}),
       ...(overrides.componentMessageOptions
         ? { componentMessageOptions: overrides.componentMessageOptions }
         : {}),
@@ -833,6 +842,7 @@ function serviceFixture(overrides: {
       ...(overrides.forumTagOptions
         ? { forumTagOptions: overrides.forumTagOptions }
         : {}),
+      ...(overrides.gateway ? { gateway: overrides.gateway } : {}),
       ...(overrides.guildScaffoldOptions
         ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
         : {}),
@@ -1132,6 +1142,18 @@ test("service exposes privacy-safe reaction reads and coordinates exact-message 
 test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
   const coordinationBotRoleId = "700000000000000003"
+  const orderedChannels = [
+    channel({ id: CHANNEL_ID, name: "target", position: 0 }),
+    channel({ id: OTHER_CHANNEL_ID, name: "anchor", position: 1 }),
+  ]
+  const gateway = new GatewayChannelLayoutStore({
+    enabled: true,
+    guildIds: new Set([GUILD_ID]),
+  })
+  assert.equal(gateway.ingestDispatch("GUILD_CREATE", {
+    channels: orderedChannels,
+    id: GUILD_ID,
+  }), true)
   const { service } = serviceFixture({
     client: {
       async getGuild() {
@@ -1158,11 +1180,15 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           [CREATED_ROLE_ID]: 4,
         }
       },
+      async getGuildChannels() {
+        return orderedChannels
+      },
       async getGuildRoles() {
         return [
           role(
             GUILD_ID,
             DISCORD_PERMISSIONS.MANAGE_GUILD
+              | DISCORD_PERMISSIONS.MANAGE_CHANNELS
               | DISCORD_PERMISSIONS.MANAGE_MESSAGES
               | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
               | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
@@ -1259,6 +1285,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
       DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
       DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
+      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
+      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
+      DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
@@ -1271,6 +1300,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
     },
+    gateway,
     writeCoordinator,
   })
   const digest = `hmac-sha256:${"a".repeat(64)}`
@@ -1317,6 +1347,24 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     name: "reviewed-channel",
     operationKey,
   }, digest))
+  const channelOrderRequest = {
+    anchorChannelId: OTHER_CHANNEL_ID,
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey,
+    placement: "below" as const,
+  }
+  const channelOrderAudit = await service.auditChannelOrder(GUILD_ID)
+  assert.deepEqual(
+    channelOrderAudit.groups.flatMap((group) => group.channels.map(({ id }) => id)),
+    [CHANNEL_ID, OTHER_CHANNEL_ID],
+  )
+  const channelOrderPlan = await service.planChannelOrder(channelOrderRequest)
+  await captured(() => service.executeChannelOrder(
+    channelOrderRequest,
+    channelOrderPlan.digest,
+  ))
   await captured(() => service.executeChannelPermissionOverwrite({
     auditReason: "reviewed",
     channelId: CHANNEL_ID,
@@ -1566,7 +1614,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 34)
+  assert.equal(byKind.size, 35)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1592,6 +1640,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       ],
       "channel-metadata-change": [
         { id: CHANNEL_ID, kind: "channel" },
+        { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
+      "channel-ordering": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { id: OTHER_CHANNEL_ID, kind: "channel" },
         { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
       ],
       "channel-permission-overwrite": [
@@ -1718,7 +1771,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
             ? componentPlan.digest
             : entry.kind === "role-ordering"
               ? roleOrderPlan.digest
-            : digest
+              : entry.kind === "channel-ordering"
+                ? channelOrderPlan.digest
+                : digest
     assert.equal(entry.planDigest, expectedDigest)
   }
   await assert.rejects(
@@ -1731,7 +1786,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 34)
+  assert.equal(writeCoordinator.intents.length, 35)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

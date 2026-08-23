@@ -854,6 +854,31 @@ export interface ChannelMetadataActivity {
   verification: "drift" | "match" | null
 }
 
+export type ChannelOrderingActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ChannelOrderingActivity {
+  anchorChannelId: string
+  baselineRevision: number
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "channel-ordering"
+  observedRevision: number | null
+  operationKeyHash: string
+  parentChannelId: string | null
+  placement: "above" | "below"
+  planDigest: string
+  schemaVersion: number
+  status: ChannelOrderingActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type ForumTagActivityStatus =
   | "completed"
   | "failed"
@@ -910,6 +935,7 @@ export type ActivityEntry =
   | AutoModerationActivity
   | ChannelCreationActivity
   | ChannelMetadataActivity
+  | ChannelOrderingActivity
   | ChannelPermissionOverwriteActivity
   | ComponentMessageActivity
   | DeletionActivity
@@ -2207,6 +2233,83 @@ function parseChannelMetadataActivity(
     status: record.status as ChannelMetadataActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseChannelOrderingActivity(
+  value: unknown,
+): ChannelOrderingActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "channel-ordering"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.channelId !== "string"
+    || !positiveActivitySnowflake(record.channelId)
+    || typeof record.anchorChannelId !== "string"
+    || !positiveActivitySnowflake(record.anchorChannelId)
+    || record.channelId === record.anchorChannelId
+    || !(record.parentChannelId === null || (
+      typeof record.parentChannelId === "string"
+      && positiveActivitySnowflake(record.parentChannelId)
+      && record.parentChannelId !== record.channelId
+      && record.parentChannelId !== record.anchorChannelId
+    ))
+    || (record.placement !== "above" && record.placement !== "below")
+    || !Number.isSafeInteger(record.baselineRevision)
+    || (record.baselineRevision as number) < 1
+    || !(record.observedRevision === null || (
+      Number.isSafeInteger(record.observedRevision)
+      && (record.observedRevision as number) > (record.baselineRevision as number)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.observedRevision !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.observedRevision === null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    anchorChannelId: record.anchorChannelId,
+    baselineRevision: record.baselineRevision as number,
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "channel-ordering",
+    observedRevision: record.observedRevision as number | null,
+    operationKeyHash: record.operationKeyHash,
+    parentChannelId: record.parentChannelId as string | null,
+    placement: record.placement as "above" | "below",
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ChannelOrderingActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
   }
 }
 
@@ -3689,6 +3792,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseStageInstanceActivity(value)
     || parseChannelCreationActivity(value)
     || parseChannelMetadataActivity(value)
+    || parseChannelOrderingActivity(value)
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
