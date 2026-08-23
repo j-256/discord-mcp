@@ -406,6 +406,34 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT",
+          "description": "Enable complete obfuscation-safe planning for exact allowlisted channel-clone sources; requires pinned application and bot identities",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_CHANNEL_CLONING",
+          "description": "Enable reviewed atomic same-guild channel cloning when clone audit is also enabled",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS",
+          "description": "Exact guild IDs eligible for channel-clone planning and reviewed execution",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS",
+          "description": "Exact direct source-channel IDs eligible for channel-clone planning and reviewed execution",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES",
           "description": "Enable reviewed partial metadata changes when an exact direct-channel allowlist is also set",
           "default": "false",

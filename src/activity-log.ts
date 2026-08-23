@@ -11,6 +11,7 @@ import {
   CONNECTOR_LIMITS,
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
+  DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -854,6 +855,30 @@ export interface ChannelMetadataActivity {
   verification: "drift" | "match" | null
 }
 
+export type ChannelCloneActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ChannelCloneActivity {
+  baselineRevision: number
+  channelType: number
+  createdChannelId: string | null
+  error: string | null
+  guildId: string
+  id: string
+  kind: "channel-clone"
+  observedRevision: number | null
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  sourceChannelId: string
+  status: ChannelCloneActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type ChannelOrderingActivityStatus =
   | "completed"
   | "failed"
@@ -933,6 +958,7 @@ export type ActivityEntry =
   | AnnouncementSubscriptionActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
+  | ChannelCloneActivity
   | ChannelCreationActivity
   | ChannelMetadataActivity
   | ChannelOrderingActivity
@@ -2308,6 +2334,99 @@ function parseChannelOrderingActivity(
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as ChannelOrderingActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
+function parseChannelCloneActivity(
+  value: unknown,
+): ChannelCloneActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const supportedTypes: readonly number[] = [
+    DISCORD_CHANNEL_TYPES.announcement,
+    DISCORD_CHANNEL_TYPES.category,
+    DISCORD_CHANNEL_TYPES.forum,
+    DISCORD_CHANNEL_TYPES.media,
+    DISCORD_CHANNEL_TYPES.stageVoice,
+    DISCORD_CHANNEL_TYPES.text,
+    DISCORD_CHANNEL_TYPES.voice,
+  ]
+  const createdChannelId = record.createdChannelId
+  const observedRevision = record.observedRevision
+  const status = String(record.status)
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "channel-clone"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.sourceChannelId !== "string"
+    || !positiveActivitySnowflake(record.sourceChannelId)
+    || !(createdChannelId === null || (
+      typeof createdChannelId === "string"
+      && positiveActivitySnowflake(createdChannelId)
+      && createdChannelId !== record.sourceChannelId
+    ))
+    || !Number.isSafeInteger(record.channelType)
+    || !supportedTypes.includes(record.channelType as number)
+    || !Number.isSafeInteger(record.baselineRevision)
+    || (record.baselineRevision as number) < 1
+    || !(observedRevision === null || (
+      Number.isSafeInteger(observedRevision)
+      && (observedRevision as number) > (record.baselineRevision as number)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      createdChannelId !== null
+      || record.error !== null
+      || observedRevision !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      createdChannelId === null
+      || record.error !== null
+      || observedRevision === null
+      || record.verification !== "match"
+    ))
+    || (status === "failed" && (
+      createdChannelId !== null
+      || record.error === null
+      || observedRevision !== null
+      || record.verification !== null
+    ))
+    || (status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    baselineRevision: record.baselineRevision as number,
+    channelType: record.channelType as number,
+    createdChannelId: createdChannelId as string | null,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "channel-clone",
+    observedRevision: observedRevision as number | null,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    sourceChannelId: record.sourceChannelId,
+    status: record.status as ChannelCloneActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "match" | null,
   }
@@ -3792,6 +3911,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseStageInstanceActivity(value)
     || parseChannelCreationActivity(value)
     || parseChannelMetadataActivity(value)
+    || parseChannelCloneActivity(value)
     || parseChannelOrderingActivity(value)
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)

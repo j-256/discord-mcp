@@ -43,7 +43,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 13
+export const OPERATOR_REPORT_SCHEMA_VERSION = 14
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -57,6 +57,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   automodChangePolicy: "automod-change-policy",
   banAuditPolicy: "ban-audit-policy",
   botIdentity: "bot-identity",
+  channelCloneAuditPolicy: "channel-clone-audit-policy",
+  channelCloneChangePolicy: "channel-clone-change-policy",
   channelCreationPolicy: "channel-creation-policy",
   channelMetadataPolicy: "channel-metadata-policy",
   channelScope: "channel-scope",
@@ -350,6 +352,18 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowChannelCreation && config.channelCreationGuildIds.size === 0) {
     warnings.push("The channel-creation toggle is enabled but channel creation remains blocked because no channel-creation guild allowlist is configured")
   }
+  if (
+    config.allowChannelCloneAudit
+    && (config.channelCloneGuildIds.size === 0 || config.channelCloneSourceIds.size === 0)
+  ) {
+    warnings.push("The channel-clone audit toggle is enabled but planning remains blocked because exact guild and source-channel allowlists are both required")
+  }
+  if (
+    config.allowChannelCloning
+    && (config.channelCloneGuildIds.size === 0 || config.channelCloneSourceIds.size === 0)
+  ) {
+    warnings.push("The channel-clone change toggle is enabled but cloning remains blocked because exact guild and source-channel allowlists are both required")
+  }
   if (config.allowChannelMetadataChanges && config.channelMetadataIds.size === 0) {
     warnings.push("The channel-metadata toggle is enabled but metadata changes remain blocked because an exact channel allowlist is required")
   }
@@ -612,6 +626,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowRoleCreation, "role-creation", "Role creation"],
     [config.allowRoleConfiguration, "role-configuration", "Role configuration"],
     [
+      config.allowChannelCloneAudit || config.allowChannelCloning,
+      "channel-cloning",
+      "Channel-clone audit and reviewed changes",
+    ],
+    [
       config.allowChannelOrderingAudit || config.allowChannelOrderingChanges,
       "channel-ordering",
       "Channel-order audit and reviewed changes",
@@ -822,6 +841,50 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.channelCreationPolicy,
         "pass",
         `Additive channel creation is constrained to ${config.channelCreationGuildIds.size} guilds with reviewed one-shot execution`,
+      ))
+    }
+    if (!config.allowChannelCloneAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCloneAuditPolicy,
+        "pass",
+        "Channel-clone audit is disabled",
+      ))
+    } else if (
+      config.channelCloneGuildIds.size === 0
+      || config.channelCloneSourceIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCloneAuditPolicy,
+        "warn",
+        "Channel-clone audit is enabled, but exact guild and source-channel allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCloneAuditPolicy,
+        "pass",
+        `Channel-clone audit is constrained to ${config.channelCloneSourceIds.size} exact sources across ${config.channelCloneGuildIds.size} exact guilds with complete obfuscation-safe topology, strict source evidence, capacity, and authority checks`,
+      ))
+    }
+    if (!config.allowChannelCloning) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCloneChangePolicy,
+        "pass",
+        "Reviewed channel cloning is disabled",
+      ))
+    } else if (
+      config.channelCloneGuildIds.size === 0
+      || config.channelCloneSourceIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCloneChangePolicy,
+        "warn",
+        "Channel cloning is enabled, but exact guild and source-channel allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelCloneChangePolicy,
+        "pass",
+        `Reviewed channel cloning is constrained to ${config.channelCloneSourceIds.size} exact sources across ${config.channelCloneGuildIds.size} exact guilds with signed approval, atomic one-shot creation, content-free auditing, and newer complete Gateway verification`,
       ))
     }
     if (!config.allowChannelMetadataChanges) {
@@ -2201,6 +2264,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.protectedUserIds,
     ENVIRONMENT_NAMES.allowChannelCreation,
     ENVIRONMENT_NAMES.channelCreationGuildIds,
+    ENVIRONMENT_NAMES.allowChannelCloneAudit,
+    ENVIRONMENT_NAMES.allowChannelCloning,
+    ENVIRONMENT_NAMES.channelCloneGuildIds,
+    ENVIRONMENT_NAMES.channelCloneSourceIds,
     ENVIRONMENT_NAMES.allowChannelMetadataChanges,
     ENVIRONMENT_NAMES.channelMetadataIds,
     ENVIRONMENT_NAMES.allowChannelOrderingAudit,

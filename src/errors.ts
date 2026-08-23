@@ -231,6 +231,46 @@ export class ChannelCreationExecutionError extends Error {
   }
 }
 
+export class ChannelClonePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord channel snapshot does not match the reviewed clone plan")
+    this.name = "ChannelClonePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelCloneOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord channel-clone operation key has already been reserved")
+    this.name = "ChannelCloneOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelCloneExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelCloneExecutionError"
+    this.result = result
+  }
+}
+
+export class ChannelCloneEvidenceError extends Error {
+  override name = "ChannelCloneEvidenceError"
+}
+
+export class ChannelCloneVerificationTimeoutError extends Error {
+  override name = "ChannelCloneVerificationTimeoutError"
+}
+
 export class ChannelMetadataPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -476,6 +476,7 @@ function guidanceService(options: {
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
+    executeChannelClone: unexpected,
     executeChannelMetadataChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
@@ -495,6 +496,7 @@ function guidanceService(options: {
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planAnnouncementSubscription: unexpected,
+    planChannelClone: unexpected,
     planNativeInteractionCommand: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
@@ -1373,6 +1375,10 @@ function guidanceService(options: {
         automodGuildIds: [],
         banAuditEnabled: false,
         banAuditGuildIds: [],
+        channelCloneAuditEnabled: false,
+        channelCloneGuildIds: [],
+        channelCloneSourceIds: [],
+        channelCloningEnabled: false,
         channelCreationEnabled: false,
         channelCreationGuildIds: [],
         channelMetadataChangesEnabled: false,
@@ -4020,6 +4026,27 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(roleOrder, /complete affected segment/)
   assert.match(roleOrder, /aggregate holder assignments/)
   assert.match(roleOrder, /unknown future role fields/)
+
+  const channelCloneRequest = {
+    auditReason: "Reviewed channel clone",
+    guildId: GUILD_ID,
+    name: "reviewed-copy",
+    operationKey: OPERATION_KEY,
+    sourceChannelId: CHANNEL_ID,
+  }
+  const channelClone = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(channelCloneRequest) },
+    name: MCP_PROMPT_NAMES.reviewChannelClone,
+  }))
+  assert.deepEqual(
+    JSON.parse(channelClone.split("\n")[1] || ""),
+    channelCloneRequest,
+  )
+  assert.match(channelClone, /Call only plan_channel_clone/)
+  assert.match(channelClone, /do not call execute_channel_clone/)
+  assert.match(channelClone, /atomic create payload/)
+  assert.match(channelClone, /source position and child resources/)
+  assert.match(channelClone, /unknown or lossy source fields/)
 
   const channelOrderRequest = {
     anchorChannelId: SECOND_CHANNEL_ID,

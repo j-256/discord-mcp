@@ -20,6 +20,7 @@ const GUILD_ID = "100000000000000001"
 const VISIBLE_CHANNEL_ID = "200000000000000001"
 const HIDDEN_CHANNEL_ID = "200000000000000002"
 const SECOND_GUILD_ID = "100000000000000002"
+const CLONE_GUILD_ID = "100000000000000003"
 
 function channel(
   id: string,
@@ -220,16 +221,18 @@ test("exactGatewayChannelLayout rejects malformed topology", () => {
 test("guildChannelLayoutGuildIds unions only enabled exact scopes", () => {
   const ids = guildChannelLayoutGuildIds({
     allowedGuildIds: new Set([GUILD_ID]),
+    allowChannelCloneAudit: true,
     allowChannelOrderingAudit: true,
     allowGateway: false,
     allowGuildTemplateAudit: true,
     allowMemberRoleChanges: false,
     allowOnboardingAudit: true,
+    channelCloneGuildIds: new Set([CLONE_GUILD_ID]),
     channelOrderingGuildIds: new Set([GUILD_ID]),
     guildTemplateGuildIds: new Set([SECOND_GUILD_ID]),
     memberRoleGuildIds: new Set(["100000000000000003"]),
     onboardingGuildIds: new Set([SECOND_GUILD_ID]),
   })
 
-  assert.deepEqual([...ids], [GUILD_ID, SECOND_GUILD_ID])
+  assert.deepEqual([...ids], [CLONE_GUILD_ID, GUILD_ID, SECOND_GUILD_ID])
 })

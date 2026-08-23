@@ -1811,6 +1811,79 @@ test("Discord client never retries a rate-limited channel creation", async () =>
   assert.equal(sleeps, 0)
 })
 
+test("Discord client sends one complete atomically cloneable forum body", async () => {
+  let body: unknown = null
+  const topic = "f".repeat(1_024)
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      return jsonResponse({ guild_id: "100", id: "201", name: "reviewed-copy", type: 15 })
+    },
+    token: TOKEN,
+  })
+
+  await client.createGuildChannel("100", {
+    availableTags: [
+      {
+        emojiId: null,
+        emojiName: "📌",
+        moderated: true,
+        name: "Pinned",
+      },
+      {
+        emojiId: "300",
+        emojiName: null,
+        moderated: false,
+        name: "Custom",
+      },
+    ],
+    defaultAutoArchiveDuration: 4_320,
+    defaultForumLayout: 2,
+    defaultReactionEmoji: { emojiId: null, emojiName: "✅" },
+    defaultSortOrder: 1,
+    defaultThreadRateLimitPerUser: 7,
+    flags: 16,
+    name: "reviewed-copy",
+    nsfw: false,
+    parentId: "200",
+    permissionOverwrites: [{ allow: "1024", deny: "0", id: "100", type: 0 }],
+    rateLimitPerUser: 5,
+    topic,
+    type: 15,
+  }, "Reviewed forum clone")
+
+  assert.deepEqual(body, {
+    available_tags: [
+      {
+        emoji_id: null,
+        emoji_name: "📌",
+        moderated: true,
+        name: "Pinned",
+      },
+      {
+        emoji_id: "300",
+        emoji_name: null,
+        moderated: false,
+        name: "Custom",
+      },
+    ],
+    default_auto_archive_duration: 4_320,
+    default_forum_layout: 2,
+    default_reaction_emoji: { emoji_id: null, emoji_name: "✅" },
+    default_sort_order: 1,
+    default_thread_rate_limit_per_user: 7,
+    flags: 16,
+    name: "reviewed-copy",
+    nsfw: false,
+    parent_id: "200",
+    permission_overwrites: [{ allow: "1024", deny: "0", id: "100", type: 0 }],
+    rate_limit_per_user: 5,
+    topic,
+    type: 15,
+  })
+})
+
 test("Discord client sends one narrow forum-post body with fixed telemetry", async () => {
   let request: {
     body: unknown
@@ -3019,10 +3092,22 @@ test("Discord client rejects unsupported channel creation before fetching", () =
 
   assert.throws(
     () => client.createGuildChannel("invalid", { name: "valid", type: 0 }, "reviewed"),
-    /guild ID must be a snowflake/,
+    /guild ID must be a positive Discord snowflake/,
   )
   assert.throws(
-    () => client.createGuildChannel("100", { name: "valid", type: 2 }, "reviewed"),
+    () => client.createGuildChannel("0", { name: "valid", type: 0 }, "reviewed"),
+    /guild ID must be a positive Discord snowflake/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      name: "valid",
+      parentId: "0",
+      type: 0,
+    }, "reviewed"),
+    /parent ID must be a positive Discord snowflake/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", { name: "valid", type: 14 }, "reviewed"),
     /type is not supported/,
   )
   assert.throws(
@@ -3031,7 +3116,7 @@ test("Discord client rejects unsupported channel creation before fetching", () =
       parentId: "200",
       type: 4,
     }, "reviewed"),
-    /category creation does not accept/,
+    /category creation does not accept a parent/,
   )
   assert.throws(
     () => client.createGuildChannel("100", {
@@ -3056,6 +3141,36 @@ test("Discord client rejects unsupported channel creation before fetching", () =
       type: 0,
     }, "reviewed"),
     /without unsupported controls/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      name: "valid",
+      topic: "f".repeat(1_025),
+      type: 15,
+    }, "reviewed"),
+    /at most 1024 characters/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      flags: 2 ** 32,
+      name: "valid",
+      type: 15,
+    }, "reviewed"),
+    /flags are not supported/,
+  )
+  assert.throws(
+    () => client.createGuildChannel("100", {
+      availableTags: [{
+        emojiId: null,
+        emojiName: null,
+        id: "300",
+        moderated: false,
+        name: "invalid",
+      }],
+      name: "valid",
+      type: 15,
+    } as never, "reviewed"),
+    /available tag is invalid/,
   )
   assert.equal(requests, 0)
 })

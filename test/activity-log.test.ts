@@ -16,6 +16,7 @@ import {
   type AnnouncementSubscriptionActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
+  type ChannelCloneActivity,
   type ChannelCreationActivity,
   type ChannelMetadataActivity,
   type ChannelOrderingActivity,
@@ -52,6 +53,7 @@ import {
   type WelcomeScreenActivity,
   type WidgetSettingsActivity,
 } from "../src/activity-log.js"
+import { DISCORD_CHANNEL_TYPES } from "../src/constants.js"
 
 function attachmentMessage(
   id: string,
@@ -324,6 +326,31 @@ function channelOrdering(
     placement: "above",
     planDigest: `hmac-sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function channelClone(
+  id: string,
+  status: ChannelCloneActivity["status"],
+): ChannelCloneActivity {
+  return {
+    baselineRevision: 4,
+    channelType: DISCORD_CHANNEL_TYPES.text,
+    createdChannelId: status === "completed" ? "252" : null,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "channel-clone",
+    observedRevision: status === "completed" ? 5 : null,
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"c".repeat(64)}`,
+    schemaVersion: 1,
+    sourceChannelId: "250",
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed" ? "match" : null,
@@ -1414,6 +1441,82 @@ test("JSONL activity log keeps role-ordering evidence content-free", async (cont
       "planDigest",
       "roleId",
       "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps channel-clone evidence content-free and exact", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-name",
+    "private-operation-key",
+    "private-overwrites",
+    "private-topic",
+  ]
+
+  await store.append(channelClone("1", "pending"))
+  await store.append({
+    ...channelClone("2", "completed"),
+    auditReason: privateValues[0],
+    channelName: privateValues[1],
+    operationKey: privateValues[2],
+    overwrites: privateValues[3],
+    topic: privateValues[4],
+  } as ChannelCloneActivity)
+  await appendFile(
+    file,
+    [
+      {
+        ...channelClone("3", "completed"),
+        createdChannelId: "250",
+      },
+      {
+        ...channelClone("4", "completed"),
+        observedRevision: 4,
+      },
+      {
+        ...channelClone("5", "completed"),
+        channelType: DISCORD_CHANNEL_TYPES.directory,
+      },
+      {
+        ...channelClone("6", "failed"),
+        createdChannelId: "252",
+      },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 4)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "baselineRevision",
+      "channelType",
+      "createdChannelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "observedRevision",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "sourceChannelId",
       "status",
       "timestamp",
       "verification",

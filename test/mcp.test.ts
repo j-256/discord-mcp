@@ -20,6 +20,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
+  DISCORD_CHANNEL_TYPES,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
@@ -55,6 +56,10 @@ import {
   type ProjectedAutoModerationRule,
 } from "../src/automod-service.js"
 import type { ChannelCreationRequest } from "../src/channel-administration-service.js"
+import type {
+  ChannelClonePlan,
+  ChannelCloneRequest,
+} from "../src/channel-clone-service.js"
 import type {
   ChannelMetadataChangePlan,
   ChannelMetadataChangeRequest,
@@ -207,6 +212,8 @@ import {
   AutoModerationOperationConflictError,
   ChannelCreationExecutionError,
   ChannelCreationOperationConflictError,
+  ChannelCloneExecutionError,
+  ChannelCloneOperationConflictError,
   ChannelMetadataExecutionError,
   ChannelMetadataOperationConflictError,
   ChannelOrderingExecutionError,
@@ -357,6 +364,8 @@ const ROLE_ORDERING_ANCHOR_ID = "350000000000000002"
 const CHANNEL_ORDERING_ANCHOR_ID = "200000000000000004"
 const CHANNEL_ORDERING_MID_ID = "200000000000000005"
 const CHANNEL_ORDERING_OPERATION_KEY = "channel-ordering-attempt-0001"
+const CHANNEL_CLONE_OPERATION_KEY = "channel-clone-attempt-0001"
+const CHANNEL_CLONE_CREATED_ID = "200000000000000006"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const COMPONENT_MESSAGE_OPERATION_KEY = "component-message-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
@@ -3920,6 +3929,129 @@ function roleOrderingInput(
   } as RoleOrderingRequest & Record<string, unknown>
 }
 
+function channelClonePlan(
+  request: ChannelCloneRequest,
+  digest = DIGEST,
+): ChannelClonePlan {
+  const name = request.name ?? "Private source channel"
+  const source: ChannelClonePlan["source"] = {
+    availableTags: null,
+    bitrate: null,
+    defaultAutoArchiveDuration: 1_440,
+    defaultForumLayout: null,
+    defaultReactionEmoji: null,
+    defaultSortOrder: null,
+    defaultThreadRateLimitPerUser: 0,
+    flags: 0,
+    guildId: request.guildId,
+    id: request.sourceChannelId,
+    name: "Private source channel",
+    nsfw: false,
+    parentId: PARENT_ID,
+    permissionOverwrites: [],
+    position: 3,
+    rateLimitPerUser: 5,
+    rtcRegion: null,
+    topic: "Private source topic",
+    type: DISCORD_CHANNEL_TYPES.text,
+    typeName: "text",
+    userLimit: null,
+    videoQualityMode: null,
+  }
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    capacity: {
+      guildChannels: 3,
+      guildLimit: 500,
+      parentChildren: 1,
+      parentLimit: 50,
+    },
+    createdAt: "2026-08-23T14:00:00.000Z",
+    digest,
+    evidence: {
+      httpMode: "complete",
+      layoutRevision: 7,
+      layoutUpdatedAt: "2026-08-23T13:59:59.000Z",
+      obfuscatedChannels: 0,
+    },
+    guild: {
+      features: [],
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: GUILD_OWNER_ID,
+      premiumTier: 0,
+    },
+    operationKeyHash: operationKeyHash(request.operationKey),
+    parent: { id: PARENT_ID, name: "Private parent category" },
+    permission: {
+      administrator: false,
+      guildEffectivePermissionNames: ["VIEW_CHANNEL", "MANAGE_CHANNELS"],
+      guildEffectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+      ).toString(),
+      guildManageChannels: true,
+      sourceEffectivePermissionNames: ["VIEW_CHANNEL", "MANAGE_CHANNELS"],
+      sourceEffectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+      ).toString(),
+      sourceViewChannel: true,
+    },
+    privacy: {
+      channelMetadata: "transient-untrusted",
+      hiddenMetadataReturned: false,
+      omittedFields: [
+        "auditReason",
+        "childResources",
+        "hiddenChannelMetadata",
+        "memberProfiles",
+        "messages",
+        "rawOperationKey",
+        "rawPayloads",
+      ],
+      persistence: "content-free-only",
+    },
+    risks: [
+      "Discord creates a new channel ID",
+      "Discord chooses default placement because source position is omitted",
+    ],
+    schemaVersion: 1,
+    source,
+    status: "planned",
+    target: {
+      payload: {
+        defaultAutoArchiveDuration: 1_440,
+        defaultThreadRateLimitPerUser: 0,
+        flags: 0,
+        name,
+        nsfw: false,
+        parentId: PARENT_ID,
+        permissionOverwrites: [],
+        rateLimitPerUser: 5,
+        topic: "Private source topic",
+        type: DISCORD_CHANNEL_TYPES.text,
+      },
+      placement: "discord-default",
+      regeneratedTagIds: false,
+    },
+    warnings: ["Success requires exact readback and a newer complete Gateway layout"],
+  }
+}
+
+function channelCloneInput(
+  overrides: Partial<ChannelCloneRequest> = {},
+): ChannelCloneRequest & Record<string, unknown> {
+  return {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    name: "reviewed-copy",
+    operationKey: CHANNEL_CLONE_OPERATION_KEY,
+    sourceChannelId: CHANNEL_ID,
+    ...overrides,
+  } as ChannelCloneRequest & Record<string, unknown>
+}
+
 function channelOrderEntry(
   id: string,
   name: string,
@@ -4554,6 +4686,10 @@ function fixturePolicy(): PolicyDescription {
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    channelCloneAuditEnabled: false,
+    channelCloneGuildIds: [],
+    channelCloneSourceIds: [],
+    channelCloningEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
@@ -4689,6 +4825,8 @@ function serviceFixture(overrides: {
   channelCreationAction?: "create" | "none"
   channelCreationError?: Error
   channelCreationPlanDigest?: string
+  channelCloneError?: Error
+  channelClonePlanDigest?: string
   channelMetadataEffect?: "change" | "none"
   channelMetadataError?: Error
   channelMetadataPlanDigest?: string
@@ -4819,6 +4957,8 @@ function serviceFixture(overrides: {
     autoModerationPlan: 0,
     banGet: 0,
     banList: 0,
+    channelCloneExecute: 0,
+    channelClonePlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     channelMetadataExecute: 0,
@@ -5096,6 +5236,27 @@ function serviceFixture(overrides: {
         targetApplicationId: INTEGRATION_APPLICATION_ID,
         verifiedAbsent: true,
         verifiedUnchanged: true,
+      }
+    },
+    async executeChannelClone(request, planDigest) {
+      if (overrides.channelCloneError) throw overrides.channelCloneError
+      calls.channelCloneExecute += 1
+      return {
+        activityId: "activity-channel-clone",
+        baselineLayoutRevision: 7,
+        createdChannelId: CHANNEL_CLONE_CREATED_ID,
+        guildId: request.guildId,
+        observedLayoutRevision: 8,
+        operationKeyHash: operationKeyHash(request.operationKey),
+        parentId: PARENT_ID,
+        planDigest,
+        schemaVersion: 1,
+        sourceChannelId: request.sourceChannelId,
+        status: "completed",
+        tagIdMap: [],
+        type: DISCORD_CHANNEL_TYPES.text,
+        typeName: "text",
+        verification: "match",
       }
     },
     async executeChannelOrder(request, planDigest) {
@@ -7402,6 +7563,13 @@ function serviceFixture(overrides: {
         overrides.roleOrderingEffect,
       )
     },
+    async planChannelClone(request) {
+      calls.channelClonePlan += 1
+      return channelClonePlan(
+        request,
+        overrides.channelClonePlanDigest || DIGEST,
+      )
+    },
     async planChannelOrder(request) {
       calls.channelOrderingPlan += 1
       return channelOrderingPlan(
@@ -7814,6 +7982,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_role_configuration",
       "plan_role_order",
       "execute_role_order",
+      "plan_channel_clone",
+      "execute_channel_clone",
       "plan_channel_order",
       "execute_channel_order",
       "plan_member_moderation",
@@ -7893,6 +8063,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const channelOrdering = result.tools.find((tool) => (
     tool.name === "execute_channel_order"
   ))
+  const channelClone = result.tools.find((tool) => (
+    tool.name === "execute_channel_clone"
+  ))
   const componentMessage = result.tools.find((tool) => (
     tool.name === "execute_component_message"
   ))
@@ -7919,6 +8092,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     threadChange,
     roleConfiguration,
     roleOrdering,
+    channelClone,
     channelOrdering,
   ]) {
     assert.deepEqual(tool?.annotations, {
@@ -8024,6 +8198,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_channel",
     "audit_forum_tags",
     "audit_channel_order",
+    "plan_channel_clone",
     "plan_channel_order",
     "plan_forum_tag_change",
     "plan_channel_metadata_change",
@@ -8241,13 +8416,17 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
 })
 
-test("MCP server validates the exact channel-order Gateway layout scope", async () => {
+test("MCP server validates the exact reviewed channel-workflow Gateway layout scope", async () => {
   const environment = {
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
     DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
     DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
     DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
   }
   const service = serviceFixture().service
@@ -8454,6 +8633,30 @@ test("progressive discovery enables the complete reviewed channel-creation workf
     [
       "plan_channel_creation",
       "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed channel-clone workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_channel_clone" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_channel_clone",
+    "plan_channel_clone",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_channel_clone",
+      "execute_channel_clone",
       "discover_discord_tools",
     ],
   )
@@ -9347,6 +9550,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     autoModerationPlan: 0,
     banGet: 0,
     banList: 0,
+    channelCloneExecute: 0,
+    channelClonePlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     channelMetadataExecute: 0,
@@ -19684,6 +19889,194 @@ test("MCP role ordering exposes uncertainty and content-free conflicts", async (
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(ROLE_ORDERING_OPERATION_KEY),
+  )
+})
+
+test("MCP channel cloning plans one exact atomic payload without exposing the raw key", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: channelCloneInput(),
+    name: "plan_channel_clone",
+  })
+  const extra = await client.callTool({
+    arguments: { ...channelCloneInput(), position: 4 },
+    name: "plan_channel_clone",
+  })
+  const invalidSource = await client.callTool({
+    arguments: channelCloneInput({ sourceChannelId: "0" }),
+    name: "plan_channel_clone",
+  })
+
+  const plan = structuredContent(planned)
+  const target = plan.target as Record<string, unknown>
+  const payload = target.payload as Record<string, unknown>
+  assert.equal(plan.status, "planned")
+  assert.equal((plan.source as Record<string, unknown>).id, CHANNEL_ID)
+  assert.equal(payload.name, "reviewed-copy")
+  assert.equal(payload.parentId, PARENT_ID)
+  assert.equal("position" in payload, false)
+  assert.equal(target.placement, "discord-default")
+  assert.equal(extra.isError, true)
+  assert.equal(invalidSource.isError, true)
+  assert.equal(calls.channelClonePlan, 1)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(CHANNEL_CLONE_OPERATION_KEY))
+})
+
+test("MCP channel cloning binds approval to source, atomic payload, and placement exclusion", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: { ...channelCloneInput(), planDigest: DIGEST },
+    name: "execute_channel_clone",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).createdChannelId, CHANNEL_CLONE_CREATED_ID)
+  assert.equal(calls.channelClonePlan, 1)
+  assert.equal(calls.channelCloneExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    PARENT_ID,
+    "Private source channel",
+    "Private source topic",
+    "reviewed-copy",
+    "MANAGE_CHANNELS",
+    operationKeyHash(CHANNEL_CLONE_OPERATION_KEY),
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Target atomic create payload:/)
+  assert.match(confirmationMessage, /source channel position is intentionally omitted/i)
+  assert.match(confirmationMessage, /one non-retried atomic channel create/i)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(CHANNEL_CLONE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(CHANNEL_CLONE_OPERATION_KEY),
+  )
+})
+
+test("MCP channel cloning stops on refusal, drift, or mismatched signed state", async (context) => {
+  const argumentsValue = { ...channelCloneInput(), planDigest: DIGEST }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_clone",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.channelCloneExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelClonePlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_clone",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.channelCloneExecute, 0)
+
+  const signed = await connectedModernStdioFixture(context)
+  const initial = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: argumentsValue,
+      name: "execute_channel_clone",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  const invalid = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...argumentsValue, name: "different-reviewed-copy" },
+      inputResponses: {
+        confirm_channel_clone: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_channel_clone",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(invalid).status, "confirmation-invalid")
+  assert.equal(invalid.isError, true)
+  assert.equal(signed.calls.channelCloneExecute, 0)
+})
+
+test("MCP channel cloning exposes uncertainty and only content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = { ...channelCloneInput(), planDigest: DIGEST }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelCloneError: new ChannelCloneExecutionError(
+        "Discord channel-clone outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_clone",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-channel-clone",
+    createdChannelId: CHANNEL_CLONE_CREATED_ID,
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(CHANNEL_CLONE_OPERATION_KEY),
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelCloneError: new ChannelCloneOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_clone",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(CHANNEL_CLONE_OPERATION_KEY),
   )
 })
 

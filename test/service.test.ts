@@ -254,6 +254,7 @@ function serviceFixture(overrides: {
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
+  channelCloneOptions?: ConnectorServiceOptions["channelCloneOptions"]
   channelMetadataOptions?: ConnectorServiceOptions["channelMetadataOptions"]
   channelOrderingOptions?: ConnectorServiceOptions["channelOrderingOptions"]
   componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
@@ -804,6 +805,9 @@ function serviceFixture(overrides: {
       ...(overrides.channelAdministrationOptions
         ? { channelAdministrationOptions: overrides.channelAdministrationOptions }
         : {}),
+      ...(overrides.channelCloneOptions
+        ? { channelCloneOptions: overrides.channelCloneOptions }
+        : {}),
       ...(overrides.channelMetadataOptions
         ? { channelMetadataOptions: overrides.channelMetadataOptions }
         : {}),
@@ -952,6 +956,22 @@ test("service rejects forum-tag scope before identity or channel access", async 
       tagId: CREATED_ROLE_ID,
     }),
     /forum-tag audit is disabled/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+})
+
+test("service rejects channel-clone scope before identity access", async () => {
+  const { calls, service } = serviceFixture()
+
+  await assert.rejects(
+    () => service.planChannelClone({
+      auditReason: "reviewed",
+      guildId: GUILD_ID,
+      operationKey: "channel-clone-preflight-0001",
+      sourceChannelId: CHANNEL_ID,
+    }),
+    /channel-clone audit is disabled/,
   )
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
@@ -1175,6 +1195,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           ...guild(),
           features: [],
           owner_id: "800000000000000001",
+          premium_tier: 0,
         }
       },
       async getGuildMember(_guildId, userId) {
@@ -1301,6 +1322,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
       DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
       DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
+      DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
+      DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
       DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
@@ -1361,6 +1386,18 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     name: "reviewed-channel",
     operationKey,
   }, digest))
+  const channelCloneRequest = {
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    name: "reviewed-clone",
+    operationKey,
+    sourceChannelId: CHANNEL_ID,
+  }
+  const channelClonePlan = await service.planChannelClone(channelCloneRequest)
+  await captured(() => service.executeChannelClone(
+    channelCloneRequest,
+    channelClonePlan.digest,
+  ))
   const channelOrderRequest = {
     anchorChannelId: OTHER_CHANNEL_ID,
     auditReason: "reviewed",
@@ -1628,7 +1665,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 35)
+  assert.equal(byKind.size, 36)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1651,6 +1688,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       "channel-creation": [
         { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
         { id: CHANNEL_ID, kind: "channel" },
+      ],
+      "channel-clone": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
       ],
       "channel-metadata-change": [
         { id: CHANNEL_ID, kind: "channel" },
@@ -1785,6 +1826,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
             ? componentPlan.digest
             : entry.kind === "role-ordering"
               ? roleOrderPlan.digest
+              : entry.kind === "channel-clone"
+                ? channelClonePlan.digest
               : entry.kind === "channel-ordering"
                 ? channelOrderPlan.digest
                 : digest
@@ -1800,7 +1843,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 35)
+  assert.equal(writeCoordinator.intents.length, 36)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

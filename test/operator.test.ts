@@ -88,6 +88,10 @@ function status(
       automodGuildIds: [],
       banAuditEnabled: false,
       banAuditGuildIds: [],
+      channelCloneAuditEnabled: false,
+      channelCloneGuildIds: [],
+      channelCloneSourceIds: [],
+      channelCloningEnabled: false,
       channelCreationEnabled: false,
       channelCreationGuildIds: [],
       channelMetadataChangesEnabled: false,
@@ -319,6 +323,7 @@ function toolService(): DiscordToolService {
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelClone: unexpected,
     executeChannelOrder: unexpected,
     executeChannelMetadataChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
@@ -363,6 +368,7 @@ function toolService(): DiscordToolService {
     planAttachmentMessage: unexpected,
     planComponentMessage: unexpected,
     planChannelCreation: unexpected,
+    planChannelClone: unexpected,
     planChannelMetadataChange: unexpected,
     planChannelOrder: unexpected,
     planChannelPermissionOverwrite: unexpected,
@@ -2199,6 +2205,53 @@ test("doctor and setup separate role-order audit from reviewed changes", async (
   }
 })
 
+test("doctor and setup explain exact reviewed channel cloning", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
+    DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelCloneAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelCloneChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact sources across 1 exact guilds/)
+  assert.match(audit?.summary || "", /obfuscation-safe topology/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /signed approval/)
+  assert.match(changes?.summary || "", /atomic one-shot creation/)
+  assert.match(changes?.summary || "", /content-free auditing/)
+  assert.match(omitted.warnings.join("\n"), /channel-cloning toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT",
+    "DISCORD_MCP_ALLOW_CHANNEL_CLONING",
+    "DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS",
+    "DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
 test("doctor and setup separate channel-order audit from reviewed changes", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
@@ -3084,6 +3137,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_announcement_subscription",
     "review_attachment_message",
     "review_automod_change",
+    "review_channel_clone",
     "review_channel_creation",
     "review_channel_metadata_change",
     "review_channel_order",
@@ -3169,6 +3223,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_announcement_crosspost",
     "execute_announcement_subscription",
     "execute_automod_change",
+    "execute_channel_clone",
     "execute_channel_metadata_change",
     "execute_channel_order",
     "execute_channel_permission_overwrite",
@@ -3204,6 +3259,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
   assert.equal(report.readOnlyTools.includes("audit_channel_order"), true)
+  assert.equal(report.readOnlyTools.includes("plan_channel_clone"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_order"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("audit_forum_tags"), true)

@@ -81,6 +81,7 @@ export interface DiscordAttachment {
 export interface DiscordChannel {
   applied_tags?: string[]
   available_tags?: DiscordForumTag[]
+  bitrate?: number
   default_auto_archive_duration?: number | null
   default_forum_layout?: number
   default_reaction_emoji?: DiscordDefaultReaction | null
@@ -100,6 +101,7 @@ export interface DiscordChannel {
   permission_overwrites?: DiscordPermissionOverwrite[]
   position?: number
   rate_limit_per_user?: number | null
+  rtc_region?: string | null
   thread_metadata?: {
     archive_timestamp?: string
     archived?: boolean
@@ -111,6 +113,8 @@ export interface DiscordChannel {
   topic?: string | null
   total_message_sent?: number
   type: number
+  user_limit?: number
+  video_quality_mode?: number
 }
 
 export interface DiscordCreatedForumPost extends DiscordChannel {
@@ -137,6 +141,7 @@ export interface DiscordGuild {
   name: string
   owner?: boolean
   owner_id?: string
+  premium_tier?: number
   permissions?: string
   widget_channel_id?: string | null
   widget_enabled?: boolean

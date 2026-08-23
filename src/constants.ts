@@ -31,6 +31,7 @@ export const MCP_TOOLSET_NAMES = [
   "automod",
   "bans",
   "channel-creation",
+  "channel-cloning",
   "channel-metadata",
   "channel-ordering",
   "connector",
@@ -97,6 +98,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowAutomodChanges: "DISCORD_MCP_ALLOW_AUTOMOD_CHANGES",
   allowBanAudit: "DISCORD_MCP_ALLOW_BAN_AUDIT",
   allowChannelCreation: "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
+  allowChannelCloneAudit: "DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT",
+  allowChannelCloning: "DISCORD_MCP_ALLOW_CHANNEL_CLONING",
   allowChannelMetadataChanges: "DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES",
   allowChannelOrderingAudit: "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT",
   allowChannelOrderingChanges: "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES",
@@ -165,6 +168,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   auditFile: "DISCORD_MCP_AUDIT_FILE",
   botId: "DISCORD_MCP_BOT_ID",
   channelCreationGuildIds: "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
+  channelCloneGuildIds: "DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS",
+  channelCloneSourceIds: "DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS",
   channelMetadataIds: "DISCORD_MCP_CHANNEL_METADATA_IDS",
   channelOrderingGuildIds: "DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS",
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
@@ -266,6 +271,7 @@ export const DISCORD_LIMITS = Object.freeze({
   banDeleteMessageSeconds: 7 * 24 * 60 * 60,
   channelMessages: 100,
   channelPins: 50,
+  channelBitrateMinimum: 8_000,
   channelPermissionOverwrites: 1_000,
   channelNameCharacters: 100,
   channelRateLimitSeconds: 21_600,
@@ -303,6 +309,8 @@ export const DISCORD_LIMITS = Object.freeze({
   soundboardNameCharacters: 32,
   soundboardNameMinimumCharacters: 2,
   soundboardSounds: 250,
+  stageChannelBitrateMaximum: 64_000,
+  stageChannelUserLimit: 10_000,
   stageTopicCharacters: 120,
   searchChannelIds: 500,
   searchContentCharacters: 1_024,
@@ -321,6 +329,9 @@ export const DISCORD_LIMITS = Object.freeze({
   stickerTagCharacters: 200,
   webhookNameCharacters: 80,
   webhooksPerChannel: 15,
+  voiceChannelBitrateMaximum: 384_000,
+  voiceChannelUserLimit: 99,
+  voiceRegionIdCharacters: 100,
 })
 
 export const PERMISSION_LIMITS = Object.freeze({
@@ -478,6 +489,8 @@ export const CONNECTOR_LIMITS = Object.freeze({
   profileBytes: 16_384,
   protectedUserAllowlist: 100,
   reactionChannelAllowlist: 100,
+  channelCloneGuildAllowlist: 100,
+  channelCloneSourceAllowlist: 100,
   channelOrderingGuildAllowlist: 100,
   roleConfigurationAllowlist: 100,
   roleOrderingGuildAllowlist: 100,
@@ -663,7 +676,25 @@ export const DISCORD_CHANNEL_TYPES = Object.freeze({
 
 export const DISCORD_CHANNEL_FLAGS = Object.freeze({
   channelObfuscated: 1 << 17,
+  hideMediaDownloadOptions: 1 << 15,
+  isSpoilerChannel: 1 << 21,
   requireTag: 1 << 4,
+})
+
+export const DISCORD_VIDEO_QUALITY_MODES = Object.freeze({
+  auto: 1,
+  full: 2,
+})
+
+export const DISCORD_FORUM_SORT_ORDERS = Object.freeze({
+  creationDate: 1,
+  latestActivity: 0,
+})
+
+export const DISCORD_FORUM_LAYOUTS = Object.freeze({
+  gallery: 2,
+  list: 1,
+  notSet: 0,
 })
 
 export const DISCORD_MESSAGE_REFERENCE_TYPES = Object.freeze({

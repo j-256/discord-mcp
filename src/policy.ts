@@ -30,6 +30,10 @@ export interface PolicyDescription {
   automodGuildIds: string[]
   banAuditEnabled: boolean
   banAuditGuildIds: string[]
+  channelCloneAuditEnabled: boolean
+  channelCloneGuildIds: string[]
+  channelCloneSourceIds: string[]
+  channelCloningEnabled: boolean
   channelCreationEnabled: boolean
   channelCreationGuildIds: string[]
   channelMetadataChangesEnabled: boolean
@@ -168,6 +172,8 @@ export class ScopePolicy {
   readonly #allowAutomodAudit: boolean
   readonly #allowAutomodChanges: boolean
   readonly #allowBanAudit: boolean
+  readonly #allowChannelCloneAudit: boolean
+  readonly #allowChannelCloning: boolean
   readonly #allowChannelCreation: boolean
   readonly #allowChannelMetadataChanges: boolean
   readonly #allowChannelOrderingAudit: boolean
@@ -236,6 +242,8 @@ export class ScopePolicy {
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
+  readonly #channelCloneGuildIds: ReadonlySet<string>
+  readonly #channelCloneSourceIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
   readonly #channelMetadataIds: ReadonlySet<string>
   readonly #channelOrderingGuildIds: ReadonlySet<string>
@@ -311,6 +319,8 @@ export class ScopePolicy {
     | "allowAutomodAudit"
     | "allowAutomodChanges"
     | "allowBanAudit"
+    | "allowChannelCloneAudit"
+    | "allowChannelCloning"
     | "allowChannelMetadataChanges"
     | "allowChannelOrderingAudit"
     | "allowChannelOrderingChanges"
@@ -368,6 +378,8 @@ export class ScopePolicy {
     | "allowWidgetSettingsAudit"
     | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
+    | "channelCloneGuildIds"
+    | "channelCloneSourceIds"
     | "announcementCrosspostChannelIds"
     | "announcementSubscriptionSourceChannelIds"
     | "announcementSubscriptionTargetChannelIds"
@@ -436,6 +448,8 @@ export class ScopePolicy {
     this.#allowAutomodAudit = config.allowAutomodAudit ?? false
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
     this.#allowBanAudit = config.allowBanAudit ?? false
+    this.#allowChannelCloneAudit = config.allowChannelCloneAudit ?? false
+    this.#allowChannelCloning = config.allowChannelCloning ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
     this.#allowChannelOrderingAudit = config.allowChannelOrderingAudit ?? false
     this.#allowChannelOrderingChanges = config.allowChannelOrderingChanges ?? false
@@ -506,6 +520,8 @@ export class ScopePolicy {
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
+    this.#channelCloneGuildIds = config.channelCloneGuildIds ?? new Set()
+    this.#channelCloneSourceIds = config.channelCloneSourceIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
     this.#channelMetadataIds = config.channelMetadataIds ?? new Set()
     this.#channelOrderingGuildIds = config.channelOrderingGuildIds ?? new Set()
@@ -595,6 +611,15 @@ export class ScopePolicy {
       automodGuildIds: [...this.#automodGuildIds].sort(),
       banAuditEnabled: this.#allowBanAudit && this.#banAuditGuildIds.size > 0,
       banAuditGuildIds: [...this.#banAuditGuildIds].sort(),
+      channelCloneAuditEnabled: this.#allowChannelCloneAudit
+        && this.#channelCloneGuildIds.size > 0
+        && this.#channelCloneSourceIds.size > 0,
+      channelCloneGuildIds: [...this.#channelCloneGuildIds].sort(),
+      channelCloneSourceIds: [...this.#channelCloneSourceIds].sort(),
+      channelCloningEnabled: this.#allowChannelCloneAudit
+        && this.#allowChannelCloning
+        && this.#channelCloneGuildIds.size > 0
+        && this.#channelCloneSourceIds.size > 0,
       channelCreationEnabled: this.#allowChannelCreation
         && this.#channelCreationGuildIds.size > 0,
       channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
@@ -1173,6 +1198,32 @@ export class ScopePolicy {
     }
     if (!this.#channelOrderingGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the channel-ordering scope`)
+    }
+  }
+
+  assertChannelCloneAuditable(guildId: string, sourceChannelId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowChannelCloneAudit) {
+      throw new PolicyError("Discord channel-clone audit is disabled by connector configuration")
+    }
+    if (
+      this.#channelCloneGuildIds.size === 0
+      || this.#channelCloneSourceIds.size === 0
+    ) {
+      throw new PolicyError("Discord channel-clone audit requires exact guild and source allowlists")
+    }
+    if (!this.#channelCloneGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the channel-clone scope`)
+    }
+    if (!this.#channelCloneSourceIds.has(sourceChannelId)) {
+      throw new PolicyError(`Discord channel ${sourceChannelId} is outside the channel-clone source scope`)
+    }
+  }
+
+  assertChannelCloneable(guildId: string, sourceChannelId: string): void {
+    this.assertChannelCloneAuditable(guildId, sourceChannelId)
+    if (!this.#allowChannelCloning) {
+      throw new PolicyError("Discord channel cloning is disabled by connector configuration")
     }
   }
 

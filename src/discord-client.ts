@@ -6,7 +6,10 @@ import {
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
   DISCORD_API_BASE_URL,
+  DISCORD_CHANNEL_FLAGS,
   DISCORD_CHANNEL_TYPES,
+  DISCORD_FORUM_LAYOUTS,
+  DISCORD_FORUM_SORT_ORDERS,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
   GUILD_TEMPLATE_LIMITS,
@@ -20,6 +23,7 @@ import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_USER_AGENT,
+  DISCORD_VIDEO_QUALITY_MODES,
 } from "./constants.js"
 import {
   assertCompiledComponentLayout,
@@ -986,13 +990,41 @@ export interface CreateAttachmentMessageInput {
 }
 
 export interface CreateGuildChannelInput {
+  availableTags?: readonly CreateGuildChannelForumTagInput[]
+  bitrate?: number
   defaultAutoArchiveDuration?: number
+  defaultForumLayout?: number
+  defaultReactionEmoji?: {
+    emojiId: string | null
+    emojiName: string | null
+  } | null
+  defaultSortOrder?: number | null
+  defaultThreadRateLimitPerUser?: number
+  flags?: number
   name: string
   nsfw?: boolean
   parentId?: string
+  permissionOverwrites?: readonly CreateGuildChannelPermissionOverwriteInput[]
   rateLimitPerUser?: number
+  rtcRegion?: string | null
   topic?: string | null
   type: number
+  userLimit?: number
+  videoQualityMode?: number
+}
+
+export interface CreateGuildChannelForumTagInput {
+  emojiId: string | null
+  emojiName: string | null
+  moderated: boolean
+  name: string
+}
+
+export interface CreateGuildChannelPermissionOverwriteInput {
+  allow: string
+  deny: string
+  id: string
+  type: 0 | 1
 }
 
 export interface ModifyGuildChannelPositionInput {
@@ -5213,13 +5245,155 @@ function assertValidUnicode(value: string, name: string): void {
   }
 }
 
+const CREATE_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.category,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CREATE_CHANNEL_TOPIC_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.text,
+])
+const CREATE_CHANNEL_VOICE_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CREATE_CHANNEL_SLOWMODE_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CREATE_CHANNEL_NSFW_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const CREATE_CHANNEL_THREAD_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.text,
+])
+const CREATE_CHANNEL_TAG_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+])
+const CREATE_CHANNEL_FORUM_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.forum,
+])
+const CREATE_CHANNEL_FLAG_MASKS: ReadonlyMap<number, number> = new Map([
+  [DISCORD_CHANNEL_TYPES.text, DISCORD_CHANNEL_FLAGS.isSpoilerChannel],
+  [DISCORD_CHANNEL_TYPES.voice, DISCORD_CHANNEL_FLAGS.isSpoilerChannel],
+  [DISCORD_CHANNEL_TYPES.announcement, DISCORD_CHANNEL_FLAGS.isSpoilerChannel],
+  [DISCORD_CHANNEL_TYPES.forum,
+    DISCORD_CHANNEL_FLAGS.requireTag | DISCORD_CHANNEL_FLAGS.isSpoilerChannel],
+  [DISCORD_CHANNEL_TYPES.media,
+    DISCORD_CHANNEL_FLAGS.requireTag
+      | DISCORD_CHANNEL_FLAGS.hideMediaDownloadOptions
+      | DISCORD_CHANNEL_FLAGS.isSpoilerChannel],
+])
+const CREATE_GUILD_CHANNEL_INPUT_KEYS = [
+  "availableTags",
+  "bitrate",
+  "defaultAutoArchiveDuration",
+  "defaultForumLayout",
+  "defaultReactionEmoji",
+  "defaultSortOrder",
+  "defaultThreadRateLimitPerUser",
+  "flags",
+  "name",
+  "nsfw",
+  "parentId",
+  "permissionOverwrites",
+  "rateLimitPerUser",
+  "rtcRegion",
+  "topic",
+  "type",
+  "userLimit",
+  "videoQualityMode",
+] as const
+const CREATE_GUILD_CHANNEL_OVERWRITE_KEYS = [
+  "allow",
+  "deny",
+  "id",
+  "type",
+] as const
+const CREATE_GUILD_CHANNEL_REACTION_KEYS = [
+  "emojiId",
+  "emojiName",
+] as const
+const CREATE_GUILD_CHANNEL_TAG_KEYS = [
+  "emojiId",
+  "emojiName",
+  "moderated",
+  "name",
+] as const
+
+function createField(
+  value: unknown,
+  types: ReadonlySet<number>,
+  type: number,
+  name: string,
+): void {
+  if (value !== undefined && !types.has(type)) {
+    throw new RangeError(`Discord channel type does not accept ${name}`)
+  }
+}
+
+function assertCreateGuildChannelTags(
+  tags: readonly CreateGuildChannelForumTagInput[],
+): void {
+  if (!Array.isArray(tags) || tags.length > DISCORD_LIMITS.forumAvailableTags) {
+    throw new RangeError("Discord channel available tags must be a bounded array")
+  }
+  for (const tag of tags) {
+    if (
+      !tag
+      || typeof tag !== "object"
+      || Array.isArray(tag)
+      || !hasOnlyKeys(
+        tag as unknown as Record<string, unknown>,
+        CREATE_GUILD_CHANNEL_TAG_KEYS,
+      )
+      || typeof tag.moderated !== "boolean"
+      || !(tag.emojiId === null || typeof tag.emojiId === "string")
+    ) {
+      throw new RangeError("Discord channel available tag is invalid")
+    }
+    assertForumTagName(tag.name, "Discord channel available tag name")
+    assertForumTagEmojiName(tag.emojiName, "Discord channel available tag Unicode emoji")
+    if (typeof tag.emojiId === "string") {
+      assertPositiveSnowflake(tag.emojiId, "Discord channel available tag custom emoji ID")
+    }
+    if (tag.emojiId !== null && tag.emojiName !== null) {
+      throw new RangeError("Discord channel available tag emoji fields conflict")
+    }
+  }
+}
+
 function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
-  const supportedTypes: ReadonlySet<number> = new Set([
-    DISCORD_CHANNEL_TYPES.category,
-    DISCORD_CHANNEL_TYPES.forum,
-    DISCORD_CHANNEL_TYPES.text,
-  ])
-  if (!supportedTypes.has(input.type)) {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || !hasOnlyKeys(
+      input as unknown as Record<string, unknown>,
+      CREATE_GUILD_CHANNEL_INPUT_KEYS,
+    )
+  ) {
+    throw new RangeError("Discord channel creation input must be an object")
+  }
+  if (!CREATE_CHANNEL_TYPES.has(input.type)) {
     throw new RangeError("Discord channel creation type is not supported")
   }
   if (
@@ -5234,24 +5408,17 @@ function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
     )
   }
   assertValidUnicode(input.name, "Discord channel name")
-  if (
-    input.parentId !== undefined
-    && (
-      typeof input.parentId !== "string"
-      || !DISCORD_SNOWFLAKE_PATTERN.test(input.parentId)
-    )
-  ) {
-    throw new RangeError("Discord channel parent ID must be a snowflake")
+  if (input.parentId !== undefined) {
+    assertPositiveSnowflake(input.parentId, "Discord channel parent ID")
   }
   if (input.topic !== undefined && input.topic !== null) {
     if (
       typeof input.topic !== "string"
-      || !input.topic.trim()
       || input.topic.length > DISCORD_LIMITS.channelTopicCharacters
       || CHANNEL_TOPIC_CONTROL_PATTERN.test(input.topic)
     ) {
       throw new RangeError(
-        `Discord channel topic must be nonblank and at most ${DISCORD_LIMITS.channelTopicCharacters} characters without unsupported controls`,
+        `Discord channel topic must contain at most ${DISCORD_LIMITS.channelTopicCharacters} characters without unsupported controls`,
       )
     }
     assertValidUnicode(input.topic, "Discord channel topic")
@@ -5265,6 +5432,24 @@ function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
     DISCORD_LIMITS.channelRateLimitSeconds,
     "Discord channel slowmode seconds",
   )
+  assertIntegerRange(
+    input.defaultThreadRateLimitPerUser,
+    0,
+    DISCORD_LIMITS.channelRateLimitSeconds,
+    "Discord default thread slowmode seconds",
+  )
+  assertIntegerRange(
+    input.bitrate,
+    DISCORD_LIMITS.channelBitrateMinimum,
+    DISCORD_LIMITS.voiceChannelBitrateMaximum,
+    "Discord channel bitrate",
+  )
+  assertIntegerRange(
+    input.userLimit,
+    0,
+    DISCORD_LIMITS.stageChannelUserLimit,
+    "Discord channel user limit",
+  )
   if (
     input.defaultAutoArchiveDuration !== undefined
     && !(CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS as readonly number[])
@@ -5272,17 +5457,187 @@ function assertCreateGuildChannelInput(input: CreateGuildChannelInput): void {
   ) {
     throw new RangeError("Discord channel default auto-archive duration is not supported")
   }
+  if (input.videoQualityMode !== undefined && !(
+    [
+      DISCORD_VIDEO_QUALITY_MODES.auto,
+      DISCORD_VIDEO_QUALITY_MODES.full,
+    ] as readonly number[]
+  ).includes(input.videoQualityMode)) {
+    throw new RangeError("Discord channel video quality mode is not supported")
+  }
   if (
-    input.type === DISCORD_CHANNEL_TYPES.category
+    input.rtcRegion !== undefined
+    && input.rtcRegion !== null
     && (
-      input.defaultAutoArchiveDuration !== undefined
-      || input.nsfw !== undefined
-      || input.parentId !== undefined
-      || input.rateLimitPerUser !== undefined
-      || input.topic !== undefined
+      typeof input.rtcRegion !== "string"
+      || input.rtcRegion.length < 1
+      || input.rtcRegion.length > DISCORD_LIMITS.voiceRegionIdCharacters
+      || CHANNEL_NAME_CONTROL_PATTERN.test(input.rtcRegion)
     )
   ) {
-    throw new RangeError("Discord category creation does not accept channel-specific settings")
+    throw new RangeError("Discord channel voice region is invalid")
+  }
+  if (typeof input.rtcRegion === "string") {
+    assertValidUnicode(input.rtcRegion, "Discord channel voice region")
+  }
+  if (
+    input.defaultSortOrder !== undefined
+    && input.defaultSortOrder !== null
+    && !(
+      [
+        DISCORD_FORUM_SORT_ORDERS.latestActivity,
+        DISCORD_FORUM_SORT_ORDERS.creationDate,
+      ] as readonly number[]
+    ).includes(input.defaultSortOrder)
+  ) {
+    throw new RangeError("Discord channel default sort order is not supported")
+  }
+  if (
+    input.defaultForumLayout !== undefined
+    && !(
+      [
+        DISCORD_FORUM_LAYOUTS.notSet,
+        DISCORD_FORUM_LAYOUTS.list,
+        DISCORD_FORUM_LAYOUTS.gallery,
+      ] as readonly number[]
+    ).includes(input.defaultForumLayout)
+  ) {
+    throw new RangeError("Discord channel default forum layout is not supported")
+  }
+  if (input.defaultReactionEmoji !== undefined && input.defaultReactionEmoji !== null) {
+    const reaction = input.defaultReactionEmoji
+    if (
+      !reaction
+      || typeof reaction !== "object"
+      || Array.isArray(reaction)
+      || !hasOnlyKeys(
+        reaction as unknown as Record<string, unknown>,
+        CREATE_GUILD_CHANNEL_REACTION_KEYS,
+      )
+    ) {
+      throw new RangeError("Discord channel default reaction is invalid")
+    }
+    if (
+      !(reaction.emojiId === null || typeof reaction.emojiId === "string")
+      || !(reaction.emojiName === null || typeof reaction.emojiName === "string")
+      || (reaction.emojiId === null) === (reaction.emojiName === null)
+    ) {
+      throw new RangeError("Discord channel default reaction requires exactly one emoji")
+    }
+    if (typeof reaction.emojiId === "string") {
+      assertPositiveSnowflake(reaction.emojiId, "Discord channel default reaction emoji ID")
+    }
+    assertForumTagEmojiName(
+      reaction.emojiName,
+      "Discord channel default reaction Unicode emoji",
+    )
+  }
+  if (input.availableTags !== undefined) {
+    assertCreateGuildChannelTags(input.availableTags)
+  }
+  if (input.permissionOverwrites !== undefined) {
+    if (
+      !Array.isArray(input.permissionOverwrites)
+      || input.permissionOverwrites.length > DISCORD_LIMITS.channelPermissionOverwrites
+    ) {
+      throw new RangeError("Discord channel permission overwrites must be a bounded array")
+    }
+    const targetIds = new Set<string>()
+    for (const overwrite of input.permissionOverwrites) {
+      if (!overwrite || typeof overwrite !== "object" || Array.isArray(overwrite)) {
+        throw new RangeError("Discord channel permission overwrite is invalid")
+      }
+      if (!hasOnlyKeys(
+        overwrite as unknown as Record<string, unknown>,
+        CREATE_GUILD_CHANNEL_OVERWRITE_KEYS,
+      )) throw new RangeError("Discord channel permission overwrite is invalid")
+      assertPositiveSnowflake(overwrite.id, "Discord channel permission overwrite target ID")
+      if (overwrite.type !== 0 && overwrite.type !== 1) {
+        throw new RangeError("Discord channel permission overwrite type is invalid")
+      }
+      if (targetIds.has(overwrite.id)) {
+        throw new RangeError("Discord channel permission overwrite targets must be unique")
+      }
+      targetIds.add(overwrite.id)
+      if (
+        typeof overwrite.allow !== "string"
+        || typeof overwrite.deny !== "string"
+        || !/^(0|[1-9][0-9]*)$/u.test(overwrite.allow)
+        || !/^(0|[1-9][0-9]*)$/u.test(overwrite.deny)
+        || (BigInt(overwrite.allow) & BigInt(overwrite.deny)) !== 0n
+      ) {
+        throw new RangeError("Discord channel permission overwrite bitfields are invalid")
+      }
+    }
+  }
+  if (
+    input.flags !== undefined
+    && (
+      !Number.isSafeInteger(input.flags)
+      || input.flags < 0
+      || (BigInt(input.flags) & ~BigInt(
+        CREATE_CHANNEL_FLAG_MASKS.get(input.type) ?? 0,
+      )) !== 0n
+    )
+  ) {
+    throw new RangeError("Discord channel creation flags are not supported for this type")
+  }
+  if (
+    input.flags !== undefined
+    && (input.flags & DISCORD_CHANNEL_FLAGS.isSpoilerChannel) !== 0
+    && input.nsfw === true
+  ) {
+    throw new RangeError("Discord spoiler-channel flag requires NSFW to be false")
+  }
+  createField(input.topic, CREATE_CHANNEL_TOPIC_TYPES, input.type, "topic")
+  createField(input.bitrate, CREATE_CHANNEL_VOICE_TYPES, input.type, "bitrate")
+  createField(input.userLimit, CREATE_CHANNEL_VOICE_TYPES, input.type, "userLimit")
+  createField(input.rtcRegion, CREATE_CHANNEL_VOICE_TYPES, input.type, "rtcRegion")
+  createField(input.videoQualityMode, CREATE_CHANNEL_VOICE_TYPES, input.type, "videoQualityMode")
+  createField(input.rateLimitPerUser, CREATE_CHANNEL_SLOWMODE_TYPES, input.type, "rateLimitPerUser")
+  createField(input.nsfw, CREATE_CHANNEL_NSFW_TYPES, input.type, "nsfw")
+  createField(
+    input.defaultAutoArchiveDuration,
+    CREATE_CHANNEL_THREAD_TYPES,
+    input.type,
+    "defaultAutoArchiveDuration",
+  )
+  createField(
+    input.defaultThreadRateLimitPerUser,
+    CREATE_CHANNEL_THREAD_TYPES,
+    input.type,
+    "defaultThreadRateLimitPerUser",
+  )
+  createField(input.availableTags, CREATE_CHANNEL_TAG_TYPES, input.type, "availableTags")
+  createField(
+    input.defaultReactionEmoji,
+    CREATE_CHANNEL_TAG_TYPES,
+    input.type,
+    "defaultReactionEmoji",
+  )
+  createField(input.defaultSortOrder, CREATE_CHANNEL_TAG_TYPES, input.type, "defaultSortOrder")
+  createField(
+    input.defaultForumLayout,
+    CREATE_CHANNEL_FORUM_TYPES,
+    input.type,
+    "defaultForumLayout",
+  )
+  if (
+    input.type === DISCORD_CHANNEL_TYPES.voice
+    && input.userLimit !== undefined
+    && input.userLimit > DISCORD_LIMITS.voiceChannelUserLimit
+  ) {
+    throw new RangeError("Discord voice channel user limit is too large")
+  }
+  if (
+    input.type === DISCORD_CHANNEL_TYPES.stageVoice
+    && input.bitrate !== undefined
+    && input.bitrate > DISCORD_LIMITS.stageChannelBitrateMaximum
+  ) {
+    throw new RangeError("Discord Stage channel bitrate is too large")
+  }
+  if (input.type === DISCORD_CHANNEL_TYPES.category && input.parentId !== undefined) {
+    throw new RangeError("Discord category creation does not accept a parent")
   }
 }
 
@@ -7070,12 +7425,7 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<DiscordChannel> {
-    if (
-      typeof guildId !== "string"
-      || !DISCORD_SNOWFLAKE_PATTERN.test(guildId)
-    ) {
-      throw new RangeError("Discord channel creation guild ID must be a snowflake")
-    }
+    assertPositiveSnowflake(guildId, "Discord channel creation guild ID")
     assertCreateGuildChannelInput(input)
     if (typeof auditReason !== "string") {
       throw new RangeError("Discord channel creation audit reason must be a string")
@@ -7086,17 +7436,66 @@ export class DiscordClient {
       auditReason,
       automaticRateLimitRetry: false,
       body: {
+        ...(input.availableTags !== undefined
+          ? {
+              available_tags: input.availableTags.map((tag) => ({
+                emoji_id: tag.emojiId,
+                emoji_name: tag.emojiName,
+                moderated: tag.moderated,
+                name: tag.name,
+              })),
+            }
+          : {}),
+        ...(input.bitrate !== undefined ? { bitrate: input.bitrate } : {}),
         ...(input.defaultAutoArchiveDuration !== undefined
           ? { default_auto_archive_duration: input.defaultAutoArchiveDuration }
           : {}),
+        ...(input.defaultForumLayout !== undefined
+          ? { default_forum_layout: input.defaultForumLayout }
+          : {}),
+        ...(input.defaultReactionEmoji !== undefined
+          ? {
+              default_reaction_emoji: input.defaultReactionEmoji === null
+                ? null
+                : {
+                    emoji_id: input.defaultReactionEmoji.emojiId,
+                    emoji_name: input.defaultReactionEmoji.emojiName,
+                  },
+            }
+          : {}),
+        ...(input.defaultSortOrder !== undefined
+          ? { default_sort_order: input.defaultSortOrder }
+          : {}),
+        ...(input.defaultThreadRateLimitPerUser !== undefined
+          ? {
+              default_thread_rate_limit_per_user:
+                input.defaultThreadRateLimitPerUser,
+            }
+          : {}),
+        ...(input.flags !== undefined ? { flags: input.flags } : {}),
         name: input.name,
         ...(input.nsfw !== undefined ? { nsfw: input.nsfw } : {}),
         ...(input.parentId !== undefined ? { parent_id: input.parentId } : {}),
+        ...(input.permissionOverwrites !== undefined
+          ? {
+              permission_overwrites: input.permissionOverwrites.map((overwrite) => ({
+                allow: overwrite.allow,
+                deny: overwrite.deny,
+                id: overwrite.id,
+                type: overwrite.type,
+              })),
+            }
+          : {}),
         ...(input.rateLimitPerUser !== undefined
           ? { rate_limit_per_user: input.rateLimitPerUser }
           : {}),
+        ...(input.rtcRegion !== undefined ? { rtc_region: input.rtcRegion } : {}),
         ...(input.topic !== undefined ? { topic: input.topic } : {}),
         type: input.type,
+        ...(input.userLimit !== undefined ? { user_limit: input.userLimit } : {}),
+        ...(input.videoQualityMode !== undefined
+          ? { video_quality_mode: input.videoQualityMode }
+          : {}),
       },
     })
   }

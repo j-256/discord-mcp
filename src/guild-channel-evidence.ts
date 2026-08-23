@@ -288,10 +288,12 @@ export function guildChannelLayoutGuildIds(
     "allowedGuildIds" | "allowGateway"
   > & Partial<Pick<
     ConnectorConfig,
+    | "allowChannelCloneAudit"
     | "allowChannelOrderingAudit"
     | "allowGuildTemplateAudit"
     | "allowMemberRoleChanges"
     | "allowOnboardingAudit"
+    | "channelCloneGuildIds"
     | "channelOrderingGuildIds"
     | "guildTemplateGuildIds"
     | "memberRoleGuildIds"
@@ -304,6 +306,7 @@ export function guildChannelLayoutGuildIds(
     for (const guildId of values) guildIds.add(guildId)
   }
   add(config.allowGateway, config.allowedGuildIds)
+  add(config.allowChannelCloneAudit === true, config.channelCloneGuildIds ?? new Set())
   add(config.allowChannelOrderingAudit === true, config.channelOrderingGuildIds ?? new Set())
   add(config.allowGuildTemplateAudit === true, config.guildTemplateGuildIds ?? new Set())
   add(config.allowMemberRoleChanges === true, config.memberRoleGuildIds ?? new Set())

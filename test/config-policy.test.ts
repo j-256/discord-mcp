@@ -179,6 +179,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    channelCloneAuditEnabled: false,
+    channelCloneGuildIds: [],
+    channelCloneSourceIds: [],
+    channelCloningEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
@@ -736,6 +740,10 @@ test("configuration and policy require an exact administration guild and protect
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    channelCloneAuditEnabled: false,
+    channelCloneGuildIds: [],
+    channelCloneSourceIds: [],
+    channelCloningEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,
@@ -1724,6 +1732,100 @@ test("configuration and policy separate role-order audit from exact-guild change
   )
 })
 
+test("configuration and policy separate channel-clone audit from exact-source changes", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS and DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
+      DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /require DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const auditConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: ROLE_ID,
+    DISCORD_MCP_BOT_ID: USER_ID,
+    DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const audit = new ScopePolicy(auditConfig)
+  audit.assertChannelCloneAuditable(GUILD_ID, CHANNEL_ID)
+  assert.throws(
+    () => audit.assertChannelCloneable(GUILD_ID, CHANNEL_ID),
+    /cloning is disabled/,
+  )
+  assert.deepEqual(audit.describe().channelCloneGuildIds, [GUILD_ID])
+  assert.deepEqual(audit.describe().channelCloneSourceIds, [CHANNEL_ID])
+  assert.equal(audit.describe().channelCloneAuditEnabled, true)
+  assert.equal(audit.describe().channelCloningEnabled, false)
+
+  const changesConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
+    DISCORD_MCP_APPLICATION_ID: ROLE_ID,
+    DISCORD_MCP_BOT_ID: USER_ID,
+    DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const changes = new ScopePolicy(changesConfig)
+  changes.assertChannelCloneable(GUILD_ID, CHANNEL_ID)
+  assert.equal(changes.describe().channelCloningEnabled, true)
+  assert.throws(
+    () => changes.assertChannelCloneAuditable(GUILD_ID, OTHER_CHANNEL_ID),
+    /source scope/,
+  )
+
+  const excessiveSources = Array.from(
+    { length: CONNECTOR_LIMITS.channelCloneSourceAllowlist + 1 },
+    (_, index) => (620_000_000_000_000_000n + BigInt(index)).toString(),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: excessiveSources,
+    }, { homeDirectory: "/test/home" }),
+    /must contain at most 100 unique IDs/,
+  )
+})
+
 test("configuration and policy separate channel-order audit from exact-guild changes", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -2545,6 +2647,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    channelCloneAuditEnabled: false,
+    channelCloneGuildIds: [],
+    channelCloneSourceIds: [],
+    channelCloningEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
     channelMetadataChangesEnabled: false,

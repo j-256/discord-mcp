@@ -48,6 +48,8 @@ export interface ConnectorConfig {
   allowAutomodAudit: boolean
   allowAutomodChanges: boolean
   allowBanAudit: boolean
+  allowChannelCloneAudit: boolean
+  allowChannelCloning: boolean
   allowChannelCreation: boolean
   allowChannelMetadataChanges: boolean
   allowChannelOrderingAudit: boolean
@@ -113,6 +115,8 @@ export interface ConnectorConfig {
   automodAlertChannelIds: ReadonlySet<string>
   automodGuildIds: ReadonlySet<string>
   banAuditGuildIds: ReadonlySet<string>
+  channelCloneGuildIds: ReadonlySet<string>
+  channelCloneSourceIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
   channelMetadataIds: ReadonlySet<string>
   channelOrderingGuildIds: ReadonlySet<string>
@@ -356,6 +360,16 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.channelCreationGuildIds],
     ENVIRONMENT_NAMES.channelCreationGuildIds,
   )
+  const channelCloneGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.channelCloneGuildIds],
+    ENVIRONMENT_NAMES.channelCloneGuildIds,
+    CONNECTOR_LIMITS.channelCloneGuildAllowlist,
+  )
+  const channelCloneSourceIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.channelCloneSourceIds],
+    ENVIRONMENT_NAMES.channelCloneSourceIds,
+    CONNECTOR_LIMITS.channelCloneSourceAllowlist,
+  )
   const channelMetadataIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.channelMetadataIds],
     ENVIRONMENT_NAMES.channelMetadataIds,
@@ -563,6 +577,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.automodGuildIds, automodGuildIds],
     [ENVIRONMENT_NAMES.banAuditGuildIds, banAuditGuildIds],
     [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
+    [ENVIRONMENT_NAMES.channelCloneGuildIds, channelCloneGuildIds],
     [ENVIRONMENT_NAMES.channelOrderingGuildIds, channelOrderingGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
@@ -595,6 +610,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
     [ENVIRONMENT_NAMES.automodAlertChannelIds, automodAlertChannelIds],
     [ENVIRONMENT_NAMES.channelMetadataIds, channelMetadataIds],
+    [ENVIRONMENT_NAMES.channelCloneSourceIds, channelCloneSourceIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.forumTagChannelIds, forumTagChannelIds],
@@ -656,6 +672,27 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowGateway],
     ENVIRONMENT_NAMES.allowGateway,
   )
+  const allowChannelCloneAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowChannelCloneAudit],
+    ENVIRONMENT_NAMES.allowChannelCloneAudit,
+  )
+  const allowChannelCloning = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowChannelCloning],
+    ENVIRONMENT_NAMES.allowChannelCloning,
+  )
+  if (allowChannelCloning && !allowChannelCloneAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelCloning} requires ${ENVIRONMENT_NAMES.allowChannelCloneAudit}`,
+    )
+  }
+  if (
+    allowChannelCloneAudit
+    && (channelCloneGuildIds.size === 0 || channelCloneSourceIds.size === 0)
+  ) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelCloneAudit} requires ${ENVIRONMENT_NAMES.channelCloneGuildIds} and ${ENVIRONMENT_NAMES.channelCloneSourceIds}`,
+    )
+  }
   const allowChannelOrderingAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowChannelOrderingAudit],
     ENVIRONMENT_NAMES.allowChannelOrderingAudit,
@@ -685,6 +722,7 @@ export function loadConnectorConfig(
   if (
     (
       allowGateway
+      || allowChannelCloneAudit
       || allowChannelOrderingAudit
       || allowNativeCommandChanges
       || allowNativeInteractions
@@ -1035,6 +1073,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowBanAudit],
       ENVIRONMENT_NAMES.allowBanAudit,
     ),
+    allowChannelCloneAudit,
+    allowChannelCloning,
     allowChannelCreation: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowChannelCreation],
       ENVIRONMENT_NAMES.allowChannelCreation,
@@ -1145,6 +1185,8 @@ export function loadConnectorConfig(
     automodAlertChannelIds,
     automodGuildIds,
     banAuditGuildIds,
+    channelCloneGuildIds,
+    channelCloneSourceIds,
     channelCreationGuildIds,
     channelMetadataIds,
     channelOrderingGuildIds,

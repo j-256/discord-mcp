@@ -30,6 +30,7 @@ export const OPERATION_KINDS = [
   "announcement-subscription",
   "attachment-message",
   "automod-change",
+  "channel-clone",
   "channel-creation",
   "channel-metadata-change",
   "channel-ordering",

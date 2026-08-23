@@ -41,6 +41,7 @@ type McpToolWorkflow =
   | "announcement-subscription"
   | "attachment-message"
   | "automod-change"
+  | "channel-cloning"
   | "channel-creation"
   | "channel-metadata-change"
   | "channel-ordering"
@@ -149,6 +150,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  execute_channel_clone: {
+    keywords: ["channel", "clone", "copy", "execute", "forum", "media", "stage", "voice"],
+    toolset: "channel-cloning",
+    workflow: "channel-cloning",
   },
   execute_channel_metadata_change: {
     keywords: ["channel", "configure", "execute", "metadata", "name", "nsfw", "slowmode", "topic"],
@@ -570,6 +576,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  plan_channel_clone: {
+    keywords: ["channel", "clone", "copy", "forum", "media", "plan", "review", "stage", "voice"],
+    toolset: "channel-cloning",
+    workflow: "channel-cloning",
   },
   plan_channel_metadata_change: {
     keywords: ["channel", "configure", "metadata", "name", "nsfw", "plan", "review", "slowmode", "topic"],

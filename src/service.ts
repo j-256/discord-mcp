@@ -78,6 +78,16 @@ import type {
 } from "./channel-administration-service.js"
 import { ChannelAdministrationService } from "./channel-administration-service.js"
 import type {
+  ChannelClonePlan,
+  ChannelCloneRequest,
+  ChannelCloneResult,
+  ChannelCloneServiceOptions,
+} from "./channel-clone-service.js"
+import {
+  ChannelCloneService,
+  normalizeChannelCloneRequest,
+} from "./channel-clone-service.js"
+import type {
   ChannelMetadataChangePlan,
   ChannelMetadataChangeRequest,
   ChannelMetadataChangeResult,
@@ -139,6 +149,7 @@ import type {
 import { DiscordClient } from "./discord-client.js"
 import {
   AnnouncementSubscriptionPlanChangedError,
+  ChannelClonePlanChangedError,
   ChannelOrderingPlanChangedError,
   ConfigurationError,
   ComponentMessagePlanChangedError,
@@ -667,6 +678,10 @@ export interface ConnectorServiceOptions {
     ChannelAdministrationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  channelCloneOptions?: Pick<
+    ChannelCloneServiceOptions,
+    "clock" | "planKey" | "randomId" | "verificationTimeoutMs"
+  >
   channelMetadataOptions?: Pick<
     ChannelMetadataServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -908,6 +923,7 @@ export class ConnectorService {
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
   readonly #channelAdministrationService: ChannelAdministrationService
+  readonly #channelCloneService: ChannelCloneService
   readonly #channelMetadataService: ChannelMetadataService
   readonly #channelOrderingService: ChannelOrderingService
   readonly #client: DiscordServiceClient
@@ -1006,6 +1022,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelAdministrationOptions,
+    })
+    this.#channelCloneService = new ChannelCloneService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      layoutSource: gateway,
+      operationStore,
+      policy: this.#policy,
+      ...options.channelCloneOptions,
     })
     this.#channelMetadataService = new ChannelMetadataService({
       activityStore: this.#activityStore,
@@ -2699,6 +2723,21 @@ export class ConnectorService {
     )
   }
 
+  async planChannelClone(
+    request: ChannelCloneRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelClonePlan> {
+    normalizeChannelCloneRequest(request)
+    this.#policy.assertChannelCloneAuditable(request.guildId, request.sourceChannelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelCloneService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildScaffold(
     request: GuildScaffoldRequest,
     options: RequestOptions = {},
@@ -3046,6 +3085,44 @@ export class ConnectorService {
         writeGuildCollectionTarget("channels", request.guildId),
       ],
       () => this.#channelOrderingService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeChannelClone(
+    request: ChannelCloneRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelCloneResult> {
+    normalizeChannelCloneRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord channel-clone plan digest is invalid")
+    }
+    this.#policy.assertChannelCloneable(request.guildId, request.sourceChannelId)
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#channelCloneService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new ChannelClonePlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    return this.#coordinateWrite(
+      "channel-clone",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.sourceChannelId),
+        writeGuildCollectionTarget("channels", request.guildId),
+      ],
+      () => this.#channelCloneService.execute(
         identity.application.id,
         identity.bot.id,
         request,
