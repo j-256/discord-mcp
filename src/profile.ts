@@ -29,7 +29,7 @@ import {
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
-import { ProfileError } from "./errors.js"
+import { ProfileCredentialError, ProfileError } from "./errors.js"
 
 export const PROFILE_SCHEMA_VERSION = 1
 
@@ -113,14 +113,14 @@ function clonedCredentialEnvironment(
 ): NodeJS.ProcessEnv {
   const credentialVariable = normalizeCredentialEnvironmentName(variable)
   const credential = source[credentialVariable]?.trim()
-  if (!credential) throw new ProfileError(missingMessage)
+  if (!credential) throw new ProfileCredentialError("missing", missingMessage)
   const canonicalCredential = source[ENVIRONMENT_NAMES.token]?.trim()
   if (
     credentialVariable !== ENVIRONMENT_NAMES.token
     && canonicalCredential
     && canonicalCredential !== credential
   ) {
-    throw new ProfileError(conflictMessage)
+    throw new ProfileCredentialError("conflict", conflictMessage)
   }
   const environment = { ...source }
   if (credentialVariable !== ENVIRONMENT_NAMES.token) {

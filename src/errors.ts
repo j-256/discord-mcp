@@ -131,6 +131,16 @@ export class ProfileError extends Error {
   override name = "ProfileError"
 }
 
+export class ProfileCredentialError extends ProfileError {
+  readonly kind: "conflict" | "missing"
+
+  constructor(kind: "conflict" | "missing", message: string) {
+    super(message)
+    this.name = "ProfileCredentialError"
+    this.kind = kind
+  }
+}
+
 export class AttachmentMessagePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -11,6 +11,12 @@ import {
 } from "../src/cli.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
 import {
+  ConfigurationError,
+  DiscordApiError,
+  ProfileCredentialError,
+  ProfileError,
+} from "../src/errors.js"
+import {
   OPERATOR_REPORT_SCHEMA_VERSION,
   type DoctorReport,
   type SetupReport,
@@ -45,11 +51,26 @@ function outputStream() {
 }
 
 function doctorReport(status: DoctorReport["status"] = "ok"): DoctorReport {
+  const checkStatus = status === "error"
+    ? "fail"
+    : status === "warning"
+      ? "warn"
+      : "pass"
   return {
     checks: [{
+      ...(checkStatus === "pass"
+        ? {}
+        : {
+          action: "Correct the diagnostic boundary.",
+          reference: "docs/reference.md#verification",
+        }),
       id: "configuration",
-      status: status === "error" ? "fail" : "pass",
-      summary: status === "error" ? `Rejected ${TOKEN}` : "Configuration is valid",
+      status: checkStatus,
+      summary: status === "error"
+        ? `Rejected ${TOKEN}`
+        : status === "warning"
+          ? "Configuration needs review"
+          : "Configuration is valid",
     }],
     identity: null,
     online: false,
@@ -590,7 +611,7 @@ test("CLI default coordination inspection needs no credential or connector confi
     args: ["coordination", "resolve", claimId, "--confirm", claimId],
     environment,
     stderr: stderr.stream,
-  }), 1)
+  }), 2)
   assert.match(stderr.value(), /Discord write claim was not found/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
@@ -610,10 +631,157 @@ test("CLI returns diagnostic failure while preserving secret-free JSON", async (
     stdout: stdout.stream,
   })
 
-  assert.equal(exitCode, 1)
+  assert.equal(exitCode, 2)
   assert.match(stdout.value(), /\[redacted\]/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
   assert.equal(stderr.value(), "")
+})
+
+test("CLI distinguishes doctor warnings and renders their recovery guidance", async () => {
+  const stdout = outputStream()
+  const exitCode = await runCli({
+    args: ["doctor"],
+    dependencies: dependencies({
+      async diagnose() {
+        return doctorReport("warning")
+      },
+    }),
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 1)
+  assert.match(stdout.value(), /WARN configuration: Configuration needs review/)
+  assert.match(stdout.value(), /Next: Correct the diagnostic boundary/)
+  assert.match(stdout.value(), /See: docs\/reference\.md#verification/)
+})
+
+test("CLI emits a redacted structured failure when JSON was requested", async () => {
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exitCode = await runCli({
+    args: ["smoke", "--json"],
+    dependencies: dependencies({
+      async smoke() {
+        throw new ConfigurationError(`Configuration exposed ${TOKEN}`)
+      },
+    }),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+  })
+
+  const report = JSON.parse(stdout.value())
+  assert.equal(exitCode, 2)
+  assert.equal(stderr.value(), "")
+  assert.equal(report.status, "error")
+  assert.equal(report.schemaVersion, OPERATOR_REPORT_SCHEMA_VERSION)
+  assert.equal(report.error.category, "configuration")
+  assert.equal(report.error.message, "Configuration exposed [redacted]")
+  assert.equal(report.error.recovery.retry, "after-correction")
+  assert.equal(report.error.recovery.reference, "docs/reference.md#configuration")
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI keeps JSON usage and profile failures machine-readable", async () => {
+  const usageOutput = outputStream()
+  const usageError = outputStream()
+  const credentialOutput = outputStream()
+  const credentialError = outputStream()
+  const profileOutput = outputStream()
+  const profileError = outputStream()
+
+  assert.equal(await runCli({
+    args: ["catalog", "--json"],
+    stderr: usageError.stream,
+    stdout: usageOutput.stream,
+  }), 2)
+  const usage = JSON.parse(usageOutput.value())
+  assert.equal(usage.error.category, "usage")
+  assert.equal(usage.error.recovery.retry, "after-correction")
+  assert.match(usage.error.recovery.action, /discord-mcp help catalog/)
+  assert.equal(usageError.value(), "")
+
+  assert.equal(await runCli({
+    args: ["setup", "--json"],
+    dependencies: dependencies({
+      async prepareSetup() {
+        throw new ProfileCredentialError(
+          "missing",
+          "DISCORD_SUPPORT_BOT_TOKEN is required",
+        )
+      },
+    }),
+    stderr: credentialError.stream,
+    stdout: credentialOutput.stream,
+  }), 2)
+  const credential = JSON.parse(credentialOutput.value())
+  assert.equal(credential.error.category, "configuration")
+  assert.equal(credential.error.recovery.retry, "after-correction")
+  assert.match(credential.error.recovery.action, /configured credential variable/)
+  assert.equal(credentialError.value(), "")
+
+  assert.equal(await runCli({
+    args: ["profile", "show", "missing", "--json"],
+    dependencies: dependencies({
+      async loadProfile() {
+        throw new ProfileError("Profile not found")
+      },
+    }),
+    stderr: profileError.stream,
+    stdout: profileOutput.stream,
+  }), 2)
+  const profile = JSON.parse(profileOutput.value())
+  assert.equal(profile.error.category, "profile")
+  assert.equal(profile.error.recovery.retry, "after-inspection")
+  assert.equal(profileError.value(), "")
+})
+
+test("CLI exposes only bounded retry evidence for Discord rate limits", async () => {
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exitCode = await runCli({
+    args: ["smoke", "--json"],
+    dependencies: dependencies({
+      async smoke() {
+        throw new DiscordApiError({
+          message: "Discord rate limited the request",
+          method: "GET",
+          retryAfterMs: 1_250,
+          route: `/channels/${CHANNEL_ID}`,
+          status: 429,
+        })
+      },
+    }),
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+  })
+
+  const report = JSON.parse(stdout.value())
+  assert.equal(exitCode, 2)
+  assert.equal(report.error.category, "discord-rate-limit")
+  assert.equal(report.error.retryAfterMs, 1_250)
+  assert.equal(report.error.recovery.retry, "after-delay")
+  assert.equal(stderr.value(), "")
+  assert.doesNotMatch(stdout.value(), new RegExp(CHANNEL_ID))
+  assert.doesNotMatch(stdout.value(), /channels/)
+})
+
+test("CLI preserves long-running startup failure status with recovery text", async () => {
+  const stderr = outputStream()
+  const exitCode = await runCli({
+    args: [],
+    dependencies: dependencies({
+      serve() {
+        throw new Error("stdio startup failed")
+      },
+    }),
+    stderr: stderr.stream,
+  })
+
+  assert.equal(exitCode, 1)
+  assert.match(stderr.value(), /Operator command failed/)
+  assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
+  assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
 })
 
 test("CLI redacts setup output and forwards setup options", async () => {
@@ -634,7 +802,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
     stdout: stdout.stream,
   })
 
-  assert.equal(exitCode, 0)
+  assert.equal(exitCode, 1)
   assert.deepEqual(received, {
     args: ["serve"],
     command: "/bin/discord-mcp",
@@ -705,7 +873,7 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
     stdout: stdout.stream,
   })
 
-  assert.equal(exitCode, 0)
+  assert.equal(exitCode, 1)
   assert.deepEqual(received, {
     args: ["/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
@@ -917,7 +1085,7 @@ test("CLI profile lifecycle is credential-free, recoverable, and exactly confirm
     dependencies: lifecycleDependencies,
     environment,
     stderr: mismatchError.stream,
-  }), 1)
+  }), 2)
   assert.equal(await runCli({
     args: [
       "profile",
@@ -1014,7 +1182,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(versionOutput.value(), /0\.1\.0/)
 })
 
-test("CLI converts thrown failures into redacted diagnostics", async () => {
+test("CLI converts unknown failures into bounded diagnostics", async () => {
   const stderr = outputStream()
   const exitCode = await runCli({
     args: ["smoke"],
@@ -1027,8 +1195,10 @@ test("CLI converts thrown failures into redacted diagnostics", async () => {
     stderr: stderr.stream,
   })
 
-  assert.equal(exitCode, 1)
-  assert.match(stderr.value(), /\[redacted\]/)
+  assert.equal(exitCode, 2)
+  assert.match(stderr.value(), /discord-mcp: Operator command failed/)
+  assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
+  assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
 
@@ -1045,7 +1215,8 @@ test("CLI redacts a custom profile credential when activation fails", async () =
     stderr: stderr.stream,
   })
 
-  assert.equal(exitCode, 1)
-  assert.match(stderr.value(), /\[redacted\]/)
+  assert.equal(exitCode, 2)
+  assert.match(stderr.value(), /discord-mcp: Operator command failed/)
+  assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })

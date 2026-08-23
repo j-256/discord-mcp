@@ -48,7 +48,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 16
+export const OPERATOR_REPORT_SCHEMA_VERSION = 17
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -159,7 +159,9 @@ export type DoctorCheckStatus = "fail" | "pass" | "warn"
 export type OperatorReportStatus = "error" | "ok" | "warning"
 
 export interface DoctorCheck {
+  action?: string
   id: string
+  reference?: string
   status: DoctorCheckStatus
   summary: string
 }
@@ -259,12 +261,100 @@ export interface SmokeOptions {
   service?: DiscordToolService
 }
 
+const DOCTOR_REFERENCES = Object.freeze({
+  botSetup: "docs/reference.md#discord-bot-setup",
+  configuration: "docs/reference.md#configuration",
+  operatorCli: "docs/reference.md#operator-cli",
+  requirements: "docs/reference.md#requirements",
+  verification: "docs/reference.md#verification",
+})
+
+const DOCTOR_IDENTITY_CHECK_IDS = new Set<string>([
+  DOCTOR_CHECK_IDS.applicationIdentity,
+  DOCTOR_CHECK_IDS.botIdentity,
+])
+
+const DOCTOR_SCOPE_CHECK_IDS = new Set<string>([
+  DOCTOR_CHECK_IDS.channelScope,
+  DOCTOR_CHECK_IDS.guildScope,
+])
+
+const DOCTOR_INTENT_CHECK_IDS = new Set<string>([
+  DOCTOR_CHECK_IDS.guildMembersIntent,
+  DOCTOR_CHECK_IDS.messageContentIntent,
+])
+
+function doctorGuidance(
+  id: string,
+): Pick<DoctorCheck, "action" | "reference"> {
+  if (id === DOCTOR_CHECK_IDS.nodeVersion) {
+    return {
+      action: `Install Node.js ${SUPPORTED_NODE_MAJOR} or newer, then rerun doctor.`,
+      reference: DOCTOR_REFERENCES.requirements,
+    }
+  }
+  if (id === DOCTOR_CHECK_IDS.token) {
+    return {
+      action: `Set ${ENVIRONMENT_NAMES.token} in the current process or activate a profile whose credential variable is present, then rerun doctor.`,
+      reference: DOCTOR_REFERENCES.botSetup,
+    }
+  }
+  if (id === DOCTOR_CHECK_IDS.configuration) {
+    return {
+      action: "Correct the reported environment or profile value, then rerun doctor before starting the server.",
+      reference: DOCTOR_REFERENCES.configuration,
+    }
+  }
+  if (DOCTOR_IDENTITY_CHECK_IDS.has(id)) {
+    return {
+      action: "Create or refresh a profile with setup so the verified application and bot identities are pinned.",
+      reference: DOCTOR_REFERENCES.operatorCli,
+    }
+  }
+  if (DOCTOR_SCOPE_CHECK_IDS.has(id)) {
+    return {
+      action: "Create a least-privilege profile with an exact guild and, when message access is needed, channel scope.",
+      reference: DOCTOR_REFERENCES.operatorCli,
+    }
+  }
+  if (DOCTOR_INTENT_CHECK_IDS.has(id)) {
+    return {
+      action: "Enable only the required privileged intent in the Discord Developer Portal, or disable the connector feature that needs it, then rerun doctor --online.",
+      reference: DOCTOR_REFERENCES.botSetup,
+    }
+  }
+  if (id === DOCTOR_CHECK_IDS.guildAccess) {
+    return {
+      action: "Install the verified bot in every intended guild and align the exact local guild scope, then rerun doctor --online.",
+      reference: DOCTOR_REFERENCES.botSetup,
+    }
+  }
+  if (id === DOCTOR_CHECK_IDS.observability) {
+    return {
+      action: "Disable export or correct the loopback collector configuration, then rerun doctor.",
+      reference: DOCTOR_REFERENCES.configuration,
+    }
+  }
+  if (id.endsWith("-policy")) {
+    return {
+      action: "Review this feature's toggle and exact allowlists; keep it disabled unless the capability is intended, then rerun doctor.",
+      reference: DOCTOR_REFERENCES.configuration,
+    }
+  }
+  return {
+    action: "Review the reported boundary, correct only the intended configuration, and rerun doctor before proceeding.",
+    reference: DOCTOR_REFERENCES.verification,
+  }
+}
+
 function check(
   id: string,
   status: DoctorCheckStatus,
   summary: string,
 ): DoctorCheck {
-  return { id, status, summary }
+  if (status === "pass") return { id, status, summary }
+  const guidance = doctorGuidance(id)
+  return { ...guidance, id, status, summary }
 }
 
 function reportStatus(checks: readonly DoctorCheck[]): OperatorReportStatus {

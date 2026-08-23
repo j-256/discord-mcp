@@ -38,6 +38,7 @@ export function sha512Integrity(value) {
 
 export async function run(command, args, options = {}) {
   const capture = options.capture === true
+  const allowedExitCodes = options.allowedExitCodes || [0]
   const child = spawn(command, args, {
     cwd: options.cwd || REPOSITORY_ROOT,
     env: options.env || process.env,
@@ -57,6 +58,6 @@ export async function run(command, args, options = {}) {
     child.on("error", reject)
     child.on("close", resolveCode)
   })
-  invariant(code === 0, `${command} exited with status ${code}`)
-  return { stderr, stdout }
+  invariant(allowedExitCodes.includes(code), `${command} exited with status ${code}`)
+  return { code, stderr, stdout }
 }

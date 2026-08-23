@@ -11,13 +11,20 @@ import {
   ENVIRONMENT_NAMES,
 } from "./constants.js"
 import { resolveConnectorAuditFile } from "./config.js"
-import { ConfigurationError, errorMessage, redactText } from "./errors.js"
+import { ConfigurationError, redactText } from "./errors.js"
 import { isMainModule } from "./entrypoint.js"
 import { runDiscordMcpServer } from "./mcp.js"
 import {
   FileOperationStore,
   operationReceiptDirectory,
 } from "./operation-store.js"
+import {
+  classifyCliFailure,
+  safeCliFailureMessage,
+  type CliFailureCategory,
+  type CliFailureGuidance,
+  type OperatorRecovery,
+} from "./operator-recovery.js"
 import {
   diagnoseConnector,
   OPERATOR_REPORT_SCHEMA_VERSION,
@@ -67,6 +74,12 @@ const CLI_COMMANDS = Object.freeze([
   "smoke",
   "version",
 ] as const)
+
+const CLI_EXIT_CODES = Object.freeze({
+  failure: 2,
+  success: 0,
+  warning: 1,
+} as const)
 
 type CliCommand = typeof CLI_COMMANDS[number]
 
@@ -166,6 +179,17 @@ export interface CliOptions {
   nodeVersion?: string
   stderr?: Pick<NodeJS.WriteStream, "write">
   stdout?: Pick<NodeJS.WriteStream, "write">
+}
+
+export interface CliErrorReport {
+  error: {
+    category: CliFailureCategory
+    message: string
+    recovery: OperatorRecovery
+    retryAfterMs?: number
+  }
+  schemaVersion: number
+  status: "error"
 }
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
@@ -556,7 +580,7 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp catalog [--check] [--json]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check."
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor [--profile NAME] [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access."
+    return "Usage: discord-mcp doctor [--profile NAME] [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "coordination") {
     return [
@@ -653,8 +677,55 @@ function renderDoctor(report: DoctorReport): string {
   const lines = [`Discord MCP doctor: ${report.status}`]
   for (const entry of report.checks) {
     lines.push(`${entry.status.toUpperCase()} ${entry.id}: ${entry.summary}`)
+    if (entry.action) lines.push(`  Next: ${entry.action}`)
+    if (entry.reference) lines.push(`  See: ${entry.reference}`)
   }
   return lines.join("\n")
+}
+
+function cliErrorReport(
+  message: string,
+  guidance: CliFailureGuidance,
+): CliErrorReport {
+  return {
+    error: {
+      category: guidance.category,
+      message,
+      recovery: guidance.recovery,
+      ...(guidance.retryAfterMs === undefined
+        ? {}
+        : { retryAfterMs: guidance.retryAfterMs }),
+    },
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
+    status: "error",
+  }
+}
+
+function renderCliFailure(
+  message: string,
+  guidance: CliFailureGuidance,
+): string {
+  return [
+    `${CONNECTOR_NAME}: ${message}`,
+    `Next: ${guidance.recovery.action}`,
+    `See: ${guidance.recovery.reference}`,
+  ].join("\n")
+}
+
+function requestsJson(
+  args: readonly string[],
+  parsed: ParsedCliArguments | undefined,
+): boolean {
+  if (parsed) return "json" in parsed && parsed.json
+  return args.includes("--json")
+}
+
+function failureExitCode(
+  parsed: ParsedCliArguments | undefined,
+): typeof CLI_EXIT_CODES.failure | typeof CLI_EXIT_CODES.warning {
+  if (parsed?.command === "serve") return CLI_EXIT_CODES.warning
+  if (parsed?.command === "catalog" && !parsed.check) return CLI_EXIT_CODES.warning
+  return CLI_EXIT_CODES.failure
 }
 
 function renderCoordinationList(report: WriteCoordinationList): string {
@@ -863,17 +934,18 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
   const stdout = options.stdout || process.stdout
   const stderr = options.stderr || process.stderr
   const dependencies = options.dependencies || DEFAULT_DEPENDENCIES
+  let parsed: ParsedCliArguments | undefined
   try {
-    const parsed = parseCliArguments(args)
+    parsed = parseCliArguments(args)
     switch (parsed.command) {
       case "catalog": {
         if (!parsed.check) {
           dependencies.catalog({ stderr })
-          return 0
+          return CLI_EXIT_CODES.success
         }
         const report = await dependencies.checkCatalog()
         safeWrite(stdout, parsed.json ? jsonReport(report) : renderCatalog(report), environment)
-        return 0
+        return CLI_EXIT_CODES.success
       }
       case "doctor": {
         const runtimeEnvironment = parsed.profileName
@@ -889,7 +961,9 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           parsed.json ? jsonReport(report) : renderDoctor(report),
           runtimeEnvironment,
         )
-        return report.status === "error" ? 1 : 0
+        if (report.status === "error") return CLI_EXIT_CODES.failure
+        if (report.status === "warning") return CLI_EXIT_CODES.warning
+        return CLI_EXIT_CODES.success
       }
       case "coordination": {
         const report = parsed.action === "list"
@@ -908,11 +982,11 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
               : renderCoordinationResolution(report as WriteCoordinationResolution),
           environment,
         )
-        return 0
+        return CLI_EXIT_CODES.success
       }
       case "help":
         safeWrite(stdout, helpText(parsed.topic), environment)
-        return 0
+        return CLI_EXIT_CODES.success
       case "profile": {
         const location = { environment }
         if (parsed.action === "list") {
@@ -927,7 +1001,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             parsed.json ? jsonReport(report) : renderProfileList(report),
             environment,
           )
-          return 0
+          return CLI_EXIT_CODES.success
         }
         const name = normalizeProfileName(parsed.name)
         if (parsed.action === "show") {
@@ -942,7 +1016,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             parsed.json ? jsonReport(report) : renderProfileShow(report),
             environment,
           )
-          return 0
+          return CLI_EXIT_CODES.success
         }
         if (parsed.confirmation !== name) {
           throw new ConfigurationError(
@@ -967,7 +1041,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           parsed.json ? jsonReport(report) : renderProfileAction(report),
           environment,
         )
-        return 0
+        return CLI_EXIT_CODES.success
       }
       case "preset": {
         if (parsed.action === "list") {
@@ -981,7 +1055,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             parsed.json ? jsonReport(report) : renderPresetList(report),
             environment,
           )
-          return 0
+          return CLI_EXIT_CODES.success
         }
         const report: PresetShowReport = {
           preset: getSetupPreset(parsed.name),
@@ -993,7 +1067,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           parsed.json ? jsonReport(report) : renderPreset(report.preset),
           environment,
         )
-        return 0
+        return CLI_EXIT_CODES.success
       }
       case "serve":
         dependencies.serve({
@@ -1002,7 +1076,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             : environment,
           stderr,
         })
-        return 0
+        return CLI_EXIT_CODES.success
       case "setup": {
         const entrypointPath = options.entrypointPath || process.argv[1]
         const defaultLauncher = entrypointPath
@@ -1027,7 +1101,9 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           ...(parsed.serverName ? { serverName: parsed.serverName } : {}),
         })
         safeWrite(stdout, parsed.json ? jsonReport(report) : renderSetup(report), environment)
-        return 0
+        return report.warnings.length > 0
+          ? CLI_EXIT_CODES.warning
+          : CLI_EXIT_CODES.success
       }
       case "smoke": {
         const runtimeEnvironment = parsed.profileName
@@ -1039,19 +1115,26 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           parsed.json ? jsonReport(report) : renderSmoke(report),
           runtimeEnvironment,
         )
-        return 0
+        return CLI_EXIT_CODES.success
       }
       case "version":
         safeWrite(stdout, CONNECTOR_VERSION, environment)
-        return 0
+        return CLI_EXIT_CODES.success
     }
   } catch (error) {
-    safeWrite(
-      stderr,
-      `${CONNECTOR_NAME}: ${errorMessage(error)}`,
-      environment,
-    )
-    return 1
+    const helpTopic = args[0] && isCommand(args[0]) ? args[0] : undefined
+    const context = {
+      ...(helpTopic ? { helpTopic } : {}),
+      usage: parsed === undefined,
+    }
+    const guidance = classifyCliFailure(error, context)
+    const message = safeCliFailureMessage(error, context)
+    if (requestsJson(args, parsed)) {
+      safeWrite(stdout, jsonReport(cliErrorReport(message, guidance)), environment)
+    } else {
+      safeWrite(stderr, renderCliFailure(message, guidance), environment)
+    }
+    return failureExitCode(parsed)
   }
 }
 

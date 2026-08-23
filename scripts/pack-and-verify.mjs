@@ -415,12 +415,14 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     "installed REST method counts",
   )
   const doctorResult = await run(process.execPath, [entrypoint, "doctor", "--json"], {
+    allowedExitCodes: [0, 1],
     capture: true,
     cwd: consumer,
     env: environment,
   })
   const doctor = JSON.parse(doctorResult.stdout)
   invariant(doctor.online === false && doctor.status !== "error", "installed offline doctor failed")
+  assert.equal(doctorResult.code, doctor.status === "warning" ? 1 : 0)
   const smokePath = join(consumer, "installed-smoke.mjs")
   await writeFile(smokePath, INSTALLED_SMOKE)
   await run(process.execPath, [smokePath, entrypoint, version], {
@@ -487,6 +489,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     "installed-profile",
     "--json",
   ], {
+    allowedExitCodes: [0, 1],
     capture: true,
     cwd: consumer,
     env: {
@@ -494,7 +497,9 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
       DISCORD_INSTALLED_BOT_TOKEN: DUMMY_TOKEN,
     },
   })
-  invariant(JSON.parse(profileDoctorResult.stdout).status !== "error", "installed profile activation failed")
+  const profileDoctor = JSON.parse(profileDoctorResult.stdout)
+  invariant(profileDoctor.status !== "error", "installed profile activation failed")
+  assert.equal(profileDoctorResult.code, profileDoctor.status === "warning" ? 1 : 0)
   return catalog
 }
 

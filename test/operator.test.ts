@@ -443,6 +443,18 @@ test("doctor reports unsupported runtime and missing configuration without throw
     report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.configuration)?.status,
     "fail",
   )
+  for (const entry of report.checks.filter((candidate) => candidate.status !== "pass")) {
+    assert.ok(entry.action)
+    assert.ok(entry.reference)
+  }
+  const runtime = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.nodeVersion,
+  )
+  assert.match(runtime?.action || "", /Install Node\.js 22 or newer/)
+  assert.equal(runtime?.reference, "docs/reference.md#requirements")
+  const token = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)
+  assert.match(token?.action || "", /Set DISCORD_BOT_TOKEN/)
+  assert.equal(token?.reference, "docs/reference.md#discord-bot-setup")
 })
 
 test("doctor distinguishes valid scoped configuration from safe warnings", async () => {
@@ -459,6 +471,8 @@ test("doctor distinguishes valid scoped configuration from safe warnings", async
 
   assert.equal(scoped.status, "ok")
   assert.equal(scoped.checks.every((entry) => entry.status === "pass"), true)
+  assert.equal(scoped.checks.every((entry) => !("action" in entry)), true)
+  assert.equal(scoped.checks.every((entry) => !("reference" in entry)), true)
   assert.equal(open.status, "warning")
   assert.equal(
     open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.applicationIdentity)?.status,
@@ -472,6 +486,27 @@ test("doctor distinguishes valid scoped configuration from safe warnings", async
     open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.status,
     "warn",
   )
+  for (const entry of open.checks.filter((candidate) => candidate.status !== "pass")) {
+    assert.ok(entry.action)
+    assert.equal(entry.reference, "docs/reference.md#operator-cli")
+  }
+})
+
+test("doctor gives feature-policy warnings a safe default recovery path", async () => {
+  const report = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_DELETIONS: "true",
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const deletion = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.deletionPolicy,
+  )
+
+  assert.equal(report.status, "warning")
+  assert.equal(deletion?.status, "warn")
+  assert.match(deletion?.action || "", /toggle and exact allowlists/)
+  assert.equal(deletion?.reference, "docs/reference.md#configuration")
 })
 
 test("doctor and setup explain progressive risk-separated MCP toolsets", async () => {
