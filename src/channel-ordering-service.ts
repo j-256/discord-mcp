@@ -30,6 +30,13 @@ import type {
   GatewayChannelLayoutSnapshot,
   GatewayChannelLayoutSource,
 } from "./gateway-channel-layout.js"
+import {
+  collectGuildChannelEvidence,
+  DIRECT_GUILD_CHANNEL_TYPES,
+  exactGatewayChannelLayout,
+  GuildChannelEvidenceError,
+  type GuildChannelHttpEvidenceMode,
+} from "./guild-channel-evidence.js"
 import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
@@ -71,16 +78,6 @@ const CHANNEL_ORDERING_UNCERTAIN_GUILDS = new Set<string>()
 const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 10_000
 const MAX_VERIFICATION_TIMEOUT_MS = 60_000
-const DIRECT_GUILD_CHANNEL_TYPES: ReadonlySet<number> = new Set([
-  DISCORD_CHANNEL_TYPES.announcement,
-  DISCORD_CHANNEL_TYPES.category,
-  DISCORD_CHANNEL_TYPES.directory,
-  DISCORD_CHANNEL_TYPES.forum,
-  DISCORD_CHANNEL_TYPES.media,
-  DISCORD_CHANNEL_TYPES.stageVoice,
-  DISCORD_CHANNEL_TYPES.text,
-  DISCORD_CHANNEL_TYPES.voice,
-])
 const TEXT_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
   DISCORD_CHANNEL_TYPES.forum,
@@ -148,7 +145,7 @@ const PRIVACY_OMISSIONS = Object.freeze([
 type ChannelOrderingTargetOutcome = "settled" | "uncertain"
 export type ChannelOrderPlacement = "above" | "below"
 export type ChannelOrderFamily = "category" | "text" | "unsupported" | "voice"
-export type ChannelOrderingHttpEvidenceMode = "complete" | "visibility-bounded"
+export type ChannelOrderingHttpEvidenceMode = GuildChannelHttpEvidenceMode
 
 export interface ChannelOrderingRequest {
   anchorChannelId: string
@@ -527,73 +524,10 @@ function exactLayout(
   value: GatewayChannelLayoutSnapshot,
   guildId: string,
 ): GatewayChannelLayoutSnapshot {
-  const record = recordValue(value)
-  if (
-    !record
-    || !hasOnlyKeys(record, [
-      "channels",
-      "complete",
-      "guildId",
-      "reason",
-      "revision",
-      "schemaVersion",
-      "state",
-      "updatedAt",
-    ])
-    || value.schemaVersion !== SCHEMA_VERSION
-    || value.guildId !== guildId
-    || value.complete !== true
-    || value.state !== "ready"
-    || value.reason !== null
-    || !Number.isSafeInteger(value.revision)
-    || value.revision < 1
-    || typeof value.updatedAt !== "string"
-    || Number.isNaN(Date.parse(value.updatedAt))
-    || new Date(value.updatedAt).toISOString() !== value.updatedAt
-    || !Array.isArray(value.channels)
-    || value.channels.length > DISCORD_LIMITS.guildChannels
-  ) throw evidenceError("Discord Gateway channel-ordering layout is not complete and ready")
-  const channels = new Map<string, GatewayChannelLayoutEntry>()
-  for (const valueChannel of value.channels) {
-    const channelRecord = recordValue(valueChannel)
-    if (
-      !channelRecord
-      || !hasOnlyKeys(channelRecord, [
-        "channelId",
-        "obfuscated",
-        "parentChannelId",
-        "position",
-        "type",
-      ])
-      || !snowflake(valueChannel.channelId)
-      || channels.has(valueChannel.channelId)
-      || typeof valueChannel.obfuscated !== "boolean"
-      || !(valueChannel.parentChannelId === null || snowflake(valueChannel.parentChannelId))
-      || !Number.isSafeInteger(valueChannel.position)
-      || valueChannel.position < 0
-      || !Number.isSafeInteger(valueChannel.type)
-      || !DIRECT_GUILD_CHANNEL_TYPES.has(valueChannel.type)
-    ) throw evidenceError("Discord Gateway returned invalid channel-ordering layout evidence")
-    channels.set(valueChannel.channelId, { ...valueChannel })
-  }
-  for (const channel of channels.values()) {
-    if (channel.type === DISCORD_CHANNEL_TYPES.category) {
-      if (channel.parentChannelId !== null) {
-        throw evidenceError("Discord Gateway returned invalid channel-ordering category topology")
-      }
-      continue
-    }
-    if (channel.parentChannelId === null) continue
-    const parent = channels.get(channel.parentChannelId)
-    if (!parent || parent.type !== DISCORD_CHANNEL_TYPES.category) {
-      throw evidenceError("Discord Gateway returned incomplete channel-ordering parent topology")
-    }
-  }
-  return {
-    ...value,
-    channels: [...channels.values()].sort((left, right) => (
-      compareSnowflakes(left.channelId, right.channelId)
-    )),
+  try {
+    return exactGatewayChannelLayout(value, guildId)
+  } catch (error) {
+    throw evidenceError("Discord Gateway channel-ordering layout evidence is invalid", error)
   }
 }
 
@@ -656,21 +590,17 @@ function exactOverwrites(value: unknown): {
 
 function exactHttpChannels(
   value: readonly DiscordChannel[],
-  guildId: string,
   layout: GatewayChannelLayoutSnapshot,
+  mode: ChannelOrderingHttpEvidenceMode,
 ): {
   channels: HttpChannelEvidence[]
   mode: ChannelOrderingHttpEvidenceMode
 } {
-  if (!Array.isArray(value) || value.length > DISCORD_LIMITS.guildChannels) {
-    throw evidenceError("Discord returned invalid channel-ordering HTTP inventory evidence")
-  }
   const layoutById = new Map(layout.channels.map((channel) => [channel.channelId, channel]))
   const channels = new Map<string, HttpChannelEvidence>()
   for (const rawChannel of value) {
     const record = recordValue(rawChannel)
     const id = snowflake(record?.id)
-    const guildChannelId = snowflake(record?.guild_id)
     const parentChannelId = record?.parent_id === undefined || record.parent_id === null
       ? null
       : snowflake(record.parent_id)
@@ -679,7 +609,6 @@ function exactHttpChannels(
     if (
       !record
       || !id
-      || guildChannelId !== guildId
       || channels.has(id)
       || !(record.parent_id === undefined || record.parent_id === null || parentChannelId)
       || !Number.isSafeInteger(position)
@@ -690,23 +619,11 @@ function exactHttpChannels(
     const layoutChannel = layoutById.get(id)
     if (
       !layoutChannel
+      || layoutChannel.obfuscated
       || layoutChannel.type !== type
       || layoutChannel.position !== position
       || layoutChannel.parentChannelId !== parentChannelId
     ) throw evidenceError("Discord HTTP and Gateway channel-ordering evidence do not match")
-    if (layoutChannel.obfuscated) {
-      channels.set(id, {
-        id,
-        metadataVisibility: "obfuscated",
-        name: null,
-        parentChannelId,
-        permissionOverwrites: null,
-        position: position as number,
-        type: type as number,
-        unknownFieldCount: null,
-      })
-      continue
-    }
     const projectedOverwrites = exactOverwrites(record.permission_overwrites)
     channels.set(id, {
       id,
@@ -721,21 +638,27 @@ function exactHttpChannels(
         + projectedOverwrites.unknownFieldCount,
     })
   }
-  const actualIds = [...channels.keys()].sort(compareSnowflakes)
-  const completeIds = layout.channels.map((channel) => channel.channelId)
-    .sort(compareSnowflakes)
-  const visibleIds = layout.channels
-    .filter((channel) => !channel.obfuscated)
-    .map((channel) => channel.channelId)
-    .sort(compareSnowflakes)
-  const complete = stableString(actualIds) === stableString(completeIds)
-  const visibilityBounded = stableString(actualIds) === stableString(visibleIds)
-  if (!complete && !visibilityBounded) {
-    throw evidenceError("Discord HTTP channel-ordering inventory is neither complete nor visibility-bounded")
+  for (const layoutChannel of layout.channels) {
+    if (!layoutChannel.obfuscated) {
+      if (!channels.has(layoutChannel.channelId)) {
+        throw evidenceError("Discord channel-ordering metadata evidence is incomplete")
+      }
+      continue
+    }
+    channels.set(layoutChannel.channelId, {
+      id: layoutChannel.channelId,
+      metadataVisibility: "obfuscated",
+      name: null,
+      parentChannelId: layoutChannel.parentChannelId,
+      permissionOverwrites: null,
+      position: layoutChannel.position,
+      type: layoutChannel.type,
+      unknownFieldCount: null,
+    })
   }
   return {
     channels: [...channels.values()].sort((left, right) => compareSnowflakes(left.id, right.id)),
-    mode: complete ? "complete" : "visibility-bounded",
+    mode,
   }
 }
 
@@ -1341,18 +1264,45 @@ export class ChannelOrderingService {
     if (!this.#layoutSource.layoutEnabled) {
       throw evidenceError("Discord Gateway channel-ordering layout is disabled")
     }
-    const before = exactLayout(this.#layoutSource.getChannelLayout(guildId), guildId)
-    const [guildValue, memberValue, rawRoles, rawChannels] = await Promise.all([
-      this.#client.getGuild(guildId, options),
-      this.#client.getGuildMember(guildId, botId, options),
-      this.#client.getGuildRoles(guildId, options),
-      this.#client.getGuildChannels(guildId, options),
-    ])
-    const after = exactLayout(this.#layoutSource.getChannelLayout(guildId), guildId)
-    if (
-      after.revision !== before.revision
-      || stableString(after.channels) !== stableString(before.channels)
-    ) throw evidenceError("Discord channel-ordering layout changed during evidence collection")
+    let supportingEvidence: {
+      guild: DiscordGuild
+      member: DiscordGuildMember
+      roles: DiscordRole[]
+    } | undefined
+    let channelEvidence
+    try {
+      channelEvidence = await collectGuildChannelEvidence({
+        guildId,
+        layoutSource: this.#layoutSource,
+        readChannels: async () => {
+          const [guild, member, roles, channels] = await Promise.all([
+            this.#client.getGuild(guildId, options),
+            this.#client.getGuildMember(guildId, botId, options),
+            this.#client.getGuildRoles(guildId, options),
+            this.#client.getGuildChannels(guildId, options),
+          ])
+          supportingEvidence = { guild, member, roles }
+          return channels
+        },
+      })
+    } catch (error) {
+      if (error instanceof GuildChannelEvidenceError) {
+        throw evidenceError(
+          `Discord channel-ordering evidence is incomplete: ${error.message}`,
+          error,
+        )
+      }
+      throw error
+    }
+    if (!supportingEvidence) {
+      throw evidenceError("Discord channel-ordering supporting evidence is unavailable")
+    }
+    const {
+      guild: guildValue,
+      member: memberValue,
+      roles: rawRoles,
+    } = supportingEvidence
+    const after = channelEvidence.layout
     const guild = exactGuild(guildValue, guildId)
     let roles: NormalizedDiscordRole[]
     try {
@@ -1362,7 +1312,11 @@ export class ChannelOrderingService {
     }
     const botMember = exactBotMember(memberValue, botId, roles, guildId)
     const guildPermission = exactGuildPermissions(guildId, botMember, rawRoles)
-    const http = exactHttpChannels(rawChannels, guildId, after)
+    const http = exactHttpChannels(
+      channelEvidence.channels,
+      after,
+      channelEvidence.view.httpMode,
+    )
     const groups = buildGroups({
       botId,
       guildId,

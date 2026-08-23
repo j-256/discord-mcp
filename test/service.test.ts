@@ -171,6 +171,20 @@ function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
   }
 }
 
+function completeChannelGateway(
+  channels: readonly DiscordChannel[] = [channel()],
+): GatewayChannelLayoutStore {
+  const gateway = new GatewayChannelLayoutStore({
+    enabled: true,
+    guildIds: new Set([GUILD_ID]),
+  })
+  assert.equal(gateway.ingestDispatch("GUILD_CREATE", {
+    channels,
+    id: GUILD_ID,
+  }), true)
+  return gateway
+}
+
 function thread(
   id: string,
   parentId = CHANNEL_ID,
@@ -2454,6 +2468,7 @@ test("service pins identity through capability-safe Guild Template audit and cha
       DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
       DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
     },
+    gateway: completeChannelGateway(),
     guildTemplateOptions: {
       clock: () => new Date("2026-08-22T00:00:00.000Z"),
       planKey: new Uint8Array(32).fill(37),
@@ -2572,6 +2587,7 @@ test("service pins identity through privacy-safe reviewed onboarding", async () 
       DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
       DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
     },
+    gateway: completeChannelGateway(),
     onboardingOptions: {
       clock: () => new Date("2026-08-21T00:00:00.000Z"),
       planKey: new Uint8Array(32).fill(41),
@@ -3878,6 +3894,7 @@ test("service pins identity through reviewed exact member-role changes", async (
       DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_MEMBER_ROLE_IDS: selectedRoleId,
     },
+    gateway: completeChannelGateway(),
     memberRoleOptions: {
       clock: () => new Date("2026-08-21T00:00:00.000Z"),
       planKey: new Uint8Array(32).fill(5),

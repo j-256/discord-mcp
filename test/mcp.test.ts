@@ -1410,6 +1410,16 @@ function onboardingAudit(includeText: boolean): OnboardingAuditResult {
     access: onboardingAccess(),
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
+    channelEvidence: {
+      gatewayChannelCount: 1,
+      httpChannelCount: 1,
+      httpMode: "complete",
+      layoutRevision: 1,
+      layoutUpdatedAt: "2026-08-21T00:00:00.000Z",
+      metadataCoverage: "complete",
+      obfuscatedChannelCount: 0,
+      trustedMetadataCount: 1,
+    },
     configuration: onboardingConfiguration(onboardingRequest(), includeText),
     guild: { id: GUILD_ID, name: "Private guild name" },
     localLimits: {
@@ -1450,6 +1460,16 @@ function onboardingPlan(
     applicationId: APPLICATION_ID,
     auditReason: request.auditReason,
     botId: BOT_ID,
+    channelEvidence: {
+      gatewayChannelCount: 1,
+      httpChannelCount: 1,
+      httpMode: "complete",
+      layoutRevision: 1,
+      layoutUpdatedAt: "2026-08-21T00:00:00.000Z",
+      metadataCoverage: "complete",
+      obfuscatedChannelCount: 0,
+      trustedMetadataCount: 1,
+    },
     createdAt: "2026-08-21T00:00:00.000Z",
     current,
     desired,
@@ -2275,6 +2295,16 @@ function guildTemplatePlan(
     applicationId: APPLICATION_ID,
     auditReason: request.auditReason,
     botId: BOT_ID,
+    channelEvidence: {
+      gatewayChannelCount: 1,
+      httpChannelCount: 1,
+      httpMode: "complete",
+      layoutRevision: 1,
+      layoutUpdatedAt: "2026-08-22T00:00:00.000Z",
+      metadataCoverage: "complete",
+      obfuscatedChannelCount: 0,
+      trustedMetadataCount: 1,
+    },
     createdAt: "2026-08-22T00:00:00.000Z",
     desiredMetadata: request.action === "create" || request.action === "update-metadata"
       ? { description: request.description, name: request.name }
@@ -2284,6 +2314,7 @@ function guildTemplatePlan(
       ? {
           ambiguousChannelIdentities: 0,
           ambiguousRoleIdentities: 0,
+          channelComparisonComplete: true,
           channelSettingsChanged: 1,
           channelsAddedSinceSnapshot: 0,
           channelsMissingFromGuild: 0,
@@ -4074,6 +4105,16 @@ function memberRolePlan(
     applicationId: APPLICATION_ID,
     auditReason: request.auditReason,
     botId: BOT_ID,
+    channelEvidence: {
+      gatewayChannelCount: 1,
+      httpChannelCount: 1,
+      httpMode: "complete",
+      layoutRevision: 1,
+      layoutUpdatedAt: "2026-08-21T00:00:00.000Z",
+      metadataCoverage: "complete",
+      obfuscatedChannelCount: 0,
+      trustedMetadataCount: 1,
+    },
     createdAt: "2026-08-21T00:00:00.000Z",
     digest,
     guild: {
@@ -5380,6 +5421,13 @@ function serviceFixture(overrides: {
         }).access,
         applicationId: APPLICATION_ID,
         botId: BOT_ID,
+        channelEvidence: guildTemplatePlan({
+          action: "delete",
+          auditReason: AUDIT_REASON,
+          guildId,
+          operationKey: GUILD_TEMPLATE_OPERATION_KEY,
+          templateRef: GUILD_TEMPLATE_REF,
+        }).channelEvidence,
         guild: { id: guildId },
         inventory: { returned: 1, safetyLimit: 100 },
         limitations: ["Guild Templates are snapshots rather than backups"],
@@ -6888,6 +6936,11 @@ function serviceFixture(overrides: {
       return {
         channels: [],
         guildId,
+        inventory: {
+          completeness: "visibility-bounded" as const,
+          returned: 0,
+          scope: "configured-policy-and-discord-visibility" as const,
+        },
         schemaVersion: 1,
         status: "ok",
       }
@@ -9725,7 +9778,16 @@ test("MCP Gateway tools expose local health and cursor continuity without conten
     cursorNamespace: "mcptooltest1",
     enabled: true,
   })
-  const { client } = await connectedFixture(context, { gateway })
+  const { client } = await connectedFixture(context, {
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+      DISCORD_MCP_BOT_ID: BOT_ID,
+    },
+    gateway,
+  })
   gateway.transition("ready")
   gateway.ingestDispatch("MESSAGE_CREATE", {
     author: { username: TOKEN },
@@ -20270,6 +20332,8 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     allowedGuildIds: new Set([GUILD_ID]),
     cursorNamespace: "nativeinteractionrunner",
     enabled: true,
+    eventFeedEnabled: false,
+    layoutGuildIds: new Set(),
   })
   const lifecycle: string[] = []
   let releasePreflight: (() => void) | undefined
@@ -20385,6 +20449,8 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
     allowedGuildIds: new Set([GUILD_ID]),
     cursorNamespace: "runnergateway",
     enabled: true,
+    eventFeedEnabled: false,
+    layoutGuildIds: new Set(),
   })
   let starts = 0
   let stops = 0

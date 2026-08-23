@@ -955,6 +955,10 @@ export class ConnectorService {
     })
     this.#policy = options.policy || new ScopePolicy(options.config)
     this.#activityStore = options.activityStore || new JsonlActivityLog(options.config.auditFile)
+    const gateway = options.gateway ?? new GatewayChannelLayoutStore({
+      enabled: false,
+      guildIds: new Set(),
+    })
     const operationStore = options.operationStore || new FileOperationStore(
       operationReceiptDirectory(options.config.auditFile),
     )
@@ -1013,10 +1017,7 @@ export class ConnectorService {
     this.#channelOrderingService = new ChannelOrderingService({
       activityStore: this.#activityStore,
       client: this.#client,
-      layoutSource: options.gateway ?? new GatewayChannelLayoutStore({
-        enabled: false,
-        guildIds: new Set(),
-      }),
+      layoutSource: gateway,
       operationStore,
       policy: this.#policy,
       ...options.channelOrderingOptions,
@@ -1083,6 +1084,7 @@ export class ConnectorService {
     this.#guildTemplateService = new GuildTemplateService({
       activityStore: this.#activityStore,
       client: this.#client,
+      layoutSource: gateway,
       operationStore,
       policy: this.#policy,
       ...options.guildTemplateOptions,
@@ -1097,6 +1099,7 @@ export class ConnectorService {
     this.#onboardingService = new OnboardingService({
       activityStore: this.#activityStore,
       client: this.#client,
+      layoutSource: gateway,
       operationStore,
       policy: this.#policy,
       ...options.onboardingOptions,
@@ -1168,6 +1171,7 @@ export class ConnectorService {
     this.#memberRoleService = new MemberRoleService({
       activityStore: this.#activityStore,
       client: this.#client,
+      layoutSource: gateway,
       operationStore,
       policy: this.#policy,
       ...options.memberRoleOptions,
@@ -1383,14 +1387,20 @@ export class ConnectorService {
     const scopedChannels = this.#policy.filterChannels(
       channels.filter((channel) => !channel.guild_id || channel.guild_id === guildId),
     )
+    const projectedChannels = scopedChannels
+      .map((channel) => normalizedGuildChannel(channel, guildId))
+      .sort((left, right) => (
+        (left.position ?? Number.MAX_SAFE_INTEGER)
+        - (right.position ?? Number.MAX_SAFE_INTEGER)
+      ))
     return {
-      channels: scopedChannels
-        .map((channel) => normalizedGuildChannel(channel, guildId))
-        .sort((left, right) => (
-          (left.position ?? Number.MAX_SAFE_INTEGER)
-          - (right.position ?? Number.MAX_SAFE_INTEGER)
-        )),
+      channels: projectedChannels,
       guildId,
+      inventory: {
+        completeness: "visibility-bounded" as const,
+        returned: projectedChannels.length,
+        scope: "configured-policy-and-discord-visibility" as const,
+      },
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }

@@ -31,6 +31,12 @@ import {
   OnboardingOperationConflictError,
   OnboardingPlanChangedError,
 } from "./errors.js"
+import type { GatewayChannelLayoutSource } from "./gateway-channel-layout.js"
+import {
+  collectGuildChannelEvidence,
+  GuildChannelEvidenceError,
+  type GuildChannelEvidenceView,
+} from "./guild-channel-evidence.js"
 import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
@@ -353,6 +359,7 @@ export interface OnboardingAuditResult {
   access: OnboardingAccessEvidence
   applicationId: string
   botId: string
+  channelEvidence: GuildChannelEvidenceView
   configuration: OnboardingConfigurationView
   guild: {
     id: string
@@ -395,6 +402,7 @@ export interface OnboardingChangePlan {
   applicationId: string
   auditReason: string
   botId: string
+  channelEvidence: GuildChannelEvidenceView
   createdAt: string
   current: OnboardingConfigurationView
   desired: OnboardingConfigurationView
@@ -440,6 +448,7 @@ export interface OnboardingServiceOptions {
   activityStore: ActivityStore
   client: OnboardingServiceClient
   clock?: () => Date
+  layoutSource: GatewayChannelLayoutSource
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: Pick<
@@ -466,6 +475,7 @@ interface ValidatedChannel extends DiscordChannel {
 interface OnboardingState {
   access: OnboardingAccessEvidence
   botMember: DiscordGuildMember
+  channelEvidence: GuildChannelEvidenceView
   channels: ValidatedChannel[]
   configuration: OnboardingConfigurationView
   emojis: DiscordGuildEmojiSummary[]
@@ -920,18 +930,6 @@ function exactChannels(
       type: channel.type,
     } satisfies ValidatedChannel
   })
-  const channelsById = new Map(channels.map((channel) => [channel.id, channel]))
-  for (const channel of channels) {
-    if (channel.type === DISCORD_CHANNEL_TYPES.category && channel.parent_id !== null) {
-      throw evidenceError("Discord returned a parented onboarding category")
-    }
-    if (channel.parent_id !== null) {
-      const parent = channelsById.get(channel.parent_id)
-      if (!parent || parent.type !== DISCORD_CHANNEL_TYPES.category) {
-        throw evidenceError("Discord returned incomplete onboarding channel hierarchy evidence")
-      }
-    }
-  }
   return channels.sort((left, right) => compareSnowflakes(left.id, right.id))
 }
 
@@ -1253,6 +1251,7 @@ function roleSafetyReasons(
   botHighestRolePosition: number,
   rolesById: ReadonlyMap<string, ValidatedRole>,
   channels: readonly ValidatedChannel[],
+  obfuscatedChannelCount: number,
 ): string[] {
   const role = rolesById.get(roleId)
   if (!role) return ["missing-role"]
@@ -1261,6 +1260,9 @@ function roleSafetyReasons(
     ...(role.managed ? ["managed-role"] : []),
     ...(role.position >= botHighestRolePosition ? ["not-below-bot"] : []),
     ...(BigInt(role.permissions) !== 0n ? ["guild-permissions"] : []),
+    ...(obfuscatedChannelCount > 0
+      ? ["obfuscated-channel-overwrites-unavailable"]
+      : []),
   ]
   const overwriteAuthority = channels.some((channel) => (
     channel.permission_overwrites.some((overwrite) => (
@@ -1279,6 +1281,7 @@ function roleReferenceView(
   botHighestRolePosition: number,
   rolesById: ReadonlyMap<string, ValidatedRole>,
   channels: readonly ValidatedChannel[],
+  obfuscatedChannelCount: number,
 ): OnboardingRoleReferenceView {
   const reasons = roleSafetyReasons(
     roleId,
@@ -1286,6 +1289,7 @@ function roleReferenceView(
     botHighestRolePosition,
     rolesById,
     channels,
+    obfuscatedChannelCount,
   )
   return {
     exists: rolesById.has(roleId),
@@ -1414,6 +1418,7 @@ function remoteConfigurationView(
   channels: readonly ValidatedChannel[],
   emojis: readonly DiscordGuildEmojiSummary[],
   includeText: boolean,
+  obfuscatedChannelCount: number,
 ): OnboardingConfigurationView {
   const rolesById = new Map(roles.map((role) => [role.id, role]))
   const channelsById = new Map(channels.map((channel) => [channel.id, channel]))
@@ -1477,6 +1482,7 @@ function remoteConfigurationView(
         access.highestRolePosition,
         rolesById,
         channels,
+        obfuscatedChannelCount,
       ))
       const emoji = remoteEmojiView(option.emoji, emojisById, includeText)
       if (channelReferences.some((reference) => (
@@ -1600,6 +1606,7 @@ function desiredConfigurationView(
           state.access.highestRolePosition,
           rolesById,
           state.channels,
+          state.channelEvidence.obfuscatedChannelCount,
         )),
         title: option.title,
         titleCharacters: [...option.title].length,
@@ -2012,10 +2019,16 @@ function planRisks(
   ].sort()
 }
 
-function planWarnings(access: OnboardingAccessEvidence): string[] {
+function planWarnings(
+  access: OnboardingAccessEvidence,
+  channelEvidence: GuildChannelEvidenceView,
+): string[] {
   return [
     ...(access.botAdministrator
       ? ["Discord connector bot has ADMINISTRATOR; replace it with narrowly scoped onboarding permissions"]
+      : []),
+    ...(channelEvidence.obfuscatedChannelCount > 0
+      ? ["Channel metadata is visibility-bounded; role-bearing onboarding options are blocked because hidden overwrite authority cannot be evaluated"]
       : []),
     "The operation performs one complete onboarding replacement and omits no hidden state",
     "Unknown response fields or enums block replacement to prevent silent future-field loss",
@@ -2206,6 +2219,7 @@ export class OnboardingService {
   readonly #activityStore: ActivityStore
   readonly #client: OnboardingServiceClient
   readonly #clock: () => Date
+  readonly #layoutSource: GatewayChannelLayoutSource
   readonly #operationStore: OperationStore
   readonly #planKey: Uint8Array
   readonly #policy: OnboardingServiceOptions["policy"]
@@ -2215,6 +2229,7 @@ export class OnboardingService {
     this.#activityStore = options.activityStore
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#layoutSource = options.layoutSource
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
@@ -2245,15 +2260,52 @@ export class OnboardingService {
       )
       if (receipt) throw new OnboardingOperationConflictError(receiptView(receipt))
     }
-    const [rawGuild, rawBotMember, rawRoles, rawChannels, rawEmojis, rawOnboarding] =
-      await Promise.all([
-        this.#client.getGuild(guildId, options),
-        this.#client.getGuildMember(guildId, botId, options),
-        this.#client.getGuildRoles(guildId, options),
-        this.#client.getGuildChannels(guildId, options),
-        this.#client.listGuildEmojis(guildId, options),
-        this.#client.getGuildOnboarding(guildId, options),
-      ])
+    let supportingEvidence: {
+      botMember: DiscordGuildMember
+      emojis: DiscordGuildEmojiSummary[]
+      guild: DiscordGuild
+      onboarding: DiscordGuildOnboarding
+      roles: DiscordRole[]
+    } | undefined
+    let channelEvidence
+    try {
+      channelEvidence = await collectGuildChannelEvidence({
+        guildId,
+        layoutSource: this.#layoutSource,
+        readChannels: async () => {
+          const [guild, botMember, roles, channels, emojis, onboarding] =
+            await Promise.all([
+              this.#client.getGuild(guildId, options),
+              this.#client.getGuildMember(guildId, botId, options),
+              this.#client.getGuildRoles(guildId, options),
+              this.#client.getGuildChannels(guildId, options),
+              this.#client.listGuildEmojis(guildId, options),
+              this.#client.getGuildOnboarding(guildId, options),
+            ])
+          supportingEvidence = { botMember, emojis, guild, onboarding, roles }
+          return channels
+        },
+      })
+    } catch (error) {
+      if (error instanceof GuildChannelEvidenceError) {
+        throw evidenceError(
+          `Discord onboarding channel evidence is incomplete: ${error.message}`,
+          { cause: error },
+        )
+      }
+      throw error
+    }
+    if (!supportingEvidence) {
+      throw evidenceError("Discord onboarding supporting evidence is unavailable")
+    }
+    const {
+      botMember: rawBotMember,
+      emojis: rawEmojis,
+      guild: rawGuild,
+      onboarding: rawOnboarding,
+      roles: rawRoles,
+    } = supportingEvidence
+    const rawChannels = channelEvidence.channels
     const guild = exactGuild(rawGuild, guildId)
     const botMember = exactBotMember(rawBotMember, guildId, botId)
     const roles = exactRoles(rawRoles, guildId)
@@ -2270,6 +2322,7 @@ export class OnboardingService {
       channels,
       emojis,
       includeText,
+      channelEvidence.view.obfuscatedChannelCount,
     )
     if (mode === "change" && !access.authorizedForChange) {
       throw evidenceError(
@@ -2279,6 +2332,7 @@ export class OnboardingService {
     return {
       access,
       botMember,
+      channelEvidence: channelEvidence.view,
       channels,
       configuration,
       emojis,
@@ -2308,6 +2362,7 @@ export class OnboardingService {
       access: state.access,
       applicationId,
       botId,
+      channelEvidence: state.channelEvidence,
       configuration: state.configuration,
       guild: { id: state.guild.id, name: state.guild.name },
       localLimits: ONBOARDING_LOCAL_LIMITS,
@@ -2346,7 +2401,7 @@ export class OnboardingService {
     )
     const diff = changeDiff(state.onboarding, desired)
     const warnings = writeRequired
-      ? planWarnings(state.access)
+      ? planWarnings(state.access, state.channelEvidence)
       : ["The complete desired onboarding state already matches Discord"]
     const risks = writeRequired
       ? planRisks(diff, desired.enabled, desiredView)
@@ -2360,6 +2415,7 @@ export class OnboardingService {
     const evidence = {
       access: state.access,
       botMemberRoleIds: [...state.botMember.roles].sort(compareSnowflakes),
+      channelEvidence: state.channelEvidence,
       channels: state.channels.map((channel) => ({
         id: channel.id,
         parentId: channel.parent_id ?? null,
@@ -2414,6 +2470,7 @@ export class OnboardingService {
       applicationId,
       auditReason: desired.auditReason,
       botId,
+      channelEvidence: state.channelEvidence,
       createdAt: this.#clock().toISOString(),
       current: state.configuration,
       desired: desiredView,

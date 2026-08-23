@@ -1294,6 +1294,7 @@ export class GuildScaffoldService {
         ...(highRiskPermissions.length > 0
           ? [`Requested high-risk role permissions: ${[...new Set(highRiskPermissions)].join(", ")}`]
           : []),
+        "Discord guild channel listings can omit channels the bot cannot view; matching, collision, and capacity evidence is visibility-bounded",
         "Guild scaffolds create only additive roles, categories, text channels, and forum channels",
         "A newly created category must be reviewed in a fresh plan before any child channel can be created",
         "No step is retried, rolled back, reordered, assigned, edited, or deleted",

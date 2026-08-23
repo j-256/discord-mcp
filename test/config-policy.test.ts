@@ -24,6 +24,8 @@ import { ScopePolicy } from "../src/policy.js"
 import type { DiscordChannel } from "../src/types.js"
 
 const TOKEN = "test-discord-token"
+const APPLICATION_ID = "900000000000000001"
+const BOT_ID = "900000000000000002"
 const GUILD_ID = "100000000000000001"
 const OTHER_GUILD_ID = "100000000000000002"
 const CHANNEL_ID = "200000000000000001"
@@ -1028,6 +1030,8 @@ test("configuration and policy isolate reviewed guild onboarding", () => {
     DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
     DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" })
   const policy = new ScopePolicy(config)
@@ -1056,6 +1060,8 @@ test("configuration and policy isolate reviewed guild onboarding", () => {
   const auditOnly = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" }))
   assert.doesNotThrow(() => auditOnly.assertGuildOnboardingAuditable(GUILD_ID))
@@ -1067,6 +1073,8 @@ test("configuration and policy isolate reviewed guild onboarding", () => {
   const empty = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
   }, { homeDirectory: "/test/home" }))
   assert.throws(
     () => empty.assertGuildOnboardingAuditable(GUILD_ID),
@@ -1304,6 +1312,8 @@ test("configuration and policy isolate exact member-role authority", () => {
   const missingGuilds = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_MEMBER_ROLE_IDS: ROLE_ID,
   }, { homeDirectory: "/test/home" }))
   assert.throws(
@@ -1314,6 +1324,8 @@ test("configuration and policy isolate exact member-role authority", () => {
   const missingRoles = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" }))
   assert.throws(
@@ -1324,6 +1336,8 @@ test("configuration and policy isolate exact member-role authority", () => {
   const policy = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_MEMBER_ROLE_IDS: `${ROLE_ID},${OTHER_ROLE_ID}`,
     DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
@@ -1852,6 +1866,8 @@ test("configuration and policy separate capability-safe Guild Template audit fro
   const auditOnly = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" }))
   auditOnly.assertGuildTemplateAuditable(GUILD_ID)
@@ -1864,6 +1880,8 @@ test("configuration and policy separate capability-safe Guild Template audit fro
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
     DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
     DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" })
   const enabled = new ScopePolicy(enabledConfig)
@@ -1880,6 +1898,8 @@ test("configuration and policy separate capability-safe Guild Template audit fro
   const empty = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
   }, { homeDirectory: "/test/home" }))
   assert.throws(
     () => empty.assertGuildTemplateAuditable(GUILD_ID),

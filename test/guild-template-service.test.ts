@@ -5,7 +5,10 @@ import type {
   ActivityEntry,
   ActivityStore,
 } from "../src/activity-log.js"
-import { GUILD_TEMPLATE_REFERENCE_PATTERN } from "../src/constants.js"
+import {
+  GUILD_TEMPLATE_REFERENCE_PATTERN,
+  SCHEMA_VERSION,
+} from "../src/constants.js"
 import type {
   DiscordGuildTemplateSummary,
   ModifyGuildTemplateInput,
@@ -24,6 +27,10 @@ import {
   type GuildTemplateChangeRequest,
   type GuildTemplateServiceOptions,
 } from "../src/guild-template-service.js"
+import type {
+  GatewayChannelLayoutListener,
+  GatewayChannelLayoutSource,
+} from "../src/gateway-channel-layout.js"
 import type {
   OperationReceipt,
   OperationReservation,
@@ -205,6 +212,7 @@ interface FixtureState {
   mutationLeavesDirty: boolean
   mutationStarted: (() => void) | null
   mutationUpdatesState: boolean
+  obfuscatedChannelIds: Set<string>
   readbackError: unknown
   roles: DiscordRole[]
   templates: DiscordGuildTemplateSummary[]
@@ -227,6 +235,7 @@ function fixture(options: {
     mutationLeavesDirty: false,
     mutationStarted: null,
     mutationUpdatesState: true,
+    obfuscatedChannelIds: new Set(),
     readbackError: undefined,
     roles: [
       role(GUILD_ID, 0n, 0),
@@ -263,6 +272,50 @@ function fixture(options: {
     },
   }
   const operationStore = new MemoryOperationStore(events)
+  const layoutSource: GatewayChannelLayoutSource = {
+    layoutEnabled: true,
+    getChannelLayout(guildId) {
+      return {
+        channels: state.channels.map((entry, position) => ({
+          channelId: entry.id,
+          obfuscated: state.obfuscatedChannelIds.has(entry.id),
+          parentChannelId: entry.parent_id ?? null,
+          position: entry.position ?? position,
+          type: entry.type,
+        })),
+        complete: true,
+        guildId,
+        reason: null,
+        revision: 1,
+        schemaVersion: SCHEMA_VERSION,
+        state: "ready",
+        updatedAt: NOW,
+      }
+    },
+    getChannelLayoutStatus() {
+      return {
+        channels: {
+          obfuscated: state.obfuscatedChannelIds.size,
+          retained: state.channels.length,
+        },
+        enabled: true,
+        guilds: {
+          invalidated: 0,
+          pending: 0,
+          ready: 1,
+          resuming: 0,
+          scoped: 1,
+          unavailable: 0,
+        },
+        invalidations: 0,
+        schemaVersion: SCHEMA_VERSION,
+        updates: 1,
+      }
+    },
+    subscribeChannelLayouts(_listener: GatewayChannelLayoutListener) {
+      return () => undefined
+    },
+  }
   const basePolicy = options.policy || policy()
   const scopedPolicy: GuildTemplateServiceOptions["policy"] = {
     assertGuildTemplateAuditable(guildId) {
@@ -359,6 +412,7 @@ function fixture(options: {
     activityStore,
     client,
     clock: () => new Date(NOW),
+    layoutSource,
     operationStore,
     planKey: new Uint8Array(32).fill(options.planKeyByte ?? 17),
     policy: scopedPolicy,
@@ -479,6 +533,45 @@ test("Guild Template audit returns only opaque capabilities and count-only priva
   ]) {
     assert.doesNotMatch(serialized, new RegExp(secret))
   }
+})
+
+test("Guild Template snapshot capture blocks on obfuscated channels while exact capability changes remain available", async () => {
+  const target = fixture({
+    state: { obfuscatedChannelIds: new Set([CHANNEL_ID]) },
+  })
+  const audit = await target.service.list(APPLICATION_ID, BOT_ID, GUILD_ID)
+  const templateRef = audit.templates.find(({ isDirty }) => isDirty === true)?.templateRef
+  assert.ok(templateRef)
+  assert.equal(audit.channelEvidence.metadataCoverage, "visibility-bounded")
+  assert.equal(audit.channelEvidence.obfuscatedChannelCount, 1)
+  assert.equal(audit.liveStructure.channels.total, 0)
+
+  await assert.rejects(
+    target.service.plan(APPLICATION_ID, BOT_ID, request("create")),
+    /creation and synchronization require complete live channel metadata/,
+  )
+  await assert.rejects(
+    target.service.plan(APPLICATION_ID, BOT_ID, request("synchronize", templateRef)),
+    /creation and synchronization require complete live channel metadata/,
+  )
+
+  const metadataPlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request("update-metadata", templateRef, { name: "Reviewed name" }),
+  )
+  assert.equal(metadataPlan.channelEvidence.metadataCoverage, "visibility-bounded")
+  assert.equal(metadataPlan.drift?.channelComparisonComplete, false)
+  assert.match(metadataPlan.warnings.join(" "), /channel drift are visibility-bounded/)
+
+  const deletePlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request("delete", templateRef),
+  )
+  assert.equal(deletePlan.mutation, "delete")
+  assert.equal(deletePlan.drift?.channelComparisonComplete, false)
+  assert.equal(target.getMutationCalls(), 0)
 })
 
 test("Guild Template references are stable only inside one process key", async () => {

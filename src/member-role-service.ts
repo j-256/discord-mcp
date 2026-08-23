@@ -27,6 +27,13 @@ import {
   MemberRolePlanChangedError,
   errorMessage,
 } from "./errors.js"
+import type { GatewayChannelLayoutSource } from "./gateway-channel-layout.js"
+import {
+  collectGuildChannelEvidence,
+  DIRECT_GUILD_CHANNEL_TYPES,
+  GuildChannelEvidenceError,
+  type GuildChannelEvidenceView,
+} from "./guild-channel-evidence.js"
 import {
   type OperationReceipt,
   type OperationStore,
@@ -69,16 +76,6 @@ import type {
 
 const STATE_UNAVAILABLE = "member-role-state-unavailable"
 const MEMBER_ROLE_LOCKS = new Map<string, Promise<MemberRoleTargetOutcome>>()
-const DIRECT_CHANNEL_TYPES: ReadonlySet<number> = new Set([
-  DISCORD_CHANNEL_TYPES.announcement,
-  DISCORD_CHANNEL_TYPES.category,
-  DISCORD_CHANNEL_TYPES.directory,
-  DISCORD_CHANNEL_TYPES.forum,
-  DISCORD_CHANNEL_TYPES.media,
-  DISCORD_CHANNEL_TYPES.stageVoice,
-  DISCORD_CHANNEL_TYPES.text,
-  DISCORD_CHANNEL_TYPES.voice,
-])
 const MEMBER_ROLE_HIGH_RISK_PERMISSIONS = Object.freeze([
   "ADMINISTRATOR",
   ...ROLE_CREATION_HIGH_RISK_PERMISSIONS,
@@ -141,6 +138,7 @@ export interface MemberRoleChangePlan {
   applicationId: string
   auditReason: string
   botId: string
+  channelEvidence: GuildChannelEvidenceView
   createdAt: string
   digest: string
   guild: {
@@ -215,6 +213,7 @@ export interface MemberRoleServiceOptions {
     | "removeGuildMemberRole"
   >
   clock?: () => Date
+  layoutSource: GatewayChannelLayoutSource
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: ScopePolicy
@@ -228,6 +227,7 @@ interface MemberRoleState {
   botMember: DiscordGuildMember
   botPermissions: GuildMemberPermissionResult
   channelOverwriteUnknownPermissionBits: bigint
+  channelEvidence: GuildChannelEvidenceView
   channels: DirectGuildChannel[]
   guild: DiscordGuild & { owner_id: string }
   guildRoleUnknownPermissionBits: bigint
@@ -465,7 +465,7 @@ function exactChannels(
       || !positiveSnowflake(channel.id)
       || ids.has(channel.id)
       || !Number.isSafeInteger(channel.type)
-      || !DIRECT_CHANNEL_TYPES.has(channel.type)
+      || !DIRECT_GUILD_CHANNEL_TYPES.has(channel.type)
       || channel.guild_id !== guildId
       || (
         channel.parent_id !== undefined
@@ -886,6 +886,7 @@ export class MemberRoleService {
   readonly #activityStore: ActivityStore
   readonly #client: MemberRoleServiceOptions["client"]
   readonly #clock: () => Date
+  readonly #layoutSource: GatewayChannelLayoutSource
   readonly #operationStore: OperationStore
   readonly #planKey: Uint8Array
   readonly #policy: ScopePolicy
@@ -895,6 +896,7 @@ export class MemberRoleService {
     this.#activityStore = options.activityStore
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#layoutSource = options.layoutSource
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
@@ -923,13 +925,53 @@ export class MemberRoleService {
     if (existingReceipt) {
       throw new MemberRoleOperationConflictError(receiptView(existingReceipt))
     }
-    const [rawGuild, rawBotMember, rawTargetMember, rawRoles, rawChannels] = await Promise.all([
-      this.#client.getGuild(request.guildId, options),
-      this.#client.getGuildMember(request.guildId, botId, options),
-      this.#client.getGuildMember(request.guildId, request.userId, options),
-      this.#client.getGuildRoles(request.guildId, options),
-      this.#client.getGuildChannels(request.guildId, options),
-    ])
+    let supportingEvidence: {
+      botMember: DiscordGuildMember
+      guild: DiscordGuild
+      roles: DiscordRole[]
+      targetMember: DiscordGuildMember
+    } | undefined
+    let channelEvidence
+    try {
+      channelEvidence = await collectGuildChannelEvidence({
+        guildId: request.guildId,
+        layoutSource: this.#layoutSource,
+        readChannels: async () => {
+          const [guild, botMember, targetMember, roles, channels] = await Promise.all([
+            this.#client.getGuild(request.guildId, options),
+            this.#client.getGuildMember(request.guildId, botId, options),
+            this.#client.getGuildMember(request.guildId, request.userId, options),
+            this.#client.getGuildRoles(request.guildId, options),
+            this.#client.getGuildChannels(request.guildId, options),
+          ])
+          supportingEvidence = { botMember, guild, roles, targetMember }
+          return channels
+        },
+      })
+    } catch (error) {
+      if (error instanceof GuildChannelEvidenceError) {
+        throw new MemberRoleStateError(
+          `Discord member-role channel evidence is incomplete: ${error.message}`,
+          { cause: error },
+        )
+      }
+      throw error
+    }
+    if (!supportingEvidence) {
+      throw new MemberRoleStateError("Discord member-role supporting evidence is unavailable")
+    }
+    if (channelEvidence.view.obfuscatedChannelCount > 0) {
+      throw new MemberRoleStateError(
+        "Discord member-role changes require complete metadata for every direct guild channel",
+      )
+    }
+    const {
+      botMember: rawBotMember,
+      guild: rawGuild,
+      roles: rawRoles,
+      targetMember: rawTargetMember,
+    } = supportingEvidence
+    const rawChannels = channelEvidence.channels
     const guild = exactGuild(rawGuild, request.guildId)
     if (request.userId === guild.owner_id) {
       throw new MemberRoleStateError(
@@ -1126,6 +1168,7 @@ export class MemberRoleService {
       beforePermissions,
       botMember,
       botPermissions,
+      channelEvidence: channelEvidence.view,
       channelOverwriteUnknownPermissionBits: channelOverwriteUnknownBits(channels),
       channels,
       guild,
@@ -1172,6 +1215,7 @@ export class MemberRoleService {
         highestRoleIds: state.botPermissions.highestRoleIds,
         highestRolePosition: state.botPermissions.highestRolePosition,
       },
+      channelEvidence: state.channelEvidence,
       channels: channelSnapshot(state.channels),
       guild: {
         id: state.guild.id,
@@ -1225,6 +1269,7 @@ export class MemberRoleService {
       applicationId,
       auditReason: request.auditReason,
       botId,
+      channelEvidence: state.channelEvidence,
       createdAt: this.#clock().toISOString(),
       digest,
       guild: {
@@ -1306,7 +1351,7 @@ export class MemberRoleService {
         ...(alreadyCurrent && !state.rolePermissionsSubset
           ? ["No write is required, but the selected role contains permissions outside the connector bot's effective grantable set"]
           : []),
-        "Permission impact covers every direct guild channel returned by Discord; active threads are not included in that endpoint",
+        "Permission impact covers every direct guild channel proven by a continuity-stable Gateway layout; active threads are not included in that inventory",
         "Same-member serialization is process-local; do not run multiple connector processes with overlapping member-role scope",
         "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
         "This workflow performs one exact role add or remove and never replaces the member's complete role array, retries, or rolls back",

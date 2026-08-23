@@ -14,6 +14,7 @@ import type {
   GatewayChannelLayoutSnapshot,
   GatewayChannelLayoutStatus,
 } from "./gateway-channel-layout.js"
+import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 import {
   GatewayEventStore,
   type GatewayChangeListener,
@@ -60,7 +61,15 @@ export interface DiscordGatewayOptions {
     | "token"
   > & Partial<Pick<
     ConnectorConfig,
-    "allowChannelOrderingAudit" | "allowNativeInteractions" | "channelOrderingGuildIds"
+    | "allowChannelOrderingAudit"
+    | "allowGuildTemplateAudit"
+    | "allowMemberRoleChanges"
+    | "allowNativeInteractions"
+    | "allowOnboardingAudit"
+    | "channelOrderingGuildIds"
+    | "guildTemplateGuildIds"
+    | "memberRoleGuildIds"
+    | "onboardingGuildIds"
   >>
   eventStore?: GatewayEventStore
   interactionHandler?: GatewayInteractionHandler
@@ -255,13 +264,10 @@ export class DiscordGateway implements GatewayRuntime {
         "Enabled Discord native Interactions require an Interaction handler",
       )
     }
+    const layoutGuildIds = guildChannelLayoutGuildIds(options.config)
     const connectionEnabled = options.config.allowGateway
-      || options.config.allowChannelOrderingAudit
+      || layoutGuildIds.size > 0
       || options.config.allowNativeInteractions === true
-    const layoutGuildIds = new Set(options.config.channelOrderingGuildIds ?? [])
-    if (options.config.allowGateway) {
-      for (const guildId of options.config.allowedGuildIds) layoutGuildIds.add(guildId)
-    }
     this.#applicationId = options.applicationId
     this.#botId = botId
     this.#clock = options.clock || Date.now
@@ -279,6 +285,11 @@ export class DiscordGateway implements GatewayRuntime {
       || this.#eventStore.getChannelLayoutStatus().guilds.scoped !== layoutGuildIds.size
     ) {
       throw new RangeError("Gateway runtime and event store enabled states must match")
+    }
+    for (const guildId of layoutGuildIds) {
+      if (this.#eventStore.getChannelLayout(guildId).reason === "outside-scope") {
+        throw new RangeError("Gateway runtime and event store channel-layout scopes must match")
+      }
     }
     this.#interactionHandler = options.interactionHandler
     this.#logger = options.logger || (() => undefined)

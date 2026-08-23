@@ -30,6 +30,12 @@ import {
   GuildTemplateOperationConflictError,
   GuildTemplatePlanChangedError,
 } from "./errors.js"
+import type { GatewayChannelLayoutSource } from "./gateway-channel-layout.js"
+import {
+  collectGuildChannelEvidence,
+  GuildChannelEvidenceError,
+  type GuildChannelEvidenceView,
+} from "./guild-channel-evidence.js"
 import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
@@ -171,6 +177,7 @@ export interface GuildTemplateInventoryResult {
   access: GuildTemplateAccessEvidence
   applicationId: string
   botId: string
+  channelEvidence: GuildChannelEvidenceView
   guild: {
     id: string
   }
@@ -189,6 +196,7 @@ export interface GuildTemplateInventoryResult {
 export interface GuildTemplateDrift {
   ambiguousChannelIdentities: number
   ambiguousRoleIdentities: number
+  channelComparisonComplete: boolean
   channelSettingsChanged: number
   channelsAddedSinceSnapshot: number
   channelsMissingFromGuild: number
@@ -203,6 +211,7 @@ export interface GuildTemplateChangePlan {
   applicationId: string
   auditReason: string
   botId: string
+  channelEvidence: GuildChannelEvidenceView
   createdAt: string
   desiredMetadata: {
     description: string | null | undefined
@@ -257,6 +266,7 @@ export interface GuildTemplateServiceOptions {
   activityStore: ActivityStore
   client: GuildTemplateServiceClient
   clock?: () => Date
+  layoutSource: GatewayChannelLayoutSource
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: Pick<
@@ -302,6 +312,7 @@ interface PrivateTemplate {
 
 interface GuildTemplateState {
   access: GuildTemplateAccessEvidence
+  channelEvidence: GuildChannelEvidenceView
   channels: DiscordChannel[]
   guild: DiscordGuild & { owner_id: string }
   inventoryDigest: string
@@ -1040,9 +1051,6 @@ function exactChannels(
   }
   const roleIds = new Set(roles.map(({ id }) => id))
   for (const channel of value) {
-    if (channel.parent_id && !ids.has(channel.parent_id)) {
-      throw evidenceError("Discord returned guild-template channel evidence with an absent parent")
-    }
     const seenOverwrites = new Set<string>()
     const overwrites = channel.permission_overwrites ?? []
     overwriteCount += overwrites.length
@@ -1314,12 +1322,14 @@ function driftItems(
 function templateDrift(
   template: ParsedStructure,
   live: ParsedStructure,
+  channelComparisonComplete: boolean,
 ): GuildTemplateDrift {
   const channels = driftItems(template.channels, live.channels)
   const roles = driftItems(template.roles, live.roles)
   return {
     ambiguousChannelIdentities: channels.ambiguous,
     ambiguousRoleIdentities: roles.ambiguous,
+    channelComparisonComplete,
     channelSettingsChanged: channels.changed,
     channelsAddedSinceSnapshot: channels.added,
     channelsMissingFromGuild: channels.missing,
@@ -1488,6 +1498,7 @@ export class GuildTemplateService {
   readonly #activityStore: ActivityStore
   readonly #client: GuildTemplateServiceClient
   readonly #clock: () => Date
+  readonly #layoutSource: GatewayChannelLayoutSource
   readonly #lockState: TargetLockState = {
     tails: new Map(),
     uncertainTargets: new Set(),
@@ -1501,6 +1512,7 @@ export class GuildTemplateService {
     this.#activityStore = options.activityStore
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#layoutSource = options.layoutSource
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
@@ -1530,13 +1542,47 @@ export class GuildTemplateService {
         throw new GuildTemplateOperationConflictError(receiptView(receipt))
       }
     }
-    const [rawGuild, rawMember, rawRoles, rawChannels, rawTemplates] = await Promise.all([
-      this.#client.getGuild(guildId, options),
-      this.#client.getGuildMember(guildId, botId, options),
-      this.#client.getGuildRoles(guildId, options),
-      this.#client.getGuildChannels(guildId, options),
-      this.#client.listGuildTemplates(guildId, options),
-    ])
+    let supportingEvidence: {
+      guild: DiscordGuild
+      member: DiscordGuildMember
+      roles: DiscordRole[]
+      templates: DiscordGuildTemplateSummary[]
+    } | undefined
+    let channelEvidence
+    try {
+      channelEvidence = await collectGuildChannelEvidence({
+        guildId,
+        layoutSource: this.#layoutSource,
+        readChannels: async () => {
+          const [guild, member, roles, channels, templates] = await Promise.all([
+            this.#client.getGuild(guildId, options),
+            this.#client.getGuildMember(guildId, botId, options),
+            this.#client.getGuildRoles(guildId, options),
+            this.#client.getGuildChannels(guildId, options),
+            this.#client.listGuildTemplates(guildId, options),
+          ])
+          supportingEvidence = { guild, member, roles, templates }
+          return channels
+        },
+      })
+    } catch (error) {
+      if (error instanceof GuildChannelEvidenceError) {
+        throw evidenceError(
+          `Discord guild-template channel evidence is incomplete: ${error.message}`,
+        )
+      }
+      throw error
+    }
+    if (!supportingEvidence) {
+      throw evidenceError("Discord guild-template supporting evidence is unavailable")
+    }
+    const {
+      guild: rawGuild,
+      member: rawMember,
+      roles: rawRoles,
+      templates: rawTemplates,
+    } = supportingEvidence
+    const rawChannels = channelEvidence.channels
     const guild = exactGuild(rawGuild, guildId)
     const member = exactBotMember(rawMember, guildId, botId)
     const roles = exactRoles(rawRoles, guildId)
@@ -1576,6 +1622,7 @@ export class GuildTemplateService {
     const inventoryDigest = reviewedPlanDigest(this.#planKey, {
       access,
       botMemberRoleIds: [...member.roles].sort(),
+      channelEvidence: channelEvidence.view,
       channels,
       domain: "discord-mcp-guild-template-inventory.v1",
       guild: {
@@ -1589,6 +1636,7 @@ export class GuildTemplateService {
     })
     return {
       access,
+      channelEvidence: channelEvidence.view,
       channels,
       guild,
       inventoryDigest,
@@ -1612,6 +1660,7 @@ export class GuildTemplateService {
       access: state.access,
       applicationId,
       botId,
+      channelEvidence: state.channelEvidence,
       guild: {
         id: state.guild.id,
       },
@@ -1654,7 +1703,11 @@ export class GuildTemplateService {
       throw evidenceError("Discord guild-template audit reason must not contain the target code")
     }
     const drift = target
-      ? templateDrift(target.structure, state.liveStructure)
+      ? templateDrift(
+          target.structure,
+          state.liveStructure,
+          state.channelEvidence.metadataCoverage === "complete",
+        )
       : null
     let mutation: GuildTemplateChangePlan["mutation"] = request.action
     if (
@@ -1669,6 +1722,11 @@ export class GuildTemplateService {
     const privacy = privacyProjection()
     const capturesLiveSnapshot = request.action === "create"
       || request.action === "synchronize"
+    if (capturesLiveSnapshot && state.channelEvidence.obfuscatedChannelCount > 0) {
+      throw evidenceError(
+        "Discord guild-template creation and synchronization require complete live channel metadata",
+      )
+    }
     const capturableLiveRoles = state.roles.filter(({ managed }) => !managed)
     const liveSnapshotHasPrivilegedRoles = capturableLiveRoles.some(({ permissions }) => (
       discordPermissionNames(BigInt(permissions))
@@ -1717,7 +1775,10 @@ export class GuildTemplateService {
     ]
     const warnings = [
       ...limitations(),
-      "The complete template and live guild inventories are freshness-bound",
+      "The complete template inventory and continuity-stable live guild evidence are freshness-bound",
+      ...(state.channelEvidence.metadataCoverage === "complete"
+        ? []
+        : ["Live channel structure and channel drift are visibility-bounded; metadata updates and deletion remain exact"]),
       "Count-only structural drift is advisory because Discord's serialized guild snapshot is partial",
       "Template codes, use URLs, names, descriptions, channel text, and role names never enter persistent state",
       "Opaque template references are process-local and expire when the connector restarts",
@@ -1731,6 +1792,7 @@ export class GuildTemplateService {
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       botId,
+      channelEvidence: state.channelEvidence,
       desiredMetadata: desiredMetadata(request),
       domain: "discord-mcp-guild-template-change-plan.v1",
       drift,
@@ -1749,6 +1811,7 @@ export class GuildTemplateService {
       applicationId,
       auditReason: request.auditReason,
       botId,
+      channelEvidence: state.channelEvidence,
       createdAt: this.#clock().toISOString(),
       desiredMetadata: desiredMetadata(request),
       digest,

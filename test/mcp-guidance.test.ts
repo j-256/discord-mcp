@@ -717,6 +717,16 @@ function guidanceService(options: {
         },
         applicationId: "500000000000000001",
         botId: "600000000000000001",
+        channelEvidence: {
+          gatewayChannelCount: 0,
+          httpChannelCount: 0,
+          httpMode: "complete",
+          layoutRevision: 1,
+          layoutUpdatedAt: "2026-08-21T00:00:00.000Z",
+          metadataCoverage: "complete",
+          obfuscatedChannelCount: 0,
+          trustedMetadataCount: 0,
+        },
         configuration: {
           communityGuild: true,
           defaultChannels: [],
@@ -996,6 +1006,16 @@ function guidanceService(options: {
         },
         applicationId: "500000000000000001",
         botId: "600000000000000001",
+        channelEvidence: {
+          gatewayChannelCount: 1,
+          httpChannelCount: 1,
+          httpMode: "complete" as const,
+          layoutRevision: 1,
+          layoutUpdatedAt: "2026-08-22T00:00:00.000Z",
+          metadataCoverage: "complete" as const,
+          obfuscatedChannelCount: 0,
+          trustedMetadataCount: 1,
+        },
         guild: { id: guildId },
         inventory: { returned: 1, safetyLimit: 100 },
         limitations: ["Guild Templates are snapshots rather than backups"],
@@ -1751,6 +1771,11 @@ function guidanceService(options: {
       return {
         channels: [normalizeChannel(rawChannel())],
         guildId,
+        inventory: {
+          completeness: "visibility-bounded" as const,
+          returned: 1,
+          scope: "configured-policy-and-discord-visibility" as const,
+        },
         schemaVersion: 1,
         status: "ok",
       }

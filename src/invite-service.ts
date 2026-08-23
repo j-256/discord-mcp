@@ -636,7 +636,7 @@ function projectedInvite(
   }
   const channel = channelsById.get(invite.channelId)
   if (!channel) {
-    throw evidenceError("Discord invite references a channel outside the complete guild inventory")
+    throw evidenceError("Discord invite references a channel outside the visible guild inventory")
   }
   const roles = invite.roleIds
     .map((roleId) => roleProjection(roleId, guildId, rolesById))

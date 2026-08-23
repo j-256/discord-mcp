@@ -17,6 +17,7 @@ import {
   type McpToolSurface,
 } from "./constants.js"
 import { ConfigurationError, errorMessage, redactText } from "./errors.js"
+import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 import {
   MCP_RESOURCE_TEMPLATE_URIS,
   MCP_RESOURCE_URIS,
@@ -1999,17 +2000,24 @@ export async function diagnoseConnector(
         `Stage start notifications are constrained to ${config.stageChannelIds.size} exact Stage channels and require fresh Mention Everyone permission evidence`,
       ))
     }
+    const layoutGuildCount = guildChannelLayoutGuildIds(config).size
     checks.push(config.allowGateway
       ? check(
-        DOCTOR_CHECK_IDS.gatewayPolicy,
-        "pass",
-        `Discord Gateway events are enabled with a ${config.gatewayEventBufferSize}-event content-free buffer and only nonprivileged intents`,
-      )
-      : check(
-        DOCTOR_CHECK_IDS.gatewayPolicy,
-        "pass",
-        "Discord Gateway events are disabled",
-      ))
+          DOCTOR_CHECK_IDS.gatewayPolicy,
+          "pass",
+          `Discord Gateway events are enabled with a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, and only nonprivileged intents`,
+        )
+      : layoutGuildCount > 0
+        ? check(
+            DOCTOR_CHECK_IDS.gatewayPolicy,
+            "pass",
+            `Discord Gateway events are disabled; a GUILDS-only channel-layout connection covers ${layoutGuildCount} exact guilds for continuity-safe metadata evidence`,
+          )
+        : check(
+            DOCTOR_CHECK_IDS.gatewayPolicy,
+            "pass",
+            "Discord Gateway events and channel-layout evidence are disabled",
+          ))
     checks.push(config.allowNativeCommandChanges
       ? check(
         DOCTOR_CHECK_IDS.nativeInteractionCommandPolicy,

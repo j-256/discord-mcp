@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
-import { CONNECTOR_LIMITS } from "../src/constants.js"
+import { CONNECTOR_LIMITS, SCHEMA_VERSION } from "../src/constants.js"
 import {
   DiscordApiError,
   MemberRoleExecutionError,
@@ -15,6 +15,10 @@ import {
   type MemberRoleChangeRequest,
   type MemberRoleServiceOptions,
 } from "../src/member-role-service.js"
+import type {
+  GatewayChannelLayoutListener,
+  GatewayChannelLayoutSource,
+} from "../src/gateway-channel-layout.js"
 import type {
   OperationReceipt,
   OperationReservation,
@@ -78,6 +82,7 @@ function channel(
     name: "private-channel-name",
     parent_id: null,
     permission_overwrites: [],
+    position: 0,
     type: 0,
     ...overrides,
   }
@@ -158,6 +163,7 @@ interface FixtureState {
   mutationError: unknown
   mutationGate: Promise<void> | null
   mutationStarted: (() => void) | null
+  obfuscatedChannelIds: Set<string>
   ownerId: string
   readbackError: unknown
   roles: DiscordRole[]
@@ -184,6 +190,7 @@ function fixture(options: {
     mutationError: undefined,
     mutationGate: null,
     mutationStarted: null,
+    obfuscatedChannelIds: new Set(),
     ownerId: OWNER_ID,
     readbackError: undefined,
     roles: [
@@ -218,6 +225,50 @@ function fixture(options: {
     },
   }
   const operationStore = new MemoryOperationStore(events)
+  const layoutSource: GatewayChannelLayoutSource = {
+    layoutEnabled: true,
+    getChannelLayout(guildId) {
+      return {
+        channels: state.channels.map((entry, position) => ({
+          channelId: entry.id,
+          obfuscated: state.obfuscatedChannelIds.has(entry.id),
+          parentChannelId: entry.parent_id ?? null,
+          position: entry.position ?? position,
+          type: entry.type,
+        })),
+        complete: true,
+        guildId,
+        reason: null,
+        revision: 1,
+        schemaVersion: SCHEMA_VERSION,
+        state: "ready",
+        updatedAt: NOW,
+      }
+    },
+    getChannelLayoutStatus() {
+      return {
+        channels: {
+          obfuscated: state.obfuscatedChannelIds.size,
+          retained: state.channels.length,
+        },
+        enabled: true,
+        guilds: {
+          invalidated: 0,
+          pending: 0,
+          ready: 1,
+          resuming: 0,
+          scoped: 1,
+          unavailable: 0,
+        },
+        invalidations: 0,
+        schemaVersion: SCHEMA_VERSION,
+        updates: 1,
+      }
+    },
+    subscribeChannelLayouts(_listener: GatewayChannelLayoutListener) {
+      return () => undefined
+    },
+  }
   async function mutate(action: "add" | "remove") {
     writes += 1
     events.push(`write:${action}`)
@@ -264,6 +315,7 @@ function fixture(options: {
     activityStore,
     client,
     clock: () => new Date(NOW),
+    layoutSource,
     operationStore,
     planKey: new Uint8Array(32).fill(7),
     policy: options.policy || policy(),
@@ -274,6 +326,7 @@ function fixture(options: {
     activityStore,
     client,
     events,
+    layoutSource,
     operationStore,
     service,
     state,
@@ -288,6 +341,7 @@ function siblingService(
     activityStore: target.activityStore,
     client: target.client,
     clock: () => new Date(NOW),
+    layoutSource: target.layoutSource,
     operationStore,
     planKey: new Uint8Array(32).fill(7),
     policy: policy(),
@@ -854,7 +908,7 @@ test("member-role planning fails closed on malformed or excessive impact evidenc
   } })
   await assert.rejects(
     unresolvedParent.service.plan(APPLICATION_ID, BOT_ID, request()),
-    /unresolved member-role channel parent/,
+    /incomplete channel parent topology|unresolved member-role channel parent/,
   )
 
   const explicitEveryone = fixture({ state: {
@@ -894,6 +948,25 @@ test("member-role planning fails closed on malformed or excessive impact evidenc
     excessive.service.plan(APPLICATION_ID, BOT_ID, request()),
     /affects more than/,
   )
+})
+
+test("member-role additions and removals require complete channel metadata", async () => {
+  for (const action of ["add", "remove"] as const) {
+    const target = fixture({
+      state: {
+        obfuscatedChannelIds: new Set([CHANNEL_ID]),
+        targetMember: {
+          roles: action === "remove" ? [ROLE_ID] : [],
+          user: { id: USER_ID, username: "target-user" },
+        },
+      },
+    })
+    await assert.rejects(
+      target.service.plan(APPLICATION_ID, BOT_ID, request({ action })),
+      /require complete metadata for every direct guild channel/,
+    )
+    assert.equal(target.events.some((event) => event.startsWith("write:")), false)
+  }
 })
 
 test("member-role execution refuses changed plans, application drift, and spent keys", async () => {

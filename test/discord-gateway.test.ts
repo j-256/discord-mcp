@@ -20,6 +20,9 @@ const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "100000000000000002"
 const GUILD_ID = "200000000000000001"
 const ORDERING_GUILD_ID = "200000000000000002"
+const MEMBER_ROLE_GUILD_ID = "200000000000000003"
+const ONBOARDING_GUILD_ID = "200000000000000004"
+const TEMPLATE_GUILD_ID = "200000000000000005"
 const CHANNEL_ID = "300000000000000001"
 const MESSAGE_ID = "400000000000000001"
 const TOKEN = "test-discord-token"
@@ -212,6 +215,21 @@ test("Gateway construction independently enforces scope and enabled-state invari
     }),
     /enabled states must match/,
   )
+
+  const channelOnlyGateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    config: {
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set(),
+      allowGateway: true,
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+  })
+  assert.equal(channelOnlyGateway.enabled, true)
+  assert.equal(channelOnlyGateway.getStatus().feedEnabled, true)
+  assert.equal(channelOnlyGateway.layoutEnabled, false)
 })
 
 test("Gateway identifies with fixed nonprivileged intents and exposes no session material", async () => {
@@ -393,7 +411,7 @@ test("Layout-only Gateway requests only GUILDS and ingests a content-free seed",
   await gateway.stop()
 })
 
-test("Gateway layout scope unions event-feed and channel-order guilds", () => {
+test("Gateway layout scope unions every enabled channel-completeness feature", () => {
   const gateway = new DiscordGateway({
     applicationId: APPLICATION_ID,
     config: {
@@ -401,16 +419,25 @@ test("Gateway layout scope unions event-feed and channel-order guilds", () => {
       allowedGuildIds: new Set([GUILD_ID]),
       allowChannelOrderingAudit: true,
       allowGateway: true,
+      allowGuildTemplateAudit: true,
+      allowMemberRoleChanges: true,
+      allowOnboardingAudit: true,
       channelOrderingGuildIds: new Set([ORDERING_GUILD_ID]),
       expectedBotId: BOT_ID,
       gatewayEventBufferSize: 10,
+      guildTemplateGuildIds: new Set([TEMPLATE_GUILD_ID]),
+      memberRoleGuildIds: new Set([MEMBER_ROLE_GUILD_ID]),
+      onboardingGuildIds: new Set([ONBOARDING_GUILD_ID]),
       token: TOKEN,
     },
   })
 
-  assert.equal(gateway.getChannelLayoutStatus().guilds.scoped, 2)
+  assert.equal(gateway.getChannelLayoutStatus().guilds.scoped, 5)
   assert.equal(gateway.getChannelLayout(GUILD_ID).state, "pending")
   assert.equal(gateway.getChannelLayout(ORDERING_GUILD_ID).state, "pending")
+  assert.equal(gateway.getChannelLayout(MEMBER_ROLE_GUILD_ID).state, "pending")
+  assert.equal(gateway.getChannelLayout(ONBOARDING_GUILD_ID).state, "pending")
+  assert.equal(gateway.getChannelLayout(TEMPLATE_GUILD_ID).state, "pending")
 })
 
 test("Gateway accepts events only after READY identity validation and drops content", async () => {

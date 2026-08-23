@@ -813,6 +813,10 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowOnboardingChanges} requires ${ENVIRONMENT_NAMES.allowOnboardingAudit}`,
     )
   }
+  const allowMemberRoleChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
+    ENVIRONMENT_NAMES.allowMemberRoleChanges,
+  )
   const allowGuildExpressionAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGuildExpressionAudit],
     ENVIRONMENT_NAMES.allowGuildExpressionAudit,
@@ -837,6 +841,14 @@ export function loadConnectorConfig(
   if (allowGuildTemplateChanges && !allowGuildTemplateAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowGuildTemplateChanges} requires ${ENVIRONMENT_NAMES.allowGuildTemplateAudit}`,
+    )
+  }
+  if (
+    (allowGuildTemplateAudit || allowMemberRoleChanges || allowOnboardingAudit)
+    && (!expectedApplicationId || !expectedBotId)
+  ) {
+    throw new ConfigurationError(
+      `Channel-completeness features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
     )
   }
   const allowIntegrationAudit = parseBoolean(
@@ -1064,10 +1076,7 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowMemberDirectory],
       ENVIRONMENT_NAMES.allowMemberDirectory,
     ),
-    allowMemberRoleChanges: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
-      ENVIRONMENT_NAMES.allowMemberRoleChanges,
-    ),
+    allowMemberRoleChanges,
     allowNativeCommandChanges,
     allowNativeInteractions,
     allowMemberVoiceAudit,

@@ -29,6 +29,10 @@ import {
   type OnboardingServiceOptions,
 } from "../src/onboarding-service.js"
 import type {
+  GatewayChannelLayoutListener,
+  GatewayChannelLayoutSource,
+} from "../src/gateway-channel-layout.js"
+import type {
   OperationReceipt,
   OperationReservation,
   OperationStore,
@@ -55,6 +59,7 @@ const CHANNEL_IDS = Array.from(
   { length: 7 },
   (_, index) => `80000000000000000${index + 1}`,
 )
+const HIDDEN_CHANNEL_ID = "800000000000000008"
 const OPERATION_KEY = "onboarding-operation-0001"
 const AUDIT_REASON = "Reviewed onboarding / community launch"
 const NOW = "2026-08-21T00:00:00.000Z"
@@ -78,6 +83,7 @@ function channel(id: string): DiscordChannel {
     name: `private-channel-${id}`,
     parent_id: null,
     permission_overwrites: [],
+    position: Number(BigInt(id) - BigInt(CHANNEL_IDS[0] as string)),
     type: DISCORD_CHANNEL_TYPES.text,
   }
 }
@@ -176,6 +182,7 @@ interface FixtureState {
   mutationGate: Promise<void> | null
   mutationStarted: (() => void) | null
   mutationUpdatesState: boolean
+  obfuscatedChannelIds: Set<string>
   onboarding: DiscordGuildOnboarding
   readbackError: unknown
   responseDrift: boolean
@@ -247,6 +254,7 @@ function fixture(options: {
     mutationGate: null,
     mutationStarted: null,
     mutationUpdatesState: true,
+    obfuscatedChannelIds: new Set(),
     onboarding: emptyOnboarding(),
     readbackError: undefined,
     responseDrift: false,
@@ -284,6 +292,50 @@ function fixture(options: {
     },
   }
   const operationStore = new MemoryOperationStore(events)
+  const layoutSource: GatewayChannelLayoutSource = {
+    layoutEnabled: true,
+    getChannelLayout(guildId) {
+      return {
+        channels: state.channels.map((entry, position) => ({
+          channelId: entry.id,
+          obfuscated: state.obfuscatedChannelIds.has(entry.id),
+          parentChannelId: entry.parent_id ?? null,
+          position: entry.position ?? position,
+          type: entry.type,
+        })),
+        complete: true,
+        guildId,
+        reason: null,
+        revision: 1,
+        schemaVersion: SCHEMA_VERSION,
+        state: "ready",
+        updatedAt: NOW,
+      }
+    },
+    getChannelLayoutStatus() {
+      return {
+        channels: {
+          obfuscated: state.obfuscatedChannelIds.size,
+          retained: state.channels.length,
+        },
+        enabled: true,
+        guilds: {
+          invalidated: 0,
+          pending: 0,
+          ready: 1,
+          resuming: 0,
+          scoped: 1,
+          unavailable: 0,
+        },
+        invalidations: 0,
+        schemaVersion: SCHEMA_VERSION,
+        updates: 1,
+      }
+    },
+    subscribeChannelLayouts(_listener: GatewayChannelLayoutListener) {
+      return () => undefined
+    },
+  }
   const scopedPolicy: OnboardingServiceOptions["policy"] = {
     assertGuildOnboardingAuditable(guildId) {
       policyCalls += 1
@@ -349,6 +401,7 @@ function fixture(options: {
     activityStore,
     client,
     clock: () => new Date(NOW),
+    layoutSource,
     operationStore,
     planKey: new Uint8Array(32).fill(13),
     policy: scopedPolicy,
@@ -575,6 +628,42 @@ test("onboarding planning proves safe references and rejects authority-bearing r
     () => mismatchedOnboarding.service.get(APPLICATION_ID, BOT_ID, GUILD_ID),
     OnboardingEvidenceError,
   )
+})
+
+test("onboarding marks every role reference unsafe when hidden overwrites are unavailable", async () => {
+  const target = fixture({
+    state: {
+      channels: [...CHANNEL_IDS.map(channel), channel(HIDDEN_CHANNEL_ID)],
+      obfuscatedChannelIds: new Set([HIDDEN_CHANNEL_ID]),
+      onboarding: populatedOnboarding(),
+    },
+  })
+
+  const audit = await target.service.get(APPLICATION_ID, BOT_ID, GUILD_ID)
+  assert.equal(audit.channelEvidence.metadataCoverage, "visibility-bounded")
+  assert.deepEqual(
+    audit.configuration.prompts[0]?.options[0]?.roleReferences[0]?.reasons,
+    ["obfuscated-channel-overwrites-unavailable"],
+  )
+  await assert.rejects(
+    target.service.plan(APPLICATION_ID, BOT_ID, request()),
+    /roles must be zero-authority standard roles/,
+  )
+
+  const roleFreeRequest = request({
+    prompts: request().prompts.map((prompt) => ({
+      ...prompt,
+      options: prompt.options.map((option) => ({ ...option, roleIds: [] })),
+    })),
+  })
+  const roleFreePlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    roleFreeRequest,
+  )
+  assert.equal(roleFreePlan.status, "planned")
+  assert.equal(roleFreePlan.channelEvidence.obfuscatedChannelCount, 1)
+  assert.match(roleFreePlan.warnings.join(" "), /role-bearing onboarding options are blocked/)
 })
 
 test("onboarding reviewed digests bind custom emoji restrictions", async () => {

@@ -1107,7 +1107,7 @@ function channelForEvent(
   const channel = state.channels.find((candidate) => candidate.id === channelId)
   if (!channel) {
     throw new ScheduledEventEvidenceError(
-      "Discord scheduled event channel is absent from the exact guild inventory",
+      "Discord scheduled event channel is absent from the visible guild inventory",
     )
   }
   const expected = entityType === "stage"
