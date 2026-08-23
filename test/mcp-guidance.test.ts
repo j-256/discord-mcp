@@ -167,6 +167,7 @@ interface GuidanceCalls {
   forumTags: number
   guilds: number
   guildExpressions: number
+  guildProfiles: number
   guildSettings: number
   integrations: number
   invites: number
@@ -216,6 +217,7 @@ function guidanceService(options: {
     forumTags: 0,
     guilds: 0,
     guildExpressions: 0,
+    guildProfiles: 0,
     guildSettings: 0,
     integrations: 0,
     invites: 0,
@@ -491,6 +493,7 @@ function guidanceService(options: {
     executeWelcomeScreenChange: unexpected,
     executeWidgetSettingsChange: unexpected,
     executeGuildSettingsChange: unexpected,
+    executeGuildProfileChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeReactionModeration: unexpected,
@@ -1058,6 +1061,60 @@ function guidanceService(options: {
         },
       }
     },
+    async getGuildProfile(guildId) {
+      calls.guildProfiles += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guildId,
+        localConstraints: {
+          descriptionCharacters: 120,
+          guildAllowlist: 100,
+          nameCharacters: 100,
+          nameMinimumCharacters: 2,
+          supportedFields: ["description", "name"] as Array<"description" | "name">,
+        },
+        privacy: {
+          mediaHashes: "presence-only" as const,
+          persistence: "content-free-records-only" as const,
+          profileText: "transient-untrusted" as const,
+          rawPayloads: "omitted" as const,
+          roleNames: "omitted" as const,
+        },
+        profile: {
+          description: "Private profile description",
+          mediaPresence: {
+            banner: false,
+            discoverySplash: true,
+            icon: true,
+            inviteSplash: false,
+          },
+          name: "Private Guild Profile",
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        verificationBoundary: {
+          automaticRetry: false as const,
+          freshApiReadback: true as const,
+          mutationResponse: true as const,
+          rollback: "not-automatic" as const,
+        },
+      }
+    },
     planWebhookChange: unexpected,
     planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
@@ -1458,6 +1515,7 @@ function guidanceService(options: {
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildSettingsChange: unexpected,
+    planGuildProfileChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -1509,6 +1567,9 @@ function guidanceService(options: {
         guildExpressionCreationEnabled: false,
         guildExpressionGuildIds: [],
         guildExpressionRootCount: 0,
+        guildProfileAuditEnabled: false,
+        guildProfileChangesEnabled: false,
+        guildProfileGuildIds: [],
         guildSettingsAuditEnabled: false,
         guildSettingsChangesEnabled: false,
         guildSettingsGuildIds: [],
@@ -2184,6 +2245,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.forumTags
     + calls.guilds
     + calls.guildExpressions
+    + calls.guildProfiles
     + calls.guildSettings
     + calls.integrations
     + calls.invites
@@ -2352,6 +2414,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildOnboarding,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildProfile,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildProfile,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildTemplates,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildTemplates,
       },
@@ -2467,6 +2533,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /directly supported channels visible to @everyone/)
   assert.match(safety.text, /Omitted ordered channel entries are deletions/)
   assert.match(safety.text, /Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed/)
+  assert.match(safety.text, /Guild profile text audit and changes require a separate exact guild scope/)
+  assert.match(safety.text, /presence-only media state/)
+  assert.match(safety.text, /profile text is never persisted or exported/)
   assert.match(safety.text, /Authenticated widget-settings audit requires a separate exact guild allowlist/)
   assert.match(safety.text, /never calls anonymous widget JSON or image endpoints/)
   assert.match(safety.text, /presence-bearing member summaries/)
@@ -3024,6 +3093,27 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   )
   assert.doesNotMatch(guildSettings.text, /system_channel_flags|Private guild/u)
 
+  const guildProfile = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/profile`,
+  )
+  const guildProfileData = guildProfile.value.data as Record<string, unknown>
+  const guildProfilePrivacy = guildProfileData.privacy as Record<string, unknown>
+  const guildProfileView = guildProfileData.profile as Record<string, unknown>
+  assert.equal(guildProfilePrivacy.mediaHashes, "presence-only")
+  assert.equal(guildProfilePrivacy.profileText, "transient-untrusted")
+  assert.equal(guildProfilePrivacy.rawPayloads, "omitted")
+  assert.equal(guildProfileView.name, "Private Guild Profile")
+  assert.equal(guildProfileView.description, "Private profile description")
+  assert.deepEqual(guildProfileView.mediaPresence, {
+    banner: false,
+    discoverySplash: true,
+    icon: true,
+    inviteSplash: false,
+  })
+  assert.equal("ownerId" in guildProfileData, false)
+  assert.doesNotMatch(guildProfile.text, /assetHash|private-role/u)
+
   const channelMetadata = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}`,
@@ -3096,6 +3186,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.welcomeScreens, 1)
   assert.equal(calls.widgetSettings, 1)
   assert.equal(calls.guildSettings, 1)
+  assert.equal(calls.guildProfiles, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
@@ -3719,6 +3810,27 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildSettings, /requested and changed fields/)
   assert.match(guildSettings, /unknown-bit boundary/)
   assert.match(guildSettings, /uncertain same-guild predecessor/)
+
+  const guildProfileRequest = {
+    auditReason: "Reviewed public guild presentation",
+    description: null,
+    guildId: GUILD_ID,
+    name: "Reviewed Guild Name",
+    operationKey: OPERATION_KEY,
+  }
+  const guildProfile = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(guildProfileRequest) },
+    name: MCP_PROMPT_NAMES.reviewGuildProfileChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(guildProfile.split("\n")[1] || ""),
+    guildProfileRequest,
+  )
+  assert.match(guildProfile, /Call only plan_guild_profile_change/)
+  assert.match(guildProfile, /Do not call execute_guild_profile_change/)
+  assert.match(guildProfile, /requested and changed fields/)
+  assert.match(guildProfile, /presence-only media state/)
+  assert.match(guildProfile, /uncertain same-guild predecessor/)
 
   const channelMetadataRequest = {
     auditReason: "Reviewed channel metadata",

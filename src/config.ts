@@ -61,6 +61,8 @@ export interface ConnectorConfig {
   allowGateway: boolean
   allowGuildExpressionAudit: boolean
   allowGuildExpressionChanges: boolean
+  allowGuildProfileAudit: boolean
+  allowGuildProfileChanges: boolean
   allowGuildScaffolds: boolean
   allowGuildSettingsAudit: boolean
   allowGuildSettingsChanges: boolean
@@ -136,6 +138,7 @@ export interface ConnectorConfig {
   guildScaffoldGuildIds: ReadonlySet<string>
   guildExpressionGuildIds: ReadonlySet<string>
   guildExpressionRoots: readonly string[]
+  guildProfileGuildIds: ReadonlySet<string>
   guildSettingsGuildIds: ReadonlySet<string>
   guildTemplateGuildIds: ReadonlySet<string>
   integrationGuildIds: ReadonlySet<string>
@@ -557,6 +560,11 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.guildSettingsGuildIds,
     CONNECTOR_LIMITS.guildSettingsGuildAllowlist,
   )
+  const guildProfileGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.guildProfileGuildIds],
+    ENVIRONMENT_NAMES.guildProfileGuildIds,
+    CONNECTOR_LIMITS.guildProfileGuildAllowlist,
+  )
   const guildTemplateGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.guildTemplateGuildIds],
     ENVIRONMENT_NAMES.guildTemplateGuildIds,
@@ -612,6 +620,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.channelOrderingGuildIds, channelOrderingGuildIds],
     [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
     [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
+    [ENVIRONMENT_NAMES.guildProfileGuildIds, guildProfileGuildIds],
     [ENVIRONMENT_NAMES.guildSettingsGuildIds, guildSettingsGuildIds],
     [ENVIRONMENT_NAMES.guildTemplateGuildIds, guildTemplateGuildIds],
     [ENVIRONMENT_NAMES.integrationGuildIds, integrationGuildIds],
@@ -981,8 +990,28 @@ export function loadConnectorConfig(
       `${ENVIRONMENT_NAMES.allowGuildSettingsAudit} requires ${ENVIRONMENT_NAMES.guildSettingsGuildIds}`,
     )
   }
+  const allowGuildProfileAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGuildProfileAudit],
+    ENVIRONMENT_NAMES.allowGuildProfileAudit,
+  )
+  const allowGuildProfileChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowGuildProfileChanges],
+    ENVIRONMENT_NAMES.allowGuildProfileChanges,
+  )
+  if (allowGuildProfileChanges && !allowGuildProfileAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowGuildProfileChanges} requires ${ENVIRONMENT_NAMES.allowGuildProfileAudit}`,
+    )
+  }
+  if (allowGuildProfileAudit && guildProfileGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowGuildProfileAudit} requires ${ENVIRONMENT_NAMES.guildProfileGuildIds}`,
+    )
+  }
   if (
     (
+      allowGuildProfileAudit
+      ||
       allowGuildSettingsAudit
       || allowGuildTemplateAudit
       || allowMemberRoleChanges
@@ -991,7 +1020,7 @@ export function loadConnectorConfig(
     && (!expectedApplicationId || !expectedBotId)
   ) {
     throw new ConfigurationError(
-      `Channel-completeness features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+      `Permission-aware guild features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
     )
   }
   const allowIntegrationAudit = parseBoolean(
@@ -1207,6 +1236,8 @@ export function loadConnectorConfig(
     allowGateway,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
+    allowGuildProfileAudit,
+    allowGuildProfileChanges,
     allowGuildScaffolds: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowGuildScaffolds],
       ENVIRONMENT_NAMES.allowGuildScaffolds,
@@ -1329,6 +1360,7 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.guildExpressionRoots],
       ENVIRONMENT_NAMES.guildExpressionRoots,
     ),
+    guildProfileGuildIds,
     guildSettingsGuildIds,
     guildTemplateGuildIds,
     integrationGuildIds,

@@ -21,6 +21,7 @@ import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   DISCORD_CHANNEL_TYPES,
+  GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
@@ -154,6 +155,11 @@ import type {
   WidgetSettingsPrivacyProjection,
 } from "../src/widget-settings-service.js"
 import type {
+  GuildProfileAuditResult,
+  GuildProfileChangePlan,
+  GuildProfileChangeRequest,
+} from "../src/guild-profile-service.js"
+import type {
   GuildSettingsAccessEvidence,
   GuildSettingsAuditResult,
   GuildSettingsChangePlan,
@@ -249,6 +255,8 @@ import {
   ForumTagOperationConflictError,
   GuildExpressionExecutionError,
   GuildExpressionOperationConflictError,
+  GuildProfileExecutionError,
+  GuildProfileOperationConflictError,
   GuildScaffoldExecutionError,
   GuildScaffoldOperationConflictError,
   GuildTemplateExecutionError,
@@ -437,6 +445,7 @@ const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
 const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
 const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
 const GUILD_SETTINGS_OPERATION_KEY = "guild-settings-change-attempt-0001"
+const GUILD_PROFILE_OPERATION_KEY = "guild-profile-change-attempt-0001"
 const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
 const ONBOARDING_PROMPT_TITLE = "Choose your community path"
 const ONBOARDING_OPTION_TITLE = "Community member"
@@ -1993,6 +2002,19 @@ function guildSettingsRequest(
   }
 }
 
+function guildProfileRequest(
+  overrides: Partial<GuildProfileChangeRequest> = {},
+): GuildProfileChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    description: "Private guild profile after",
+    guildId: GUILD_ID,
+    name: "Private Guild After",
+    operationKey: GUILD_PROFILE_OPERATION_KEY,
+    ...overrides,
+  }
+}
+
 function guildSettingsAccess(): GuildSettingsAccessEvidence {
   return {
     appliedRoleIds: [GUILD_ID],
@@ -2200,6 +2222,120 @@ function guildSettingsPlan(
     warnings: changed
       ? ["Only the reviewed named fields will be patched"]
       : ["The requested guild settings already match Discord"],
+    writeRequired: changed,
+  }
+}
+
+function guildProfileAccess(): GuildProfileAuditResult["access"] {
+  return {
+    appliedRoleIds: [GUILD_ID, ROLE_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD"],
+    effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+    manageGuild: true,
+    requiredPermission: "MANAGE_GUILD",
+    unknownPermissionBits: "0",
+    warnings: [],
+  }
+}
+
+function guildProfileView(
+  description: string | null,
+  name: string,
+): GuildProfileAuditResult["profile"] {
+  return {
+    description,
+    mediaPresence: {
+      banner: false,
+      discoverySplash: true,
+      icon: true,
+      inviteSplash: false,
+    },
+    name,
+  }
+}
+
+function guildProfileAudit(): GuildProfileAuditResult {
+  return {
+    access: guildProfileAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    guildId: GUILD_ID,
+    localConstraints: {
+      descriptionCharacters: 120,
+      guildAllowlist: 100,
+      nameCharacters: 100,
+      nameMinimumCharacters: 2,
+      supportedFields: [...GUILD_PROFILE_FIELDS],
+    },
+    privacy: {
+      mediaHashes: "presence-only",
+      persistence: "content-free-records-only",
+      profileText: "transient-untrusted",
+      rawPayloads: "omitted",
+      roleNames: "omitted",
+    },
+    profile: guildProfileView(
+      "Private guild profile before",
+      "Private Guild Before",
+    ),
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      automaticRetry: false,
+      freshApiReadback: true,
+      mutationResponse: true,
+      rollback: "not-automatic",
+    },
+  }
+}
+
+function guildProfilePlan(
+  request: GuildProfileChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): GuildProfileChangePlan {
+  const requestedFields = GUILD_PROFILE_FIELDS
+    .filter((field) => Object.hasOwn(request, field))
+    .sort()
+  const desired = guildProfileView(
+    Object.hasOwn(request, "description")
+      ? request.description as string | null
+      : "Private guild profile before",
+    Object.hasOwn(request, "name")
+      ? request.name as string
+      : "Private Guild Before",
+  )
+  const changed = effect === "change"
+  return {
+    access: guildProfileAccess(),
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields: changed ? requestedFields : [],
+    createdAt: "2026-08-23T00:00:00.000Z",
+    current: changed
+      ? guildProfileAudit().profile
+      : desired,
+    desired,
+    digest,
+    guildId: request.guildId,
+    localConstraints: guildProfileAudit().localConstraints,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: guildProfileAudit().privacy,
+    requestedFields,
+    risks: changed
+      ? ["The guild's member-facing and potentially public display name will change"]
+      : [],
+    schemaVersion: 1,
+    status: changed ? "planned" : "already-current",
+    verificationBoundary: guildProfileAudit().verificationBoundary,
+    warnings: changed
+      ? ["Guild profile text is untrusted external content and is not persisted locally"]
+      : ["The requested guild profile fields already match Discord"],
     writeRequired: changed,
   }
 }
@@ -5147,6 +5283,9 @@ function fixturePolicy(): PolicyDescription {
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildProfileAuditEnabled: false,
+    guildProfileChangesEnabled: false,
+    guildProfileGuildIds: [],
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -5331,6 +5470,9 @@ function serviceFixture(overrides: {
   guildSettingsEffect?: "change" | "none"
   guildSettingsError?: Error
   guildSettingsPlanDigest?: string
+  guildProfileEffect?: "change" | "none"
+  guildProfileError?: Error
+  guildProfilePlanDigest?: string
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
@@ -5386,6 +5528,11 @@ function serviceFixture(overrides: {
     plan: 0,
   }
   const guildSettingsCalls = {
+    execute: 0,
+    get: 0,
+    plan: 0,
+  }
+  const guildProfileCalls = {
     execute: 0,
     get: 0,
     plan: 0,
@@ -5970,6 +6117,27 @@ function serviceFixture(overrides: {
         warnings: planned.warnings,
       }
     },
+    async executeGuildProfileChange(request, planDigest) {
+      if (overrides.guildProfileError) throw overrides.guildProfileError
+      guildProfileCalls.execute += 1
+      const planned = guildProfilePlan(
+        request,
+        planDigest,
+        overrides.guildProfileEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-guild-profile" : null,
+        driftFields: [],
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        requestedFields: planned.requestedFields,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+        warnings: planned.warnings,
+      }
+    },
     async getGuildOnboarding(_guildId, includeText = false) {
       calls.onboardingGet += 1
       return onboardingAudit(includeText)
@@ -5985,6 +6153,10 @@ function serviceFixture(overrides: {
     async getGuildSettings() {
       guildSettingsCalls.get += 1
       return guildSettingsAudit()
+    },
+    async getGuildProfile() {
+      guildProfileCalls.get += 1
+      return guildProfileAudit()
     },
     async planOnboardingChange(request) {
       calls.onboardingPlan += 1
@@ -6016,6 +6188,14 @@ function serviceFixture(overrides: {
         request,
         overrides.guildSettingsPlanDigest || DIGEST,
         overrides.guildSettingsEffect,
+      )
+    },
+    async planGuildProfileChange(request) {
+      guildProfileCalls.plan += 1
+      return guildProfilePlan(
+        request,
+        overrides.guildProfilePlanDigest || DIGEST,
+        overrides.guildProfileEffect,
       )
     },
     async executeInviteDeletion(request, planDigest) {
@@ -8247,6 +8427,7 @@ function serviceFixture(overrides: {
   }
   return {
     calls,
+    guildProfileCalls,
     nativeInteractionCommandCalls,
     service,
     welcomeScreenCalls,
@@ -8473,6 +8654,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_welcome_screen",
       "get_guild_widget_settings",
       "get_guild_settings",
+      "get_guild_profile",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -8549,6 +8731,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_widget_settings_change",
       "plan_guild_settings_change",
       "execute_guild_settings_change",
+      "plan_guild_profile_change",
+      "execute_guild_profile_change",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
@@ -15951,6 +16135,262 @@ test("MCP guild-settings execution exposes uncertainty and content-free conflict
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(GUILD_SETTINGS_OPERATION_KEY))
+})
+
+test("MCP guild profile audit exposes transient text and presence-only media", async (context) => {
+  const { client, guildProfileCalls } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_profile",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "get_guild_profile",
+  })
+
+  const content = structuredContent(audited)
+  const profile = content.profile as Record<string, unknown>
+  const privacy = content.privacy as Record<string, unknown>
+  assert.equal(profile.name, "Private Guild Before")
+  assert.equal(profile.description, "Private guild profile before")
+  assert.deepEqual(profile.mediaPresence, {
+    banner: false,
+    discoverySplash: true,
+    icon: true,
+    inviteSplash: false,
+  })
+  assert.equal(privacy.mediaHashes, "presence-only")
+  assert.equal(privacy.profileText, "transient-untrusted")
+  assert.equal(privacy.rawPayloads, "omitted")
+  assert.equal("ownerId" in content, false)
+  assert.doesNotMatch(JSON.stringify(audited), /assetHash|private-role/u)
+  assert.equal(invalid.isError, true)
+  assert.equal(guildProfileCalls.get, 1)
+})
+
+test("MCP guild profile plans preserve exact sparse text intent", async (context) => {
+  const { client, guildProfileCalls } = await connectedFixture(context)
+  const sparse = {
+    auditReason: AUDIT_REASON,
+    description: null,
+    guildId: GUILD_ID,
+    operationKey: GUILD_PROFILE_OPERATION_KEY,
+  }
+  const planned = await client.callTool({
+    arguments: sparse,
+    name: "plan_guild_profile_change",
+  })
+  const empty = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: GUILD_PROFILE_OPERATION_KEY,
+    },
+    name: "plan_guild_profile_change",
+  })
+  const emptyDescription = await client.callTool({
+    arguments: { ...sparse, description: "" },
+    name: "plan_guild_profile_change",
+  })
+  const formatCharacter = await client.callTool({
+    arguments: { ...sparse, name: "Hidden\u200bName" },
+    name: "plan_guild_profile_change",
+  })
+  const unsupported = await client.callTool({
+    arguments: { ...sparse, icon: null },
+    name: "plan_guild_profile_change",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.deepEqual(content.requestedFields, ["description"])
+  assert.deepEqual(content.changedFields, ["description"])
+  assert.equal((content.desired as Record<string, unknown>).description, null)
+  assert.equal(
+    (content.desired as Record<string, unknown>).name,
+    "Private Guild Before",
+  )
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(GUILD_PROFILE_OPERATION_KEY))
+  assert.equal(empty.isError, true)
+  assert.equal(emptyDescription.isError, true)
+  assert.equal(formatCharacter.isError, true)
+  assert.equal(unsupported.isError, true)
+  assert.equal(guildProfileCalls.plan, 1)
+})
+
+test("MCP guild profile execution binds signed approval to exact transient text", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client, guildProfileCalls } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const desired = guildProfileRequest()
+
+  const result = await client.callTool({
+    arguments: { ...desired, planDigest: DIGEST },
+    name: "execute_guild_profile_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(guildProfileCalls.plan, 1)
+  assert.equal(guildProfileCalls.execute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+    "Private Guild Before",
+    "Private Guild After",
+    "Private guild profile before",
+    "Private guild profile after",
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Requested fields/)
+  assert.match(confirmationMessage, /Current guild profile/)
+  assert.match(confirmationMessage, /presence-only/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_PROFILE_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(GUILD_PROFILE_OPERATION_KEY))
+})
+
+test("MCP guild profile execution stops on no-op, refusal, drift, or changed signed intent", async (context) => {
+  const argumentsValue = {
+    ...guildProfileRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildProfileEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_profile_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.guildProfileCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_profile_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.guildProfileCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildProfilePlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_profile_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.guildProfileCalls.execute, 0)
+
+  const signed = await connectedModernStdioFixture(context)
+  const initial = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: argumentsValue,
+      name: "execute_guild_profile_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  const changed = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...argumentsValue,
+        name: "Tampered Guild Name",
+      },
+      inputResponses: {
+        confirm_guild_profile_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_profile_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changed).status, "confirmation-invalid")
+  assert.equal(changed.isError, true)
+  assert.equal(signed.guildProfileCalls.execute, 0)
+})
+
+test("MCP guild profile execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...guildProfileRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildProfileError: new GuildProfileExecutionError(
+        "Discord guild profile outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_profile_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-profile",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    planDigest: DIGEST,
+    status: "completed" as const,
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildProfileError: new GuildProfileOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_profile_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(GUILD_PROFILE_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(conflictResult), /Private Guild|Private guild profile/u)
 })
 
 test("MCP channel metadata reads and plans preserve exact bounded intent", async (context) => {

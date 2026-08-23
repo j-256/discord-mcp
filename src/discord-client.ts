@@ -61,6 +61,12 @@ import type {
 import type { ScheduledEventCoverFormat } from "./scheduled-event-file.js"
 import type { SoundboardFileFormat } from "./soundboard-file.js"
 import {
+  normalizeDesiredGuildProfileDescription,
+  normalizeDesiredGuildProfileName,
+  projectGuildProfile,
+  type DiscordGuildProfile,
+} from "./guild-profile.js"
+import {
   normalizeDesiredMemberNickname,
   projectMemberNickname,
 } from "./member-nickname.js"
@@ -503,6 +509,11 @@ export interface ModifyGuildSettingsInput {
   suppressedSystemNotifications?: number
   systemChannelId?: string | null
   verificationLevel?: 0 | 1 | 2 | 3 | 4
+}
+
+export interface ModifyGuildProfileInput {
+  description?: string | null
+  name?: string
 }
 
 export interface ModifyGuildOnboardingInput {
@@ -1320,6 +1331,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "follow_announcement_channel",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
+  "get_guild_profile",
   "get_forum_tags",
   "get_guild_soundboard_sound",
   "get_guild_sticker",
@@ -1354,6 +1366,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_webhook",
   "modify_stage_instance",
   "modify_guild_onboarding",
+  "modify_guild_profile",
   "modify_guild_channel_positions",
   "modify_guild_role_positions",
   "modify_guild_welcome_screen",
@@ -2259,6 +2272,10 @@ const GUILD_SETTINGS_INPUT_KEYS = [
   "systemChannelId",
   "verificationLevel",
 ] as const
+const GUILD_PROFILE_INPUT_KEYS = [
+  "description",
+  "name",
+] as const
 
 const VOICE_STATE_KEYS = [
   "channel_id",
@@ -2579,6 +2596,34 @@ function guildSettingsBody(input: ModifyGuildSettingsInput): Record<string, unkn
     ...(Object.hasOwn(input, "verificationLevel")
       ? { verification_level: input.verificationLevel }
       : {}),
+  }
+}
+
+function assertModifyGuildProfileInput(
+  value: unknown,
+): asserts value is ModifyGuildProfileInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord guild profile input must be an exact object")
+  }
+  const input = value as Record<string, unknown>
+  const keys = Object.keys(input)
+  if (keys.length < 1 || !hasOnlyKeys(input, GUILD_PROFILE_INPUT_KEYS)) {
+    throw new RangeError("Discord guild profile input must contain supported fields only")
+  }
+  if (Object.hasOwn(input, "name")) {
+    normalizeDesiredGuildProfileName(input.name)
+  }
+  if (Object.hasOwn(input, "description")) {
+    normalizeDesiredGuildProfileDescription(input.description)
+  }
+}
+
+function guildProfileBody(input: ModifyGuildProfileInput): Record<string, unknown> {
+  return {
+    ...(Object.hasOwn(input, "description")
+      ? { description: input.description }
+      : {}),
+    ...(Object.hasOwn(input, "name") ? { name: input.name } : {}),
   }
 }
 
@@ -7847,6 +7892,48 @@ export class DiscordClient {
   getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {
     assertPositiveSnowflake(guildId, "Discord guild ID")
     return this.#request("get_guild", `/guilds/${guildId}`, options)
+  }
+
+  async getGuildProfile(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildProfile> {
+    assertPositiveSnowflake(guildId, "Discord guild profile guild ID")
+    const response = await this.#request<unknown>(
+      "get_guild_profile",
+      `/guilds/${guildId}`,
+      {
+        ...options,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildProfile(response, guildId)
+  }
+
+  async modifyGuildProfile(
+    guildId: string,
+    input: ModifyGuildProfileInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildProfile> {
+    assertPositiveSnowflake(guildId, "Discord guild profile guild ID")
+    assertModifyGuildProfileInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord guild profile audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_profile",
+      `/guilds/${guildId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: guildProfileBody(input),
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildProfile(response, guildId)
   }
 
   async modifyGuildSettings(

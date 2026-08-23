@@ -472,6 +472,18 @@ import {
   normalizeGuildSettingsChangeRequest,
 } from "./guild-settings-service.js"
 import type {
+  GuildProfileAuditResult,
+  GuildProfileChangePlan,
+  GuildProfileChangeRequest,
+  GuildProfileChangeResult,
+  GuildProfileServiceOptions,
+} from "./guild-profile-service.js"
+import {
+  assertGuildProfileGetInput,
+  GuildProfileService,
+  normalizeGuildProfileChangeRequest,
+} from "./guild-profile-service.js"
+import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
   ThreadCreationResult,
@@ -596,6 +608,7 @@ export interface DiscordServiceClient {
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
+  getGuildProfile: DiscordClient["getGuildProfile"]
   getGuildAutoModerationRule: DiscordClient["getGuildAutoModerationRule"]
   getGuildAuditLog: DiscordClient["getGuildAuditLog"]
   getGuildBan: DiscordClient["getGuildBan"]
@@ -652,6 +665,7 @@ export interface DiscordServiceClient {
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
   modifyGuildWidgetSettings: DiscordClient["modifyGuildWidgetSettings"]
   modifyGuildSettings: DiscordClient["modifyGuildSettings"]
+  modifyGuildProfile: DiscordClient["modifyGuildProfile"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
@@ -752,6 +766,10 @@ export interface ConnectorServiceOptions {
   >
   guildSettingsOptions?: Pick<
     GuildSettingsServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildProfileOptions?: Pick<
+    GuildProfileServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   interactionOptions?: Pick<
@@ -997,6 +1015,7 @@ export class ConnectorService {
   readonly #forumTagService: ForumTagService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
+  readonly #guildProfileService: GuildProfileService
   readonly #guildSettingsService: GuildSettingsService
   readonly #guildTemplateService: GuildTemplateService
   readonly #integrationService: IntegrationService
@@ -1174,6 +1193,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildSettingsOptions,
+    })
+    this.#guildProfileService = new GuildProfileService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildProfileOptions,
     })
     this.#integrationService = new IntegrationService({
       activityStore: this.#activityStore,
@@ -1761,6 +1787,20 @@ export class ConnectorService {
     assertGuildSettingsGetInput(guildId)
     const identity = await this.#verifyIdentity(options)
     return this.#guildSettingsService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async getGuildProfile(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildProfileAuditResult> {
+    assertGuildProfileGetInput(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildProfileService.get(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -2627,6 +2667,20 @@ export class ConnectorService {
     normalizeGuildSettingsChangeRequest(request)
     const identity = await this.#verifyIdentity(options)
     return this.#guildSettingsService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildProfileChange(
+    request: GuildProfileChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildProfileChangePlan> {
+    normalizeGuildProfileChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildProfileService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -4207,6 +4261,31 @@ export class ConnectorService {
       planDigest,
       [writeGuildCollectionTarget("guild-settings", request.guildId)],
       () => this.#guildSettingsService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildProfileChange(
+    request: GuildProfileChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildProfileChangeResult> {
+    normalizeGuildProfileChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild profile plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "guild-profile-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("guild-settings", request.guildId)],
+      () => this.#guildProfileService.execute(
         identity.application.id,
         identity.bot.id,
         request,

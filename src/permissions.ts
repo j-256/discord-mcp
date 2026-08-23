@@ -166,10 +166,15 @@ export type PermissionRoleEvidence = Pick<
   "id" | "managed" | "name" | "permissions" | "position"
 >
 
+export type GuildPermissionRoleEvidence = Pick<
+  DiscordRole,
+  "id" | "permissions" | "position"
+> & Partial<Pick<DiscordRole, "managed" | "name">>
+
 export interface EvaluateGuildMemberPermissionsOptions {
   guildId: string
   member: DiscordGuildMember
-  roles: readonly PermissionRoleEvidence[]
+  roles: readonly GuildPermissionRoleEvidence[]
 }
 
 export interface GuildMemberPermissionResult {
@@ -272,7 +277,7 @@ export function evaluateGuildMemberPermissions(
 ): GuildMemberPermissionResult {
   const warnings: string[] = []
   let complete = true
-  const rolesById = new Map<string, PermissionRoleEvidence>()
+  const rolesById = new Map<string, GuildPermissionRoleEvidence>()
   for (const role of options.roles) {
     if (!DISCORD_SNOWFLAKE_PATTERN.test(role.id)) {
       complete = false
@@ -305,7 +310,7 @@ export function evaluateGuildMemberPermissions(
 
   const everyone = rolesById.get(options.guildId)
   let effective = 0n
-  const appliedRoles: PermissionRoleEvidence[] = []
+  const appliedRoles: GuildPermissionRoleEvidence[] = []
   if (!everyone) {
     complete = false
     warnings.push("Discord role evidence omitted the guild @everyone role")

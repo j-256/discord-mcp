@@ -981,6 +981,42 @@ export class GuildSettingsEvidenceError extends Error {
   override name = "GuildSettingsEvidenceError"
 }
 
+export class GuildProfilePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild profile snapshot does not match the reviewed plan")
+    this.name = "GuildProfilePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildProfileOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild profile operation key has already been reserved")
+    this.name = "GuildProfileOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildProfileExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildProfileExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildProfileEvidenceError extends Error {
+  override name = "GuildProfileEvidenceError"
+}
+
 export class WidgetSettingsPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

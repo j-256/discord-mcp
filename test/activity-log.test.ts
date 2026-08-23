@@ -26,6 +26,7 @@ import {
   type ForumPostActivity,
   type ForumTagActivity,
   type GuildExpressionActivity,
+  type GuildProfileActivity,
   type GuildSettingsActivity,
   type GuildTemplateActivity,
   type IntegrationDeletionActivity,
@@ -975,6 +976,31 @@ function guildSettingsChange(
     operationKeyHash: `sha256:${"e".repeat(64)}`,
     planDigest: `hmac-sha256:${"f".repeat(64)}`,
     requestedFields: ["explicitContentFilter", "verificationLevel"],
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function guildProfileChange(
+  id: string,
+  status: GuildProfileActivity["status"],
+): GuildProfileActivity {
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "guild-profile-change",
+    operationKeyHash: `sha256:${"1".repeat(64)}`,
+    planDigest: `hmac-sha256:${"2".repeat(64)}`,
+    requestedFields: ["description", "name"],
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -2980,6 +3006,62 @@ test("JSONL activity log accepts only exact content-free guild-settings evidence
     ],
   )
   assert.doesNotMatch(persisted, /private-audit-reason|private-channel-id|private-setting-value/)
+})
+
+test("JSONL activity log accepts only exact content-free guild-profile evidence", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(guildProfileChange("1", "pending"))
+  await store.append(guildProfileChange("2", "completed"))
+  await assert.rejects(
+    store.append({
+      ...guildProfileChange("3", "completed"),
+      auditReason: "private-audit-reason",
+      description: "private-description",
+      name: "private-guild-name",
+      operationKey: "private-operation-key",
+    } as GuildProfileActivity),
+    /invalid content-free shape/,
+  )
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildProfileChange("4", "completed"),
+      requestedFields: ["name", "description"],
+    })}\n${JSON.stringify({
+      ...guildProfileChange("5", "completed"),
+      requestedFields: ["privateFutureField"],
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 2)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "requestedFields",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  assert.doesNotMatch(
+    persisted,
+    /private-audit-reason|private-description|private-guild-name|private-operation-key/,
+  )
 })
 
 test("JSONL activity log keeps channel metadata evidence content-free", async (context) => {

@@ -115,6 +115,9 @@ function status(
       guildExpressionCreationEnabled: false,
       guildExpressionGuildIds: [],
       guildExpressionRootCount: 0,
+      guildProfileAuditEnabled: false,
+      guildProfileChangesEnabled: false,
+      guildProfileGuildIds: [],
       guildSettingsAuditEnabled: false,
       guildSettingsChangesEnabled: false,
       guildSettingsGuildIds: [],
@@ -272,6 +275,7 @@ function toolService(): DiscordToolService {
     executeWelcomeScreenChange: unexpected,
     executeWidgetSettingsChange: unexpected,
     executeGuildSettingsChange: unexpected,
+    executeGuildProfileChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeReactionModeration: unexpected,
@@ -302,6 +306,7 @@ function toolService(): DiscordToolService {
     getGuildWelcomeScreen: unexpected,
     getGuildWidgetSettings: unexpected,
     getGuildSettings: unexpected,
+    getGuildProfile: unexpected,
     listChannelWebhooks: unexpected,
     listAnnouncementSubscriptions: unexpected,
     listGuildInvites: unexpected,
@@ -323,6 +328,7 @@ function toolService(): DiscordToolService {
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildSettingsChange: unexpected,
+    planGuildProfileChange: unexpected,
     planGuildExpressionChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
@@ -1746,6 +1752,66 @@ test("doctor and setup explain privacy-minimized reviewed guild settings", async
     assert.equal(setup.launch.environment.forward.includes(name), true)
   }
   assert.doesNotMatch(JSON.stringify(enabled), /guild name|channel name|audit reason/u)
+})
+
+test("doctor and setup explain transient reviewed guild profile text", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
+    DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
+    DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildProfileAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildProfileChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /transient text/)
+  assert.match(audit?.summary || "", /presence-only media/)
+  assert.match(audit?.summary || "", /complete permission evidence/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /sparse text-field review/)
+  assert.match(change?.summary || "", /signed approval/)
+  assert.match(change?.summary || "", /exact readback/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.guildProfileAuditPolicy,
+    )?.summary || "",
+    /audit is disabled/,
+  )
+  assert.match(omitted.warnings.join("\n"), /guild-profile toolset/)
+  for (const name of [
+    ENVIRONMENT_NAMES.allowGuildProfileAudit,
+    ENVIRONMENT_NAMES.allowGuildProfileChanges,
+    ENVIRONMENT_NAMES.guildProfileGuildIds,
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+  assert.doesNotMatch(
+    JSON.stringify(enabled),
+    /guild profile text|guild name|description value|audit reason/u,
+  )
 })
 
 test("doctor and setup explain reviewed exact-channel metadata changes", async () => {
@@ -3367,6 +3433,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_forum_tag_change",
     "review_guild_expression_change",
     "review_guild_integration_deletion",
+    "review_guild_profile_change",
     "review_guild_scaffold",
     "review_guild_settings_change",
     "review_guild_template_change",
@@ -3428,6 +3495,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/members/{userId}",
     "discord://guilds/{guildId}/members/{userId}/voice-state",
     "discord://guilds/{guildId}/onboarding",
+    "discord://guilds/{guildId}/profile",
     "discord://guilds/{guildId}/role-order",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
@@ -3456,6 +3524,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_forum_tag_change",
     "execute_guild_expression_change",
     "execute_guild_integration_deletion",
+    "execute_guild_profile_change",
     "execute_guild_settings_change",
     "execute_guild_soundboard_change",
     "execute_guild_template_change",

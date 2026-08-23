@@ -40,6 +40,7 @@ export const MCP_TOOLSET_NAMES = [
   "forum-tags",
   "gateway",
   "guild-expressions",
+  "guild-profile",
   "guild-scaffolds",
   "guild-settings",
   "guild-templates",
@@ -76,6 +77,13 @@ export const MCP_TOOLSET_NAMES = [
 ] as const
 
 export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
+
+export const GUILD_PROFILE_FIELDS = [
+  "description",
+  "name",
+] as const
+
+export type GuildProfileField = typeof GUILD_PROFILE_FIELDS[number]
 
 export const GUILD_SETTINGS_FIELDS = [
   "afkChannelId",
@@ -176,6 +184,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowGuildExpressionAudit: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
   allowGuildExpressionChanges: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
+  allowGuildProfileAudit: "DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT",
+  allowGuildProfileChanges: "DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES",
   allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
   allowGuildSettingsAudit: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT",
   allowGuildSettingsChanges: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES",
@@ -252,6 +262,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   guildScaffoldGuildIds: "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
   guildExpressionGuildIds: "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
   guildExpressionRoots: "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
+  guildProfileGuildIds: "DISCORD_MCP_GUILD_PROFILE_GUILD_IDS",
   guildSettingsGuildIds: "DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS",
   guildTemplateGuildIds: "DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS",
   integrationGuildIds: "DISCORD_MCP_INTEGRATION_GUILD_IDS",
@@ -354,6 +365,9 @@ export const DISCORD_LIMITS = Object.freeze({
   channelRateLimitSeconds: 21_600,
   channelTopicCharacters: 1_024,
   guildNicknameCharacters: 32,
+  guildDescriptionCharacters: 120,
+  guildNameCharacters: 100,
+  guildNameMinimumCharacters: 2,
   forumChannelTopicCharacters: 4_096,
   categoryChannels: 50,
   currentUserGuilds: 200,
@@ -529,6 +543,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   gatewayCursorCharacters: 128,
   gatewayEventBufferSize: 1_000,
   gatewayEventPage: 100,
+  guildProfileGuildAllowlist: 100,
   guildSettingsGuildAllowlist: 100,
   idempotencyKeyCharacters: 128,
   idempotencyKeyMinimumCharacters: 16,

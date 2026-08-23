@@ -51,6 +51,7 @@ type McpToolWorkflow =
   | "forum-tag-change"
   | "guild-scaffold"
   | "guild-expression-change"
+  | "guild-profile-change"
   | "guild-soundboard-change"
   | "guild-settings-change"
   | "guild-template-change"
@@ -249,6 +250,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-settings",
     workflow: "guild-settings-change",
   },
+  execute_guild_profile_change: {
+    keywords: ["description", "execute", "guild", "identity", "name", "profile"],
+    toolset: "guild-profile",
+    workflow: "guild-profile-change",
+  },
   execute_poll_creation: {
     keywords: ["create", "execute", "poll", "question", "vote"],
     toolset: "polls",
@@ -369,6 +375,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_settings: {
     keywords: ["afk", "audit", "content filter", "guild", "notifications", "safety", "settings"],
     toolset: "guild-settings",
+  },
+  get_guild_profile: {
+    keywords: ["audit", "description", "guild", "identity", "name", "profile"],
+    toolset: "guild-profile",
   },
   get_automod_rule: {
     keywords: ["automod", "exact", "moderation", "policy", "rule"],
@@ -707,6 +717,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["afk", "configure", "guild", "notifications", "plan", "review", "safety", "settings"],
     toolset: "guild-settings",
     workflow: "guild-settings-change",
+  },
+  plan_guild_profile_change: {
+    keywords: ["description", "guild", "identity", "name", "plan", "profile", "review"],
+    toolset: "guild-profile",
+    workflow: "guild-profile-change",
   },
   plan_poll_creation: {
     keywords: ["create", "plan", "poll", "question", "vote"],

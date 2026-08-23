@@ -264,6 +264,7 @@ function serviceFixture(overrides: {
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
+  guildProfileOptions?: ConnectorServiceOptions["guildProfileOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   guildSettingsOptions?: ConnectorServiceOptions["guildSettingsOptions"]
   guildTemplateOptions?: ConnectorServiceOptions["guildTemplateOptions"]
@@ -498,6 +499,9 @@ function serviceFixture(overrides: {
     async getGuild() {
       return { ...guild(), owner_id: "700000000000000001" }
     },
+    async getGuildProfile() {
+      throw new Error("Unexpected guild profile lookup")
+    },
     async getGuildAuditLog() {
       calls.guildAuditLog += 1
       return { audit_log_entries: [] }
@@ -658,6 +662,9 @@ function serviceFixture(overrides: {
     },
     async modifyGuildSettings() {
       throw new Error("Unexpected guild-settings change")
+    },
+    async modifyGuildProfile() {
+      throw new Error("Unexpected guild profile change")
     },
     async modifyWebhook() {
       throw new Error("Unexpected webhook modification")
@@ -886,6 +893,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.guildSettingsOptions
         ? { guildSettingsOptions: overrides.guildSettingsOptions }
+        : {}),
+      ...(overrides.guildProfileOptions
+        ? { guildProfileOptions: overrides.guildProfileOptions }
         : {}),
       ...(overrides.guildTemplateOptions
         ? { guildTemplateOptions: overrides.guildTemplateOptions }
@@ -1501,6 +1511,18 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     kind: "emoji",
     operationKey,
   }, digest))
+  await captured(() => service.executeGuildProfileChange({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    name: "Reviewed Guild Name",
+    operationKey,
+  }, digest))
+  await captured(() => service.executeGuildSettingsChange({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    verificationLevel: "high",
+  }, digest))
   await captured(() => service.executeGuildTemplateChange({
     action: "delete",
     auditReason: "reviewed",
@@ -1732,7 +1754,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 38)
+  assert.equal(byKind.size, 40)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1785,6 +1807,16 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       }],
       "guild-soundboard-change": [{
         collection: "soundboard",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "guild-profile-change": [{
+        collection: "guild-settings",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "guild-settings-change": [{
+        collection: "guild-settings",
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
@@ -1915,7 +1947,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 38)
+  assert.equal(writeCoordinator.intents.length, 40)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -3010,6 +3042,94 @@ test("service pins identity through reviewed guild settings", async () => {
   assert.equal(result.verification, "not-required")
   assert.equal(guildSettingsReads, 3)
   assert.equal(guildSettingsWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through transient reviewed guild profile text", async () => {
+  const operationStore = new MemoryOperationStore()
+  let guildProfileReads = 0
+  let guildProfileWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildProfile(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        guildProfileReads += 1
+        return {
+          description: "Private profile description",
+          id: GUILD_ID,
+          mediaPresence: {
+            banner: false,
+            discoverySplash: true,
+            icon: true,
+            inviteSplash: false,
+          },
+          name: "Private Guild Profile",
+          ownerId: "700000000000000003",
+        }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD,
+          "@everyone",
+        )]
+      },
+      async modifyGuildProfile() {
+        guildProfileWrites += 1
+        throw new Error("Unexpected guild profile change")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
+      DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
+    },
+    guildProfileOptions: {
+      clock: () => new Date("2026-08-23T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(59),
+      randomId: () => "activity-guild-profile",
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed guild presentation",
+    description: "Private profile description",
+    guildId: GUILD_ID,
+    name: "Private Guild Profile",
+    operationKey: "guild-profile-service-attempt-0001",
+  }
+
+  await assert.rejects(
+    () => service.getGuildProfile("bad"),
+    /guild profile guild ID/,
+  )
+  await assert.rejects(
+    () => service.planGuildProfileChange({ ...request, name: "x" }),
+    /guild name/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildProfile(GUILD_ID)
+  const plan = await service.planGuildProfileChange(request)
+  const result = await service.executeGuildProfileChange(request, plan.digest)
+
+  assert.equal(audit.privacy.profileText, "transient-untrusted")
+  assert.equal(audit.privacy.mediaHashes, "presence-only")
+  assert.equal(audit.profile.name, "Private Guild Profile")
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(guildProfileReads, 3)
+  assert.equal(guildProfileWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)
