@@ -3741,6 +3741,19 @@ test("Discord client projects channel webhook inventory before returning it", as
         name: null,
         type: 3,
         user: null,
+      }, {
+        application_id: null,
+        channel_id: "200",
+        guild_id: "100",
+        id: "302",
+        name: "private-follower-name",
+        source_channel: { id: "202", name: "private-followed-channel" },
+        source_guild: {
+          icon: "private-source-icon",
+          id: "102",
+          name: "private-followed-guild",
+        },
+        type: 2,
       }])
     },
     observer: recordingObserver(records),
@@ -3756,6 +3769,8 @@ test("Discord client projects channel webhook inventory before returning it", as
     guildId: "100",
     id: "300",
     name: "reviewed-hook",
+    sourceChannelId: null,
+    sourceGuildId: null,
     type: 1,
   }, {
     applicationId: null,
@@ -3764,7 +3779,19 @@ test("Discord client projects channel webhook inventory before returning it", as
     guildId: null,
     id: "301",
     name: null,
+    sourceChannelId: null,
+    sourceGuildId: null,
     type: 3,
+  }, {
+    applicationId: null,
+    channelId: "200",
+    creatorUserId: null,
+    guildId: "100",
+    id: "302",
+    name: "private-follower-name",
+    sourceChannelId: "202",
+    sourceGuildId: "102",
+    type: 2,
   }])
   assert.deepEqual(request, {
     authorization: `Bot ${TOKEN}`,
@@ -3779,6 +3806,9 @@ test("Discord client projects channel webhook inventory before returning it", as
     "private-avatar",
     "private-source-channel",
     "private-source-guild",
+    "private-followed-channel",
+    "private-followed-guild",
+    "private-source-icon",
     "private-unknown-field",
   ]) {
     assert.equal(serialized.includes(secret), false)
@@ -3912,6 +3942,8 @@ test("Discord client creates an Incoming webhook while projecting its credential
     guildId: "100",
     id: "300",
     name: "Release relay",
+    sourceChannelId: null,
+    sourceGuildId: null,
     type: 1,
   })
   assert.deepEqual(requests, [{
@@ -3929,6 +3961,127 @@ test("Discord client creates an Incoming webhook while projecting its credential
     retries: 0,
     runs: 1,
   }])
+})
+
+test("Discord client follows one announcement channel with an exact non-retried request", async () => {
+  const requests: Array<{
+    authorization: string | null
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("Authorization"),
+        body: JSON.parse(String(init?.body)),
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({
+        channel_id: "201",
+        webhook_id: "300",
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const followed = await client.followAnnouncementChannel(
+    "201",
+    "200",
+    "Reviewed follow / case 42",
+  )
+
+  assert.deepEqual(followed, {
+    sourceChannelId: "201",
+    webhookId: "300",
+  })
+  assert.deepEqual(requests, [{
+    authorization: `Bot ${TOKEN}`,
+    body: { webhook_channel_id: "200" },
+    method: "POST",
+    reason: "Reviewed%20follow%20%2F%20case%2042",
+    url: `${API_BASE_URL}/channels/201/followers`,
+  }])
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "follow_announcement_channel",
+    retries: 0,
+    runs: 1,
+  }])
+})
+
+test("Discord client rejects malformed follower evidence and never retries following", async () => {
+  let requests = 0
+  let sleeps = 0
+  const malformedInventory = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse([{
+        application_id: null,
+        channel_id: "200",
+        guild_id: "100",
+        id: "300",
+        name: "Follower",
+        source_channel: { id: "201", name: "private-source" },
+        type: 2,
+      }])
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => malformedInventory.listChannelWebhooks("200"),
+    /invalid webhook object/,
+  )
+
+  const mismatchedResponse = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ channel_id: "202", webhook_id: "300" })
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => mismatchedResponse.followAnnouncementChannel("201", "200", "Reviewed"),
+    /another source channel/,
+  )
+
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "private-follow-failure", retry_after: 0.001 }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => rateLimited.followAnnouncementChannel("201", "200", "Reviewed"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && !error.message.includes("private-follow-failure")
+    ),
+  )
+  await assert.rejects(
+    () => rateLimited.followAnnouncementChannel("0", "200", "Reviewed"),
+    /positive Discord snowflake/,
+  )
+  await assert.rejects(
+    () => rateLimited.followAnnouncementChannel("201", "invalid", "Reviewed"),
+    /target channel ID/,
+  )
+  assert.equal(requests, 3)
+  assert.equal(sleeps, 0)
 })
 
 test("Discord client modifies exact webhook metadata without surfacing credentials", async () => {
@@ -3975,6 +4128,8 @@ test("Discord client modifies exact webhook metadata without surfacing credentia
     guildId: "100",
     id: "300",
     name: "Deployment relay",
+    sourceChannelId: null,
+    sourceGuildId: null,
     type: 1,
   })
   assert.deepEqual(requests, [{
@@ -4112,6 +4267,7 @@ test("Discord client never retries webhook deletion and validates before fetchin
       error instanceof DiscordApiError
       && error.status === 429
       && error.retryAfterMs === 1
+      && !error.message.includes("rate limited")
     ),
   )
   assert.equal(requests, 1)

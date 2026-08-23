@@ -161,6 +161,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     administrationGuildIds: [],
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
+    announcementSubscriptionAuditEnabled: false,
+    announcementSubscriptionChangesEnabled: false,
+    announcementSubscriptionSourceChannelIds: [],
+    announcementSubscriptionTargetChannelIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
     attachmentChannelIds: [],
@@ -708,6 +712,10 @@ test("configuration and policy require an exact administration guild and protect
     administrationGuildIds: [GUILD_ID],
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
+    announcementSubscriptionAuditEnabled: false,
+    announcementSubscriptionChangesEnabled: false,
+    announcementSubscriptionSourceChannelIds: [],
+    announcementSubscriptionTargetChannelIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
     attachmentChannelIds: [],
@@ -2028,6 +2036,105 @@ test("configuration and policy isolate announcement crossposts to exact readable
   )
 })
 
+test("configuration and policy independently scope announcement subscription audit and changes", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
+    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  const source = channel({
+    id: OTHER_CHANNEL_ID,
+    type: DISCORD_CHANNEL_TYPES.announcement,
+  })
+  const target = channel({ type: DISCORD_CHANNEL_TYPES.text })
+
+  assert.equal(enabledConfig.allowAnnouncementSubscriptionAudit, true)
+  assert.equal(enabledConfig.allowAnnouncementSubscriptionChanges, true)
+  assert.deepEqual(
+    [...enabledConfig.announcementSubscriptionSourceChannelIds],
+    [OTHER_CHANNEL_ID],
+  )
+  assert.deepEqual(
+    [...enabledConfig.announcementSubscriptionTargetChannelIds],
+    [CHANNEL_ID],
+  )
+  assert.equal(enabled.assertAnnouncementSubscriptionTargetAuditable(target), GUILD_ID)
+  assert.equal(enabled.assertAnnouncementSubscriptionTargetChangeable(target), GUILD_ID)
+  assert.equal(enabled.assertAnnouncementSubscriptionSourceChangeable(source), GUILD_ID)
+  assert.deepEqual({
+    audit: enabled.describe().announcementSubscriptionAuditEnabled,
+    changes: enabled.describe().announcementSubscriptionChangesEnabled,
+    sources: enabled.describe().announcementSubscriptionSourceChannelIds,
+    targets: enabled.describe().announcementSubscriptionTargetChannelIds,
+  }, {
+    audit: true,
+    changes: true,
+    sources: [OTHER_CHANNEL_ID],
+    targets: [CHANNEL_ID],
+  })
+
+  assert.throws(
+    () => enabled.assertAnnouncementSubscriptionTargetAuditable(channel({
+      id: OTHER_CHANNEL_ID,
+      type: DISCORD_CHANNEL_TYPES.text,
+    })),
+    /outside the announcement-subscription target scope/,
+  )
+  assert.throws(
+    () => enabled.assertAnnouncementSubscriptionTargetAuditable(channel({
+      type: DISCORD_CHANNEL_TYPES.announcement,
+    })),
+    /targets must be direct guild text channels/,
+  )
+  assert.throws(
+    () => enabled.assertAnnouncementSubscriptionSourceChangeable(channel({
+      id: OTHER_CHANNEL_ID,
+      type: DISCORD_CHANNEL_TYPES.text,
+    })),
+    /sources must be direct guild announcement channels/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.equal(auditOnly.assertAnnouncementSubscriptionTargetAuditable(target), GUILD_ID)
+  assert.throws(
+    () => auditOnly.assertAnnouncementSubscriptionTargetChangeable(target),
+    /changes are disabled/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertAnnouncementSubscriptionTargetIdAuditable(CHANNEL_ID),
+    /audit is disabled/,
+  )
+})
+
 test("configuration and policy separate poll audit, voter, creation, and ending authority", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -2240,6 +2347,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     administrationGuildIds: [],
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
+    announcementSubscriptionAuditEnabled: false,
+    announcementSubscriptionChangesEnabled: false,
+    announcementSubscriptionSourceChannelIds: [],
+    announcementSubscriptionTargetChannelIds: [],
     allowedChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
     allowedGuildIds: [GUILD_ID],
     attachmentChannelIds: [],

@@ -28,6 +28,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
 
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelAccess: "channel_access",
+  channelAnnouncementSubscriptions: "channel_announcement_subscriptions",
   channelForumTags: "channel_forum_tags",
   channelMetadata: "channel_metadata",
   channelPermissionOverwrites: "channel_permission_overwrites",
@@ -59,6 +60,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
 
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelAccess: "discord://channels/{channelId}/access",
+  channelAnnouncementSubscriptions: "discord://channels/{channelId}/announcement-subscriptions",
   channelForumTags: "discord://channels/{channelId}/forum-tags",
   channelMetadata: "discord://channels/{channelId}",
   channelPermissionOverwrites: "discord://channels/{channelId}/permission-overwrites",
@@ -92,6 +94,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
   reviewAnnouncementCrosspost: "review_announcement_crosspost",
+  reviewAnnouncementSubscription: "review_announcement_subscription",
   reviewInviteDeletion: "review_invite_deletion",
   reviewOnboardingChange: "review_onboarding_change",
   reviewWelcomeScreenChange: "review_welcome_screen_change",
@@ -135,6 +138,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.inspectGuildBan]: "bans",
   [MCP_PROMPT_NAMES.reviewAnnouncementCrosspost]: "announcement-crossposts",
+  [MCP_PROMPT_NAMES.reviewAnnouncementSubscription]: "announcement-subscriptions",
   [MCP_PROMPT_NAMES.reviewInviteDeletion]: "invites",
   [MCP_PROMPT_NAMES.reviewOnboardingChange]: "onboarding",
   [MCP_PROMPT_NAMES.reviewWelcomeScreenChange]: "welcome-screen",

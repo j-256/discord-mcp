@@ -14,6 +14,10 @@ export interface PolicyDescription {
   administrationGuildIds: string[]
   announcementCrosspostChannelIds: string[]
   announcementCrosspostsEnabled: boolean
+  announcementSubscriptionAuditEnabled: boolean
+  announcementSubscriptionChangesEnabled: boolean
+  announcementSubscriptionSourceChannelIds: string[]
+  announcementSubscriptionTargetChannelIds: string[]
   allowedChannelIds: string[]
   allowedGuildIds: string[]
   attachmentChannelIds: string[]
@@ -152,6 +156,8 @@ export class ScopePolicy {
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
   readonly #allowAnnouncementCrossposts: boolean
+  readonly #allowAnnouncementSubscriptionAudit: boolean
+  readonly #allowAnnouncementSubscriptionChanges: boolean
   readonly #allowAttachments: boolean
   readonly #allowAutomodAudit: boolean
   readonly #allowAutomodChanges: boolean
@@ -212,6 +218,8 @@ export class ScopePolicy {
   readonly #allowWidgetSettingsChanges: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #announcementCrosspostChannelIds: ReadonlySet<string>
+  readonly #announcementSubscriptionSourceChannelIds: ReadonlySet<string>
+  readonly #announcementSubscriptionTargetChannelIds: ReadonlySet<string>
   readonly #attachmentChannelIds: ReadonlySet<string>
   readonly #attachmentMaxBytes: number
   readonly #attachmentRoots: readonly string[]
@@ -285,6 +293,8 @@ export class ScopePolicy {
   > & Partial<Pick<
     ConnectorConfig,
     | "allowAnnouncementCrossposts"
+    | "allowAnnouncementSubscriptionAudit"
+    | "allowAnnouncementSubscriptionChanges"
     | "allowAttachments"
     | "allowAutomodAudit"
     | "allowAutomodChanges"
@@ -343,6 +353,8 @@ export class ScopePolicy {
     | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
     | "announcementCrosspostChannelIds"
+    | "announcementSubscriptionSourceChannelIds"
+    | "announcementSubscriptionTargetChannelIds"
     | "channelMetadataIds"
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
@@ -398,6 +410,10 @@ export class ScopePolicy {
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
     this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
+    this.#allowAnnouncementSubscriptionAudit = config.allowAnnouncementSubscriptionAudit
+      ?? false
+    this.#allowAnnouncementSubscriptionChanges = config.allowAnnouncementSubscriptionChanges
+      ?? false
     this.#allowAttachments = config.allowAttachments ?? false
     this.#allowAutomodAudit = config.allowAutomodAudit ?? false
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
@@ -458,6 +474,10 @@ export class ScopePolicy {
     this.#allowWidgetSettingsChanges = config.allowWidgetSettingsChanges ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#announcementCrosspostChannelIds = config.announcementCrosspostChannelIds ?? new Set()
+    this.#announcementSubscriptionSourceChannelIds = config
+      .announcementSubscriptionSourceChannelIds ?? new Set()
+    this.#announcementSubscriptionTargetChannelIds = config
+      .announcementSubscriptionTargetChannelIds ?? new Set()
     this.#attachmentChannelIds = config.attachmentChannelIds ?? new Set()
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
     this.#attachmentRoots = config.attachmentRoots ?? []
@@ -523,6 +543,17 @@ export class ScopePolicy {
       announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
       announcementCrosspostsEnabled: this.#allowAnnouncementCrossposts
         && this.#announcementCrosspostChannelIds.size > 0,
+      announcementSubscriptionAuditEnabled: this.#allowAnnouncementSubscriptionAudit
+        && this.#announcementSubscriptionTargetChannelIds.size > 0,
+      announcementSubscriptionChangesEnabled: this.#allowAnnouncementSubscriptionAudit
+        && this.#allowAnnouncementSubscriptionChanges
+        && this.#announcementSubscriptionTargetChannelIds.size > 0,
+      announcementSubscriptionSourceChannelIds: [
+        ...this.#announcementSubscriptionSourceChannelIds,
+      ].sort(),
+      announcementSubscriptionTargetChannelIds: [
+        ...this.#announcementSubscriptionTargetChannelIds,
+      ].sort(),
       allowedChannelIds: [...this.#allowedChannelIds].sort(),
       allowedGuildIds: [...this.#allowedGuildIds].sort(),
       attachmentChannelIds: [...this.#attachmentChannelIds].sort(),
@@ -1393,6 +1424,78 @@ export class ScopePolicy {
     if (!this.#announcementCrosspostChannelIds.has(channel.id)) {
       throw new PolicyError(
         `Discord channel ${channel.id} is outside the announcement-crosspost scope`,
+      )
+    }
+    return guildId
+  }
+
+  assertAnnouncementSubscriptionTargetIdAuditable(channelId: string): void {
+    if (!this.#allowAnnouncementSubscriptionAudit) {
+      throw new PolicyError(
+        "Discord announcement subscription audit is disabled by connector configuration",
+      )
+    }
+    if (this.#announcementSubscriptionTargetChannelIds.size === 0) {
+      throw new PolicyError(
+        "Discord announcement subscription audit requires an explicit target-channel allowlist",
+      )
+    }
+    if (!this.#announcementSubscriptionTargetChannelIds.has(channelId)) {
+      throw new PolicyError(
+        `Discord channel ${channelId} is outside the announcement-subscription target scope`,
+      )
+    }
+  }
+
+  assertAnnouncementSubscriptionTargetAuditable(channel: DiscordChannel): string {
+    this.assertAnnouncementSubscriptionTargetIdAuditable(channel.id)
+    const guildId = this.assertChannelReadable(channel)
+    if (channel.type !== DISCORD_CHANNEL_TYPES.text) {
+      throw new PolicyError(
+        "Discord announcement subscription targets must be direct guild text channels",
+      )
+    }
+    return guildId
+  }
+
+  assertAnnouncementSubscriptionTargetIdChangeable(channelId: string): void {
+    this.assertAnnouncementSubscriptionTargetIdAuditable(channelId)
+    if (!this.#allowAnnouncementSubscriptionChanges) {
+      throw new PolicyError(
+        "Discord announcement subscription changes are disabled by connector configuration",
+      )
+    }
+  }
+
+  assertAnnouncementSubscriptionTargetChangeable(channel: DiscordChannel): string {
+    this.assertAnnouncementSubscriptionTargetIdChangeable(channel.id)
+    return this.assertAnnouncementSubscriptionTargetAuditable(channel)
+  }
+
+  assertAnnouncementSubscriptionSourceIdChangeable(channelId: string): void {
+    if (!this.#allowAnnouncementSubscriptionChanges) {
+      throw new PolicyError(
+        "Discord announcement subscription changes are disabled by connector configuration",
+      )
+    }
+    if (this.#announcementSubscriptionSourceChannelIds.size === 0) {
+      throw new PolicyError(
+        "Discord announcement subscriptions require an explicit source-channel allowlist",
+      )
+    }
+    if (!this.#announcementSubscriptionSourceChannelIds.has(channelId)) {
+      throw new PolicyError(
+        `Discord channel ${channelId} is outside the announcement-subscription source scope`,
+      )
+    }
+  }
+
+  assertAnnouncementSubscriptionSourceChangeable(channel: DiscordChannel): string {
+    this.assertAnnouncementSubscriptionSourceIdChangeable(channel.id)
+    const guildId = this.assertChannelReadable(channel)
+    if (channel.type !== DISCORD_CHANNEL_TYPES.announcement) {
+      throw new PolicyError(
+        "Discord announcement subscription sources must be direct guild announcement channels",
       )
     }
     return guildId

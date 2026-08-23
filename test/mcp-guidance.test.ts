@@ -156,6 +156,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 
 interface GuidanceCalls {
   activity: number
+  announcementSubscriptions: number
   automod: number
   bans: number
   channelAccess: number
@@ -201,6 +202,7 @@ function guidanceService(options: {
 } {
   const calls: GuidanceCalls = {
     activity: 0,
+    announcementSubscriptions: 0,
     automod: 0,
     bans: 0,
     channelAccess: 0,
@@ -297,6 +299,7 @@ function guidanceService(options: {
       }
     },
     executeAnnouncementCrosspost: unexpected,
+    executeAnnouncementSubscription: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
@@ -320,6 +323,7 @@ function guidanceService(options: {
     executeWebhookCreation: unexpected,
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
+    planAnnouncementSubscription: unexpected,
     planNativeInteractionCommand: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
@@ -1161,6 +1165,10 @@ function guidanceService(options: {
         administrationGuildIds: [],
         announcementCrosspostChannelIds: [],
         announcementCrosspostsEnabled: false,
+        announcementSubscriptionAuditEnabled: false,
+        announcementSubscriptionChangesEnabled: false,
+        announcementSubscriptionSourceChannelIds: [],
+        announcementSubscriptionTargetChannelIds: [],
         allowedChannelIds: [CHANNEL_ID],
         allowedGuildIds: [GUILD_ID],
         attachmentChannelIds: [],
@@ -1640,6 +1648,61 @@ function guidanceService(options: {
         }],
       }
     },
+    async listAnnouncementSubscriptions(targetChannelId) {
+      calls.announcementSubscriptions += 1
+      calls.lastChannelId = targetChannelId
+      const subscription = {
+        createdAt: "2016-10-17T18:21:34.577Z",
+        sourceChannelId: SECOND_CHANNEL_ID,
+        sourceGuildId: GUILD_ID,
+        sourceIdentity: "available" as const,
+        type: "channel-follower" as const,
+        webhookId: WEBHOOK_ID,
+      }
+      return {
+        privacy: {
+          credentialsProjectedOut: true,
+          messageDataAccessed: false,
+          omittedFields: [
+            "applicationMetadata",
+            "creatorProfile",
+            "followerSourceChannelName",
+            "followerSourceGuildIcon",
+            "followerSourceGuildName",
+            "messageData",
+            "unrelatedWebhookIdentifiers",
+            "unknownRawFields",
+            "webhookAvatar",
+            "webhookName",
+            "webhookToken",
+            "webhookUrl",
+          ],
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        target: {
+          channel: webhookChannel(targetChannelId),
+          guild: { id: GUILD_ID, name: "Private guild name" },
+          inventory: {
+            channelFollowers: 1,
+            safetyLimit: 15,
+            totalWebhooks: 1,
+          },
+          permission: {
+            administrator: false,
+            confidence: "complete" as const,
+            effectivePermissions: (
+              DISCORD_PERMISSIONS.VIEW_CHANNEL
+              | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+            ).toString(),
+            manageWebhooks: true,
+            permissionSourceChannelId: targetChannelId,
+            viewChannel: true as const,
+          },
+          subscriptions: [subscription],
+        },
+      }
+    },
     async listGuilds() {
       calls.guilds += 1
       return {
@@ -1781,6 +1844,7 @@ async function connectedFixture(
 
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
+    + calls.announcementSubscriptions
     + calls.automod
     + calls.bans
     + calls.channelAccess
@@ -1877,6 +1941,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelAccess,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAccess,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelAnnouncementSubscriptions,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAnnouncementSubscriptions,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelForumTags,
@@ -2015,6 +2083,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Deletion usage is unavailable and explicit/)
   assert.match(safety.text, /exact thread plus starter-message readback/)
   assert.match(safety.text, /permission-overwrite inventory is read-only/)
+  assert.match(safety.text, /Announcement subscriptions separate exact source and target allowlists/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
   assert.match(safety.text, /survive process restarts/)
   assert.match(safety.text, /claim both guild role and channel collections/)
@@ -2186,6 +2255,32 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     (webhookData.privacy as Record<string, unknown>).credentialsProjectedOut,
     true,
   )
+
+  const announcementSubscriptions = await readJsonResource(
+    client,
+    `discord://channels/${CHANNEL_ID}/announcement-subscriptions`,
+  )
+  const announcementSubscriptionData = announcementSubscriptions.value.data as Record<string, unknown>
+  const announcementSubscriptionTarget = announcementSubscriptionData.target as Record<string, unknown>
+  const subscriptions = announcementSubscriptionTarget.subscriptions as Array<Record<string, unknown>>
+  assert.deepEqual(Object.keys(subscriptions[0] || {}).sort(), [
+    "createdAt",
+    "sourceChannelId",
+    "sourceGuildId",
+    "sourceIdentity",
+    "type",
+    "webhookId",
+  ])
+  assert.equal(subscriptions[0]?.sourceChannelId, SECOND_CHANNEL_ID)
+  assert.equal(
+    (announcementSubscriptionData.privacy as Record<string, unknown>)
+      .messageDataAccessed,
+    false,
+  )
+  assert.equal("token" in (subscriptions[0] || {}), false)
+  assert.equal("url" in (subscriptions[0] || {}), false)
+  assert.equal("creator" in (subscriptions[0] || {}), false)
+  assert.equal("webhooks" in announcementSubscriptionTarget, false)
 
   const integrations = await readJsonResource(
     client,
@@ -2569,6 +2664,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.doesNotMatch(reactions.text, new RegExp(TOKEN))
 
   assert.equal(calls.guilds, 1)
+  assert.equal(calls.announcementSubscriptions, 1)
   assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.integrations, 1)
   assert.equal(calls.invites, 1)
@@ -2652,6 +2748,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
   await assert.rejects(
     () => malformed.client.readResource({
       uri: "discord://channels/not-a-snowflake/webhooks",
+    }),
+    /channelId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: "discord://channels/not-a-snowflake/announcement-subscriptions",
     }),
     /channelId must be a Discord snowflake ID/,
   )
@@ -2884,6 +2986,38 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   )
   assert.match(announcementCrosspost, /Message Content intent/)
   assert.match(announcementCrosspost, /unknown follower fanout/)
+
+  const announcementSubscription = promptText(await client.getPrompt({
+    arguments: {
+      action: "subscribe",
+      auditReason: "Reviewed announcement delivery",
+      operationKey: OPERATION_KEY,
+      sourceChannelId: SECOND_CHANNEL_ID,
+      targetChannelId: CHANNEL_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewAnnouncementSubscription,
+  }))
+  assert.deepEqual(
+    JSON.parse(announcementSubscription.split("\n")[1] || ""),
+    {
+      action: "subscribe",
+      auditReason: "Reviewed announcement delivery",
+      operationKey: OPERATION_KEY,
+      sourceChannelId: SECOND_CHANNEL_ID,
+      targetChannelId: CHANNEL_ID,
+    },
+  )
+  assert.match(
+    announcementSubscription,
+    /Call only plan_announcement_subscription/,
+  )
+  assert.match(
+    announcementSubscription,
+    /Do not call execute_announcement_subscription/,
+  )
+  assert.match(announcementSubscription, /aggregate target capacity/)
+  assert.match(announcementSubscription, /different webhook ID/)
+  assert.match(announcementSubscription, /accesses no message data/)
 
   const webhookCreation = promptText(await client.getPrompt({
     arguments: {
@@ -4039,6 +4173,26 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewMessagePin,
+    },
+    {
+      arguments: {
+        action: "subscribe",
+        auditReason: "Reviewed announcement delivery",
+        operationKey: OPERATION_KEY,
+        targetChannelId: CHANNEL_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewAnnouncementSubscription,
+    },
+    {
+      arguments: {
+        action: "unsubscribe",
+        auditReason: "Reviewed announcement removal",
+        operationKey: OPERATION_KEY,
+        sourceChannelId: SECOND_CHANNEL_ID,
+        targetChannelId: CHANNEL_ID,
+        webhookId: WEBHOOK_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewAnnouncementSubscription,
     },
     {
       arguments: {

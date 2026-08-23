@@ -38,6 +38,7 @@ const MCP_DISCOVERY_DETAILS = [
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
 type McpToolWorkflow =
   | "announcement-crosspost"
+  | "announcement-subscription"
   | "attachment-message"
   | "automod-change"
   | "channel-creation"
@@ -128,6 +129,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["announcement", "crosspost", "execute", "message", "publish"],
     toolset: "announcement-crossposts",
     workflow: "announcement-crosspost",
+  },
+  execute_announcement_subscription: {
+    keywords: ["announcement", "execute", "follow", "subscribe", "unsubscribe", "webhook"],
+    toolset: "announcement-subscriptions",
+    workflow: "announcement-subscription",
   },
   execute_channel_creation: {
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
@@ -496,6 +502,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "channel", "integration", "inventory", "list", "webhook"],
     toolset: "webhooks",
   },
+  list_announcement_subscriptions: {
+    keywords: ["announcement", "audit", "follow", "inventory", "list", "subscription"],
+    toolset: "announcement-subscriptions",
+  },
   plan_member_moderation: {
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
@@ -520,6 +530,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["announcement", "crosspost", "message", "plan", "publish", "review"],
     toolset: "announcement-crossposts",
     workflow: "announcement-crosspost",
+  },
+  plan_announcement_subscription: {
+    keywords: ["announcement", "follow", "plan", "review", "subscribe", "unsubscribe", "webhook"],
+    toolset: "announcement-subscriptions",
+    workflow: "announcement-subscription",
   },
   plan_attachment_message: {
     keywords: ["attachment", "file", "message", "plan", "review", "upload"],

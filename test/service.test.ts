@@ -78,6 +78,7 @@ const CREATED_ROLE_ID = "700000000000000001"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
+const FOLLOWER_WEBHOOK_ID = "900000000000000002"
 const INTEGRATION_ID = "905000000000000001"
 const INTEGRATION_APPLICATION_ID = "905000000000000002"
 const INTEGRATION_BOT_ID = "905000000000000003"
@@ -305,6 +306,9 @@ function serviceFixture(overrides: {
     async bulkDeleteMessages() {},
     async crosspostMessage() {
       throw new Error("unexpected")
+    },
+    async followAnnouncementChannel() {
+      throw new Error("Unexpected announcement subscription")
     },
     async createGuildBan() {},
     async createGuildApplicationCommand() {
@@ -1144,15 +1148,30 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         )]
       },
       async listChannelWebhooks(): Promise<DiscordWebhookSummary[]> {
-        return [{
-          applicationId: null,
-          channelId: CHANNEL_ID,
-          creatorUserId: BOT_ID,
-          guildId: GUILD_ID,
-          id: WEBHOOK_ID,
-          name: "reviewed-hook",
-          type: 1,
-        }]
+        return [
+          {
+            applicationId: null,
+            channelId: CHANNEL_ID,
+            creatorUserId: BOT_ID,
+            guildId: GUILD_ID,
+            id: WEBHOOK_ID,
+            name: "reviewed-hook",
+            sourceChannelId: null,
+            sourceGuildId: null,
+            type: 1,
+          },
+          {
+            applicationId: null,
+            channelId: CHANNEL_ID,
+            creatorUserId: null,
+            guildId: GUILD_ID,
+            id: FOLLOWER_WEBHOOK_ID,
+            name: "followed-announcements",
+            sourceChannelId: OTHER_CHANNEL_ID,
+            sourceGuildId: OTHER_GUILD_ID,
+            type: 2,
+          },
+        ]
       },
       async listGuildIntegrations(): Promise<DiscordGuildIntegrationSummary[]> {
         return [{
@@ -1190,12 +1209,15 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ALLOW_DELETIONS: "true",
+      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
       DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
@@ -1347,6 +1369,20 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     messageId: MESSAGE_ID,
     operationKey,
   }, digest))
+  const announcementSubscriptionRequest = {
+    action: "unsubscribe" as const,
+    auditReason: "reviewed",
+    operationKey,
+    targetChannelId: CHANNEL_ID,
+    webhookId: FOLLOWER_WEBHOOK_ID,
+  }
+  const announcementSubscriptionPlan = await service.planAnnouncementSubscription(
+    announcementSubscriptionRequest,
+  )
+  await captured(() => service.executeAnnouncementSubscription(
+    announcementSubscriptionRequest,
+    announcementSubscriptionPlan.digest,
+  ))
   await captured(() => service.executeOnboardingChange({
     auditReason: "reviewed",
     defaultChannelIds: [],
@@ -1471,13 +1507,18 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 32)
+  assert.equal(byKind.size, 33)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
       "announcement-crosspost": [
         { id: CHANNEL_ID, kind: "channel" },
         { id: MESSAGE_ID, kind: "message" },
+      ],
+      "announcement-subscription": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
+        { id: FOLLOWER_WEBHOOK_ID, kind: "webhook" },
       ],
       "attachment-message": [{ id: CHANNEL_ID, kind: "channel" }],
       "component-message": [{ id: CHANNEL_ID, kind: "channel" }],
@@ -1599,6 +1640,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     assert.equal(entry.operationKeyHash, operationKeyHash(operationKey))
     const expectedDigest = entry.kind === "integration-deletion"
       ? integrationPlan.digest
+      : entry.kind === "announcement-subscription"
+        ? announcementSubscriptionPlan.digest
       : entry.kind === "webhook-deletion"
         ? webhookPlan.digest
         : entry.kind === "webhook-creation"
@@ -1622,7 +1665,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 32)
+  assert.equal(writeCoordinator.intents.length, 33)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -1903,6 +1946,8 @@ test("service verifies identity through credential-safe webhook administration",
     guildId: GUILD_ID,
     id: WEBHOOK_ID,
     name: "reviewed-hook",
+    sourceChannelId: null,
+    sourceGuildId: null,
     type: 1,
   }]
   let deleteCalls = 0

@@ -649,6 +649,42 @@ export class WebhookEvidenceError extends Error {
   override name = "WebhookEvidenceError"
 }
 
+export class AnnouncementSubscriptionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord announcement subscription snapshot does not match the reviewed plan")
+    this.name = "AnnouncementSubscriptionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class AnnouncementSubscriptionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord announcement subscription operation key has already been reserved")
+    this.name = "AnnouncementSubscriptionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class AnnouncementSubscriptionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AnnouncementSubscriptionExecutionError"
+    this.result = result
+  }
+}
+
+export class AnnouncementSubscriptionEvidenceError extends Error {
+  override name = "AnnouncementSubscriptionEvidenceError"
+}
+
 export class IntegrationDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

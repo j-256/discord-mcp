@@ -36,10 +36,14 @@ import {
 export interface ConnectorConfig {
   adminGuildIds: ReadonlySet<string>
   announcementCrosspostChannelIds: ReadonlySet<string>
+  announcementSubscriptionSourceChannelIds: ReadonlySet<string>
+  announcementSubscriptionTargetChannelIds: ReadonlySet<string>
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
   allowAnnouncementCrossposts: boolean
+  allowAnnouncementSubscriptionAudit: boolean
+  allowAnnouncementSubscriptionChanges: boolean
   allowAttachments: boolean
   allowAutomodAudit: boolean
   allowAutomodChanges: boolean
@@ -358,6 +362,14 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.announcementCrosspostChannelIds],
     ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
   )
+  const announcementSubscriptionSourceChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds],
+    ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
+  )
+  const announcementSubscriptionTargetChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds],
+    ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds,
+  )
   const automodAlertChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.automodAlertChannelIds],
     ENVIRONMENT_NAMES.automodAlertChannelIds,
@@ -575,6 +587,14 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
     [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
     [ENVIRONMENT_NAMES.reactionChannelIds, reactionChannelIds],
+    [
+      ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
+      announcementSubscriptionSourceChannelIds,
+    ],
+    [
+      ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds,
+      announcementSubscriptionTargetChannelIds,
+    ],
     [ENVIRONMENT_NAMES.stageChannelIds, stageChannelIds],
     [ENVIRONMENT_NAMES.threadParentIds, threadParentIds],
     [ENVIRONMENT_NAMES.threadIds, threadIds],
@@ -698,6 +718,19 @@ export function loadConnectorConfig(
   ) {
     throw new ConfigurationError(
       `Enabling webhook creation, changes, or deletion requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
+    )
+  }
+  const allowAnnouncementSubscriptionAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit],
+    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit,
+  )
+  const allowAnnouncementSubscriptionChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges],
+    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges,
+  )
+  if (allowAnnouncementSubscriptionChanges && !allowAnnouncementSubscriptionAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges} requires ${ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit}`,
     )
   }
   const allowInviteAudit = parseBoolean(
@@ -912,6 +945,8 @@ export function loadConnectorConfig(
   return {
     adminGuildIds,
     announcementCrosspostChannelIds,
+    announcementSubscriptionSourceChannelIds,
+    announcementSubscriptionTargetChannelIds,
     allowedChannelIds,
     allowedGuildIds,
     allowAdministration: parseBoolean(
@@ -922,6 +957,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowAnnouncementCrossposts],
       ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
     ),
+    allowAnnouncementSubscriptionAudit,
+    allowAnnouncementSubscriptionChanges,
     allowAttachments: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowAttachments],
       ENVIRONMENT_NAMES.allowAttachments,

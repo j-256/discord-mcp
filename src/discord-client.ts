@@ -272,7 +272,14 @@ export interface DiscordWebhookSummary {
   guildId: string | null
   id: string
   name: string | null
+  sourceChannelId: string | null
+  sourceGuildId: string | null
   type: number
+}
+
+export interface DiscordFollowedChannel {
+  sourceChannelId: string
+  webhookId: string
 }
 
 export interface CreateWebhookInput {
@@ -1219,6 +1226,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_guild_sticker",
   "delete_guild_template",
   "delete_guild_integration",
+  "delete_webhook",
   "delete_stage_instance",
   "delete_all_message_reactions",
   "delete_all_message_reactions_for_emoji",
@@ -1226,6 +1234,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_user_reaction",
   "edit_component_message",
   "edit_original_interaction_response",
+  "follow_announcement_channel",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_forum_tags",
@@ -2565,6 +2574,8 @@ function projectWebhook(value: unknown): DiscordWebhookSummary {
   ) {
     throw new WebhookEvidenceError("Discord returned an invalid webhook object")
   }
+  let sourceChannelId: string | null = null
+  let sourceGuildId: string | null = null
   try {
     assertPositiveSnowflake(record.id, "Discord webhook ID")
     if (typeof record.guild_id === "string") {
@@ -2592,6 +2603,35 @@ function projectWebhook(value: unknown): DiscordWebhookSummary {
       }
       assertValidUnicode(record.name, "Discord webhook name")
     }
+    if (record.type === 2) {
+      const sourceChannel = record.source_channel
+      const sourceGuild = record.source_guild
+      const sourceUnavailable = sourceChannel === undefined && sourceGuild === undefined
+      if (!sourceUnavailable) {
+        if (
+          !sourceChannel
+          || typeof sourceChannel !== "object"
+          || Array.isArray(sourceChannel)
+          || typeof (sourceChannel as Record<string, unknown>).id !== "string"
+          || !sourceGuild
+          || typeof sourceGuild !== "object"
+          || Array.isArray(sourceGuild)
+          || typeof (sourceGuild as Record<string, unknown>).id !== "string"
+        ) {
+          throw new RangeError("Discord Channel Follower source identity is invalid")
+        }
+        sourceChannelId = (sourceChannel as Record<string, unknown>).id as string
+        sourceGuildId = (sourceGuild as Record<string, unknown>).id as string
+        assertPositiveSnowflake(
+          sourceChannelId,
+          "Discord Channel Follower source channel ID",
+        )
+        assertPositiveSnowflake(
+          sourceGuildId,
+          "Discord Channel Follower source guild ID",
+        )
+      }
+    }
   } catch (error) {
     throw new WebhookEvidenceError("Discord returned an invalid webhook object", {
       cause: error,
@@ -2608,7 +2648,43 @@ function projectWebhook(value: unknown): DiscordWebhookSummary {
     guildId: typeof record.guild_id === "string" ? record.guild_id : null,
     id: record.id,
     name: record.name,
+    sourceChannelId,
+    sourceGuildId,
     type: record.type as number,
+  }
+}
+
+function projectFollowedChannel(
+  value: unknown,
+  sourceChannelId: string,
+): DiscordFollowedChannel {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WebhookEvidenceError("Discord returned an invalid followed-channel object")
+  }
+  const record = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(record, ["channel_id", "webhook_id"])
+    || typeof record.channel_id !== "string"
+    || typeof record.webhook_id !== "string"
+  ) {
+    throw new WebhookEvidenceError("Discord returned an invalid followed-channel object")
+  }
+  try {
+    assertPositiveSnowflake(record.channel_id, "Discord followed source channel ID")
+    assertPositiveSnowflake(record.webhook_id, "Discord followed target webhook ID")
+  } catch (error) {
+    throw new WebhookEvidenceError("Discord returned an invalid followed-channel object", {
+      cause: error,
+    })
+  }
+  if (record.channel_id !== sourceChannelId) {
+    throw new WebhookEvidenceError(
+      "Discord returned a followed-channel object for another source channel",
+    )
+  }
+  return {
+    sourceChannelId: record.channel_id,
+    webhookId: record.webhook_id,
   }
 }
 
@@ -8789,6 +8865,37 @@ export class DiscordClient {
     return projectCreatedWebhook(response, channelId)
   }
 
+  async followAnnouncementChannel(
+    sourceChannelId: string,
+    targetChannelId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordFollowedChannel> {
+    assertPositiveSnowflake(
+      sourceChannelId,
+      "Discord announcement source channel ID",
+    )
+    assertPositiveSnowflake(
+      targetChannelId,
+      "Discord announcement target channel ID",
+    )
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "follow_announcement_channel",
+      `/channels/${sourceChannelId}/followers`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { webhook_channel_id: targetChannelId },
+        diagnosticRoute: "/channels/{channel.id}/followers",
+        expectedSuccessStatus: 200,
+        suppressFailureCause: true,
+      },
+    )
+    return projectFollowedChannel(response, sourceChannelId)
+  }
+
   async modifyWebhook(
     webhookId: string,
     input: ModifyWebhookInput,
@@ -8896,6 +9003,9 @@ export class DiscordClient {
       ...options,
       auditReason,
       automaticRateLimitRetry: false,
+      diagnosticRoute: "/webhooks/{webhook.id}",
+      expectedSuccessStatus: 204,
+      suppressFailureCause: true,
     })
   }
 

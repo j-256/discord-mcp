@@ -83,6 +83,8 @@ function webhook(
     guildId: GUILD_ID,
     id,
     name,
+    sourceChannelId: null,
+    sourceGuildId: null,
     type: 1,
     ...overrides,
   }

@@ -42,12 +42,14 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 12
+export const OPERATOR_REPORT_SCHEMA_VERSION = 13
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
   announcementCrosspostPolicy: "announcement-crosspost-policy",
+  announcementSubscriptionAuditPolicy: "announcement-subscription-audit-policy",
+  announcementSubscriptionChangePolicy: "announcement-subscription-change-policy",
   applicationIdentity: "application-identity",
   attachmentPolicy: "attachment-policy",
   automodAuditPolicy: "automod-audit-policy",
@@ -267,6 +269,18 @@ function policyWarnings(config: ConnectorConfig): string[] {
     && config.announcementCrosspostChannelIds.size === 0
   ) {
     warnings.push("The announcement-crosspost toggle is enabled but crossposting remains blocked because no exact announcement-channel allowlist is configured")
+  }
+  if (
+    config.allowAnnouncementSubscriptionAudit
+    && config.announcementSubscriptionTargetChannelIds.size === 0
+  ) {
+    warnings.push("The announcement-subscription audit toggle is enabled but audit remains blocked because no exact target-channel allowlist is configured")
+  }
+  if (
+    config.allowAnnouncementSubscriptionChanges
+    && config.announcementSubscriptionSourceChannelIds.size === 0
+  ) {
+    warnings.push("Announcement-subscription changes are enabled without a source-channel allowlist, so exact-ID unsubscription remains available but new subscriptions are blocked")
   }
   if (config.allowPinManagement && config.pinChannelIds.size === 0) {
     warnings.push("The message-pin toggle is enabled but pin management remains blocked because no pin-channel allowlist is configured")
@@ -562,6 +576,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowAnnouncementCrossposts,
       "announcement-crossposts",
       "Announcement crossposts",
+    ],
+    [
+      config.allowAnnouncementSubscriptionAudit
+        || config.allowAnnouncementSubscriptionChanges,
+      "announcement-subscriptions",
+      "Announcement-subscription audit and reviewed changes",
     ],
     [
       config.allowPollAudit
@@ -965,6 +985,50 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
         "pass",
         `Reviewed announcement crossposts are constrained to ${config.announcementCrosspostChannelIds.size} exact channels with authorship-sensitive permission proof, one-shot execution, and strict response plus readback verification`,
+      ))
+    }
+    if (!config.allowAnnouncementSubscriptionAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionAuditPolicy,
+        "pass",
+        "Announcement-subscription audit is disabled",
+      ))
+    } else if (config.announcementSubscriptionTargetChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionAuditPolicy,
+        "warn",
+        "Announcement-subscription audit is enabled, but the required exact target-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionAuditPolicy,
+        "pass",
+        `Announcement-subscription audit is constrained to ${config.announcementSubscriptionTargetChannelIds.size} exact target channels with aggregate capacity, exact Channel Follower subscriptions, source IDs only when available inside local read scope, unrelated webhook IDs omitted, complete VIEW_CHANNEL and MANAGE_WEBHOOKS evidence, and no message access`,
+      ))
+    }
+    if (!config.allowAnnouncementSubscriptionChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionChangePolicy,
+        "pass",
+        "Reviewed announcement-subscription changes are disabled",
+      ))
+    } else if (config.announcementSubscriptionTargetChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionChangePolicy,
+        "warn",
+        "Announcement-subscription changes are enabled, but the required exact target-channel allowlist is empty",
+      ))
+    } else if (config.announcementSubscriptionSourceChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionChangePolicy,
+        "warn",
+        `Exact-ID unsubscription is constrained to ${config.announcementSubscriptionTargetChannelIds.size} target channels, but new subscriptions remain blocked because the source-channel allowlist is empty`,
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.announcementSubscriptionChangePolicy,
+        "pass",
+        `Reviewed subscription changes are constrained to ${config.announcementSubscriptionSourceChannelIds.size} exact announcement sources and ${config.announcementSubscriptionTargetChannelIds.size} exact text targets with duplicate and capacity checks, signed approval, one non-retried mutation, exact inventory readback, and uncertainty quarantine`,
       ))
     }
     if (!config.allowPollAudit) {
@@ -2060,6 +2124,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.pinChannelIds,
     ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
     ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
+    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit,
+    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges,
+    ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
+    ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds,
     ENVIRONMENT_NAMES.allowPollAudit,
     ENVIRONMENT_NAMES.allowPollVoterAudit,
     ENVIRONMENT_NAMES.allowPollCreation,

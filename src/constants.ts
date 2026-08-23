@@ -25,6 +25,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 export const MCP_TOOLSET_NAMES = [
   "activity",
   "announcement-crossposts",
+  "announcement-subscriptions",
   "attachments",
   "audit-logs",
   "automod",
@@ -81,10 +82,14 @@ export type ForumTagAction = typeof FORUM_TAG_ACTIONS[number]
 export const ENVIRONMENT_NAMES = Object.freeze({
   adminGuildIds: "DISCORD_MCP_ADMIN_GUILD_IDS",
   announcementCrosspostChannelIds: "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
+  announcementSubscriptionSourceChannelIds: "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS",
+  announcementSubscriptionTargetChannelIds: "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS",
   allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
   allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
   allowAdministration: "DISCORD_MCP_ALLOW_ADMINISTRATION",
   allowAnnouncementCrossposts: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
+  allowAnnouncementSubscriptionAudit: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT",
+  allowAnnouncementSubscriptionChanges: "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES",
   allowAttachments: "DISCORD_MCP_ALLOW_ATTACHMENTS",
   allowAutomodAudit: "DISCORD_MCP_ALLOW_AUTOMOD_AUDIT",
   allowAutomodChanges: "DISCORD_MCP_ALLOW_AUTOMOD_CHANGES",

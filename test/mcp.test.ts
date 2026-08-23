@@ -31,6 +31,10 @@ import type {
   AnnouncementCrosspostRequest,
 } from "../src/announcement-crosspost-service.js"
 import type {
+  AnnouncementSubscriptionPlan,
+  AnnouncementSubscriptionRequest,
+} from "../src/announcement-subscription-service.js"
+import type {
   AttachmentMessagePlan,
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
@@ -185,6 +189,8 @@ import {
   AdministrationExecutionError,
   AnnouncementCrosspostExecutionError,
   AnnouncementCrosspostOperationConflictError,
+  AnnouncementSubscriptionExecutionError,
+  AnnouncementSubscriptionOperationConflictError,
   AttachmentMessageExecutionError,
   AttachmentMessageOperationConflictError,
   AutoModerationExecutionError,
@@ -342,6 +348,9 @@ const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const REACTION_MODERATION_OPERATION_KEY = "reaction-moderation-attempt-0001"
 const ANNOUNCEMENT_CROSSPOST_OPERATION_KEY = "announcement-crosspost-attempt-0001"
+const ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY = "announcement-subscription-attempt-0001"
+const ANNOUNCEMENT_SOURCE_CHANNEL_ID = "200000000000000003"
+const ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID = "370000000000000002"
 const NATIVE_INTERACTION_COMMAND_OPERATION_KEY = "native-command-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
 const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
@@ -652,6 +661,90 @@ function announcementCrosspostPlan(
     status: action === "none" ? "already-crossposted" : "planned",
     target: { crossposted: true },
     warnings: ["Follower destinations are unavailable"],
+  }
+}
+
+function announcementSubscriptionPlan(
+  request: AnnouncementSubscriptionRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): AnnouncementSubscriptionPlan {
+  const subscription = {
+    createdAt: "2016-11-14T12:33:47.137Z",
+    sourceChannelId: request.action === "subscribe"
+      ? request.sourceChannelId
+      : ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    sourceGuildId: GUILD_ID,
+    sourceIdentity: "available" as const,
+    type: "channel-follower" as const,
+    webhookId: ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
+  }
+  const current = request.action === "unsubscribe" || !writeRequired
+    ? subscription
+    : null
+  const target = {
+    channel: webhookChannel(request.targetChannelId),
+    guild: { id: GUILD_ID, name: "Private target guild" },
+    inventory: {
+      channelFollowers: current ? 1 : 0,
+      safetyLimit: 15,
+      totalWebhooks: current ? 1 : 0,
+    },
+    permission: webhookPermission(request.targetChannelId),
+    subscriptions: current ? [subscription] : [],
+  }
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    current,
+    desired: { subscribed: request.action === "subscribe" },
+    digest,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: {
+      credentialsProjectedOut: true,
+      messageDataAccessed: false,
+      omittedFields: [
+        "applicationMetadata",
+        "creatorProfile",
+        "followerSourceChannelName",
+        "followerSourceGuildIcon",
+        "followerSourceGuildName",
+        "messageData",
+        "unrelatedWebhookIdentifiers",
+        "unknownRawFields",
+        "webhookAvatar",
+        "webhookName",
+        "webhookToken",
+        "webhookUrl",
+      ],
+    },
+    risks: ["Future published announcements are delivered until removal"],
+    schemaVersion: 1,
+    source: request.action === "subscribe"
+      ? {
+          channel: {
+            ...webhookChannel(request.sourceChannelId),
+            type: 5,
+            typeName: "guild-announcement",
+          },
+          guild: { id: GUILD_ID, name: "Private source guild" },
+          permission: {
+            administrator: false,
+            confidence: "complete",
+            effectivePermissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+            manageWebhooks: false,
+            permissionSourceChannelId: request.sourceChannelId,
+            viewChannel: true,
+          },
+        }
+      : null,
+    status: writeRequired ? "planned" : "already-current",
+    target,
+    warnings: ["One-shot reviewed subscription change"],
+    writeRequired,
   }
 }
 
@@ -4076,6 +4169,10 @@ function fixturePolicy(): PolicyDescription {
     administrationGuildIds: [],
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
+    announcementSubscriptionAuditEnabled: false,
+    announcementSubscriptionChangesEnabled: false,
+    announcementSubscriptionSourceChannelIds: [],
+    announcementSubscriptionTargetChannelIds: [],
     allowedChannelIds: [],
     allowedGuildIds: [],
     attachmentChannelIds: [],
@@ -4206,6 +4303,9 @@ function serviceFixture(overrides: {
   announcementCrosspostAction?: "crosspost" | "none"
   announcementCrosspostError?: Error
   announcementCrosspostPlanDigest?: string
+  announcementSubscriptionError?: Error
+  announcementSubscriptionPlanDigest?: string
+  announcementSubscriptionWriteRequired?: boolean
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -4327,6 +4427,9 @@ function serviceFixture(overrides: {
     attachmentPlan: 0,
     announcementCrosspostExecute: 0,
     announcementCrosspostPlan: 0,
+    announcementSubscriptionExecute: 0,
+    announcementSubscriptionList: 0,
+    announcementSubscriptionPlan: 0,
     autoModerationExecute: 0,
     autoModerationGet: 0,
     autoModerationList: 0,
@@ -5395,6 +5498,22 @@ function serviceFixture(overrides: {
         webhooks: [projectedWebhook(channelId)],
       }
     },
+    async listAnnouncementSubscriptions(targetChannelId) {
+      calls.announcementSubscriptionList += 1
+      const planned = announcementSubscriptionPlan({
+        action: "subscribe",
+        auditReason: AUDIT_REASON,
+        operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+        sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+        targetChannelId,
+      }, DIGEST, false)
+      return {
+        privacy: planned.privacy,
+        schemaVersion: 1,
+        status: "ok",
+        target: planned.target,
+      }
+    },
     async planWebhookDeletion(request) {
       calls.webhookDeletionPlan += 1
       return webhookDeletionPlan(
@@ -5798,6 +5917,41 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: planned.action === "none" ? "already-crossposted" : "completed",
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
+      }
+    },
+    async executeAnnouncementSubscription(request, planDigest) {
+      if (overrides.announcementSubscriptionError) {
+        throw overrides.announcementSubscriptionError
+      }
+      calls.announcementSubscriptionExecute += 1
+      const writeRequired = overrides.announcementSubscriptionWriteRequired ?? true
+      const planned = announcementSubscriptionPlan(
+        request,
+        planDigest,
+        writeRequired,
+      )
+      return {
+        action: request.action,
+        activityId: writeRequired ? "activity-announcement-subscription" : null,
+        inventoryMatched: true,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: request.action === "subscribe" ? true : null,
+        schemaVersion: 1,
+        sourceChannelId: planned.current?.sourceChannelId
+          ?? planned.source?.channel.id
+          ?? null,
+        sourceGuildId: planned.current?.sourceGuildId
+          ?? planned.source?.guild.id
+          ?? null,
+        status: writeRequired ? "completed" : "already-current",
+        targetChannelId: request.targetChannelId,
+        targetGuildId: GUILD_ID,
+        verifiedAbsent: request.action === "unsubscribe",
+        webhookId: request.action === "unsubscribe"
+          ? request.webhookId
+          : ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
       }
     },
     async executePollCreation(request, planDigest) {
@@ -6672,6 +6826,14 @@ function serviceFixture(overrides: {
         overrides.announcementCrosspostAction,
       )
     },
+    async planAnnouncementSubscription(request) {
+      calls.announcementSubscriptionPlan += 1
+      return announcementSubscriptionPlan(
+        request,
+        overrides.announcementSubscriptionPlanDigest || DIGEST,
+        overrides.announcementSubscriptionWriteRequired ?? true,
+      )
+    },
     async planNativeInteractionCommand(request) {
       nativeInteractionCommandCalls.plan += 1
       return nativeInteractionCommandPlan(
@@ -7048,6 +7210,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_message_pin",
       "plan_announcement_crosspost",
       "execute_announcement_crosspost",
+      "list_announcement_subscriptions",
+      "plan_announcement_subscription",
+      "execute_announcement_subscription",
       "plan_native_interaction_command",
       "execute_native_interaction_command",
       "plan_guild_template_change",
@@ -7124,6 +7289,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const announcementCrosspost = result.tools.find((tool) => (
     tool.name === "execute_announcement_crosspost"
+  ))
+  const announcementSubscription = result.tools.find((tool) => (
+    tool.name === "execute_announcement_subscription"
   ))
   const nativeInteractionCommand = result.tools.find((tool) => (
     tool.name === "execute_native_interaction_command"
@@ -7210,6 +7378,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     })
   }
   assert.deepEqual(announcementCrosspost?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(announcementSubscription?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
     openWorldHint: true,
@@ -8004,6 +8178,46 @@ test("progressive discovery enables the complete reviewed announcement-crosspost
   )
 })
 
+test("progressive discovery keeps announcement audit separate from the reviewed change pair", async (context) => {
+  const audit = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+  const auditDiscovery = structuredContent(await audit.client.callTool({
+    arguments: { query: "list_announcement_subscriptions" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(auditDiscovery.newlyEnabledToolNames, [
+    "list_announcement_subscriptions",
+  ])
+  assert.deepEqual(
+    (await audit.client.listTools()).tools.map(({ name }) => name),
+    ["list_announcement_subscriptions", "discover_discord_tools"],
+  )
+
+  const reviewed = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await reviewed.client.callTool({
+    arguments: { query: "execute_announcement_subscription" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_announcement_subscription",
+    "plan_announcement_subscription",
+  ])
+  assert.deepEqual(
+    (await reviewed.client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_announcement_subscription",
+      "execute_announcement_subscription",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed poll-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -8492,6 +8706,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     administrationPlan: 0,
     announcementCrosspostExecute: 0,
     announcementCrosspostPlan: 0,
+    announcementSubscriptionExecute: 0,
+    announcementSubscriptionList: 0,
+    announcementSubscriptionPlan: 0,
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
@@ -10814,6 +11031,273 @@ test("MCP announcement crossposts expose uncertain and one-shot conflict outcome
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(ANNOUNCEMENT_CROSSPOST_OPERATION_KEY),
+  )
+})
+
+test("MCP announcement subscriptions expose exact audit and action-specific plans", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: { targetChannelId: CHANNEL_ID },
+    name: "list_announcement_subscriptions",
+  })
+  const subscribe = await client.callTool({
+    arguments: {
+      action: "subscribe",
+      auditReason: AUDIT_REASON,
+      operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+      sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+      targetChannelId: CHANNEL_ID,
+    },
+    name: "plan_announcement_subscription",
+  })
+  const unsubscribe = await client.callTool({
+    arguments: {
+      action: "unsubscribe",
+      auditReason: AUDIT_REASON,
+      operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+      targetChannelId: CHANNEL_ID,
+      webhookId: ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
+    },
+    name: "plan_announcement_subscription",
+  })
+  const mixedSubscribe = await client.callTool({
+    arguments: {
+      action: "subscribe",
+      auditReason: AUDIT_REASON,
+      operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+      sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+      targetChannelId: CHANNEL_ID,
+      webhookId: ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
+    },
+    name: "plan_announcement_subscription",
+  })
+  const mixedUnsubscribe = await client.callTool({
+    arguments: {
+      action: "unsubscribe",
+      auditReason: AUDIT_REASON,
+      operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+      sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+      targetChannelId: CHANNEL_ID,
+      webhookId: ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
+    },
+    name: "plan_announcement_subscription",
+  })
+
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal(
+    (structuredContent(listed).privacy as Record<string, unknown>).messageDataAccessed,
+    false,
+  )
+  assert.equal(structuredContent(subscribe).action, "subscribe")
+  assert.equal(structuredContent(unsubscribe).action, "unsubscribe")
+  assert.equal(mixedSubscribe.isError, true)
+  assert.equal(mixedUnsubscribe.isError, true)
+  assert.equal(calls.announcementSubscriptionList, 1)
+  assert.equal(calls.announcementSubscriptionPlan, 2)
+})
+
+test("MCP announcement subscription approval reviews minimized evidence while binding complete inventory", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "subscribe",
+      auditReason: AUDIT_REASON,
+      operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+      targetChannelId: CHANNEL_ID,
+    },
+    name: "execute_announcement_subscription",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.announcementSubscriptionPlan, 1)
+  assert.equal(calls.announcementSubscriptionExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(ANNOUNCEMENT_SOURCE_CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, /Target webhook inventory: 0 of 15/)
+  assert.match(confirmationMessage, /Target bot MANAGE_WEBHOOKS: true/)
+  assert.match(confirmationMessage, /Message data accessed: false/)
+  assert.match(confirmationMessage, /future published announcement/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY),
+  )
+})
+
+test("MCP announcement subscriptions skip exact no-ops and stop on refusal or drift", async (context) => {
+  const argumentsValue = {
+    action: "subscribe" as const,
+    auditReason: AUDIT_REASON,
+    operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+    planDigest: DIGEST,
+    sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    targetChannelId: CHANNEL_ID,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { announcementSubscriptionWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_announcement_subscription",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.announcementSubscriptionExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_announcement_subscription",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.announcementSubscriptionExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      announcementSubscriptionPlanDigest: DIFFERENT_DIGEST,
+    },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_announcement_subscription",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.announcementSubscriptionExecute, 0)
+})
+
+test("MCP announcement subscription signed state rejects action target changes", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    action: "subscribe" as const,
+    auditReason: AUDIT_REASON,
+    operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+    planDigest: DIGEST,
+    sourceChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    targetChannelId: CHANNEL_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_announcement_subscription",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, sourceChannelId: PARENT_ID },
+      inputResponses: {
+        confirm_announcement_subscription: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_announcement_subscription",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.announcementSubscriptionExecute, 0)
+})
+
+test("MCP announcement subscriptions expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    action: "unsubscribe" as const,
+    auditReason: AUDIT_REASON,
+    operationKey: ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY,
+    planDigest: DIGEST,
+    targetChannelId: CHANNEL_ID,
+    webhookId: ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      announcementSubscriptionError: new AnnouncementSubscriptionExecutionError(
+        "Discord announcement subscription outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_announcement_subscription",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-announcement-subscription",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+    webhookId: ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      announcementSubscriptionError:
+        new AnnouncementSubscriptionOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_announcement_subscription",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY),
   )
 })
 

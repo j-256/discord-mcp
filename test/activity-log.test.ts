@@ -13,6 +13,7 @@ import test from "node:test"
 import {
   JsonlActivityLog,
   type AnnouncementCrosspostActivity,
+  type AnnouncementSubscriptionActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
   type ChannelCreationActivity,
@@ -520,6 +521,35 @@ function announcementCrosspost(
     verification: status === "completed"
       ? "match"
       : null,
+  }
+}
+
+function announcementSubscription(
+  id: string,
+  status: AnnouncementSubscriptionActivity["status"],
+): AnnouncementSubscriptionActivity {
+  return {
+    action: "subscribe",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "announcement-subscription",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    sourceChannelId: "201",
+    sourceGuildId: "101",
+    status,
+    targetChannelId: "200",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+    webhookId: ["pending", "failed"].includes(status) ? null : "300",
   }
 }
 
@@ -1764,6 +1794,70 @@ test("JSONL activity log keeps announcement-crosspost evidence content-free", as
     JSON.stringify(result),
     /private author|private channel|private announcement|private-operation/,
   )
+})
+
+test("JSONL activity log keeps announcement-subscription evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-name",
+    "private-operation-key",
+    "private-webhook-name",
+    "private-webhook-token",
+    "private-webhook-url",
+  ]
+
+  await store.append(announcementSubscription("1", "pending"))
+  await store.append({
+    ...announcementSubscription("2", "completed"),
+    auditReason: privateValues[0],
+    channelName: privateValues[1],
+    operationKey: privateValues[2],
+    webhookName: privateValues[3],
+    webhookToken: privateValues[4],
+    webhookUrl: privateValues[5],
+  } as AnnouncementSubscriptionActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...announcementSubscription("3", "completed"),
+      sourceChannelId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "sourceChannelId",
+      "sourceGuildId",
+      "status",
+      "targetChannelId",
+      "timestamp",
+      "verification",
+      "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
 })
 
 test("JSONL activity log keeps native Interaction command and response evidence content-free", async (context) => {

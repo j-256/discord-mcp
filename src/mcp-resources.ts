@@ -241,6 +241,8 @@ export function registerDiscordResources(
           "Message pin listing uses Discord's current timestamp-paginated endpoint and persists nothing. Pin and unpin both require a separate exact channel allowlist and a review-first workflow that binds verified application and bot identity, exact message state, thread membership, complete message-read and PIN_MESSAGES permission evidence, audit reason, and one-shot key hash into a keyed plan. Execution requires fresh matching evidence, signed approval, durable reservation, pending content-free activity, one non-retried mutation, and exact state plus review-snapshot readback. The production facade acquires durable exact channel-and-message claims across connector processes sharing the activity-state root, and an uncertain outcome permanently spends the key and retains those claims for operator review.",
           "Announcement crossposts require a separate exact direct-channel allowlist and confirmed Message Content intent. Planning accepts only default messages in GUILD_ANNOUNCEMENT channels, rejects polls and forwarded references, binds exact identity, content-bearing message state, flags, roles, overwrites, and complete VIEW_CHANNEL, READ_MESSAGE_HISTORY, SEND_MESSAGES, plus authorship-sensitive MANAGE_MESSAGES evidence into a keyed plan, and warns that follower destinations are unavailable. Execution requires fresh matching evidence, signed approval, durable exact channel-and-message coordination, a one-shot reservation, pending content-free activity, one non-retried POST, only the expected CROSSPOSTED flag transition, and an exact fresh readback. Already-crossposted messages are record-free no-ops; uncertain outcomes retain durable claims for credential-free operator review. Message content, attachments, embeds, components, names, raw operation keys, responses, and transport causes are never persisted or exported.",
           "",
+          "Announcement subscriptions separate exact source and target allowlists from generic webhook administration. Audit exposes aggregate target capacity and exact Channel Follower subscriptions, with source IDs only when Discord exposes them and local read scope permits them, while omitting unrelated webhook identifiers, webhook and embedded source names, creator profiles, credentials, URLs, raw payloads, and all message data. Subscribe accepts one direct announcement source and one direct text target, supports explicitly scoped cross-guild delivery, fails closed on unavailable or policy-redacted existing source identity, duplicates, capacity, incomplete VIEW_CHANNEL or MANAGE_WEBHOOKS evidence, and becomes a record-free no-op when the exact subscription already exists. Unsubscribe accepts only one exact Channel Follower webhook ID from the target inventory, including a follower whose source identity is unavailable or redacted. Both changes require a fresh matching keyed plan that privately binds the complete target inventory, signed approval for an actual write, durable target and guild-inventory coordination, a one-shot reservation, pending content-free activity, one non-retried mutation, strict response validation where Discord returns state, and exact full-inventory readback. Uncertain outcomes retain durable claims for operator review; no workflow accesses message content, retries, rolls back, or persists names, reasons, raw operation keys, or credentials.",
+          "",
           "Channel permission-overwrite inventory is read-only, bounded, thread-inheritance aware, and persists nothing. Changes require a separate exact direct-channel allowlist and accept one exact role or member target with named allow, deny, or inherit deltas, or an explicit whole-overwrite delete. Planning preserves unspecified known channel bits, blocks unknown-bit or non-channel-bit updates, verifies the connector holds every outgoing permission, prevents loss of VIEW_CHANNEL or MANAGE_ROLES, and reports target effective-access plus parent synchronization impact. Execution requires a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried PUT or DELETE, and complete overwrite-set readback. Raw bitfields, bulk reset, copy, sync, thread mutation, retry, and rollback are unsupported.",
           "",
           "Webhook inventory requires a separate exact direct-channel allowlist and complete VIEW_CHANNEL plus MANAGE_WEBHOOKS evidence. Incoming webhook credentials, complete execution URLs, avatars, creator profiles, source guild and channel objects, unknown raw fields, and unrelated channel metadata are projected out before any result is built and are never persisted. Creation, rename or same-guild move, and deletion each require an independent action gate, a fresh keyed plan over complete source and destination evidence, signed approval for an actual write, durable one-shot reservation, pending content-free activity, one non-retried mutation, strict response validation, and exact complete-inventory readback. Creation validates and discards the returned credential inside the REST boundary. A verified no-op change skips confirmation and every durable write record, while a move preserves the existing credential and redirects future external deliveries. Discord's webhook-ID-only modify and delete routes leave a non-atomic external race that every plan exposes. The production facade acquires durable affected-channel, exact-webhook, and guild-collection claims across connector processes sharing the activity-state root, and an uncertain outcome permanently spends the key and retains those claims for operator review. Message delivery, credential-authenticated actions, token or execution-URL inputs, and guild-wide inventory remain intentionally absent.",
@@ -959,6 +961,31 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listChannelPermissionOverwrites(
+        templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelAnnouncementSubscriptions,
+    new ResourceTemplate(
+      MCP_RESOURCE_TEMPLATE_URIS.channelAnnouncementSubscriptions,
+      { list: undefined },
+    ),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Exact Channel Follower subscriptions and aggregate webhook capacity for one separately allowlisted direct Discord text channel. Source IDs outside local read scope are redacted; unrelated webhook identifiers, source names, creator profiles, credentials, execution URLs, raw fields, and all message data are omitted.",
+      mimeType: "application/json",
+      title: "Discord announcement subscriptions",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listAnnouncementSubscriptions(
         templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),

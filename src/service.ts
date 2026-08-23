@@ -10,6 +10,17 @@ import type {
   AnnouncementCrosspostServiceOptions,
 } from "./announcement-crosspost-service.js"
 import { AnnouncementCrosspostService } from "./announcement-crosspost-service.js"
+import type {
+  AnnouncementSubscriptionInventoryResult,
+  AnnouncementSubscriptionPlan,
+  AnnouncementSubscriptionRequest,
+  AnnouncementSubscriptionResult,
+  AnnouncementSubscriptionServiceOptions,
+} from "./announcement-subscription-service.js"
+import {
+  AnnouncementSubscriptionService,
+  normalizeAnnouncementSubscriptionRequest,
+} from "./announcement-subscription-service.js"
 import {
   GuildAuditLogService,
   type GetGuildAuditEntryOptions,
@@ -116,6 +127,7 @@ import type {
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
 import {
+  AnnouncementSubscriptionPlanChangedError,
   ConfigurationError,
   ComponentMessagePlanChangedError,
   DeletionPlanChangedError,
@@ -483,6 +495,7 @@ export interface DiscordServiceClient {
   createThreadFromMessage: DiscordClient["createThreadFromMessage"]
   createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
   createWebhook: DiscordClient["createWebhook"]
+  followAnnouncementChannel: DiscordClient["followAnnouncementChannel"]
   deleteAllMessageReactions: DiscordClient["deleteAllMessageReactions"]
   deleteAllMessageReactionsForEmoji: DiscordClient["deleteAllMessageReactionsForEmoji"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
@@ -602,6 +615,10 @@ export interface ConnectorServiceOptions {
   activityStore?: ActivityStore
   announcementCrosspostOptions?: Pick<
     AnnouncementCrosspostServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  announcementSubscriptionOptions?: Pick<
+    AnnouncementSubscriptionServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   attachmentMessageOptions?: Pick<
@@ -846,6 +863,7 @@ export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
   readonly #announcementCrosspostService: AnnouncementCrosspostService
+  readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
@@ -915,6 +933,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.announcementCrosspostOptions,
+    })
+    this.#announcementSubscriptionService = new AnnouncementSubscriptionService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.announcementSubscriptionOptions,
     })
     this.#nativeInteractionCommandService = new NativeInteractionCommandService({
       activityStore: this.#activityStore,
@@ -2011,6 +2036,41 @@ export class ConnectorService {
       identity.application.id,
       identity.bot.id,
       applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
+  async listAnnouncementSubscriptions(
+    targetChannelId: string,
+    options: RequestOptions = {},
+  ): Promise<AnnouncementSubscriptionInventoryResult> {
+    this.#policy.assertAnnouncementSubscriptionTargetIdAuditable(targetChannelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#announcementSubscriptionService.list(
+      identity.bot.id,
+      targetChannelId,
+      options,
+    )
+  }
+
+  async planAnnouncementSubscription(
+    request: AnnouncementSubscriptionRequest,
+    options: RequestOptions = {},
+  ): Promise<AnnouncementSubscriptionPlan> {
+    const normalized = normalizeAnnouncementSubscriptionRequest(request)
+    this.#policy.assertAnnouncementSubscriptionTargetIdChangeable(
+      normalized.targetChannelId,
+    )
+    if (normalized.action === "subscribe") {
+      this.#policy.assertAnnouncementSubscriptionSourceIdChangeable(
+        normalized.sourceChannelId,
+      )
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#announcementSubscriptionService.plan(
+      identity.application.id,
+      identity.bot.id,
       request,
       options,
     )
@@ -3217,6 +3277,69 @@ export class ConnectorService {
         identity.application.id,
         identity.bot.id,
         applicationMessageContentIntent(identity.application),
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeAnnouncementSubscription(
+    request: AnnouncementSubscriptionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<AnnouncementSubscriptionResult> {
+    const normalized = normalizeAnnouncementSubscriptionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord announcement subscription plan digest is invalid")
+    }
+    this.#policy.assertAnnouncementSubscriptionTargetIdChangeable(
+      normalized.targetChannelId,
+    )
+    if (normalized.action === "subscribe") {
+      this.#policy.assertAnnouncementSubscriptionSourceIdChangeable(
+        normalized.sourceChannelId,
+      )
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#announcementSubscriptionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new AnnouncementSubscriptionPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#announcementSubscriptionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    const targets = [
+      writeResourceTarget("channel", normalized.targetChannelId),
+      writeGuildCollectionTarget("webhooks", coordinationPlan.target.guild.id),
+    ]
+    if (normalized.action === "subscribe") {
+      targets.push(writeResourceTarget("channel", normalized.sourceChannelId))
+    } else {
+      targets.push(writeResourceTarget("webhook", normalized.webhookId))
+    }
+    return this.#coordinateWrite(
+      "announcement-subscription",
+      normalized.operationKey,
+      planDigest,
+      targets,
+      () => this.#announcementSubscriptionService.execute(
+        identity.application.id,
+        identity.bot.id,
         request,
         planDigest,
         options,

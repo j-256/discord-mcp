@@ -30,6 +30,7 @@ const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
+const SOURCE_CHANNEL_ID = "400000000000000002"
 const ROLE_ID = "500000000000000001"
 const INTEGRATION_ID = "600000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
@@ -71,6 +72,10 @@ function status(
       administrationGuildIds: [],
       announcementCrosspostChannelIds: [],
       announcementCrosspostsEnabled: false,
+      announcementSubscriptionAuditEnabled: false,
+      announcementSubscriptionChangesEnabled: false,
+      announcementSubscriptionSourceChannelIds: [],
+      announcementSubscriptionTargetChannelIds: [],
       allowedChannelIds: [CHANNEL_ID],
       allowedGuildIds: [GUILD_ID],
       attachmentChannelIds: [],
@@ -225,6 +230,7 @@ function toolService(): DiscordToolService {
     addReaction: unexpected,
     auditForumTags: unexpected,
     executeAnnouncementCrosspost: unexpected,
+    executeAnnouncementSubscription: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
@@ -248,6 +254,7 @@ function toolService(): DiscordToolService {
     executeWebhookCreation: unexpected,
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
+    planAnnouncementSubscription: unexpected,
     planNativeInteractionCommand: unexpected,
     getThreadMembership: unexpected,
     getThreadState: unexpected,
@@ -267,6 +274,7 @@ function toolService(): DiscordToolService {
     getGuildWelcomeScreen: unexpected,
     getGuildWidgetSettings: unexpected,
     listChannelWebhooks: unexpected,
+    listAnnouncementSubscriptions: unexpected,
     listGuildInvites: unexpected,
     listGuildExpressions: unexpected,
     listDefaultSoundboardSounds: unexpected,
@@ -1017,6 +1025,81 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
   for (const name of [
     "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
     "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
+test("doctor and setup explain announcement-subscription scope and review gates", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${SOURCE_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
+    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS: SOURCE_CHANNEL_ID,
+    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const auditWarning = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const changeWarningEnvironment = environment({
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
+    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const changeWarning = await diagnoseConnector({
+    environment: changeWarningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: changeWarningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.announcementSubscriptionAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.announcementSubscriptionChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /unrelated webhook IDs omitted/)
+  assert.match(audit?.summary || "", /no message access/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /duplicate and capacity checks/)
+  assert.match(changes?.summary || "", /one non-retried mutation/)
+  assert.equal(
+    auditWarning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.announcementSubscriptionAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    changeWarning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.announcementSubscriptionChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /source-channel allowlist/)
+  assert.match(omitted.warnings.join("\n"), /announcement-subscriptions toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT",
+    "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES",
+    "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS",
+    "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS",
   ]) {
     assert.equal(setup.launch.environment.forward.includes(name), true)
   }
@@ -2876,6 +2959,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "find_guild_members",
     "inspect_guild_ban",
     "review_announcement_crosspost",
+    "review_announcement_subscription",
     "review_attachment_message",
     "review_automod_change",
     "review_channel_creation",
@@ -2925,6 +3009,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://channels/{channelId}",
     "discord://channels/{channelId}/access",
+    "discord://channels/{channelId}/announcement-subscriptions",
     "discord://channels/{channelId}/forum-tags",
     "discord://channels/{channelId}/messages/{messageId}",
     "discord://channels/{channelId}/messages/{messageId}/reactions",
@@ -2956,6 +3041,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "delete_messages",
     "edit_own_message",
     "execute_announcement_crosspost",
+    "execute_announcement_subscription",
     "execute_automod_change",
     "execute_channel_metadata_change",
     "execute_channel_permission_overwrite",

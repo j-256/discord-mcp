@@ -591,6 +591,26 @@ export interface WebhookChangeActivity {
   webhookId: string
 }
 
+export type AnnouncementSubscriptionActivityStatus = WebhookDeletionActivityStatus
+
+export interface AnnouncementSubscriptionActivity {
+  action: "subscribe" | "unsubscribe"
+  error: string | null
+  guildId: string
+  id: string
+  kind: "announcement-subscription"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  sourceChannelId: string | null
+  sourceGuildId: string | null
+  status: AnnouncementSubscriptionActivityStatus
+  targetChannelId: string
+  timestamp: string
+  verification: "drift" | "match" | null
+  webhookId: string | null
+}
+
 export type IntegrationDeletionActivityStatus =
   | "completed"
   | "failed"
@@ -862,6 +882,7 @@ export interface ReactionModerationActivity {
 
 export type ActivityEntry =
   | AnnouncementCrosspostActivity
+  | AnnouncementSubscriptionActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
   | ChannelCreationActivity
@@ -2366,6 +2387,92 @@ function parseWebhookChangeActivity(
   }
 }
 
+function parseAnnouncementSubscriptionActivity(
+  value: unknown,
+): AnnouncementSubscriptionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const action = record.action
+  const sourceIdentityValid = (
+    record.sourceChannelId === null && record.sourceGuildId === null
+  ) || (
+    typeof record.sourceChannelId === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(record.sourceChannelId)
+    && typeof record.sourceGuildId === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(record.sourceGuildId)
+  )
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "announcement-subscription"
+    || !["subscribe", "unsubscribe"].includes(String(action))
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.targetChannelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.targetChannelId)
+    || !sourceIdentityValid
+    || (action === "subscribe" && record.sourceChannelId === null)
+    || !(record.webhookId === null || (
+      typeof record.webhookId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.webhookId)
+    ))
+    || (action === "unsubscribe" && record.webhookId === null)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+      || (action === "subscribe" && record.webhookId !== null)
+    ))
+    || (record.status === "completed" && (
+      record.verification !== "match"
+      || typeof record.webhookId !== "string"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.verification !== "drift"
+      || typeof record.webhookId !== "string"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    action: action as AnnouncementSubscriptionActivity["action"],
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "announcement-subscription",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    sourceChannelId: record.sourceChannelId as string | null,
+    sourceGuildId: record.sourceGuildId as string | null,
+    status: record.status as AnnouncementSubscriptionActivityStatus,
+    targetChannelId: record.targetChannelId,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+    webhookId: record.webhookId as string | null,
+  }
+}
+
 function parseIntegrationDeletionActivity(
   value: unknown,
 ): IntegrationDeletionActivity | undefined {
@@ -3480,6 +3587,7 @@ function parseStageInstanceActivity(
 
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAnnouncementCrosspostActivity(value)
+    || parseAnnouncementSubscriptionActivity(value)
     || parseNativeInteractionCommandActivity(value)
     || parseGuildTemplateActivity(value)
     || parseNativeInteractionActivity(value)
