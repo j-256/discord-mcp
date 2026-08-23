@@ -106,6 +106,9 @@ export interface PolicyDescription {
   roleCreationGuildIds: string[]
   roleConfigurationEnabled: boolean
   roleConfigurationIds: string[]
+  roleOrderingAuditEnabled: boolean
+  roleOrderingChangesEnabled: boolean
+  roleOrderingGuildIds: string[]
   scheduledEventAuditEnabled: boolean
   scheduledEventChangesEnabled: boolean
   scheduledEventCoverChangesEnabled: boolean
@@ -197,6 +200,8 @@ export class ScopePolicy {
   readonly #allowForumTagChanges: boolean
   readonly #allowRoleCreation: boolean
   readonly #allowRoleConfiguration: boolean
+  readonly #allowRoleOrderingAudit: boolean
+  readonly #allowRoleOrderingChanges: boolean
   readonly #allowScheduledEventAudit: boolean
   readonly #allowScheduledEventChanges: boolean
   readonly #allowSoundboardAudit: boolean
@@ -263,6 +268,7 @@ export class ScopePolicy {
   readonly #reactionChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
   readonly #roleConfigurationIds: ReadonlySet<string>
+  readonly #roleOrderingGuildIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
   readonly #soundboardGuildIds: ReadonlySet<string>
@@ -332,6 +338,8 @@ export class ScopePolicy {
     | "allowChannelCreation"
     | "allowRoleCreation"
     | "allowRoleConfiguration"
+    | "allowRoleOrderingAudit"
+    | "allowRoleOrderingChanges"
     | "allowScheduledEventAudit"
     | "allowScheduledEventChanges"
     | "allowSoundboardAudit"
@@ -392,6 +400,7 @@ export class ScopePolicy {
     | "reactionChannelIds"
     | "roleCreationGuildIds"
     | "roleConfigurationIds"
+    | "roleOrderingGuildIds"
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
     | "soundboardGuildIds"
@@ -453,6 +462,8 @@ export class ScopePolicy {
     this.#allowForumTagChanges = config.allowForumTagChanges ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
+    this.#allowRoleOrderingAudit = config.allowRoleOrderingAudit ?? false
+    this.#allowRoleOrderingChanges = config.allowRoleOrderingChanges ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
     this.#allowScheduledEventChanges = config.allowScheduledEventChanges ?? false
     this.#allowSoundboardAudit = config.allowSoundboardAudit ?? false
@@ -522,6 +533,7 @@ export class ScopePolicy {
     this.#reactionChannelIds = config.reactionChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
+    this.#roleOrderingGuildIds = config.roleOrderingGuildIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
     this.#soundboardGuildIds = config.soundboardGuildIds ?? new Set()
@@ -693,6 +705,12 @@ export class ScopePolicy {
       roleConfigurationEnabled: this.#allowRoleConfiguration
         && this.#roleConfigurationIds.size > 0,
       roleConfigurationIds: [...this.#roleConfigurationIds].sort(),
+      roleOrderingAuditEnabled: this.#allowRoleOrderingAudit
+        && this.#roleOrderingGuildIds.size > 0,
+      roleOrderingChangesEnabled: this.#allowRoleOrderingAudit
+        && this.#allowRoleOrderingChanges
+        && this.#roleOrderingGuildIds.size > 0,
+      roleOrderingGuildIds: [...this.#roleOrderingGuildIds].sort(),
       scheduledEventAuditEnabled: this.#allowScheduledEventAudit
         && this.#scheduledEventGuildIds.size > 0,
       scheduledEventChangesEnabled: this.#allowScheduledEventAudit
@@ -1111,6 +1129,26 @@ export class ScopePolicy {
     }
     if (!this.#roleConfigurationIds.has(roleId)) {
       throw new PolicyError(`Discord role ${roleId} is outside the role-configuration scope`)
+    }
+  }
+
+  assertRoleOrderingAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowRoleOrderingAudit) {
+      throw new PolicyError("Discord role-ordering audit is disabled by connector configuration")
+    }
+    if (this.#roleOrderingGuildIds.size === 0) {
+      throw new PolicyError("Discord role-ordering audit requires an explicit guild allowlist")
+    }
+    if (!this.#roleOrderingGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the role-ordering scope`)
+    }
+  }
+
+  assertRoleOrderingChangeable(guildId: string): void {
+    this.assertRoleOrderingAuditable(guildId)
+    if (!this.#allowRoleOrderingChanges) {
+      throw new PolicyError("Discord role-ordering changes are disabled by connector configuration")
     }
   }
 

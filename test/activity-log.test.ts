@@ -39,6 +39,7 @@ import {
   type ReactionModerationActivity,
   type RoleCreationActivity,
   type RoleConfigurationActivity,
+  type RoleOrderingActivity,
   type ScheduledEventActivity,
   type SoundboardActivity,
   type StageInstanceActivity,
@@ -263,6 +264,33 @@ function roleConfiguration(
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
     requestedFields: ["name", "grantPermissions"],
+    roleId: "350",
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function roleOrdering(
+  id: string,
+  status: RoleOrderingActivity["status"],
+): RoleOrderingActivity {
+  return {
+    anchorRoleId: "351",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "role-ordering",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    placement: "above",
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
     roleId: "350",
     schemaVersion: 1,
     status,
@@ -1287,6 +1315,76 @@ test("JSONL activity log keeps role-configuration evidence content-free", async 
       "operationKeyHash",
       "planDigest",
       "requestedFields",
+      "roleId",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps role-ordering evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-role-name",
+    "private-operation-key",
+    "private-permission-data",
+    "private-holder-counts",
+  ]
+
+  await store.append(roleOrdering("1", "pending"))
+  await store.append({
+    ...roleOrdering("2", "completed-with-drift"),
+    auditReason: privateValues[0],
+    holderCounts: privateValues[4],
+    name: privateValues[1],
+    operationKey: privateValues[2],
+    permissions: privateValues[3],
+  } as RoleOrderingActivity)
+  await appendFile(
+    file,
+    [
+      {
+        ...roleOrdering("3", "completed"),
+        placement: "sideways",
+      },
+      {
+        ...roleOrdering("4", "completed"),
+        anchorRoleId: "350",
+      },
+      {
+        ...roleOrdering("5", "completed"),
+        roleId: "0",
+      },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 3)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "anchorRoleId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "placement",
+      "planDigest",
       "roleId",
       "schemaVersion",
       "status",

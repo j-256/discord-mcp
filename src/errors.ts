@@ -1109,6 +1109,42 @@ export class RoleConfigurationEvidenceError extends Error {
   override name = "RoleConfigurationEvidenceError"
 }
 
+export class RoleOrderingPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord role hierarchy does not match the reviewed ordering plan")
+    this.name = "RoleOrderingPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class RoleOrderingOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord role-ordering operation key has already been reserved")
+    this.name = "RoleOrderingOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class RoleOrderingExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "RoleOrderingExecutionError"
+    this.result = result
+  }
+}
+
+export class RoleOrderingEvidenceError extends Error {
+  override name = "RoleOrderingEvidenceError"
+}
+
 export class PollEvidenceError extends Error {
   override name = "PollEvidenceError"
 }

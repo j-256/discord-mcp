@@ -2288,6 +2288,132 @@ test("Discord client reads exact role-member counts and sends one narrow role PA
   ])
 })
 
+test("Discord client sends one exact role-position PATCH and returns the complete response", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const roles = [
+    { flags: 0, hoist: false, id: "100", managed: false, mentionable: false, name: "@everyone", permissions: "0", position: 0 },
+    { flags: 0, hoist: false, id: "300", managed: false, mentionable: false, name: "Support", permissions: "0", position: 1 },
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse(roles, 200)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.modifyGuildRolePositions(
+      "100",
+      [{ id: "300", position: 1 }],
+      "Reviewed hierarchy / case 42",
+    ),
+    roles,
+  )
+  assert.deepEqual(requests, [{
+    body: [{ id: "300", position: 1 }],
+    method: "PATCH",
+    reason: "Reviewed%20hierarchy%20%2F%20case%2042",
+    url: `${API_BASE_URL}/guilds/100/roles`,
+  }])
+})
+
+test("Discord client rejects unsafe role-position contracts before fetching", () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse([])
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(
+    () => client.modifyGuildRolePositions("invalid", [{ id: "300", position: 1 }], "reviewed"),
+    /guild ID/,
+  )
+  assert.throws(
+    () => client.modifyGuildRolePositions("100", [], "reviewed"),
+    /must contain/,
+  )
+  assert.throws(
+    () => client.modifyGuildRolePositions("100", [
+      { id: "300", position: 1 },
+      { id: "300", position: 2 },
+    ], "reviewed"),
+    /invalid entry/,
+  )
+  assert.throws(
+    () => client.modifyGuildRolePositions("100", [{ id: "bad", position: 1 }], "reviewed"),
+    /invalid entry/,
+  )
+  assert.throws(
+    () => client.modifyGuildRolePositions("100", [{ id: "300", position: -1 }], "reviewed"),
+    /invalid entry/,
+  )
+  assert.throws(
+    () => client.modifyGuildRolePositions(
+      "100",
+      [{ id: "300", position: 1, future: true } as never],
+      "reviewed",
+    ),
+    /invalid entry/,
+  )
+  assert.equal(requests, 0)
+})
+
+test("Discord client requires exact role-position success and never retries or leaks causes", async () => {
+  let requests = 0
+  let sleeps = 0
+  const secret = "private-role-order-transport-cause"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      throw new Error(secret)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.modifyGuildRolePositions("100", [{ id: "300", position: 1 }], "reviewed"),
+    (error: Error) => {
+      assert.doesNotMatch(error.message, new RegExp(secret))
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+
+  const wrongStatus = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(null, { status: 204 }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    wrongStatus.modifyGuildRolePositions("100", [{ id: "300", position: 1 }], "reviewed"),
+    /PATCH \/guilds\/\{guild.id\}\/roles returned an unexpected success status/,
+  )
+})
+
 test("Discord client rejects malformed role configuration evidence and input", async () => {
   let requests = 0
   const malformed = new DiscordClient({

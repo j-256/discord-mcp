@@ -104,6 +104,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   reactionUserAuditPolicy: "reaction-user-audit-policy",
   roleCreationPolicy: "role-creation-policy",
   roleConfigurationPolicy: "role-configuration-policy",
+  roleOrderingAuditPolicy: "role-ordering-audit-policy",
+  roleOrderingChangePolicy: "role-ordering-change-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
   scheduledEventChangePolicy: "scheduled-event-change-policy",
   soundboardAuditPolicy: "soundboard-audit-policy",
@@ -354,6 +356,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowRoleConfiguration && config.roleConfigurationIds.size === 0) {
     warnings.push("The role-configuration toggle is enabled but role changes remain blocked because no exact role allowlist is configured")
   }
+  if (config.allowRoleOrderingAudit && config.roleOrderingGuildIds.size === 0) {
+    warnings.push("The role-ordering audit toggle is enabled but hierarchy inspection remains blocked because no exact guild allowlist is configured")
+  }
+  if (config.allowRoleOrderingChanges && config.roleOrderingGuildIds.size === 0) {
+    warnings.push("The role-ordering change toggle is enabled but hierarchy changes remain blocked because no exact guild allowlist is configured")
+  }
   if (config.allowGuildScaffolds && config.guildScaffoldGuildIds.size === 0) {
     warnings.push("The guild-scaffold toggle is enabled but scaffold execution remains blocked because no guild-scaffold allowlist is configured")
   }
@@ -594,6 +602,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
     [config.allowRoleConfiguration, "role-configuration", "Role configuration"],
+    [
+      config.allowRoleOrderingAudit || config.allowRoleOrderingChanges,
+      "role-ordering",
+      "Role-order audit and reviewed changes",
+    ],
     [
       config.allowScheduledEventAudit || config.allowScheduledEventChanges,
       "scheduled-events",
@@ -1200,6 +1213,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.roleConfigurationPolicy,
         "pass",
         `Reviewed role configuration is constrained to ${config.roleConfigurationIds.size} exact roles with partial updates, one-shot execution, and complete readback`,
+      ))
+    }
+    if (!config.allowRoleOrderingAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleOrderingAuditPolicy,
+        "pass",
+        "Role-order audit is disabled",
+      ))
+    } else if (config.roleOrderingGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleOrderingAuditPolicy,
+        "warn",
+        "Role-order audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleOrderingAuditPolicy,
+        "pass",
+        `Role-order audit is constrained to ${config.roleOrderingGuildIds.size} exact guilds with complete hierarchy, authority, and aggregate holder evidence`,
+      ))
+    }
+    if (!config.allowRoleOrderingChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleOrderingChangePolicy,
+        "pass",
+        "Reviewed role-order changes are disabled",
+      ))
+    } else if (config.roleOrderingGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleOrderingChangePolicy,
+        "warn",
+        "Role-order changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleOrderingChangePolicy,
+        "pass",
+        `Reviewed role-order changes are constrained to ${config.roleOrderingGuildIds.size} exact guilds with signed approval, one-shot execution, durable collection coordination, and complete readback`,
       ))
     }
     if (!config.allowGuildScaffolds) {
@@ -2097,6 +2148,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowRoleConfiguration,
     ENVIRONMENT_NAMES.roleConfigurationIds,
+    ENVIRONMENT_NAMES.allowRoleOrderingAudit,
+    ENVIRONMENT_NAMES.allowRoleOrderingChanges,
+    ENVIRONMENT_NAMES.roleOrderingGuildIds,
     ENVIRONMENT_NAMES.allowGuildScaffolds,
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
     ENVIRONMENT_NAMES.allowGuildTemplateAudit,

@@ -83,6 +83,8 @@ export interface ConnectorConfig {
   allowReactionUserAudit: boolean
   allowRoleCreation: boolean
   allowRoleConfiguration: boolean
+  allowRoleOrderingAudit: boolean
+  allowRoleOrderingChanges: boolean
   allowScheduledEventAudit: boolean
   allowScheduledEventChanges: boolean
   allowSoundboardAudit: boolean
@@ -150,6 +152,7 @@ export interface ConnectorConfig {
   reactionChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
   roleConfigurationIds: ReadonlySet<string>
+  roleOrderingGuildIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
   soundboardGuildIds: ReadonlySet<string>
@@ -488,6 +491,11 @@ export function loadConnectorConfig(
     ENVIRONMENT_NAMES.roleConfigurationIds,
     CONNECTOR_LIMITS.roleConfigurationAllowlist,
   )
+  const roleOrderingGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.roleOrderingGuildIds],
+    ENVIRONMENT_NAMES.roleOrderingGuildIds,
+    CONNECTOR_LIMITS.roleOrderingGuildAllowlist,
+  )
   const guildScaffoldGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.guildScaffoldGuildIds],
     ENVIRONMENT_NAMES.guildScaffoldGuildIds,
@@ -559,6 +567,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.nativeInteractionGuildIds, nativeInteractionGuildIds],
     [ENVIRONMENT_NAMES.threadGuildIds, threadGuildIds],
     [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
+    [ENVIRONMENT_NAMES.roleOrderingGuildIds, roleOrderingGuildIds],
     [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
     [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
     [ENVIRONMENT_NAMES.welcomeScreenGuildIds, welcomeScreenGuildIds],
@@ -731,6 +740,19 @@ export function loadConnectorConfig(
   if (allowAnnouncementSubscriptionChanges && !allowAnnouncementSubscriptionAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges} requires ${ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit}`,
+    )
+  }
+  const allowRoleOrderingAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowRoleOrderingAudit],
+    ENVIRONMENT_NAMES.allowRoleOrderingAudit,
+  )
+  const allowRoleOrderingChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowRoleOrderingChanges],
+    ENVIRONMENT_NAMES.allowRoleOrderingChanges,
+  )
+  if (allowRoleOrderingChanges && !allowRoleOrderingAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowRoleOrderingChanges} requires ${ENVIRONMENT_NAMES.allowRoleOrderingAudit}`,
     )
   }
   const allowInviteAudit = parseBoolean(
@@ -1040,6 +1062,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowRoleConfiguration],
       ENVIRONMENT_NAMES.allowRoleConfiguration,
     ),
+    allowRoleOrderingAudit,
+    allowRoleOrderingChanges,
     allowScheduledEventAudit,
     allowScheduledEventChanges,
     allowSoundboardAudit,
@@ -1158,6 +1182,7 @@ export function loadConnectorConfig(
     reactionChannelIds,
     roleCreationGuildIds,
     roleConfigurationIds,
+    roleOrderingGuildIds,
     scheduledEventGuildIds,
     scheduledEventRoots: parseOwnedRoots(
       environment[ENVIRONMENT_NAMES.scheduledEventRoots],

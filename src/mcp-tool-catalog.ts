@@ -65,6 +65,7 @@ type McpToolWorkflow =
   | "native-interaction-command"
   | "role-creation"
   | "role-configuration"
+  | "role-ordering"
   | "scheduled-event-change"
   | "stage-instance-change"
   | "thread-creation"
@@ -100,6 +101,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   audit_channel_role_access: {
     keywords: ["access", "audit", "channel", "matrix", "permissions", "role"],
     toolset: "permissions",
+  },
+  audit_role_order: {
+    keywords: ["audit", "hierarchy", "holder", "order", "permission", "position", "role"],
+    toolset: "role-ordering",
   },
   delete_messages: {
     keywords: ["bulk", "delete", "exact ids", "remove"],
@@ -264,6 +269,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["color", "configure", "execute", "hoist", "mentionable", "name", "permission", "role"],
     toolset: "role-configuration",
     workflow: "role-configuration",
+  },
+  execute_role_order: {
+    keywords: ["above", "below", "execute", "hierarchy", "order", "position", "role"],
+    toolset: "role-ordering",
+    workflow: "role-ordering",
   },
   execute_scheduled_event_change: {
     keywords: ["calendar", "cancel", "complete", "create", "event", "execute", "schedule", "transition", "update"],
@@ -670,6 +680,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["color", "configure", "hoist", "mentionable", "name", "permission", "plan", "review", "role"],
     toolset: "role-configuration",
     workflow: "role-configuration",
+  },
+  plan_role_order: {
+    keywords: ["above", "below", "hierarchy", "order", "plan", "position", "review", "role"],
+    toolset: "role-ordering",
+    workflow: "role-ordering",
   },
   plan_scheduled_event_change: {
     keywords: ["calendar", "cancel", "complete", "create", "event", "plan", "review", "schedule", "transition", "update"],

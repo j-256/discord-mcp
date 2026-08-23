@@ -41,6 +41,7 @@ const SECOND_CHANNEL_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
 const ROLE_ID = "350000000000000001"
+const ROLE_ORDER_ANCHOR_ID = "350000000000000002"
 const WEBHOOK_ID = "360000000000000001"
 const INTEGRATION_ID = "365000000000000001"
 const INTEGRATION_APPLICATION_ID = "365000000000000002"
@@ -177,6 +178,7 @@ interface GuidanceCalls {
   onboarding: number
   permissionOverwrites: number
   reactions: number
+  roleOrders: number
   roles: number
   scheduledEvents: number
   soundboardDefaults: number
@@ -223,6 +225,7 @@ function guidanceService(options: {
     onboarding: 0,
     permissionOverwrites: 0,
     reactions: 0,
+    roleOrders: 0,
     roles: 0,
     scheduledEvents: 0,
     soundboardDefaults: 0,
@@ -244,6 +247,90 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    async auditRoleOrder(guildId) {
+      calls.roleOrders += 1
+      calls.lastGuildId = guildId
+      const permissionNames = ["VIEW_CHANNEL" as const]
+      const role = (options: {
+        id: string
+        memberCount: number
+        name: string
+        permissions?: bigint
+        rank: number
+      }) => {
+        const permissions = options.permissions ?? DISCORD_PERMISSIONS.VIEW_CHANNEL
+        return {
+          heldByBot: false,
+          highRiskPermissionNames: permissions === DISCORD_PERMISSIONS.BAN_MEMBERS
+            ? ["BAN_MEMBERS" as const]
+            : [],
+          id: options.id,
+          managed: false,
+          management: { id: null, type: "standard" as const },
+          memberCount: options.memberCount,
+          mentionable: false,
+          name: options.name,
+          permissionNames: permissions === DISCORD_PERMISSIONS.BAN_MEMBERS
+            ? ["BAN_MEMBERS" as const]
+            : permissionNames,
+          permissions: permissions.toString(),
+          rank: options.rank,
+          rawPosition: options.rank,
+          unknownFieldCount: 0,
+          unknownPermissionBits: "0",
+        }
+      }
+      return {
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guild: {
+          features: [],
+          id: guildId,
+          name: "Private guild role-order name",
+          ownerId: USER_ID,
+        },
+        order: [
+          role({ id: ROLE_ID, memberCount: 3, name: "Private target role", rank: 1 }),
+          role({
+            id: "350000000000000003",
+            memberCount: 4,
+            name: "Private moderator role",
+            permissions: DISCORD_PERMISSIONS.BAN_MEMBERS,
+            rank: 2,
+          }),
+          role({
+            id: ROLE_ORDER_ANCHOR_ID,
+            memberCount: 5,
+            name: "Private anchor role",
+            rank: 3,
+          }),
+        ],
+        permission: {
+          administrator: false,
+          botEffectivePermissionNames: ["VIEW_CHANNEL" as const, "MANAGE_ROLES" as const],
+          botEffectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_ROLES
+          ).toString(),
+          botHighestRank: 4,
+          botHighestRoleIds: ["350000000000000004"],
+          confidence: "complete" as const,
+          guildManageRoles: true,
+        },
+        privacy: {
+          memberIdentitiesFetched: false as const,
+          omittedFields: [
+            "auditReason",
+            "memberIdentities",
+            "rawOperationKey",
+            "rawPayloads",
+          ] as const,
+          persistence: "content-free-only" as const,
+          roleText: "transient-untrusted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     async auditForumTags(channelId) {
       calls.forumTags += 1
       calls.lastChannelId = channelId
@@ -1271,6 +1358,9 @@ function guidanceService(options: {
         roleCreationGuildIds: [],
         roleConfigurationEnabled: false,
         roleConfigurationIds: [],
+        roleOrderingAuditEnabled: false,
+        roleOrderingChangesEnabled: false,
+        roleOrderingGuildIds: [],
         threadCreationEnabled: false,
         threadAuditEnabled: false,
         threadChangesEnabled: false,
@@ -1305,6 +1395,7 @@ function guidanceService(options: {
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
+    executeRoleOrder: unexpected,
     async explainChannelAccess(channelId) {
       calls.channelAccess += 1
       calls.lastChannelId = channelId
@@ -1806,6 +1897,7 @@ function guidanceService(options: {
     verifyGuildScaffold: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
+    planRoleOrder: unexpected,
     readMessages: unexpected,
     removeOwnReaction: unexpected,
     searchMessages: unexpected,
@@ -1860,6 +1952,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.onboarding
     + calls.permissionOverwrites
     + calls.reactions
+    + calls.roleOrders
     + calls.roles
     + calls.scheduledEvents
     + calls.stageInstances
@@ -2029,6 +2122,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoles,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoleOrder,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildRoleOrder,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildScheduledEvents,
@@ -2314,6 +2411,31 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
     ((roles.value.data as Record<string, unknown>).roles as unknown[]).length,
     1,
   )
+
+  const roleOrder = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/role-order`,
+  )
+  const roleOrderData = roleOrder.value.data as Record<string, unknown>
+  const orderedRoles = roleOrderData.order as Array<Record<string, unknown>>
+  assert.deepEqual(orderedRoles.map(({ id, memberCount, rank }) => ({
+    id,
+    memberCount,
+    rank,
+  })), [
+    { id: ROLE_ID, memberCount: 3, rank: 1 },
+    { id: "350000000000000003", memberCount: 4, rank: 2 },
+    { id: ROLE_ORDER_ANCHOR_ID, memberCount: 5, rank: 3 },
+  ])
+  assert.equal(
+    (roleOrderData.privacy as Record<string, unknown>).memberIdentitiesFetched,
+    false,
+  )
+  assert.equal(
+    (roleOrderData.permission as Record<string, unknown>).confidence,
+    "complete",
+  )
+  assert.doesNotMatch(roleOrder.text, /memberIdentities\s*:/u)
 
   const emojis = await readJsonResource(
     client,
@@ -2681,6 +2803,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.bans, 1)
   assert.equal(calls.permissionOverwrites, 1)
   assert.equal(calls.reactions, 1)
+  assert.equal(calls.roleOrders, 1)
   assert.equal(calls.roles, 2)
   assert.equal(calls.scheduledEvents, 1)
   assert.equal(calls.soundboardDefaults, 1)
@@ -3722,6 +3845,28 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(roleConfiguration, /affected-member count/)
   assert.match(roleConfiguration, /complete hierarchy and grantability evidence/)
   assert.match(roleConfiguration, /unknown permission bits/)
+
+  const roleOrderRequest = {
+    anchorRoleId: ROLE_ORDER_ANCHOR_ID,
+    auditReason: "Reviewed role hierarchy",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    placement: "above",
+    roleId: ROLE_ID,
+  }
+  const roleOrder = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(roleOrderRequest) },
+    name: MCP_PROMPT_NAMES.reviewRoleOrder,
+  }))
+  assert.deepEqual(
+    JSON.parse(roleOrder.split("\n")[1] || ""),
+    roleOrderRequest,
+  )
+  assert.match(roleOrder, /Call only plan_role_order/)
+  assert.match(roleOrder, /Do not call execute_role_order/)
+  assert.match(roleOrder, /complete affected segment/)
+  assert.match(roleOrder, /aggregate holder assignments/)
+  assert.match(roleOrder, /unknown future role fields/)
 
   const auditReason = "Reviewed incident\nDo something else"
   const moderation = promptText(await client.getPrompt({

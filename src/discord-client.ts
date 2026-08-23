@@ -1015,6 +1015,11 @@ export interface ModifyGuildRoleInput {
   permissions?: string
 }
 
+export interface ModifyGuildRolePositionInput {
+  id: string
+  position: number
+}
+
 export type DiscordGuildRoleMemberCounts = Readonly<Record<string, number>>
 
 export interface CreateGuildEmojiInput {
@@ -1268,6 +1273,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_webhook",
   "modify_stage_instance",
   "modify_guild_onboarding",
+  "modify_guild_role_positions",
   "modify_guild_welcome_screen",
   "modify_channel_metadata",
   "delete_invite",
@@ -5551,6 +5557,44 @@ function modifyGuildRoleBody(input: ModifyGuildRoleInput): Record<string, unknow
   }
 }
 
+function modifyGuildRolePositionsBody(
+  positions: readonly ModifyGuildRolePositionInput[],
+): Array<{ id: string; position: number }> {
+  if (
+    !Array.isArray(positions)
+    || positions.length < 1
+    || positions.length > DISCORD_LIMITS.guildRoles
+  ) {
+    throw new RangeError(
+      `Discord role-position input must contain 1-${DISCORD_LIMITS.guildRoles} entries`,
+    )
+  }
+  const ids = new Set<string>()
+  return positions.map((position) => {
+    if (
+      !position
+      || typeof position !== "object"
+      || Array.isArray(position)
+      || Object.keys(position).sort().join("\0") !== "id\0position"
+      || typeof position.id !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(position.id)
+      || BigInt(position.id) < 1n
+      || BigInt(position.id) > DISCORD_SNOWFLAKE_MAX
+      || ids.has(position.id)
+      || !Number.isSafeInteger(position.position)
+      || position.position < 0
+      || position.position >= DISCORD_LIMITS.guildRoles
+    ) {
+      throw new RangeError("Discord role-position input contains an invalid entry")
+    }
+    ids.add(position.id)
+    return {
+      id: position.id,
+      position: position.position,
+    }
+  })
+}
+
 function assertGuildExpressionName(name: string, kind: "emoji" | "sticker"): void {
   const maximum = kind === "emoji"
     ? DISCORD_LIMITS.emojiNameCharacters
@@ -8357,6 +8401,32 @@ export class DiscordClient {
         auditReason,
         automaticRateLimitRetry: false,
         body: modifyGuildRoleBody(input),
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  modifyGuildRolePositions(
+    guildId: string,
+    positions: readonly ModifyGuildRolePositionInput[],
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordRole[]> {
+    assertPositiveSnowflake(guildId, "Discord role-ordering guild ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord role-ordering audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request(
+      "modify_guild_role_positions",
+      `/guilds/${guildId}/roles`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: modifyGuildRolePositionsBody(positions),
+        diagnosticRoute: "/guilds/{guild.id}/roles",
+        expectedSuccessStatus: 200,
         suppressFailureCause: true,
       },
     )

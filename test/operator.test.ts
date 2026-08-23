@@ -178,6 +178,9 @@ function status(
       roleCreationGuildIds: [],
       roleConfigurationEnabled: false,
       roleConfigurationIds: [],
+      roleOrderingAuditEnabled: false,
+      roleOrderingChangesEnabled: false,
+      roleOrderingGuildIds: [],
       threadCreationEnabled: false,
       threadAuditEnabled: false,
       threadChangesEnabled: false,
@@ -229,9 +232,11 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     auditForumTags: unexpected,
+    auditRoleOrder: unexpected,
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
     executeNativeInteractionCommand: unexpected,
+    executeRoleOrder: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
@@ -362,6 +367,7 @@ function toolService(): DiscordToolService {
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
+    planRoleOrder: unexpected,
     readMessages: unexpected,
     removeOwnReaction: unexpected,
     searchMessages: unexpected,
@@ -2121,6 +2127,72 @@ test("doctor and setup explain exact reviewed role-configuration scope", async (
   assert.match(omitted.warnings.join("\n"), /role-configuration toolset/)
 })
 
+test("doctor and setup separate role-order audit from reviewed changes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
+    DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.roleOrderingAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.roleOrderingChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact guilds/)
+  assert.match(audit?.summary || "", /aggregate holder evidence/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /signed approval/)
+  assert.match(changes?.summary || "", /durable collection coordination/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.roleOrderingAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.roleOrderingChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /role-ordering audit toggle/)
+  assert.match(setup.warnings.join("\n"), /role-ordering change toggle/)
+  assert.match(omitted.warnings.join("\n"), /role-ordering toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT",
+    "DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES",
+    "DISCORD_MCP_ROLE_ORDERING_GUILD_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
 test("doctor and setup explain reviewed member-role scope without Discord writes", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
@@ -2982,6 +3054,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_reaction_moderation",
     "review_role_configuration",
     "review_role_creation",
+    "review_role_order",
     "review_scheduled_event_change",
     "review_soundboard_change",
     "review_stage_instance_change",
@@ -3025,6 +3098,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/members/{userId}",
     "discord://guilds/{guildId}/members/{userId}/voice-state",
     "discord://guilds/{guildId}/onboarding",
+    "discord://guilds/{guildId}/role-order",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
     "discord://guilds/{guildId}/scheduled-events",
@@ -3063,6 +3137,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_poll_end",
     "execute_reaction_moderation",
     "execute_role_configuration",
+    "execute_role_order",
     "execute_scheduled_event_change",
     "execute_stage_instance_change",
     "execute_thread_change",

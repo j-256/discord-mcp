@@ -134,6 +134,7 @@ import {
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
+  RoleOrderingPlanChangedError,
   WebhookChangePlanChangedError,
   WebhookCreationPlanChangedError,
   WebhookDeletionPlanChangedError,
@@ -340,6 +341,17 @@ import {
   normalizeRoleConfigurationRequest,
   RoleConfigurationService,
 } from "./role-configuration-service.js"
+import type {
+  RoleOrderAuditResult,
+  RoleOrderingPlan,
+  RoleOrderingRequest,
+  RoleOrderingResult,
+  RoleOrderingServiceOptions,
+} from "./role-ordering-service.js"
+import {
+  normalizeRoleOrderingRequest,
+  RoleOrderingService,
+} from "./role-ordering-service.js"
 import type {
   ScheduledEventChangeRequest,
   ScheduledEventInventoryResult,
@@ -579,6 +591,7 @@ export interface DiscordServiceClient {
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
   modifyGuildSoundboardSound: DiscordClient["modifyGuildSoundboardSound"]
   modifyGuildRole: DiscordClient["modifyGuildRole"]
+  modifyGuildRolePositions: DiscordClient["modifyGuildRolePositions"]
   modifyGuildTemplate: DiscordClient["modifyGuildTemplate"]
   modifyGuildSticker: DiscordClient["modifyGuildSticker"]
   modifyStageInstance: DiscordClient["modifyStageInstance"]
@@ -706,6 +719,10 @@ export interface ConnectorServiceOptions {
   >
   roleConfigurationOptions?: Pick<
     RoleConfigurationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  roleOrderingOptions?: Pick<
+    RoleOrderingServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   scheduledEventOptions?: Pick<
@@ -896,6 +913,7 @@ export class ConnectorService {
   readonly #reactionService: ReactionService
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
+  readonly #roleOrderingService: RoleOrderingService
   readonly #scheduledEventService: ScheduledEventService
   readonly #soundboardService: SoundboardService
   readonly #stageInstanceService: StageInstanceService
@@ -1194,6 +1212,13 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.roleConfigurationOptions,
     })
+    this.#roleOrderingService = new RoleOrderingService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.roleOrderingOptions,
+    })
     this.#guildScaffoldService = new GuildScaffoldService({
       channelService: this.#channelAdministrationService,
       client: this.#client,
@@ -1378,6 +1403,19 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async auditRoleOrder(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<RoleOrderAuditResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleOrderingService.audit(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
   }
 
   async getGuildMember(
@@ -2576,6 +2614,20 @@ export class ConnectorService {
     )
   }
 
+  async planRoleOrder(
+    request: RoleOrderingRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleOrderingPlan> {
+    normalizeRoleOrderingRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleOrderingService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planGuildScaffold(
     request: GuildScaffoldRequest,
     options: RequestOptions = {},
@@ -2826,6 +2878,53 @@ export class ConnectorService {
         writeGuildCollectionTarget("roles", request.guildId),
       ],
       () => this.#roleConfigurationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeRoleOrder(
+    request: RoleOrderingRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<RoleOrderingResult> {
+    normalizeRoleOrderingRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord role-ordering plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#roleOrderingService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new RoleOrderingPlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#roleOrderingService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "role-ordering",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("role", request.roleId),
+        writeResourceTarget("role", request.anchorRoleId),
+        writeGuildCollectionTarget("roles", request.guildId),
+      ],
+      () => this.#roleOrderingService.execute(
         identity.application.id,
         identity.bot.id,
         request,

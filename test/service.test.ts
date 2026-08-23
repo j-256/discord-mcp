@@ -75,6 +75,7 @@ const SECOND_THREAD_ID = "400000000000000004"
 const MESSAGE_ID = "500000000000000001"
 const CREATED_CHANNEL_ID = "400000000000000005"
 const CREATED_ROLE_ID = "700000000000000001"
+const ANCHOR_ROLE_ID = "700000000000000002"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
 const WEBHOOK_ID = "900000000000000001"
@@ -262,6 +263,7 @@ function serviceFixture(overrides: {
   reactionOptions?: ConnectorServiceOptions["reactionOptions"]
   roleAdministrationOptions?: ConnectorServiceOptions["roleAdministrationOptions"]
   roleConfigurationOptions?: ConnectorServiceOptions["roleConfigurationOptions"]
+  roleOrderingOptions?: ConnectorServiceOptions["roleOrderingOptions"]
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
   soundboardOptions?: ConnectorServiceOptions["soundboardOptions"]
   stageInstanceOptions?: ConnectorServiceOptions["stageInstanceOptions"]
@@ -702,6 +704,9 @@ function serviceFixture(overrides: {
     async modifyGuildRole() {
       throw new Error("Unexpected role configuration")
     },
+    async modifyGuildRolePositions() {
+      throw new Error("Unexpected role ordering")
+    },
     async modifyGuildTemplate() {
       throw new Error("Unexpected guild-template metadata update")
     },
@@ -845,6 +850,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.roleConfigurationOptions
         ? { roleConfigurationOptions: overrides.roleConfigurationOptions }
+        : {}),
+      ...(overrides.roleOrderingOptions
+        ? { roleOrderingOptions: overrides.roleOrderingOptions }
         : {}),
       ...(overrides.scheduledEventOptions
         ? { scheduledEventOptions: overrides.scheduledEventOptions }
@@ -1123,11 +1131,19 @@ test("service exposes privacy-safe reaction reads and coordinates exact-message 
 
 test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
+  const coordinationBotRoleId = "700000000000000003"
   const { service } = serviceFixture({
     client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: [],
+          owner_id: "800000000000000001",
+        }
+      },
       async getGuildMember(_guildId, userId) {
         return {
-          roles: [],
+          roles: userId === BOT_ID ? [coordinationBotRoleId] : [],
           user: {
             bot: true,
             id: userId,
@@ -1135,17 +1151,44 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           },
         }
       },
+      async getGuildRoleMemberCounts() {
+        return {
+          [ANCHOR_ROLE_ID]: 2,
+          [coordinationBotRoleId]: 1,
+          [CREATED_ROLE_ID]: 4,
+        }
+      },
       async getGuildRoles() {
-        return [role(
-          GUILD_ID,
-          DISCORD_PERMISSIONS.MANAGE_GUILD
-            | DISCORD_PERMISSIONS.MANAGE_MESSAGES
-            | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
-            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
-            | DISCORD_PERMISSIONS.SEND_MESSAGES
-            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
-          "@everyone",
-        )]
+        return [
+          role(
+            GUILD_ID,
+            DISCORD_PERMISSIONS.MANAGE_GUILD
+              | DISCORD_PERMISSIONS.MANAGE_MESSAGES
+              | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+              | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+              | DISCORD_PERMISSIONS.SEND_MESSAGES
+              | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+            "@everyone",
+          ),
+          {
+            ...role(CREATED_ROLE_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "target"),
+            position: 1,
+          },
+          {
+            ...role(ANCHOR_ROLE_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "anchor"),
+            position: 2,
+          },
+          {
+            ...role(
+              coordinationBotRoleId,
+              DISCORD_PERMISSIONS.MANAGE_ROLES,
+              "connector",
+            ),
+            managed: true,
+            position: 3,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
       },
       async listChannelWebhooks(): Promise<DiscordWebhookSummary[]> {
         return [
@@ -1214,9 +1257,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+      DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
+      DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
@@ -1416,6 +1462,19 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     operationKey,
     roleId: CREATED_ROLE_ID,
   }, digest))
+  const roleOrderRequest = {
+    anchorRoleId: ANCHOR_ROLE_ID,
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    placement: "above" as const,
+    roleId: CREATED_ROLE_ID,
+  }
+  const roleOrderPlan = await service.planRoleOrder(roleOrderRequest)
+  await captured(() => service.executeRoleOrder(
+    roleOrderRequest,
+    roleOrderPlan.digest,
+  ))
   await captured(() => service.executeScheduledEventChange({
     action: "delete",
     auditReason: "reviewed",
@@ -1507,7 +1566,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 33)
+  assert.equal(byKind.size, 34)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1594,6 +1653,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: CREATED_ROLE_ID, kind: "role" },
         { collection: "roles", guildId: GUILD_ID, kind: "guild-collection" },
       ],
+      "role-ordering": [
+        { id: CREATED_ROLE_ID, kind: "role" },
+        { id: ANCHOR_ROLE_ID, kind: "role" },
+        { collection: "roles", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
       "role-creation": [{
         collection: "roles",
         guildId: GUILD_ID,
@@ -1652,6 +1716,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           ? deletionPlan.digest
           : entry.kind === "component-message"
             ? componentPlan.digest
+            : entry.kind === "role-ordering"
+              ? roleOrderPlan.digest
             : digest
     assert.equal(entry.planDigest, expectedDigest)
   }
@@ -1665,7 +1731,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 33)
+  assert.equal(writeCoordinator.intents.length, 34)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -4906,6 +4972,106 @@ test("service pins identity through exact reviewed role configuration", async ()
   assert.equal(result.verification, "not-required")
   assert.equal(memberCountReads, 2)
   assert.equal(roleWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through audited and reviewed role ordering", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const botRoleId = "710000000000000003"
+  const targetRoleId = "710000000000000001"
+  const anchorRoleId = "710000000000000002"
+  const roles = [
+    role(GUILD_ID, 0n, "@everyone"),
+    { ...role(targetRoleId, DISCORD_PERMISSIONS.VIEW_CHANNEL, "Target"), position: 1 },
+    { ...role(anchorRoleId, DISCORD_PERMISSIONS.VIEW_CHANNEL, "Anchor"), position: 2 },
+    {
+      ...role(
+        botRoleId,
+        DISCORD_PERMISSIONS.MANAGE_ROLES | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+        "connector",
+      ),
+      managed: true,
+      position: 3,
+      tags: { bot_id: BOT_ID },
+    },
+  ]
+  let memberCountReads = 0
+  let roleOrderWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), features: [], owner_id: "800000000000000001" }
+      },
+      async getGuildMember() {
+        return { roles: [botRoleId], user: bot() }
+      },
+      async getGuildRoleMemberCounts() {
+        memberCountReads += 1
+        return {
+          [anchorRoleId]: 2,
+          [botRoleId]: 1,
+          [targetRoleId]: 4,
+        }
+      },
+      async getGuildRoles() {
+        return roles
+      },
+      async modifyGuildRolePositions() {
+        roleOrderWrites += 1
+        throw new Error("Unexpected role-order write")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
+      DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
+      DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
+    },
+    operationStore,
+    roleOrderingOptions: {
+      clock: () => new Date("2026-08-23T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(11),
+      randomId: () => "activity-role-ordering",
+    },
+    writeCoordinator,
+  })
+  const request = {
+    anchorRoleId,
+    auditReason: "Reviewed unchanged role hierarchy",
+    guildId: GUILD_ID,
+    operationKey: "role-ordering-attempt-0001",
+    placement: "below" as const,
+    roleId: targetRoleId,
+  }
+
+  await assert.rejects(
+    () => service.planRoleOrder({ ...request, roleId: "bad" }),
+    /role ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.auditRoleOrder(GUILD_ID)
+  const plan = await service.planRoleOrder(request)
+  const result = await service.executeRoleOrder(request, plan.digest)
+
+  assert.deepEqual(audit.order.map((entry) => entry.id), [
+    GUILD_ID,
+    targetRoleId,
+    anchorRoleId,
+    botRoleId,
+  ])
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(memberCountReads, 4)
+  assert.equal(roleOrderWrites, 0)
+  assert.equal(writeCoordinator.intents.length, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

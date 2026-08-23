@@ -238,6 +238,8 @@ export function registerDiscordResources(
           "",
           "Role configuration requires a separate feature gate and exact standard-role allowlist. Planning binds verified application and bot identity, complete guild, member, role-inventory, hierarchy, permission-grantability, logical-name collision, modern color, and aggregate affected-member-count evidence into a keyed digest. Omitted properties and unrelated permission bits are preserved; ADMINISTRATOR grants, permission changes with unknown bits or an ungrantable complete desired set, connector lockout, @everyone, and managed roles fail closed. Metadata-only changes report but do not require grantability of unchanged permissions. Execution requires a fresh matching plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and exact role, complete inventory, and complete member-count readback. Same-role uncertain outcomes fail closed. It never deletes, reorders, assigns, creates, changes icons or emoji, retries, rolls back, or persists names, permission data, audit reasons, or raw operation keys.",
           "",
+          "Role ordering requires separate audit and change toggles plus an exact guild allowlist. Audit returns the complete canonical low-to-high hierarchy, raw positions, managed and connector-held boundaries, known and unknown permissions, aggregate holder counts without member identities, and complete connector MANAGE_ROLES and hierarchy evidence. Planning accepts only one exact standard target role, exact anchor role, and immediate above-or-below placement; it binds the complete inventory, affected segment, aggregate holder impact, hierarchy-sensitive permissions, identities, authority, metadata, reason, and one-shot key into a keyed digest. @everyone, managed roles, connector-held roles, roles at or above the connector, unsafe affected segments, and unknown future fields fail closed. Execution requires a fresh matching plan, signed approval, durable claims on the guild role collection plus target and anchor roles, one-shot reservation, pending content-free activity, one non-retried target-position PATCH, complete response validation, and full hierarchy plus count readback. Uncertain outcomes quarantine the guild role collection. It never accepts arbitrary numeric positions, changes metadata, permissions, or memberships, retries, rolls back, fetches member identities, or persists role text, permissions, counts, reasons, or raw keys.",
+          "",
           "Message pin listing uses Discord's current timestamp-paginated endpoint and persists nothing. Pin and unpin both require a separate exact channel allowlist and a review-first workflow that binds verified application and bot identity, exact message state, thread membership, complete message-read and PIN_MESSAGES permission evidence, audit reason, and one-shot key hash into a keyed plan. Execution requires fresh matching evidence, signed approval, durable reservation, pending content-free activity, one non-retried mutation, and exact state plus review-snapshot readback. The production facade acquires durable exact channel-and-message claims across connector processes sharing the activity-state root, and an uncertain outcome permanently spends the key and retains those claims for operator review.",
           "Announcement crossposts require a separate exact direct-channel allowlist and confirmed Message Content intent. Planning accepts only default messages in GUILD_ANNOUNCEMENT channels, rejects polls and forwarded references, binds exact identity, content-bearing message state, flags, roles, overwrites, and complete VIEW_CHANNEL, READ_MESSAGE_HISTORY, SEND_MESSAGES, plus authorship-sensitive MANAGE_MESSAGES evidence into a keyed plan, and warns that follower destinations are unavailable. Execution requires fresh matching evidence, signed approval, durable exact channel-and-message coordination, a one-shot reservation, pending content-free activity, one non-retried POST, only the expected CROSSPOSTED flag transition, and an exact fresh readback. Already-crossposted messages are record-free no-ops; uncertain outcomes retain durable claims for credential-free operator review. Message content, attachments, embeds, components, names, raw operation keys, responses, and transport causes are never persisted or exported.",
           "",
@@ -394,6 +396,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listRoles(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildRoleOrder,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildRoleOrder, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete canonical Discord role hierarchy with aggregate holder counts, management boundaries, hierarchy-sensitive permissions, and connector authority for one exact separately allowlisted guild. Member identities are never fetched and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Reviewed Discord guild role order",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditRoleOrder(
         templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),

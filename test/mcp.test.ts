@@ -168,6 +168,11 @@ import type {
   RoleConfigurationRequest,
 } from "../src/role-configuration-service.js"
 import type {
+  RoleOrderEntry,
+  RoleOrderingPlan,
+  RoleOrderingRequest,
+} from "../src/role-ordering-service.js"
+import type {
   ProjectedScheduledEvent,
   ScheduledEventChangeRequest,
   ScheduledEventPlan,
@@ -240,6 +245,8 @@ import {
   RoleCreationOperationConflictError,
   RoleConfigurationExecutionError,
   RoleConfigurationOperationConflictError,
+  RoleOrderingExecutionError,
+  RoleOrderingOperationConflictError,
   ScheduledEventExecutionError,
   ScheduledEventOperationConflictError,
   SoundboardExecutionError,
@@ -337,6 +344,8 @@ const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
+const ROLE_ORDERING_OPERATION_KEY = "role-ordering-attempt-0001"
+const ROLE_ORDERING_ANCHOR_ID = "350000000000000002"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const COMPONENT_MESSAGE_OPERATION_KEY = "component-message-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
@@ -3719,6 +3728,156 @@ function roleConfigurationInput(
   } as RoleConfigurationRequest & Record<string, unknown>
 }
 
+function roleOrderEntry(
+  id: string,
+  name: string,
+  rank: number,
+  memberCount: number,
+  permissions = DISCORD_PERMISSIONS.VIEW_CHANNEL,
+): RoleOrderEntry {
+  return {
+    heldByBot: false,
+    highRiskPermissionNames: [],
+    id,
+    managed: false,
+    management: { id: null, type: "standard" },
+    memberCount,
+    mentionable: false,
+    name,
+    permissionNames: discordPermissionNames(permissions),
+    permissions: permissions.toString(),
+    rank,
+    rawPosition: rank,
+    unknownFieldCount: 0,
+    unknownPermissionBits: "0",
+  }
+}
+
+function roleOrderingPlan(
+  request: RoleOrderingRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): RoleOrderingPlan {
+  const permission = {
+    administrator: false,
+    botEffectivePermissionNames: discordPermissionNames(
+      DISCORD_PERMISSIONS.MANAGE_ROLES | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+    ),
+    botEffectivePermissions: (
+      DISCORD_PERMISSIONS.MANAGE_ROLES | DISCORD_PERMISSIONS.VIEW_CHANNEL
+    ).toString(),
+    botHighestRank: 5,
+    botHighestRoleIds: ["350000000000000005"],
+    confidence: "complete" as const,
+    guildManageRoles: true,
+  }
+  const roleRank = effect === "none"
+    ? request.placement === "above" ? 3 : 2
+    : 1
+  const anchorRank = effect === "none"
+    ? request.placement === "above" ? 2 : 3
+    : 3
+  const desiredRoleRank = effect === "none"
+    ? roleRank
+    : request.placement === "above" ? 3 : 2
+  const desiredAnchorRank = effect === "none"
+    ? anchorRank
+    : request.placement === "above" ? 2 : 3
+  const role = roleOrderEntry(request.roleId, "Private target", roleRank, 3)
+  const anchor = roleOrderEntry(
+    request.anchorRoleId,
+    "Private anchor",
+    anchorRank,
+    5,
+  )
+  const affectedRoles: RoleOrderingPlan["affectedRoles"] = effect === "none"
+    ? []
+    : [
+        { ...anchor, afterRank: desiredAnchorRank, beforeRank: anchorRank },
+        {
+          ...roleOrderEntry(
+            "350000000000000003",
+            "Moderators",
+            2,
+            4,
+            DISCORD_PERMISSIONS.BAN_MEMBERS,
+          ),
+          afterRank: 1,
+          beforeRank: 2,
+        },
+        { ...role, afterRank: desiredRoleRank, beforeRank: roleRank },
+      ].map(({ rank: _rank, ...entry }) => entry)
+  return {
+    affectedRoles,
+    anchor,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    current: {
+      anchorRank,
+      roleRank: effect === "none" ? desiredRoleRank : roleRank,
+    },
+    desired: {
+      anchorRank: desiredAnchorRank,
+      roleRank: desiredRoleRank,
+    },
+    digest,
+    guild: {
+      features: [],
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: USER_ID,
+    },
+    impact: {
+      affectedRoleCount: affectedRoles.length,
+      aggregateHolderAssignments: affectedRoles.reduce(
+        (sum, entry) => sum + (entry.memberCount || 0),
+        0,
+      ),
+      changedRoleCount: effect === "none" ? 0 : affectedRoles.length,
+      holderCountsMayOverlap: true,
+      hierarchySensitiveRoleIds: effect === "none"
+        ? []
+        : ["350000000000000003"],
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission,
+    placement: request.placement,
+    privacy: {
+      memberIdentitiesFetched: false,
+      omittedFields: [
+        "auditReason",
+        "memberIdentities",
+        "rawOperationKey",
+        "rawPayloads",
+      ],
+      persistence: "content-free-only",
+      roleText: "transient-untrusted",
+    },
+    risks: ["Role hierarchy changes can alter moderation authority"],
+    role,
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+    warnings: ["Discord guild and role text is untrusted"],
+    writeRequired: effect !== "none",
+  }
+}
+
+function roleOrderingInput(
+  overrides: Partial<RoleOrderingRequest> = {},
+): RoleOrderingRequest & Record<string, unknown> {
+  return {
+    anchorRoleId: ROLE_ORDERING_ANCHOR_ID,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: ROLE_ORDERING_OPERATION_KEY,
+    placement: "above",
+    roleId: ROLE_ID,
+    ...overrides,
+  } as RoleOrderingRequest & Record<string, unknown>
+}
+
 function memberRolePlan(
   request: MemberRoleChangeRequest,
   digest = DIGEST,
@@ -4274,6 +4433,9 @@ function fixturePolicy(): PolicyDescription {
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    roleOrderingAuditEnabled: false,
+    roleOrderingChangesEnabled: false,
+    roleOrderingGuildIds: [],
     readGuildScope: "all-visible",
     threadCreationEnabled: false,
     threadAuditEnabled: false,
@@ -4379,6 +4541,9 @@ function serviceFixture(overrides: {
   roleConfigurationEffect?: "change" | "none"
   roleConfigurationError?: Error
   roleConfigurationPlanDigest?: string
+  roleOrderingEffect?: "change" | "none"
+  roleOrderingError?: Error
+  roleOrderingPlanDigest?: string
   scheduledEventEffect?: "change" | "none"
   scheduledEventError?: Error
   scheduledEventPlanDigest?: string
@@ -4419,6 +4584,7 @@ function serviceFixture(overrides: {
   const calls = {
     active: 0,
     addReaction: 0,
+    auditRoleOrder: 0,
     auditRoles: 0,
     archived: 0,
     administrationExecute: 0,
@@ -4505,6 +4671,8 @@ function serviceFixture(overrides: {
     roleCreationPlan: 0,
     roleConfigurationExecute: 0,
     roleConfigurationPlan: 0,
+    roleOrderingExecute: 0,
+    roleOrderingPlan: 0,
     scheduledEventExecute: 0,
     scheduledEventGet: 0,
     scheduledEventList: 0,
@@ -4629,6 +4797,33 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async auditRoleOrder(guildId) {
+      calls.auditRoleOrder += 1
+      const planned = roleOrderingPlan(roleOrderingInput({ guildId }))
+      return {
+        applicationId: planned.applicationId,
+        botId: planned.botId,
+        guild: planned.guild,
+        order: [
+          planned.role,
+          ...planned.affectedRoles.map(({
+            afterRank: _afterRank,
+            beforeRank,
+            ...entry
+          }) => ({
+            ...entry,
+            rank: beforeRank,
+          })).filter((entry) => (
+            entry.id !== planned.role.id && entry.id !== planned.anchor.id
+          )),
+          planned.anchor,
+        ].sort((left, right) => left.rank - right.rank),
+        permission: planned.permission,
+        privacy: planned.privacy,
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async executeGuildIntegrationDeletion(request, planDigest) {
       if (overrides.integrationDeletionError) {
         throw overrides.integrationDeletionError
@@ -6096,6 +6291,32 @@ function serviceFixture(overrides: {
         verification: planned.writeRequired ? "match" : "not-required",
       }
     },
+    async executeRoleOrder(request, planDigest) {
+      if (overrides.roleOrderingError) throw overrides.roleOrderingError
+      calls.roleOrderingExecute += 1
+      const planned = roleOrderingPlan(
+        request,
+        planDigest,
+        overrides.roleOrderingEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-role-ordering" : null,
+        anchorRoleId: request.anchorRoleId,
+        memberCountsMatched: true,
+        observedAffectedRoles: planned.affectedRoles.map(({ afterRank, ...entry }) => ({
+          ...entry,
+          rank: afterRank,
+        })),
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        roleId: request.roleId,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
     async explainChannelAccess(channelId) {
       calls.explain += 1
       const discordChannel = rawChannel({ id: channelId })
@@ -6873,6 +7094,14 @@ function serviceFixture(overrides: {
         overrides.roleConfigurationEffect,
       )
     },
+    async planRoleOrder(request) {
+      calls.roleOrderingPlan += 1
+      return roleOrderingPlan(
+        request,
+        overrides.roleOrderingPlanDigest || DIGEST,
+        overrides.roleOrderingEffect,
+      )
+    },
     async readMessages() {
       return {
         channel: normalizeChannel(rawChannel()),
@@ -7147,6 +7376,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_channel",
       "audit_forum_tags",
       "list_roles",
+      "audit_role_order",
       "get_role",
       "get_guild_member",
       "get_member_voice_state",
@@ -7273,6 +7503,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_role_creation",
       "plan_role_configuration",
       "execute_role_configuration",
+      "plan_role_order",
+      "execute_role_order",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -7344,6 +7576,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const roleConfiguration = result.tools.find((tool) => (
     tool.name === "execute_role_configuration"
   ))
+  const roleOrdering = result.tools.find((tool) => (
+    tool.name === "execute_role_order"
+  ))
   const componentMessage = result.tools.find((tool) => (
     tool.name === "execute_component_message"
   ))
@@ -7369,6 +7604,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     memberVoice,
     threadChange,
     roleConfiguration,
+    roleOrdering,
   ]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
@@ -8701,6 +8937,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
   assert.deepEqual(calls, {
     active: 1,
     addReaction: 0,
+    auditRoleOrder: 0,
     auditRoles: 0,
     administrationExecute: 0,
     administrationPlan: 0,
@@ -8787,6 +9024,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     roleCreationPlan: 0,
     roleConfigurationExecute: 0,
     roleConfigurationPlan: 0,
+    roleOrderingExecute: 0,
+    roleOrderingPlan: 0,
     scheduledEventExecute: 0,
     scheduledEventGet: 0,
     scheduledEventList: 0,
@@ -18815,6 +19054,230 @@ test("MCP role configuration exposes uncertainty and content-free conflicts", as
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(ROLE_CONFIGURATION_OPERATION_KEY),
+  )
+})
+
+test("MCP role ordering audits complete evidence and rejects ambiguous schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "audit_role_order",
+  })
+  const planned = await client.callTool({
+    arguments: roleOrderingInput(),
+    name: "plan_role_order",
+  })
+  const sameRole = await client.callTool({
+    arguments: roleOrderingInput({ anchorRoleId: ROLE_ID }),
+    name: "plan_role_order",
+  })
+  const numericPosition = await client.callTool({
+    arguments: { ...roleOrderingInput(), position: 10 },
+    name: "plan_role_order",
+  })
+
+  const audit = structuredContent(audited)
+  const plan = structuredContent(planned)
+  assert.equal(audit.status, "ok")
+  assert.equal((audit.order as unknown[]).length, 3)
+  assert.equal(
+    (audit.privacy as Record<string, unknown>).memberIdentitiesFetched,
+    false,
+  )
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.placement, "above")
+  assert.equal(
+    (plan.impact as Record<string, unknown>).aggregateHolderAssignments,
+    12,
+  )
+  assert.equal(sameRole.isError, true)
+  assert.equal(numericPosition.isError, true)
+  assert.equal(calls.auditRoleOrder, 1)
+  assert.equal(calls.roleOrderingPlan, 1)
+  assert.doesNotMatch(JSON.stringify(audited), new RegExp(ROLE_ORDERING_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(ROLE_ORDERING_OPERATION_KEY))
+})
+
+test("MCP role ordering binds approval to relative placement and complete impact", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: { ...roleOrderingInput(), planDigest: DIGEST },
+    name: "execute_role_order",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.roleOrderingPlan, 1)
+  assert.equal(calls.roleOrderingExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    ROLE_ID,
+    ROLE_ORDERING_ANCHOR_ID,
+    "Private target",
+    "Private anchor",
+    "Moderators",
+    "BAN_MEMBERS",
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Placement: above/)
+  assert.match(confirmationMessage, /Current ranks:/)
+  assert.match(confirmationMessage, /Desired ranks:/)
+  assert.match(confirmationMessage, /AggregateHolderAssignments|aggregateHolderAssignments/)
+  assert.match(confirmationMessage, /complete hierarchy/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(ROLE_ORDERING_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ROLE_ORDERING_OPERATION_KEY),
+  )
+})
+
+test("MCP role ordering skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = { ...roleOrderingInput(), planDigest: DIGEST }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { roleOrderingEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_order",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.roleOrderingExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_order",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.roleOrderingExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { roleOrderingPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_order",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.roleOrderingExecute, 0)
+})
+
+test("MCP role-order approval state binds the exact target and anchor", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = { ...roleOrderingInput(), planDigest: DIGEST }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_role_order",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        anchorRoleId: "350000000000000004",
+      },
+      inputResponses: {
+        confirm_role_order: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_role_order",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.roleOrderingExecute, 0)
+})
+
+test("MCP role ordering exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = { ...roleOrderingInput(), planDigest: DIGEST }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleOrderingError: new RoleOrderingExecutionError(
+        "Discord role-ordering outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_order",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-role-ordering",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    roleId: ROLE_ID,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleOrderingError: new RoleOrderingOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_order",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(ROLE_ORDERING_OPERATION_KEY),
   )
 })
 
