@@ -51,6 +51,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "container:index:verify": "node scripts/verify-oci-layout.mjs",
+    "container:verify": "npm run build && node scripts/verify-container.mjs",
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
     "mcp": "node dist/cli.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",

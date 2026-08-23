@@ -6,16 +6,20 @@ import {
   invariant,
   readJson,
   REPOSITORY_ROOT,
+  run,
   sha512Integrity,
 } from "./release-lib.mjs"
+import { inspectPublicOciImage } from "./oci-registry.mjs"
 
 const NPM_REGISTRY_ORIGIN = "https://registry.npmjs.org"
 const MCP_REGISTRY_ORIGIN = "https://registry.modelcontextprotocol.io"
 const EXPECTATIONS = new Set(["matching", "missing", "missing-or-matching"])
+const OCI_EXPECTATIONS = new Set([...EXPECTATIONS, "unchecked"])
 
 function parseArguments(args) {
   const options = {
     expectNpm: "missing-or-matching",
+    expectOci: "missing-or-matching",
     expectPackage: "missing-or-matching",
     expectRegistry: "missing-or-matching",
     json: false,
@@ -33,6 +37,7 @@ function parseArguments(args) {
     if (argument === "--tarball") options.tarball = resolve(value)
     else if (argument === "--expect-package") options.expectPackage = value
     else if (argument === "--expect-npm") options.expectNpm = value
+    else if (argument === "--expect-oci") options.expectOci = value
     else if (argument === "--expect-registry") options.expectRegistry = value
     else throw new Error(`Unknown option ${argument}`)
   }
@@ -44,6 +49,7 @@ function parseArguments(args) {
   ]) {
     invariant(EXPECTATIONS.has(value), `${name} has invalid expectation ${value}`)
   }
+  invariant(OCI_EXPECTATIONS.has(options.expectOci), `--expect-oci has invalid expectation ${options.expectOci}`)
   return options
 }
 
@@ -68,6 +74,8 @@ function assertExpectation(actual, expected, label) {
 const options = parseArguments(process.argv.slice(2))
 const packageJson = await readJson(`${REPOSITORY_ROOT}/package.json`)
 const server = await readJson(`${REPOSITORY_ROOT}/server.json`)
+const revisionResult = await run("git", ["rev-parse", "HEAD"], { capture: true })
+const revision = revisionResult.stdout.trim()
 const localIntegrity = sha512Integrity(await readFile(options.tarball))
 const encodedPackage = encodeURIComponent(packageJson.name)
 const packageResponse = await requestJson(new URL(`/${encodedPackage}`, NPM_REGISTRY_ORIGIN))
@@ -95,6 +103,20 @@ if (npmResponse.state === "present") {
 }
 assertExpectation(npmState, options.expectNpm, "npm version")
 
+const ociPackage = server.packages?.find(({ registryType }) => registryType === "oci")
+invariant(ociPackage, "server.json does not declare an OCI package")
+const ociResult = options.expectOci === "unchecked"
+  ? { state: "unchecked" }
+  : await inspectPublicOciImage({
+    githubToken: process.env.GITHUB_TOKEN,
+    reference: ociPackage.identifier,
+    revision,
+    version: packageJson.version,
+  })
+if (options.expectOci !== "unchecked") {
+  assertExpectation(ociResult.state, options.expectOci, "OCI image")
+}
+
 const registryName = encodeURIComponent(server.name)
 const registryResponse = await requestJson(
   new URL(`/v0.1/servers/${registryName}/versions/${server.version}`, MCP_REGISTRY_ORIGIN),
@@ -109,10 +131,13 @@ assertExpectation(registryState, options.expectRegistry, "MCP Registry version")
 const result = {
   npmPackage: packageState,
   npmVersion: npmState,
+  ociDigest: ociResult.state === "matching" ? ociResult.digest : null,
+  ociImage: ociResult.state,
   registryVersion: registryState,
 }
 process.stdout.write(options.json ? `${JSON.stringify(result)}\n` : [
   `npm package: ${packageState}`,
   `npm version: ${npmState}`,
+  `OCI image: ${ociResult.state}`,
   `MCP Registry version: ${registryState}`,
 ].join("\n") + "\n")

@@ -10,6 +10,7 @@ on:
         options:
           - bootstrap
           - stage
+          - image
           - register
       tag:
         description: Exact stable release tag such as v0.1.0
@@ -31,13 +32,16 @@ env:
 jobs:
   release:
     name: ${{ inputs.operation }} ${{ inputs.tag }}
+    if: ${{ inputs.operation != 'image' }}
     environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      artifact-metadata: write # Associate signed attestations with release artifacts
       attestations: write # Store signed release attestations
       contents: read
       id-token: write # Authenticate npm, attestations, and MCP Registry with OIDC
+      packages: read # Distinguish an absent image tag from an inaccessible package
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,6 +55,7 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Verify public repository and exact tag
+        id: release
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
@@ -145,6 +150,7 @@ jobs:
       - name: Require a clean bootstrap state
         if: ${{ inputs.operation == 'bootstrap' }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           set -eu
@@ -153,6 +159,7 @@ jobs:
             --tarball "$TARBALL" \
             --expect-package missing \
             --expect-npm missing \
+            --expect-oci missing \
             --expect-registry missing
       - name: Publish the first npm version
         if: ${{ inputs.operation == 'bootstrap' }}
@@ -170,6 +177,8 @@ jobs:
           NPM_CONFIG_USERCONFIG="$npmrc" npm publish "$TARBALL" --access public --provenance
       - name: Verify the bootstrapped npm artifact
         if: ${{ inputs.operation == 'bootstrap' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           attempt=1
@@ -177,6 +186,7 @@ jobs:
             --tarball "$TARBALL" \
             --expect-package matching \
             --expect-npm matching \
+            --expect-oci missing \
             --expect-registry missing
           do
             test "$attempt" -lt 6
@@ -186,12 +196,15 @@ jobs:
 
       - name: Require a clean staged-release state
         if: ${{ inputs.operation == 'stage' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           node scripts/check-published-artifacts.mjs \
             --tarball "$TARBALL" \
             --expect-package matching \
             --expect-npm missing \
+            --expect-oci missing \
             --expect-registry missing
       - name: Stage the npm candidate for human approval
         if: ${{ inputs.operation == 'stage' }}
@@ -199,6 +212,8 @@ jobs:
 
       - name: Verify promoted npm artifact and registry state
         if: ${{ inputs.operation == 'register' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           state_file="$RUNNER_TEMP/published-state.json"
@@ -206,6 +221,7 @@ jobs:
             --tarball "$TARBALL" \
             --expect-package matching \
             --expect-npm matching \
+            --expect-oci matching \
             --expect-registry missing-or-matching \
             --json > "$state_file"
           cat "$state_file"
@@ -221,6 +237,8 @@ jobs:
           "$RUNNER_TEMP/mcp-publisher" publish server.json
       - name: Verify exact MCP Registry metadata
         if: ${{ inputs.operation == 'register' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           attempt=1
@@ -228,9 +246,204 @@ jobs:
             --tarball "$TARBALL" \
             --expect-package matching \
             --expect-npm matching \
+            --expect-oci matching \
             --expect-registry matching
           do
             test "$attempt" -lt 6
             attempt=$((attempt + 1))
             sleep 10
           done
+
+  image:
+    name: image ${{ inputs.tag }}
+    if: ${{ inputs.operation == 'image' }}
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      attestations: write # Store signed image provenance
+      contents: read
+      id-token: write # Sign image and SBOM attestations
+      packages: write # Publish only the exact protected image tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+
+      - name: Verify public repository and exact tag
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -eu
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          test "$GITHUB_REPOSITORY" = "j-256/discord-mcp"
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+          test "$REPOSITORY_PRIVATE" = "false"
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          printf 'IMAGE=%s\n' "ghcr.io/j-256/discord-mcp:$version" >> "$GITHUB_ENV"
+          printf 'IMAGE_NAME=%s\n' "ghcr.io/j-256/discord-mcp" >> "$GITHUB_ENV"
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          printf 'image=%s\n' "ghcr.io/j-256/discord-mcp:$version" >> "$GITHUB_OUTPUT"
+          printf 'image_name=%s\n' "ghcr.io/j-256/discord-mcp" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install reviewed dependencies
+        run: npm run deps:locked
+      - name: Verify source and build release evidence
+        run: |
+          set -eu
+          npm run metadata:check
+          npm run typecheck
+          npm run test:coverage
+          npm run security:check
+          mkdir -p "$RUNNER_TEMP/release" "$RUNNER_TEMP/local-container"
+          npm run pack:verify -- --output "$RUNNER_TEMP/release"
+          npm run --silent sbom -- --output "$RUNNER_TEMP/release/sbom.spdx.json"
+          npm run container:verify -- --output "$RUNNER_TEMP/local-container"
+          set -- "$RUNNER_TEMP"/release/*.tgz
+          test "$#" -eq 1
+          printf 'TARBALL=%s\n' "$1" >> "$GITHUB_ENV"
+
+      - name: Verify promoted npm and inspect the exact image tag
+        id: image-state
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-oci unchecked \
+            --expect-registry missing
+          tag_state="$RUNNER_TEMP/image-tag-state.json"
+          node scripts/check-image-tag.mjs --image "$IMAGE" --json > "$tag_state"
+          cat "$tag_state"
+          image_tag_state="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).state" "$tag_state")"
+          image_tag_digest="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).digest || ''" "$tag_state")"
+          printf 'IMAGE_TAG_STATE=%s\n' "$image_tag_state" >> "$GITHUB_ENV"
+          printf 'IMAGE_TAG_DIGEST=%s\n' "$image_tag_digest" >> "$GITHUB_ENV"
+          printf 'state=%s\n' "$image_tag_state" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify exact multi-architecture index before publication
+        if: ${{ steps.image-state.outputs.state == 'missing' }}
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/preflight-index"
+          npm run container:index:verify -- \
+            --revision "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/preflight-index"
+      - name: Build and publish exact multi-architecture image
+        id: build
+        if: ${{ steps.image-state.outputs.state == 'missing' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          build-args: |
+            VERSION=${{ steps.release.outputs.version }}
+            REVISION=${{ github.sha }}
+          context: .
+          file: Dockerfile
+          annotations: |
+            index:org.opencontainers.image.description=Least-privilege Discord reads, privacy-safe audits, and reviewed administration
+            index:org.opencontainers.image.source=https://github.com/j-256/discord-mcp
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          push: true
+          sbom: generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+          tags: ${{ steps.release.outputs.image }}
+
+      - name: Attest exact OCI image provenance
+        if: ${{ steps.image-state.outputs.state == 'missing' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          create-storage-record: false
+          subject-name: ${{ steps.release.outputs.image_name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Verify public image identity and restricted MCP behavior
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/public-container"
+          state_file="$RUNNER_TEMP/image-state.json"
+          attempt=1
+          until node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-oci matching \
+            --expect-registry missing \
+            --json > "$state_file"
+          do
+            test "$attempt" -lt 6
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          cat "$state_file"
+          published_digest="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).ociDigest" "$state_file")"
+          if [ -n "$BUILD_DIGEST" ]
+          then
+            test "$published_digest" = "$BUILD_DIGEST"
+          else
+            test "$published_digest" = "$IMAGE_TAG_DIGEST"
+          fi
+          npm run container:verify -- \
+            --image "$IMAGE" \
+            --pull \
+            --revision "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/public-container"
+          gh attestation verify "oci://$IMAGE_NAME@$published_digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners \
+            --bundle-from-oci \
+            --format json > "$RUNNER_TEMP/provenance-attestation-verification.json"
+
+      - name: Retain exact OCI evidence for review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-evidence-${{ inputs.tag }}
+          path: |
+            ${{ runner.temp }}/image-state.json
+            ${{ runner.temp }}/image-tag-state.json
+            ${{ runner.temp }}/provenance-attestation-verification.json
+            ${{ runner.temp }}/local-container/catalog-evidence.json
+            ${{ runner.temp }}/local-container/container-evidence.json
+            ${{ runner.temp }}/preflight-index/oci-index-evidence.json
+            ${{ runner.temp }}/public-container/catalog-evidence.json
+            ${{ runner.temp }}/public-container/container-evidence.json
+            ${{ runner.temp }}/release/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 14

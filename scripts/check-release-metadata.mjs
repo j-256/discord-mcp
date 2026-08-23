@@ -24,6 +24,11 @@ const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2c
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
+const OCI_IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
+const NODE_IMAGE = "node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"
+const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
+const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
+const SBOM_GENERATOR_IMAGE = "docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
 const README_MAX_BYTES = 32 * 1024
 const README_REQUIRED_HEADINGS = Object.freeze([
   "## Why this connector",
@@ -308,6 +313,10 @@ const EXPECTED_ACTION_PINS = new Map([
   ["actions/download-artifact", "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"],
   ["actions/setup-node", "820762786026740c76f36085b0efc47a31fe5020"],
   ["actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"],
+  ["docker/build-push-action", "10e90e3645eae34f1e60eeb005ba3a3d33f178e8"],
+  ["docker/login-action", "c94ce9fb468520275223c153574b00df6fe4bcc9"],
+  ["docker/setup-buildx-action", "8d2750c68a42422c14e847fe6c8ac0403b4cbd6f"],
+  ["docker/setup-qemu-action", "c7c53464625b32c7a7e944ae62b3e17d2b600130"],
   ["github/codeql-action/analyze", "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"],
   ["github/codeql-action/init", "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"],
 ])
@@ -370,6 +379,8 @@ async function checkPackageAndLock() {
   assertPinnedDependencies(packageJson)
   assertEqual(packageJson.scripts, {
     build: "tsc -p tsconfig.build.json",
+    "container:index:verify": "node scripts/verify-oci-layout.mjs",
+    "container:verify": "npm run build && node scripts/verify-container.mjs",
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
     mcp: "node dist/cli.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",
@@ -485,15 +496,29 @@ async function checkRegistryManifest(packageJson) {
   const iconSize = `${iconBytes.readUInt32BE(16)}x${iconBytes.readUInt32BE(20)}`
   assertEqual(icon.sizes, [iconSize], "registry icon size does not match the PNG")
 
-  invariant(server.packages?.length === 1, "registry manifest must declare one package")
-  const registryPackage = server.packages[0]
-  invariant(registryPackage.registryType === "npm", "registry package type is invalid")
-  invariant(registryPackage.registryBaseUrl === NPM_REGISTRY, "registry package origin is invalid")
-  invariant(registryPackage.identifier === packageJson.name, "registry package name is out of sync")
-  invariant(registryPackage.version === packageJson.version, "registry package version is out of sync")
-  invariant(registryPackage.runtimeHint === "npx", "registry runtime hint is invalid")
-  assertEqual(registryPackage.transport, { type: "stdio" }, "registry transport must remain stdio")
-  const environmentVariables = registryPackage.environmentVariables || []
+  invariant(server.packages?.length === 2, "registry manifest must declare npm and OCI packages")
+  assertEqual(server.packages.map(({ registryType }) => registryType), ["npm", "oci"], "registry package order is invalid")
+  const npmPackage = server.packages[0]
+  invariant(npmPackage.registryType === "npm", "npm registry package type is invalid")
+  invariant(npmPackage.registryBaseUrl === NPM_REGISTRY, "npm registry package origin is invalid")
+  invariant(npmPackage.identifier === packageJson.name, "npm registry package name is out of sync")
+  invariant(npmPackage.version === packageJson.version, "npm registry package version is out of sync")
+  invariant(npmPackage.runtimeHint === "npx", "npm registry runtime hint is invalid")
+  assertEqual(npmPackage.transport, { type: "stdio" }, "npm registry transport must remain stdio")
+  const ociPackage = server.packages[1]
+  invariant(ociPackage.registryType === "oci", "OCI registry package type is invalid")
+  invariant(ociPackage.identifier === `${OCI_IMAGE_NAME}:${packageJson.version}`, "OCI image reference is out of sync")
+  invariant(ociPackage.runtimeHint === "docker", "OCI registry runtime hint is invalid")
+  assertEqual(ociPackage.transport, { type: "stdio" }, "OCI registry transport must remain stdio")
+  for (const forbidden of ["fileSha256", "registryBaseUrl", "version"]) {
+    invariant(ociPackage[forbidden] === undefined, `OCI registry package must omit ${forbidden}`)
+  }
+  assertEqual(
+    ociPackage.environmentVariables,
+    npmPackage.environmentVariables,
+    "npm and OCI registry environment catalogs differ",
+  )
+  const environmentVariables = npmPackage.environmentVariables || []
   const environmentNames = environmentVariables.map((entry) => entry.name).sort()
   assertEqual(environmentNames, EXPECTED_ENVIRONMENT_NAMES, "registry environment catalog is incomplete")
   invariant(new Set(environmentNames).size === environmentNames.length, "registry environment catalog contains duplicates")
@@ -791,6 +816,50 @@ async function checkRegistryManifest(packageJson) {
   )
 }
 
+async function checkContainerSource(packageJson) {
+  const dockerfile = await readFile(join(REPOSITORY_ROOT, "Dockerfile"), "utf8")
+  const dockerignore = await readFile(join(REPOSITORY_ROOT, ".dockerignore"), "utf8")
+  invariant(
+    dockerfile.startsWith(`ARG NODE_IMAGE=${NODE_IMAGE}\n`),
+    "Dockerfile base image is not pinned to the reviewed digest",
+  )
+  invariant((dockerfile.match(/FROM \$\{NODE_IMAGE\}/g) || []).length === 2, "every container stage must use the pinned base")
+  for (const required of [
+    "npm ci --ignore-scripts",
+    "npm prune --omit=dev --ignore-scripts",
+    `ARG VERSION=${packageJson.version}`,
+    "ARG REVISION=local",
+    "org.opencontainers.image.licenses=\"AGPL-3.0-only\"",
+    "io.modelcontextprotocol.server.name=\"io.github.j-256/discord-mcp\"",
+    "ENV NODE_ENV=production",
+    "COPY --from=build --chown=node:node /app/dist ./dist",
+    "COPY --from=build --chown=node:node /app/node_modules ./node_modules",
+    "USER node",
+    "ENTRYPOINT [\"node\", \"dist/cli.js\"]",
+    "CMD [\"catalog\"]",
+  ]) {
+    invariant(dockerfile.includes(required), `Dockerfile is missing ${required}`)
+  }
+  invariant(!/(?:DISCORD|OTEL)_[A-Z0-9_]+\s*=/.test(dockerfile), "Dockerfile must not declare connector configuration")
+  assertEqual(
+    dockerignore.split("\n").filter(Boolean),
+    [
+      "**",
+      "!.dockerignore",
+      "!.npmrc",
+      "!Dockerfile",
+      "!LICENSE",
+      "!package-lock.json",
+      "!package.json",
+      "!src",
+      "!src/**",
+      "!tsconfig.build.json",
+      "!tsconfig.json",
+    ],
+    "container build context allowlist changed",
+  )
+}
+
 async function checkAutomation() {
   const npmConfiguration = await readFile(join(REPOSITORY_ROOT, ".npmrc"), "utf8")
   invariant(npmConfiguration === NPM_CONFIGURATION, "project npm registry configuration is invalid")
@@ -817,6 +886,7 @@ async function checkAutomation() {
     "environment: release",
     "bootstrap",
     "stage",
+    "image",
     "register",
     "npm stage publish",
     "--provenance",
@@ -834,30 +904,59 @@ async function checkAutomation() {
     "test \"$(uname -m)\" = \"x86_64\"",
     "mcp-publisher 1.8.1 ",
     "Attest catalog evidence",
+    "Attest exact OCI image provenance",
+    "subject-name: ${{ steps.release.outputs.image_name }}",
     "catalog-evidence.json",
+    "container-evidence.json",
+    "ghcr.io/j-256/discord-mcp:$version",
+    "linux/amd64,linux/arm64",
+    "index:org.opencontainers.image.description=Least-privilege Discord reads, privacy-safe audits, and reviewed administration",
+    "npm run container:verify",
+    "npm run container:index:verify",
+    "--expect-oci matching",
+    "provenance: mode=max",
+    `sbom: generator=${SBOM_GENERATOR_IMAGE}`,
+    "--bundle-from-oci",
     "v1.8.1",
     "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc",
   ]) {
     invariant(release.includes(required), `release workflow is missing ${required}`)
   }
+  const ci = await readFile(join(workflowsDirectory, "ci.yml"), "utf8")
+  for (const pinnedImage of [BINFMT_IMAGE, BUILDKIT_IMAGE]) {
+    invariant(release.includes(pinnedImage), `release workflow does not pin ${pinnedImage}`)
+    invariant(ci.includes(pinnedImage), `CI workflow does not pin ${pinnedImage}`)
+  }
+  const ociLayoutVerifier = await readFile(join(REPOSITORY_ROOT, "scripts/verify-oci-layout.mjs"), "utf8")
+  const ociRegistry = await readFile(join(REPOSITORY_ROOT, "scripts/oci-registry.mjs"), "utf8")
+  invariant(release.includes(SBOM_GENERATOR_IMAGE), "release workflow does not pin its SBOM generator")
+  invariant(ociRegistry.includes(SBOM_GENERATOR_IMAGE), "OCI utilities do not pin their SBOM generator")
+  invariant(ociLayoutVerifier.includes("SBOM_GENERATOR_IMAGE"), "OCI preflight does not use the pinned SBOM generator")
   for (const workflowName of ["ci.yml", "release.yml"]) {
     const workflow = await readFile(join(workflowsDirectory, workflowName), "utf8")
     invariant(workflow.includes("NPM_CONFIG_REGISTRY: https://registry.npmjs.org"), `${workflowName} must pin the npm registry`)
     invariant(workflow.includes("NPM_CONFIG_REPLACE_REGISTRY_HOST: never"), `${workflowName} must preserve lockfile registry origins`)
   }
-  invariant((release.match(/uses: actions\/attest@/g) || []).length === 3, "release workflow must attest provenance, SBOM, and catalog evidence")
+  invariant((release.match(/uses: actions\/attest@/g) || []).length === 4, "release workflow must attest package, catalog, and image evidence")
+  invariant((release.match(/artifact-metadata: write/g) || []).length === 1, "only file attestations may write artifact metadata")
+  invariant(release.includes("create-storage-record: false"), "personal image attestation must disable unsupported storage records")
+  invariant((release.match(/packages: write/g) || []).length === 1, "only the image release job may write packages")
+  invariant((release.match(/packages: read/g) || []).length === 1, "the non-image release job must use read-only package access")
   invariant(!release.includes("secrets.NPM_TOKEN"), "release workflow must not use a standing npm token")
-  const ci = await readFile(join(workflowsDirectory, "ci.yml"), "utf8")
   invariant(
     (ci.match(/catalog-evidence\.json/g) || []).length >= 2,
     "CI must retain and compare catalog evidence across runtimes",
   )
+  invariant(ci.includes("name: Hardened OCI image"), "CI must verify the hardened OCI image")
+  invariant(ci.includes("cmp \"$evidence_reference\" container/catalog-evidence.json"), "CI must compare package and container contracts")
   const codeowners = await readFile(join(REPOSITORY_ROOT, ".github/CODEOWNERS"), "utf8")
   for (const path of [
     "/.github/",
+    "/.dockerignore",
     "/.npmrc",
     "/assets/",
     "/docs/",
+    "/Dockerfile",
     "/package.json",
     "/package-lock.json",
     "/server.json",
@@ -873,5 +972,6 @@ await checkNeutrality()
 await checkSourceIdentity(packageJson)
 await checkDocumentation(packageJson)
 await checkRegistryManifest(packageJson)
+await checkContainerSource(packageJson)
 await checkAutomation()
 process.stdout.write(`Release metadata verified for ${packageJson.name}@${packageJson.version}\n`)

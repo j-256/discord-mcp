@@ -17,7 +17,7 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence before mutation, one non-retried write, exact readback, durable coordination, and quarantine after ambiguity |
 | Privacy | Tokens stay in the caller's environment; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
-| Release integrity | Exact dependency pins, credential-free contract fingerprints, reproducible package checks, an SPDX SBOM, and signed-release automation |
+| Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
 
 The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and known limitation.
 
@@ -29,6 +29,8 @@ Requirements:
 - A Discord application with a bot user
 - The bot token available only through an environment variable
 - Only the Discord permissions needed for the selected read or reviewed-write scope
+
+Each deployment uses a Discord application and bot controlled by that operator. Discord MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.
 
 Do not grant the bot `Administrator`. Start with `View Channels` and `Read Message History` only where the connector should read. The [bot setup guide](docs/reference.md#discord-bot-setup) explains optional intents and feature-specific permissions.
 
@@ -42,6 +44,18 @@ npx --yes @j-256/discord-mcp@0.1.0 preset show server-observer
 ```
 
 `catalog --check` launches a credential-free, execution-disabled MCP server, negotiates its real tools, prompts, resources, and templates, and verifies that every tool call is blocked by the catalog-only guard.
+
+The exact release image exposes the same safe catalog without a token and defaults to catalog mode instead of operational service:
+
+```sh
+docker run --rm -i \
+  --network=none \
+  --read-only \
+  --cap-drop=ALL \
+  --security-opt=no-new-privileges:true \
+  --pids-limit=64 \
+  ghcr.io/j-256/discord-mcp:0.1.0 catalog --check
+```
 
 ### Create the safest first profile
 
@@ -135,12 +149,14 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp doctor` | Local Node.js, credential-variable, identity-pin, policy, scope, tool-surface, Gateway, observability, and write-gate diagnostics | None |
 | `discord-mcp doctor --online` | Pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
 | `discord-mcp smoke` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the configured profile | Read-only |
+| `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
+| `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, catalog evidence, and content-free MCP handshake | None |
 | `npm run security:check` | Dependency vulnerabilities, registry signatures, and attestations | Public package registry only |
 
 `catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, tool schemas and annotations, prompt declarations, resource declarations, templates, safety response, and execution guard.
 
-The release workflow rebuilds candidates from source, packs them twice, installs them without lifecycle scripts, compares them across supported Node.js lines, generates an SPDX SBOM, and retains signed provenance and catalog attestations. The [release runbook](docs/releasing.md) documents the human-controlled publication gates and independent verification path.
+The release workflow rebuilds candidates from source, packs them twice, installs them without lifecycle scripts, compares them across supported Node.js lines, builds an exact-version multi-architecture OCI image, tests the image under a read-only root filesystem with no capabilities or network, generates an SPDX SBOM, and retains signed provenance, SBOM, and catalog attestations. The [release runbook](docs/releasing.md) documents the human-controlled publication gates and independent verification path.
 
 ## Architecture
 
@@ -167,6 +183,8 @@ npm test
 npm run test:coverage
 npm run build
 npm run pack:verify
+npm run container:verify
+npm run container:index:verify
 npm run security:check
 ```
 

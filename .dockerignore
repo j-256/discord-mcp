@@ -1,0 +1,11 @@
+**
+!.dockerignore
+!.npmrc
+!Dockerfile
+!LICENSE
+!package-lock.json
+!package.json
+!src
+!src/**
+!tsconfig.build.json
+!tsconfig.json

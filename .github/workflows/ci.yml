@@ -81,9 +81,51 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  container:
+    name: Hardened OCI image
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - run: npm run deps:locked
+      - name: Verify restricted container and MCP contract
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/container"
+          npm run container:verify -- --output "$RUNNER_TEMP/container"
+          npm run container:index:verify -- \
+            --revision "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/container"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-evidence
+          path: |
+            ${{ runner.temp }}/container/Dockerfile
+            ${{ runner.temp }}/container/catalog-evidence.json
+            ${{ runner.temp }}/container/container-evidence.json
+            ${{ runner.temp }}/container/oci-index-evidence.json
+          if-no-files-found: error
+          retention-days: 1
+
   package-identity:
     name: Cross-runtime package identity
-    needs: package
+    needs:
+      - package
+      - container
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -91,6 +133,10 @@ jobs:
         with:
           pattern: package-node-*
           path: packages
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: container-evidence
+          path: container
       - name: Require byte-identical package payloads
         run: |
           set -eu
@@ -114,6 +160,7 @@ jobs:
           do
             cmp "$evidence_reference" "$candidate"
           done
+          cmp "$evidence_reference" container/catalog-evidence.json
 
   security:
     name: Dependency security
@@ -138,6 +185,7 @@ jobs:
     needs:
       - source
       - package
+      - container
       - package-identity
       - security
     runs-on: ubuntu-24.04
@@ -147,11 +195,13 @@ jobs:
         env:
           PACKAGE_RESULT: ${{ needs.package.result }}
           PACKAGE_IDENTITY_RESULT: ${{ needs.package-identity.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
           SOURCE_RESULT: ${{ needs.source.result }}
         run: |
           set -eu
           test "$SOURCE_RESULT" = success
           test "$PACKAGE_RESULT" = success
+          test "$CONTAINER_RESULT" = success
           test "$PACKAGE_IDENTITY_RESULT" = success
           test "$SECURITY_RESULT" = success
