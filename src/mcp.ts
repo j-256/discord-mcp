@@ -3881,15 +3881,6 @@ const integrationDeletionConfirmationSchema = z.strictObject({
 const inviteDeletionConfirmationSchema = z.strictObject({
   approve: z.boolean(),
 })
-const onboardingConfirmationSchema = z.strictObject({
-  approve: z.boolean(),
-})
-const welcomeScreenConfirmationSchema = z.strictObject({
-  approve: z.boolean(),
-})
-const widgetSettingsConfirmationSchema = z.strictObject({
-  approve: z.boolean(),
-})
 const pollCreationConfirmationSchema = z.strictObject({
   approve: z.boolean(),
 })
@@ -16243,114 +16234,68 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       context,
     ) => {
       const request = onboardingRequest(input)
-      const requestState = context.mcpReq.requestState()
-      if (requestState !== undefined) {
-        if (!validOnboardingRequestState(
-          requestState,
-          request,
-          input.planDigest,
-        )) {
-          const result = onboardingConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Signed confirmation state does not match the exact guild, complete desired onboarding state, audit reason, one-shot operation key, or plan digest",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const response = inputResponse(
-          context.mcpReq.inputResponses,
-          ONBOARDING_CONFIRMATION_KEY,
-        )
-        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
-          const reason = response.action === "cancel"
-            ? "Discord onboarding confirmation was canceled"
-            : "Discord onboarding confirmation was declined"
-          const result = onboardingConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-declined",
-            reason,
-          )
-          return toolResult(result, reason)
-        }
-        const confirmation = acceptedContent(
-          context.mcpReq.inputResponses,
-          ONBOARDING_CONFIRMATION_KEY,
-          onboardingConfirmationSchema,
-        )
-        if (!confirmation || confirmation.approve !== true) {
-          const result = onboardingConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Discord onboarding replacement requires explicit approval of the displayed plan",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const result = await service.executeOnboardingChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        const verification = result.status === "already-current"
-          ? " without a write"
-          : result.status === "completed-with-drift"
-            ? " with semantic readback drift"
-            : " with matching authoritative response and readback"
-        return toolResult(
-          result,
-          `Discord onboarding change ${result.status} for guild ${result.guildId}${verification}`,
-        )
-      }
-      if (context.mcpReq.inputResponses !== undefined) {
-        const result = onboardingConfirmationOutcome(
-          request,
-          input.planDigest,
-          "confirmation-invalid",
-          "Discord confirmation responses require signed request state",
-        )
-        return toolResult(result, result.reason, { isError: true })
-      }
-
-      const plan = await service.planOnboardingChange(request, {
-        signal: context.mcpReq.signal,
-      })
-      if (plan.digest !== input.planDigest) {
-        const result = {
-          actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
-          guildId: request.guildId,
-          operationKeyHash: plan.operationKeyHash,
-          reason: "The fresh Discord onboarding snapshot does not match the requested digest",
-          schemaVersion: SCHEMA_VERSION,
-          status: "plan-changed",
-        }
-        return toolResult(result, result.reason, { isError: true })
-      }
-      if (!plan.writeRequired) {
-        const result = await service.executeOnboardingChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        return toolResult(
-          result,
-          `Discord onboarding for guild ${result.guildId} already matches the reviewed state`,
-        )
-      }
-      const signedState = await requestStateCodec.mint({
-        ...onboardingRequestStatePayload(request),
-        planDigest: input.planDigest,
-      }, context)
-      return inputRequired({
-        inputRequests: {
-          [ONBOARDING_CONFIRMATION_KEY]: inputRequired.elicit({
-            message: onboardingConfirmationMessage(plan),
-            requestedSchema: onboardingConfirmationRequestSchema,
-          }),
+      return runReviewedToolExecution({
+        confirmation: {
+          approvalRequiredReason: "Discord onboarding replacement requires explicit approval of the displayed plan",
+          declinedReason(action) {
+            return action === "cancel"
+              ? "Discord onboarding confirmation was canceled"
+              : "Discord onboarding confirmation was declined"
+          },
+          invalidStateReason: "Signed confirmation state does not match the exact guild, complete desired onboarding state, audit reason, one-shot operation key, or plan digest",
+          key: ONBOARDING_CONFIRMATION_KEY,
+          message: onboardingConfirmationMessage,
+          missingStateReason: "Discord confirmation responses require signed request state",
+          requestedSchema: onboardingConfirmationRequestSchema,
         },
-        requestState: signedState,
+        execute: () => service.executeOnboardingChange(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        ),
+        inputResponses: context.mcpReq.inputResponses,
+        mintRequestState: (payload) => requestStateCodec.mint(payload, context),
+        outcome: (status, reason) => onboardingConfirmationOutcome(
+          request,
+          input.planDigest,
+          status,
+          reason,
+        ),
+        plan: () => service.planOnboardingChange(request, {
+          signal: context.mcpReq.signal,
+        }),
+        planChanged(plan) {
+          const result = {
+            actualDigest: plan.digest,
+            expectedDigest: input.planDigest,
+            guildId: request.guildId,
+            operationKeyHash: plan.operationKeyHash,
+            reason: "The fresh Discord onboarding snapshot does not match the requested digest",
+            schemaVersion: SCHEMA_VERSION,
+            status: "plan-changed",
+          }
+          return { result, summary: result.reason }
+        },
+        planDigest: input.planDigest,
+        render: toolResult,
+        requestState: context.mcpReq.requestState(),
+        requestStatePayload: onboardingRequestStatePayload(request),
+        summarizeExecution(result) {
+          const verification = result.status === "already-current"
+            ? " without a write"
+            : result.status === "completed-with-drift"
+              ? " with semantic readback drift"
+              : " with matching authoritative response and readback"
+          return `Discord onboarding change ${result.status} for guild ${result.guildId}${verification}`
+        },
+        summarizeNoWrite: (result) => (
+          `Discord onboarding for guild ${result.guildId} already matches the reviewed state`
+        ),
+        validRequestState: (value) => validOnboardingRequestState(
+          value,
+          request,
+          input.planDigest,
+        ),
       })
     }, secrets, observability),
   ))
@@ -16393,114 +16338,68 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       context,
     ) => {
       const request = welcomeScreenRequest(input)
-      const requestState = context.mcpReq.requestState()
-      if (requestState !== undefined) {
-        if (!validWelcomeScreenRequestState(
-          requestState,
-          request,
-          input.planDigest,
-        )) {
-          const result = welcomeScreenConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Signed confirmation state does not match the exact guild, complete desired Welcome Screen state, audit reason, one-shot operation key, or plan digest",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const response = inputResponse(
-          context.mcpReq.inputResponses,
-          WELCOME_SCREEN_CONFIRMATION_KEY,
-        )
-        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
-          const reason = response.action === "cancel"
-            ? "Discord Welcome Screen confirmation was canceled"
-            : "Discord Welcome Screen confirmation was declined"
-          const result = welcomeScreenConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-declined",
-            reason,
-          )
-          return toolResult(result, reason)
-        }
-        const confirmation = acceptedContent(
-          context.mcpReq.inputResponses,
-          WELCOME_SCREEN_CONFIRMATION_KEY,
-          welcomeScreenConfirmationSchema,
-        )
-        if (!confirmation || confirmation.approve !== true) {
-          const result = welcomeScreenConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Discord Welcome Screen replacement requires explicit approval of the displayed plan",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const result = await service.executeWelcomeScreenChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        const verification = result.status === "already-current"
-          ? " without a write"
-          : result.status === "completed-with-drift"
-            ? " with semantic readback drift"
-            : " with matching authoritative response and readback"
-        return toolResult(
-          result,
-          `Discord Welcome Screen change ${result.status} for guild ${result.guildId}${verification}`,
-        )
-      }
-      if (context.mcpReq.inputResponses !== undefined) {
-        const result = welcomeScreenConfirmationOutcome(
-          request,
-          input.planDigest,
-          "confirmation-invalid",
-          "Discord confirmation responses require signed request state",
-        )
-        return toolResult(result, result.reason, { isError: true })
-      }
-
-      const plan = await service.planWelcomeScreenChange(request, {
-        signal: context.mcpReq.signal,
-      })
-      if (plan.digest !== input.planDigest) {
-        const result = {
-          actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
-          guildId: request.guildId,
-          operationKeyHash: plan.operationKeyHash,
-          reason: "The fresh Discord Welcome Screen snapshot does not match the requested digest",
-          schemaVersion: SCHEMA_VERSION,
-          status: "plan-changed",
-        }
-        return toolResult(result, result.reason, { isError: true })
-      }
-      if (!plan.writeRequired) {
-        const result = await service.executeWelcomeScreenChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        return toolResult(
-          result,
-          `Discord Welcome Screen for guild ${result.guildId} already matches the reviewed state`,
-        )
-      }
-      const signedState = await requestStateCodec.mint({
-        ...welcomeScreenRequestStatePayload(request),
-        planDigest: input.planDigest,
-      }, context)
-      return inputRequired({
-        inputRequests: {
-          [WELCOME_SCREEN_CONFIRMATION_KEY]: inputRequired.elicit({
-            message: welcomeScreenConfirmationMessage(plan),
-            requestedSchema: welcomeScreenConfirmationRequestSchema,
-          }),
+      return runReviewedToolExecution({
+        confirmation: {
+          approvalRequiredReason: "Discord Welcome Screen replacement requires explicit approval of the displayed plan",
+          declinedReason(action) {
+            return action === "cancel"
+              ? "Discord Welcome Screen confirmation was canceled"
+              : "Discord Welcome Screen confirmation was declined"
+          },
+          invalidStateReason: "Signed confirmation state does not match the exact guild, complete desired Welcome Screen state, audit reason, one-shot operation key, or plan digest",
+          key: WELCOME_SCREEN_CONFIRMATION_KEY,
+          message: welcomeScreenConfirmationMessage,
+          missingStateReason: "Discord confirmation responses require signed request state",
+          requestedSchema: welcomeScreenConfirmationRequestSchema,
         },
-        requestState: signedState,
+        execute: () => service.executeWelcomeScreenChange(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        ),
+        inputResponses: context.mcpReq.inputResponses,
+        mintRequestState: (payload) => requestStateCodec.mint(payload, context),
+        outcome: (status, reason) => welcomeScreenConfirmationOutcome(
+          request,
+          input.planDigest,
+          status,
+          reason,
+        ),
+        plan: () => service.planWelcomeScreenChange(request, {
+          signal: context.mcpReq.signal,
+        }),
+        planChanged(plan) {
+          const result = {
+            actualDigest: plan.digest,
+            expectedDigest: input.planDigest,
+            guildId: request.guildId,
+            operationKeyHash: plan.operationKeyHash,
+            reason: "The fresh Discord Welcome Screen snapshot does not match the requested digest",
+            schemaVersion: SCHEMA_VERSION,
+            status: "plan-changed",
+          }
+          return { result, summary: result.reason }
+        },
+        planDigest: input.planDigest,
+        render: toolResult,
+        requestState: context.mcpReq.requestState(),
+        requestStatePayload: welcomeScreenRequestStatePayload(request),
+        summarizeExecution(result) {
+          const verification = result.status === "already-current"
+            ? " without a write"
+            : result.status === "completed-with-drift"
+              ? " with semantic readback drift"
+              : " with matching authoritative response and readback"
+          return `Discord Welcome Screen change ${result.status} for guild ${result.guildId}${verification}`
+        },
+        summarizeNoWrite: (result) => (
+          `Discord Welcome Screen for guild ${result.guildId} already matches the reviewed state`
+        ),
+        validRequestState: (value) => validWelcomeScreenRequestState(
+          value,
+          request,
+          input.planDigest,
+        ),
       })
     }, secrets, observability),
   ))
@@ -16543,115 +16442,69 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       context,
     ) => {
       const request = widgetSettingsRequest(input)
-      const requestState = context.mcpReq.requestState()
-      if (requestState !== undefined) {
-        if (!validWidgetSettingsRequestState(
-          requestState,
-          request,
-          input.planDigest,
-        )) {
-          const result = widgetSettingsConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Signed confirmation state does not match the exact guild, complete desired authenticated widget settings, audit reason, one-shot operation key, or plan digest",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const response = inputResponse(
-          context.mcpReq.inputResponses,
-          WIDGET_SETTINGS_CONFIRMATION_KEY,
-        )
-        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
-          const reason = response.action === "cancel"
-            ? "Discord widget-settings confirmation was canceled"
-            : "Discord widget-settings confirmation was declined"
-          const result = widgetSettingsConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-declined",
-            reason,
-          )
-          return toolResult(result, reason)
-        }
-        const confirmation = acceptedContent(
-          context.mcpReq.inputResponses,
-          WIDGET_SETTINGS_CONFIRMATION_KEY,
-          widgetSettingsConfirmationSchema,
-        )
-        if (!confirmation || confirmation.approve !== true) {
-          const result = widgetSettingsConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Discord widget-settings change requires explicit approval of the displayed plan",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const result = await service.executeWidgetSettingsChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        const verification = result.status === "already-current"
-          ? " without a write"
-          : result.status === "completed-with-drift"
-            ? " with authenticated readback drift"
-            : " with matching authoritative response and authenticated readback"
-        return toolResult(
-          result,
-          `Discord widget-settings change ${result.status} for guild ${result.guildId}${verification}`,
-        )
-      }
-      if (context.mcpReq.inputResponses !== undefined) {
-        const result = widgetSettingsConfirmationOutcome(
-          request,
-          input.planDigest,
-          "confirmation-invalid",
-          "Discord confirmation responses require signed request state",
-        )
-        return toolResult(result, result.reason, { isError: true })
-      }
-
-      const plan = await service.planWidgetSettingsChange(request, {
-        signal: context.mcpReq.signal,
-      })
-      if (plan.digest !== input.planDigest) {
-        const normalized = normalizeWidgetSettingsChangeRequest(request)
-        const result = {
-          actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
-          guildId: normalized.guildId,
-          operationKeyHash: normalized.operationKeyHash,
-          reason: "The fresh Discord widget-settings snapshot does not match the requested digest",
-          schemaVersion: SCHEMA_VERSION,
-          status: "plan-changed",
-        }
-        return toolResult(result, result.reason, { isError: true })
-      }
-      if (!plan.writeRequired) {
-        const result = await service.executeWidgetSettingsChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        return toolResult(
-          result,
-          `Discord widget settings for guild ${result.guildId} already match the reviewed state`,
-        )
-      }
-      const signedState = await requestStateCodec.mint({
-        ...widgetSettingsRequestStatePayload(request),
-        planDigest: input.planDigest,
-      }, context)
-      return inputRequired({
-        inputRequests: {
-          [WIDGET_SETTINGS_CONFIRMATION_KEY]: inputRequired.elicit({
-            message: widgetSettingsConfirmationMessage(plan),
-            requestedSchema: widgetSettingsConfirmationRequestSchema,
-          }),
+      return runReviewedToolExecution({
+        confirmation: {
+          approvalRequiredReason: "Discord widget-settings change requires explicit approval of the displayed plan",
+          declinedReason(action) {
+            return action === "cancel"
+              ? "Discord widget-settings confirmation was canceled"
+              : "Discord widget-settings confirmation was declined"
+          },
+          invalidStateReason: "Signed confirmation state does not match the exact guild, complete desired authenticated widget settings, audit reason, one-shot operation key, or plan digest",
+          key: WIDGET_SETTINGS_CONFIRMATION_KEY,
+          message: widgetSettingsConfirmationMessage,
+          missingStateReason: "Discord confirmation responses require signed request state",
+          requestedSchema: widgetSettingsConfirmationRequestSchema,
         },
-        requestState: signedState,
+        execute: () => service.executeWidgetSettingsChange(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        ),
+        inputResponses: context.mcpReq.inputResponses,
+        mintRequestState: (payload) => requestStateCodec.mint(payload, context),
+        outcome: (status, reason) => widgetSettingsConfirmationOutcome(
+          request,
+          input.planDigest,
+          status,
+          reason,
+        ),
+        plan: () => service.planWidgetSettingsChange(request, {
+          signal: context.mcpReq.signal,
+        }),
+        planChanged(plan) {
+          const normalized = normalizeWidgetSettingsChangeRequest(request)
+          const result = {
+            actualDigest: plan.digest,
+            expectedDigest: input.planDigest,
+            guildId: normalized.guildId,
+            operationKeyHash: normalized.operationKeyHash,
+            reason: "The fresh Discord widget-settings snapshot does not match the requested digest",
+            schemaVersion: SCHEMA_VERSION,
+            status: "plan-changed",
+          }
+          return { result, summary: result.reason }
+        },
+        planDigest: input.planDigest,
+        render: toolResult,
+        requestState: context.mcpReq.requestState(),
+        requestStatePayload: widgetSettingsRequestStatePayload(request),
+        summarizeExecution(result) {
+          const verification = result.status === "already-current"
+            ? " without a write"
+            : result.status === "completed-with-drift"
+              ? " with authenticated readback drift"
+              : " with matching authoritative response and authenticated readback"
+          return `Discord widget-settings change ${result.status} for guild ${result.guildId}${verification}`
+        },
+        summarizeNoWrite: (result) => (
+          `Discord widget settings for guild ${result.guildId} already match the reviewed state`
+        ),
+        validRequestState: (value) => validWidgetSettingsRequestState(
+          value,
+          request,
+          input.planDigest,
+        ),
       })
     }, secrets, observability),
   ))

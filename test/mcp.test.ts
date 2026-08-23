@@ -15163,6 +15163,46 @@ test("MCP onboarding execution binds approval to the complete reviewed state", a
   )
 })
 
+test("MCP onboarding execution binds signed state to the exact request", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = onboardingRequest()
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, planDigest: DIGEST },
+      name: "execute_onboarding_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        auditReason: "Different reviewed onboarding reason",
+        planDigest: DIGEST,
+      },
+      inputResponses: {
+        confirm_onboarding_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_onboarding_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.onboardingExecute, 0)
+})
+
 test("MCP onboarding execution skips no-op approval and stops on refusal or drift", async (context) => {
   const argumentsValue = {
     ...onboardingRequest(),
@@ -15419,6 +15459,46 @@ test("MCP Welcome Screen execution binds approval to the complete reviewed state
     JSON.stringify(serverMessages),
     new RegExp(WELCOME_SCREEN_OPERATION_KEY),
   )
+})
+
+test("MCP Welcome Screen execution binds signed state to the exact request", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = welcomeScreenRequest()
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, planDigest: DIGEST },
+      name: "execute_guild_welcome_screen_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        auditReason: "Different reviewed Welcome Screen reason",
+        planDigest: DIGEST,
+      },
+      inputResponses: {
+        confirm_welcome_screen_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_welcome_screen_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.welcomeScreenCalls.execute, 0)
 })
 
 test("MCP Welcome Screen execution skips no-op approval and stops on refusal or drift", async (context) => {
