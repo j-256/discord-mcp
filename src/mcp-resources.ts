@@ -252,6 +252,8 @@ export function registerDiscordResources(
           "",
           "Role configuration requires a separate feature gate and exact standard-role allowlist. Planning binds verified application and bot identity, complete guild, member, role-inventory, hierarchy, permission-grantability, logical-name collision, modern color, and aggregate affected-member-count evidence into a keyed digest. Omitted properties and unrelated permission bits are preserved; ADMINISTRATOR grants, permission changes with unknown bits or an ungrantable complete desired set, connector lockout, @everyone, and managed roles fail closed. Metadata-only changes report but do not require grantability of unchanged permissions. Execution requires a fresh matching plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and exact role, complete inventory, and complete member-count readback. Same-role uncertain outcomes fail closed. It never deletes, reorders, assigns, creates, changes icons or emoji, retries, rolls back, or persists names, permission data, audit reasons, or raw operation keys.",
           "",
+          "Role deletion requires separate audit and change gates plus an exact role allowlist. The canonical configuration keys are capabilities.roleDeletionAudit, capabilities.roleDeletions, and scopes.roleDeletionIds; environment aliases exist only for migration compatibility. Readiness and planning bind verified application and bot identity, a complete obfuscation-safe Gateway channel layout, complete guild, member, role, member-count, channel-overwrite, invite role-grant, emoji restriction, onboarding option, AutoMod exemption, integration-owned role, and this application's command-permission evidence. Only an unheld standard role below the connector can be deleted, and every discovered dependency blocks. Planning requires literal acknowledgement of irreversible role loss and binds the complete content-free evidence, audit reason, identity, and one-shot key into a keyed digest. Execution requires a fresh matching plan, signed approval, durable guild-wide claims, a one-shot reservation, pending content-free activity, one non-retried exact-ID DELETE, and fresh role inventory proving target absence while every baseline survivor remains unchanged; unrelated added roles or dependency evidence are reported as typed drift counts. Unknown or incoherent evidence fails closed, and uncertain outcomes quarantine guild role changes. Historical message mentions, Guild Template snapshot internals, and command permissions owned by other applications cannot be audited through the bounded evidence and remain explicit operator review obligations. It never cleans dependencies, treats an absent target as success, retries, rolls back, or persists names, dependency identifiers, reasons, or raw keys.",
+          "",
           "Role ordering requires separate audit and change toggles plus an exact guild allowlist. Audit returns the complete canonical low-to-high hierarchy, raw positions, managed and connector-held boundaries, known and unknown permissions, aggregate holder counts without member identities, and complete connector MANAGE_ROLES and hierarchy evidence. Planning accepts only one exact standard target role, exact anchor role, and immediate above-or-below placement; it binds the complete inventory, affected segment, aggregate holder impact, hierarchy-sensitive permissions, identities, authority, metadata, reason, and one-shot key into a keyed digest. @everyone, managed roles, connector-held roles, roles at or above the connector, unsafe affected segments, and unknown future fields fail closed. Execution requires a fresh matching plan, signed approval, durable claims on the guild role collection plus target and anchor roles, one-shot reservation, pending content-free activity, one non-retried target-position PATCH, complete response validation, and full hierarchy plus count readback. Uncertain outcomes quarantine the guild role collection. It never accepts arbitrary numeric positions, changes metadata, permissions, or memberships, retries, rolls back, fetches member identities, or persists role text, permissions, counts, reasons, or raw keys.",
           "",
           "Message pin listing uses Discord's current timestamp-paginated endpoint and persists nothing. Pin and unpin both require a separate exact channel allowlist and a review-first workflow that binds verified application and bot identity, exact message state, thread membership, complete message-read and PIN_MESSAGES permission evidence, audit reason, and one-shot key hash into a keyed plan. Execution requires fresh matching evidence, signed approval, durable reservation, pending content-free activity, one non-retried mutation, and exact state plus review-snapshot readback. The production facade acquires durable exact channel-and-message claims across connector processes sharing the activity-state root, and an uncertain outcome permanently spends the key and retains those claims for operator review.",
@@ -507,6 +509,31 @@ export function registerDiscordResources(
       secrets,
       () => service.auditRoleOrder(
         templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.roleDeletionReadiness,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.roleDeletionReadiness, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Fresh content-free retirement readiness for one exact separately allowlisted Discord role. Returns complete member-count, hierarchy, unobfuscated channel-overwrite, invite grant, emoji restriction, onboarding, AutoMod, integration, and this-application command-permission evidence with blocker counts, risks, warnings, and explicit platform blind spots. Nothing is persisted.",
+      mimeType: "application/json",
+      title: "Reviewed Discord role deletion readiness",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditRoleDeletion(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "roleId"),
         { signal: context.mcpReq.signal },
       ),
     ),

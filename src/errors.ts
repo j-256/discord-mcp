@@ -361,6 +361,42 @@ export class ChannelDeletionVerificationTimeoutError extends Error {
   override name = "ChannelDeletionVerificationTimeoutError"
 }
 
+export class RoleDeletionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord role state does not match the reviewed deletion plan")
+    this.name = "RoleDeletionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class RoleDeletionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord role-deletion operation key has already been reserved")
+    this.name = "RoleDeletionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class RoleDeletionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "RoleDeletionExecutionError"
+    this.result = result
+  }
+}
+
+export class RoleDeletionEvidenceError extends Error {
+  override name = "RoleDeletionEvidenceError"
+}
+
 export class ChannelOrderingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

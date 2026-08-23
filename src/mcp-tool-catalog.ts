@@ -73,6 +73,7 @@ type McpToolWorkflow =
   | "native-interaction-command"
   | "role-creation"
   | "role-configuration"
+  | "role-deletion"
   | "role-ordering"
   | "scheduled-event-change"
   | "stage-instance-change"
@@ -117,6 +118,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   audit_role_order: {
     keywords: ["audit", "hierarchy", "holder", "order", "permission", "position", "role"],
     toolset: "role-ordering",
+  },
+  audit_role_deletion: {
+    keywords: ["audit", "blocker", "dependency", "delete", "retire", "role"],
+    toolset: "role-deletion",
   },
   delete_messages: {
     keywords: ["bulk", "delete", "exact ids", "remove"],
@@ -171,6 +176,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "delete", "execute", "irreversible", "retire"],
     toolset: "channel-deletion",
     workflow: "channel-deletion",
+  },
+  execute_role_deletion: {
+    keywords: ["delete", "execute", "irreversible", "retire", "role"],
+    toolset: "role-deletion",
+    workflow: "role-deletion",
   },
   execute_channel_clone: {
     keywords: ["channel", "clone", "copy", "execute", "forum", "media", "stage", "voice"],
@@ -647,6 +657,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "delete", "dependency", "plan", "retire", "review"],
     toolset: "channel-deletion",
     workflow: "channel-deletion",
+  },
+  plan_role_deletion: {
+    keywords: ["blocker", "delete", "dependency", "plan", "retire", "review", "role"],
+    toolset: "role-deletion",
+    workflow: "role-deletion",
   },
   plan_channel_clone: {
     keywords: ["channel", "clone", "copy", "forum", "media", "plan", "review", "stage", "voice"],

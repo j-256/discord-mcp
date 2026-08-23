@@ -2433,6 +2433,137 @@ test("Discord client reads exact role-member counts and sends one narrow role PA
   ])
 })
 
+test("Discord client projects command-role dependencies and sends one exact role DELETE", async () => {
+  const requests: Array<{
+    authorization: string | null
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("Authorization"),
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      return jsonResponse([{
+        application_id: "100",
+        guild_id: "200",
+        id: "300",
+        permissions: [{ id: "400", permission: true, type: 1 }],
+      }])
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.listGuildApplicationCommandPermissions("100", "200"),
+    [{
+      applicationId: "100",
+      commandId: "300",
+      guildId: "200",
+      permissions: [{
+        allowed: true,
+        id: "400",
+        type: 1,
+        unknownFieldCount: 0,
+      }],
+      unknownFieldCount: 0,
+    }],
+  )
+  await client.deleteGuildRole("200", "400", "Retire role / reviewed")
+
+  assert.deepEqual(requests, [{
+    authorization: `Bot ${TOKEN}`,
+    method: "GET",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands/permissions`,
+  }, {
+    authorization: `Bot ${TOKEN}`,
+    method: "DELETE",
+    reason: "Retire%20role%20%2F%20reviewed",
+    url: `${API_BASE_URL}/guilds/200/roles/400`,
+  }])
+})
+
+test("Discord client fails closed on command-permission drift and never retries role deletion", async () => {
+  const drift = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse([{
+      application_id: "100",
+      future_command_field: true,
+      guild_id: "200",
+      id: "300",
+      permissions: [{
+        future_permission_field: true,
+        id: "400",
+        permission: true,
+        type: 1,
+      }],
+    }]),
+    token: TOKEN,
+  })
+  assert.deepEqual(
+    await drift.listGuildApplicationCommandPermissions("100", "200"),
+    [{
+      applicationId: "100",
+      commandId: "300",
+      guildId: "200",
+      permissions: [{
+        allowed: true,
+        id: "400",
+        type: 1,
+        unknownFieldCount: 1,
+      }],
+      unknownFieldCount: 1,
+    }],
+  )
+
+  for (const body of [
+    [{ application_id: "999", guild_id: "200", id: "300", permissions: [] }],
+    [{ application_id: "100", guild_id: "999", id: "300", permissions: [] }],
+    [
+      { application_id: "100", guild_id: "200", id: "300", permissions: [] },
+      { application_id: "100", guild_id: "200", id: "300", permissions: [] },
+    ],
+  ]) {
+    const malformed = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(body),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      malformed.listGuildApplicationCommandPermissions("100", "200"),
+      /invalid application-command permission evidence/,
+    )
+  }
+
+  let requests = 0
+  let sleeps = 0
+  const limited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    limited.deleteGuildRole("200", "400", "reviewed"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client sends one exact role-position PATCH and returns the complete response", async () => {
   const requests: Array<{
     body: unknown
@@ -4994,6 +5125,7 @@ test("Discord client projects bounded guild expression inventories without CDN o
     name: "wave",
     requiresColons: true,
     roleIds: ["400"],
+    unknownFieldCount: 1,
   }])
   assert.deepEqual(stickers, [{
     available: true,

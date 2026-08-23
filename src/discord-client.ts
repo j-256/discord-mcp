@@ -359,7 +359,23 @@ export interface DiscordInviteSummary {
   targetUserId: string | null
   temporary: boolean
   type: number
+  unknownFieldCount?: number
   uses: number
+}
+
+export interface DiscordApplicationCommandPermission {
+  allowed: boolean
+  id: string
+  type: 1 | 2 | 3
+  unknownFieldCount: number
+}
+
+export interface DiscordGuildApplicationCommandPermissions {
+  applicationId: string
+  commandId: string
+  guildId: string
+  permissions: DiscordApplicationCommandPermission[]
+  unknownFieldCount: number
 }
 
 export interface DiscordDeletedInviteSummary {
@@ -618,6 +634,7 @@ export interface DiscordAutoModerationRuleSummary {
   id: string
   name: string
   trigger: DiscordAutoModerationTrigger
+  unknownFieldCount?: number
 }
 
 export interface CreateGuildAutoModerationRuleInput {
@@ -646,6 +663,7 @@ export interface DiscordGuildEmojiSummary {
   name: string
   requiresColons: boolean
   roleIds: string[]
+  unknownFieldCount?: number
 }
 
 export interface DiscordApplicationEmojiSummary {
@@ -1554,6 +1572,38 @@ function inviteEvidenceError(): InviteEvidenceError {
   return new InviteEvidenceError("Discord returned an invalid guild invite inventory")
 }
 
+const INVITE_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "approximate_member_count",
+  "approximate_presence_count",
+  "channel",
+  "code",
+  "created_at",
+  "expires_at",
+  "flags",
+  "guild",
+  "guild_scheduled_event",
+  "inviter",
+  "max_age",
+  "max_uses",
+  "roles",
+  "stage_instance",
+  "target_application",
+  "target_type",
+  "target_user",
+  "temporary",
+  "type",
+  "uses",
+])
+const INVITE_ROLE_KEYS: ReadonlySet<string> = new Set([
+  "color",
+  "colors",
+  "icon",
+  "id",
+  "name",
+  "position",
+  "unicode_emoji",
+])
+
 function projectedInviteId(value: unknown): string | null {
   if (value === undefined || value === null) return null
   const id = typeof value === "object" && !Array.isArray(value)
@@ -1647,6 +1697,16 @@ function projectInvite(value: unknown): DiscordInviteSummary {
   if (roleIds.some((roleId) => roleId === null)) throw inviteEvidenceError()
   const exactRoleIds = roleIds as string[]
   if (new Set(exactRoleIds).size !== exactRoleIds.length) throw inviteEvidenceError()
+  const unknownFieldCount = countUnknownFields(record, [...INVITE_RESPONSE_KEYS])
+    + roles.reduce((total, role) => {
+        if (!role || typeof role !== "object" || Array.isArray(role)) {
+          throw inviteEvidenceError()
+        }
+        return total + countUnknownFields(
+          role as Record<string, unknown>,
+          [...INVITE_ROLE_KEYS],
+        )
+      }, 0)
   const targetType = record.target_type === undefined || record.target_type === null
     ? null
     : inviteInteger(record.target_type)
@@ -1666,6 +1726,7 @@ function projectInvite(value: unknown): DiscordInviteSummary {
     targetUserId: projectedInviteId(record.target_user),
     temporary: record.temporary,
     type: inviteInteger(record.type),
+    ...(unknownFieldCount > 0 ? { unknownFieldCount } : {}),
     uses: inviteInteger(record.uses),
   }
 }
@@ -3389,6 +3450,17 @@ function projectGuildIntegration(value: unknown): DiscordGuildIntegrationSummary
   }
 }
 
+const GUILD_EMOJI_KEYS: ReadonlySet<string> = new Set([
+  "animated",
+  "available",
+  "id",
+  "managed",
+  "name",
+  "require_colons",
+  "roles",
+  "user",
+])
+
 function projectGuildEmoji(value: unknown): DiscordGuildEmojiSummary {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new GuildExpressionEvidenceError("Discord returned an invalid guild emoji object")
@@ -3425,6 +3497,7 @@ function projectGuildEmoji(value: unknown): DiscordGuildEmojiSummary {
     if (creatorUserId !== null) {
       assertPositiveSnowflake(creatorUserId, "Discord guild emoji creator ID")
     }
+    const unknownFieldCount = countUnknownFields(record, [...GUILD_EMOJI_KEYS])
     return {
       animated: record.animated === true,
       available: record.available !== false,
@@ -3434,6 +3507,7 @@ function projectGuildEmoji(value: unknown): DiscordGuildEmojiSummary {
       name: record.name,
       requiresColons: record.require_colons !== false,
       roleIds: [...roles as string[]],
+      ...(unknownFieldCount > 0 ? { unknownFieldCount } : {}),
     }
   } catch (error) {
     if (error instanceof GuildExpressionEvidenceError) throw error
@@ -4148,6 +4222,20 @@ function assertAutoModerationCompatibility(
   }
 }
 
+const AUTO_MODERATION_RULE_KEYS: ReadonlySet<string> = new Set([
+  "actions",
+  "creator_id",
+  "enabled",
+  "event_type",
+  "exempt_channels",
+  "exempt_roles",
+  "guild_id",
+  "id",
+  "name",
+  "trigger_metadata",
+  "trigger_type",
+])
+
 function projectGuildAutoModerationRule(
   value: unknown,
   guildId: string,
@@ -4198,6 +4286,7 @@ function projectGuildAutoModerationRule(
         "Discord returned channel exemptions for a member-profile AutoMod rule",
       )
     }
+    const unknownFieldCount = countUnknownFields(record, [...AUTO_MODERATION_RULE_KEYS])
     return {
       actions,
       creatorUserId: record.creator_id,
@@ -4217,6 +4306,7 @@ function projectGuildAutoModerationRule(
         "rule name",
       ),
       trigger,
+      ...(unknownFieldCount > 0 ? { unknownFieldCount } : {}),
     }
   } catch (error) {
     if (error instanceof AutoModerationEvidenceError) throw error
@@ -7426,6 +7516,128 @@ function assertAllowedMentions(allowedMentions: DiscordAllowedMentions): void {
   }
 }
 
+const GUILD_COMMAND_PERMISSION_KEYS: ReadonlySet<string> = new Set([
+  "application_id",
+  "guild_id",
+  "id",
+  "permissions",
+])
+const COMMAND_PERMISSION_KEYS: ReadonlySet<string> = new Set([
+  "id",
+  "permission",
+  "type",
+])
+
+function compareDiscordSnowflakes(left: string, right: string): number {
+  const leftId = BigInt(left)
+  const rightId = BigInt(right)
+  return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+}
+
+function projectGuildApplicationCommandPermissions(
+  value: unknown,
+  applicationId: string,
+  guildId: string,
+): DiscordGuildApplicationCommandPermissions[] {
+  if (
+    !Array.isArray(value)
+    || value.length > DISCORD_LIMITS.guildApplicationCommandPermissions
+  ) {
+    throw new DiscordTransportError(
+      "Discord returned invalid application-command permission evidence",
+      "discord-client-error",
+    )
+  }
+  const commandIds = new Set<string>()
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new DiscordTransportError(
+        "Discord returned invalid application-command permission evidence",
+        "discord-client-error",
+      )
+    }
+    const record = entry as Record<string, unknown>
+    if (
+      typeof record.id !== "string"
+      || record.application_id !== applicationId
+      || record.guild_id !== guildId
+      || commandIds.has(record.id)
+      || !Array.isArray(record.permissions)
+      || record.permissions.length > DISCORD_LIMITS.applicationCommandPermissionOverwrites
+    ) {
+      throw new DiscordTransportError(
+        "Discord returned invalid application-command permission evidence",
+        "discord-client-error",
+      )
+    }
+    try {
+      assertPositiveSnowflake(record.id, "Discord application-command permission ID")
+    } catch (error) {
+      throw new DiscordTransportError(
+        "Discord returned invalid application-command permission evidence",
+        "discord-client-error",
+        { cause: error },
+      )
+    }
+    commandIds.add(record.id)
+    const permissionKeys = new Set<string>()
+    const permissions: DiscordApplicationCommandPermission[] = record.permissions.map((permission) => {
+      if (!permission || typeof permission !== "object" || Array.isArray(permission)) {
+        throw new DiscordTransportError(
+          "Discord returned invalid application-command permission evidence",
+          "discord-client-error",
+        )
+      }
+      const item = permission as Record<string, unknown>
+      if (
+        typeof item.id !== "string"
+        || (item.type !== 1 && item.type !== 2 && item.type !== 3)
+        || typeof item.permission !== "boolean"
+      ) {
+        throw new DiscordTransportError(
+          "Discord returned invalid application-command permission evidence",
+          "discord-client-error",
+        )
+      }
+      try {
+        assertPositiveSnowflake(item.id, "Discord application-command overwrite ID")
+      } catch (error) {
+        throw new DiscordTransportError(
+          "Discord returned invalid application-command permission evidence",
+          "discord-client-error",
+          { cause: error },
+        )
+      }
+      const key = `${item.type}:${item.id}`
+      if (permissionKeys.has(key)) {
+        throw new DiscordTransportError(
+          "Discord returned duplicate application-command permission evidence",
+          "discord-client-error",
+        )
+      }
+      permissionKeys.add(key)
+      return {
+        allowed: item.permission,
+        id: item.id,
+        type: item.type as 1 | 2 | 3,
+        unknownFieldCount: countUnknownFields(item, [...COMMAND_PERMISSION_KEYS]),
+      }
+    }).sort((left, right) => (
+      left.type - right.type || compareDiscordSnowflakes(left.id, right.id)
+    ))
+    return {
+      applicationId,
+      commandId: record.id,
+      guildId,
+      permissions,
+      unknownFieldCount: countUnknownFields(
+        record,
+        [...GUILD_COMMAND_PERMISSION_KEYS],
+      ),
+    }
+  }).sort((left, right) => compareDiscordSnowflakes(left.commandId, right.commandId))
+}
+
 export class DiscordClient {
   readonly #apiBaseUrl: string
   readonly #fetch: FetchImplementation
@@ -7617,6 +7829,25 @@ export class DiscordClient {
         diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands",
       },
     )
+  }
+
+  async listGuildApplicationCommandPermissions(
+    applicationId: string,
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildApplicationCommandPermissions[]> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_application_command_permissions",
+      `/applications/${applicationId}/guilds/${guildId}/commands/permissions`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands/permissions",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildApplicationCommandPermissions(response, applicationId, guildId)
   }
 
   createGuildApplicationCommand(
@@ -8437,6 +8668,29 @@ export class DiscordClient {
       { ...options, suppressFailureCause: true },
     )
     return projectGuildRoleMemberCounts(response)
+  }
+
+  async deleteGuildRole(
+    guildId: string,
+    roleId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord role-deletion guild ID")
+    assertPositiveSnowflake(roleId, "Discord role-deletion role ID")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "delete_guild_role",
+      `/guilds/${guildId}/roles/${roleId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/guilds/{guild.id}/roles/{role.id}",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async listApplicationEmojis(

@@ -186,6 +186,7 @@ interface GuidanceCalls {
   onboarding: number
   permissionOverwrites: number
   reactions: number
+  roleDeletions: number
   roleOrders: number
   roles: number
   scheduledEvents: number
@@ -238,6 +239,7 @@ function guidanceService(options: {
     onboarding: 0,
     permissionOverwrites: 0,
     reactions: 0,
+    roleDeletions: 0,
     roleOrders: 0,
     roles: 0,
     scheduledEvents: 0,
@@ -260,6 +262,70 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    async auditRoleDeletion(guildId, roleId) {
+      calls.roleDeletions += 1
+      calls.lastGuildId = guildId
+      calls.lastRoleId = roleId
+      return {
+        applicationId: APPLICATION_ID,
+        blockers: [],
+        botId: BOT_ID,
+        dependencies: {
+          blockerCount: 0,
+          counts: {
+            applicationCommandPermissions: 0,
+            autoModerationExemptions: 0,
+            channelOverwrites: 0,
+            emojiRestrictions: 0,
+            integrationRoles: 0,
+            inviteRoleGrants: 0,
+            onboardingOptions: 0,
+          },
+          digest: `hmac-sha256:${"d".repeat(64)}`,
+        },
+        evidenceDigest: `hmac-sha256:${"e".repeat(64)}`,
+        guild: {
+          features: [],
+          id: guildId,
+          name: "Private deletion guild",
+          ownerId: USER_ID,
+        },
+        layout: {
+          channelCount: 2,
+          httpEvidenceMode: "complete",
+          obfuscatedChannelCount: 0,
+          revision: 7,
+          updatedAt: "2026-08-23T00:00:00.000Z",
+        },
+        memberCount: 0,
+        permission: {
+          administrator: false,
+          botEffectivePermissionNames: ["MANAGE_GUILD", "MANAGE_ROLES"],
+          botEffectivePermissions: (
+            DISCORD_PERMISSIONS.MANAGE_GUILD | DISCORD_PERMISSIONS.MANAGE_ROLES
+          ).toString(),
+          botHighestRoleIds: [ROLE_ORDER_ANCHOR_ID],
+          botHighestRolePosition: 10,
+          guildManageGuild: true,
+          guildManageRoles: true,
+        },
+        privacy: {
+          contentFetched: false,
+          dependencyIdentifiersPersisted: false,
+          roleNamePersisted: false,
+        },
+        ready: true,
+        risks: ["Guild role deletion is irreversible"],
+        roleCount: 3,
+        schemaVersion: 1,
+        status: "ready",
+        target: normalizeDiscordRole(rawRole(roleId), guildId),
+        warnings: [
+          "Discord exposes no complete search for historical role mentions",
+          "Discord exposes this application's command permission overrides only",
+        ],
+      }
+    },
     async auditChannelDeletion(guildId, channelId) {
       calls.channelDeletions += 1
       calls.lastGuildId = guildId
@@ -1803,6 +1869,9 @@ function guidanceService(options: {
         roleCreationGuildIds: [],
         roleConfigurationEnabled: false,
         roleConfigurationIds: [],
+        roleDeletionAuditEnabled: false,
+        roleDeletionIds: [],
+        roleDeletionsEnabled: false,
         roleOrderingAuditEnabled: false,
         roleOrderingChangesEnabled: false,
         roleOrderingGuildIds: [],
@@ -1841,6 +1910,7 @@ function guidanceService(options: {
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
+    executeRoleDeletion: unexpected,
     executeRoleOrder: unexpected,
     async explainChannelAccess(channelId) {
       calls.channelAccess += 1
@@ -2348,6 +2418,7 @@ function guidanceService(options: {
     verifyGuildScaffold: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
+    planRoleDeletion: unexpected,
     planRoleOrder: unexpected,
     readMessages: unexpected,
     removeOwnReaction: unexpected,
@@ -2408,6 +2479,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.onboarding
     + calls.permissionOverwrites
     + calls.reactions
+    + calls.roleDeletions
     + calls.roleOrders
     + calls.roles
     + calls.scheduledEvents
@@ -2576,6 +2648,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildOnboarding,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.roleDeletionReadiness,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.roleDeletionReadiness,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildProfile,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildProfile,
       },
@@ -2679,6 +2755,10 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Role configuration requires a separate feature gate/)
   assert.match(safety.text, /complete role-member counts|complete member-count readback/)
   assert.match(safety.text, /permission changes with unknown bits/)
+  assert.match(safety.text, /Role deletion requires separate audit and change gates/)
+  assert.match(safety.text, /canonical configuration keys are capabilities\.roleDeletionAudit/)
+  assert.match(safety.text, /every discovered dependency blocks/)
+  assert.match(safety.text, /Historical message mentions, Guild Template snapshot internals/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
   assert.match(safety.text, /Creation, rename or same-guild move, and deletion each require/)
   assert.match(safety.text, /Creation validates and discards the returned credential/)
@@ -5516,5 +5596,55 @@ test("MCP channel-deletion guidance exposes exact readiness and a plan-only stri
       name: MCP_PROMPT_NAMES.reviewChannelDeletion,
     }),
     /valid strict plan_channel_deletion input object/,
+  )
+})
+
+test("MCP role-deletion guidance exposes exact readiness and a plan-only strict prompt", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const readiness = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/roles/${ROLE_ID}/deletion-readiness`,
+  )
+  const readinessData = readiness.value.data as Record<string, unknown>
+  assert.equal(readinessData.status, "ready")
+  assert.equal(
+    (readinessData.target as Record<string, unknown>).id,
+    ROLE_ID,
+  )
+  assert.equal(calls.roleDeletions, 1)
+  assert.equal(calls.lastGuildId, GUILD_ID)
+  assert.equal(calls.lastRoleId, ROLE_ID)
+  assert.doesNotMatch(JSON.stringify(readiness.value), new RegExp(TOKEN))
+
+  const request = {
+    acknowledgeIrreversibleRoleLoss: true,
+    auditReason: "Retire an unused test role",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    roleId: ROLE_ID,
+  }
+  const reviewed = await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(request) },
+    name: MCP_PROMPT_NAMES.reviewRoleDeletion,
+  })
+  const text = promptText(reviewed)
+  assert.deepEqual(JSON.parse(text.split("\n")[1] || ""), request)
+  assert.match(text, /Call only plan_role_deletion/)
+  assert.match(text, /Do not call execute_role_deletion/)
+  assert.match(text, /historical role mentions/)
+  assert.match(text, /other applications/)
+  assert.equal(totalCalls(calls), 1)
+
+  await assert.rejects(
+    () => client.getPrompt({
+      arguments: {
+        requestJson: JSON.stringify({
+          ...request,
+          acknowledgeIrreversibleRoleLoss: false,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewRoleDeletion,
+    }),
+    /valid strict plan_role_deletion input object/,
   )
 })

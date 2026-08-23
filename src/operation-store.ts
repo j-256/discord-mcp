@@ -60,6 +60,7 @@ export const OPERATION_KINDS = [
   "reaction-moderation",
   "role-creation",
   "role-configuration",
+  "role-deletion",
   "role-ordering",
   "scheduled-event-change",
   "guild-soundboard-change",

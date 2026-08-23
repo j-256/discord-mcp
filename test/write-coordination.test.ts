@@ -384,6 +384,43 @@ test("coordination accepts one exact maximum-size deletion batch and rejects exp
   )
 })
 
+test("coordination permits only the exact role-deletion evidence target count", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const targets = [
+    writeResourceTarget("role", "300000000000000001"),
+    writeGuildCollectionTarget("application-commands", GUILD_ID),
+    writeGuildCollectionTarget("automod", GUILD_ID),
+    writeGuildCollectionTarget("channels", GUILD_ID),
+    writeGuildCollectionTarget("emojis", GUILD_ID),
+    writeGuildCollectionTarget("integrations", GUILD_ID),
+    writeGuildCollectionTarget("invites", GUILD_ID),
+    writeGuildCollectionTarget("onboarding", GUILD_ID),
+    writeGuildCollectionTarget("roles", GUILD_ID),
+  ]
+
+  const result = await coordinator.run({
+    kind: "role-deletion",
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    targets,
+  }, async () => (await claimFiles(directory)).length)
+
+  assert.equal(result, targets.length)
+  assert.deepEqual(await claimFiles(directory), [])
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "role-deletion",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [
+        ...targets,
+        writeGuildCollectionTarget("templates", GUILD_ID),
+      ],
+    }, async () => "unsafe"),
+    /requires 1-9 targets for role-deletion/,
+  )
+})
+
 test("file coordinator publishes private content-free claims and releases them", async (context) => {
   const { coordinator, directory } = await fixture(context)
   let release: (() => void) | undefined

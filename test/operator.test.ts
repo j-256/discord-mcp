@@ -211,6 +211,9 @@ function status(
       roleCreationGuildIds: [],
       roleConfigurationEnabled: false,
       roleConfigurationIds: [],
+      roleDeletionAuditEnabled: false,
+      roleDeletionIds: [],
+      roleDeletionsEnabled: false,
       roleOrderingAuditEnabled: false,
       roleOrderingChangesEnabled: false,
       roleOrderingGuildIds: [],
@@ -265,6 +268,7 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     auditChannelDeletion: unexpected,
+    auditRoleDeletion: unexpected,
     auditChannelOrder: unexpected,
     auditForumTags: unexpected,
     auditRoleOrder: unexpected,
@@ -377,6 +381,7 @@ function toolService(): DiscordToolService {
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
+    executeRoleDeletion: unexpected,
     explainChannelAccess: unexpected,
     explainPrincipalPermissions: unexpected,
     getGuildAuditEntry: unexpected,
@@ -423,6 +428,7 @@ function toolService(): DiscordToolService {
     planMemberModeration: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
+    planRoleDeletion: unexpected,
     planRoleOrder: unexpected,
     readMessages: unexpected,
     removeOwnReaction: unexpected,
@@ -2692,6 +2698,51 @@ test("doctor and setup explain reviewed exact channel deletion", async () => {
   }
 })
 
+test("doctor and setup explain reviewed exact role deletion", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_GATEWAY: "true",
+    DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
+    DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+    DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector,gateway",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.roleDeletionAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.roleDeletionChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact roles/)
+  assert.match(audit?.summary || "", /holder, hierarchy, dependency, permission/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /irreversible acknowledgement/)
+  assert.match(changes?.summary || "", /fresh absence verification/)
+  assert.match(omitted.warnings.join("\n"), /role-deletion toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT",
+    "DISCORD_MCP_ALLOW_ROLE_DELETIONS",
+    "DISCORD_MCP_ROLE_DELETION_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
 test("doctor and setup explain reviewed member-role scope without Discord writes", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
@@ -3907,6 +3958,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_reaction_moderation",
     "review_role_configuration",
     "review_role_creation",
+    "review_role_deletion",
     "review_role_order",
     "review_scheduled_event_change",
     "review_soundboard_change",
@@ -3958,6 +4010,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/role-order",
     "discord://guilds/{guildId}/roles",
     "discord://guilds/{guildId}/roles/{roleId}",
+    "discord://guilds/{guildId}/roles/{roleId}/deletion-readiness",
     "discord://guilds/{guildId}/scheduled-events",
     "discord://guilds/{guildId}/settings",
     "discord://guilds/{guildId}/soundboard",
@@ -4003,6 +4056,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_poll_end",
     "execute_reaction_moderation",
     "execute_role_configuration",
+    "execute_role_deletion",
     "execute_role_order",
     "execute_scheduled_event_change",
     "execute_stage_instance_change",

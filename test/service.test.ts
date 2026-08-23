@@ -485,6 +485,9 @@ function serviceFixture(overrides: {
     async deleteGuildChannel() {
       throw new Error("Unexpected guild channel deletion")
     },
+    async deleteGuildRole() {
+      throw new Error("Unexpected guild role deletion")
+    },
     async deleteMessage() {},
     async deleteGuildEmoji() {},
     async deleteGuildAutoModerationRule() {},
@@ -658,6 +661,9 @@ function serviceFixture(overrides: {
     },
     async listGuildApplicationCommands() {
       throw new Error("Unexpected application-command listing")
+    },
+    async listGuildApplicationCommandPermissions() {
+      throw new Error("Unexpected application-command permission listing")
     },
     async listGuildMembers() {
       return []
@@ -1323,7 +1329,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         return {
           [ANCHOR_ROLE_ID]: 2,
           [coordinationBotRoleId]: 1,
-          [CREATED_ROLE_ID]: 4,
+          [CREATED_ROLE_ID]: 0,
         }
       },
       async getGuildChannels() {
@@ -1388,6 +1394,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           },
         ]
       },
+      async listGuildApplicationCommandPermissions() {
+        return []
+      },
       async listGuildIntegrations(): Promise<DiscordGuildIntegrationSummary[]> {
         return [{
           accountPresent: true,
@@ -1432,6 +1441,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+      DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+      DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
       DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
       DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
       DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
@@ -1444,6 +1456,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ROLE_DELETION_IDS: CREATED_ROLE_ID,
       DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: CHANNEL_ID,
@@ -1708,6 +1721,18 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     operationKey,
     roleId: CREATED_ROLE_ID,
   }, digest))
+  const roleDeletionRequest = {
+    acknowledgeIrreversibleRoleLoss: true as const,
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    roleId: CREATED_ROLE_ID,
+  }
+  const roleDeletionPlan = await service.planRoleDeletion(roleDeletionRequest)
+  await captured(() => service.executeRoleDeletion(
+    roleDeletionRequest,
+    roleDeletionPlan.digest,
+  ))
   const roleOrderRequest = {
     anchorRoleId: ANCHOR_ROLE_ID,
     auditReason: "reviewed",
@@ -1812,7 +1837,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 41)
+  assert.equal(byKind.size, 42)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1928,6 +1953,21 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: CREATED_ROLE_ID, kind: "role" },
         { collection: "roles", guildId: GUILD_ID, kind: "guild-collection" },
       ],
+      "role-deletion": [
+        { id: CREATED_ROLE_ID, kind: "role" },
+        { collection: "roles", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "invites", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "emojis", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "onboarding", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "automod", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "integrations", guildId: GUILD_ID, kind: "guild-collection" },
+        {
+          collection: "application-commands",
+          guildId: GUILD_ID,
+          kind: "guild-collection",
+        },
+      ],
       "role-ordering": [
         { id: CREATED_ROLE_ID, kind: "role" },
         { id: ANCHOR_ROLE_ID, kind: "role" },
@@ -1991,6 +2031,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           ? deletionPlan.digest
           : entry.kind === "component-message"
             ? componentPlan.digest
+            : entry.kind === "role-deletion"
+              ? roleDeletionPlan.digest
             : entry.kind === "role-ordering"
               ? roleOrderPlan.digest
               : entry.kind === "channel-clone"
@@ -2010,7 +2052,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 41)
+  assert.equal(writeCoordinator.intents.length, 42)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

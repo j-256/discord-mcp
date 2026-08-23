@@ -68,6 +68,7 @@ test("Discord client projects a bounded guild invite inventory", async () => {
     targetUserId: null,
     temporary: false,
     type: 0,
+    unknownFieldCount: 1,
     uses: 2,
   }])
   assert.doesNotMatch(

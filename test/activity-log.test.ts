@@ -47,6 +47,7 @@ import {
   type ReactionModerationActivity,
   type RoleCreationActivity,
   type RoleConfigurationActivity,
+  type RoleDeletionActivity,
   type RoleOrderingActivity,
   type ScheduledEventActivity,
   type SoundboardActivity,
@@ -360,6 +361,36 @@ function channelDeletion(
     schemaVersion: 1,
     status,
     targetKind: "text",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function roleDeletion(
+  id: string,
+  status: RoleDeletionActivity["status"],
+): RoleDeletionActivity {
+  const completed = status === "completed" || status === "completed-with-drift"
+  return {
+    baselineRoleCount: 8,
+    blockerCount: 0,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "role-deletion",
+    memberCount: 0,
+    observedRoleCount: completed ? 7 : null,
+    operationKeyHash: `sha256:${"8".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
+    roleId: "300",
+    schemaVersion: 1,
+    status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed"
       ? "match"
@@ -1828,6 +1859,68 @@ test("JSONL activity log keeps channel-deletion evidence content-free", async (c
       "schemaVersion",
       "status",
       "targetKind",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps role-deletion evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-role-name",
+    "private-operation-key",
+    "private-command-id",
+  ]
+
+  await store.append(roleDeletion("1", "pending"))
+  await store.append({
+    ...roleDeletion("2", "completed-with-drift"),
+    auditReason: privateValues[0],
+    commandIds: [privateValues[3]],
+    operationKey: privateValues[2],
+    roleName: privateValues[1],
+  } as RoleDeletionActivity)
+  await appendFile(
+    file,
+    [
+      { ...roleDeletion("3", "completed"), observedRoleCount: null },
+      { ...roleDeletion("4", "completed"), blockerCount: -1 },
+      { ...roleDeletion("5", "pending"), observedRoleCount: 7 },
+      { ...roleDeletion("6", "completed"), verification: "drift" },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 4)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "baselineRoleCount",
+      "blockerCount",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "memberCount",
+      "observedRoleCount",
+      "operationKeyHash",
+      "planDigest",
+      "roleId",
+      "schemaVersion",
+      "status",
       "timestamp",
       "verification",
     ],

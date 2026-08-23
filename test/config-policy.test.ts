@@ -307,6 +307,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    roleDeletionAuditEnabled: false,
+    roleDeletionIds: [],
+    roleDeletionsEnabled: false,
     roleOrderingAuditEnabled: false,
     roleOrderingChangesEnabled: false,
     roleOrderingGuildIds: [],
@@ -889,6 +892,9 @@ test("configuration and policy require an exact administration guild and protect
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    roleDeletionAuditEnabled: false,
+    roleDeletionIds: [],
+    roleDeletionsEnabled: false,
     roleOrderingAuditEnabled: false,
     roleOrderingChangesEnabled: false,
     roleOrderingGuildIds: [],
@@ -2332,6 +2338,99 @@ test("configuration and policy separate reviewed channel-deletion audit from exe
   )
 })
 
+test("configuration and policy separate reviewed role-deletion audit from execution", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ROLE_DELETION_IDS/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GATEWAY: "true",
+      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+      DISCORD_MCP_BOT_ID: BOT_ID,
+      DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOWED_GUILD_IDS/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+      DISCORD_MCP_BOT_ID: BOT_ID,
+      DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_GATEWAY/,
+  )
+
+  const auditConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_GATEWAY: "true",
+    DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
+  }, { homeDirectory: "/test/home" })
+  const audit = new ScopePolicy(auditConfig)
+  audit.assertRoleDeletionAuditable(GUILD_ID, ROLE_ID)
+  assert.throws(
+    () => audit.assertRoleDeletionAllowed(GUILD_ID, ROLE_ID),
+    /role deletion is disabled/,
+  )
+  assert.equal(audit.describe().roleDeletionAuditEnabled, true)
+  assert.deepEqual(audit.describe().roleDeletionIds, [ROLE_ID])
+  assert.equal(audit.describe().roleDeletionsEnabled, false)
+
+  const changesConfig = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_GATEWAY: "true",
+    DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
+  }, { homeDirectory: "/test/home" })
+  const changes = new ScopePolicy(changesConfig)
+  changes.assertRoleDeletionAllowed(GUILD_ID, ROLE_ID)
+  assert.equal(changes.describe().roleDeletionsEnabled, true)
+  assert.throws(
+    () => changes.assertRoleDeletionAuditable(GUILD_ID, OTHER_ROLE_ID),
+    /role-deletion scope/,
+  )
+  assert.throws(
+    () => changes.assertRoleDeletionAuditable(OTHER_GUILD_ID, ROLE_ID),
+    /configured read scope/,
+  )
+
+  const excessiveIds = Array.from(
+    { length: CONNECTOR_LIMITS.roleDeletionAllowlist + 1 },
+    (_, index) => (640_000_000_000_000_000n + BigInt(index)).toString(),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ROLE_DELETION_IDS: excessiveIds,
+    }, { homeDirectory: "/test/home" }),
+    /must contain at most 100 unique IDs/,
+  )
+})
+
 test("configuration and policy isolate exact guild scaffold authority", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -3292,6 +3391,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    roleDeletionAuditEnabled: false,
+    roleDeletionIds: [],
+    roleDeletionsEnabled: false,
     roleOrderingAuditEnabled: false,
     roleOrderingChangesEnabled: false,
     roleOrderingGuildIds: [],

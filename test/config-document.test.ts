@@ -37,6 +37,7 @@ const APPLICATION_ID = "300000000000000001"
 const BOT_ID = "400000000000000001"
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
+const ROLE_ID = "500000000000000001"
 const TOKEN = "test-discord-token"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const HEADER_ALIAS = "HONEYCOMB_OTLP_HEADERS"
@@ -252,6 +253,45 @@ test("configuration file loading is canonical, bounded, and usable by the connec
     () => loadConnectorConfigDocumentFile(symlinkPath),
     ConfigDocumentError,
   )
+})
+
+test("configuration file is the complete role-deletion policy surface", async (context) => {
+  const configured = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    capabilities: {
+      roleDeletionAudit: true,
+      roleDeletions: true,
+    },
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    gatewayEnabled: true,
+    guildIds: [GUILD_ID],
+    name: "support-bot",
+    scopes: {
+      roleDeletionIds: [ROLE_ID],
+    },
+    toolsets: ["connector", "gateway", "role-deletion"],
+    toolSurface: "progressive",
+  })
+  const file = await writeConfig(context, configured)
+  const config = loadConnectorConfig({
+    [ENVIRONMENT_NAMES.configFile]: file,
+    [TOKEN_ALIAS]: TOKEN,
+  })
+
+  assert.equal(config.allowRoleDeletionAudit, true)
+  assert.equal(config.allowRoleDeletions, true)
+  assert.deepEqual([...config.roleDeletionIds], [ROLE_ID])
+  assert.equal(config.allowGateway, true)
+  assert.deepEqual([...config.mcpToolsets], ["connector", "gateway", "role-deletion"])
+
+  const activated = activateConnectorConfigDocument(configured, {
+    [TOKEN_ALIAS]: TOKEN,
+  })
+  assert.equal(activated[ENVIRONMENT_NAMES.allowRoleDeletionAudit], "true")
+  assert.equal(activated[ENVIRONMENT_NAMES.allowRoleDeletions], "true")
+  assert.equal(activated[ENVIRONMENT_NAMES.roleDeletionIds], ROLE_ID)
 })
 
 test("configuration metadata covers every runtime field and emits a strict schema", () => {

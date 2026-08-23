@@ -192,6 +192,7 @@ import {
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
+  RoleDeletionPlanChangedError,
   RoleOrderingPlanChangedError,
   WebhookChangePlanChangedError,
   WebhookCreationPlanChangedError,
@@ -414,6 +415,17 @@ import {
   RoleConfigurationService,
 } from "./role-configuration-service.js"
 import type {
+  RoleDeletionPlan,
+  RoleDeletionReadiness,
+  RoleDeletionRequest,
+  RoleDeletionResult,
+  RoleDeletionServiceOptions,
+} from "./role-deletion-service.js"
+import {
+  normalizeRoleDeletionRequest,
+  RoleDeletionService,
+} from "./role-deletion-service.js"
+import type {
   RoleOrderAuditResult,
   RoleOrderingPlan,
   RoleOrderingRequest,
@@ -613,6 +625,7 @@ export interface DiscordServiceClient {
   deleteAllMessageReactionsForEmoji: DiscordClient["deleteAllMessageReactionsForEmoji"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
   deleteGuildChannel: DiscordClient["deleteGuildChannel"]
+  deleteGuildRole: DiscordClient["deleteGuildRole"]
   deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
@@ -664,6 +677,7 @@ export interface DiscordServiceClient {
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
+  listGuildApplicationCommandPermissions: DiscordClient["listGuildApplicationCommandPermissions"]
   listGuildBans: DiscordClient["listGuildBans"]
   listGuildInvites: DiscordClient["listGuildInvites"]
   listGuildIntegrations: DiscordClient["listGuildIntegrations"]
@@ -866,6 +880,10 @@ export interface ConnectorServiceOptions {
     RoleConfigurationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  roleDeletionOptions?: Pick<
+    RoleDeletionServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   roleOrderingOptions?: Pick<
     RoleOrderingServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1066,6 +1084,7 @@ export class ConnectorService {
   readonly #reactionService: ReactionService
   readonly #roleAdministrationService: RoleAdministrationService
   readonly #roleConfigurationService: RoleConfigurationService
+  readonly #roleDeletionService: RoleDeletionService
   readonly #roleOrderingService: RoleOrderingService
   readonly #scheduledEventService: ScheduledEventService
   readonly #soundboardService: SoundboardService
@@ -1433,6 +1452,14 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.roleConfigurationOptions,
     })
+    this.#roleDeletionService = new RoleDeletionService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      layoutSource: gateway,
+      operationStore,
+      policy: this.#policy,
+      ...options.roleDeletionOptions,
+    })
     this.#roleOrderingService = new RoleOrderingService({
       activityStore: this.#activityStore,
       client: this.#client,
@@ -1669,6 +1696,21 @@ export class ConnectorService {
       identity.bot.id,
       guildId,
       channelId,
+      options,
+    )
+  }
+
+  async auditRoleDeletion(
+    guildId: string,
+    roleId: string,
+    options: RequestOptions = {},
+  ): Promise<RoleDeletionReadiness> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleDeletionService.audit(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      roleId,
       options,
     )
   }
@@ -3008,6 +3050,20 @@ export class ConnectorService {
     )
   }
 
+  async planRoleDeletion(
+    request: RoleDeletionRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleDeletionPlan> {
+    normalizeRoleDeletionRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#roleDeletionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planRoleOrder(
     request: RoleOrderingRequest,
     options: RequestOptions = {},
@@ -3315,6 +3371,59 @@ export class ConnectorService {
         writeGuildCollectionTarget("roles", request.guildId),
       ],
       () => this.#roleConfigurationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeRoleDeletion(
+    request: RoleDeletionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<RoleDeletionResult> {
+    normalizeRoleDeletionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord role-deletion plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#roleDeletionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new RoleDeletionPlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#roleDeletionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "role-deletion",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("role", request.roleId),
+        writeGuildCollectionTarget("roles", request.guildId),
+        writeGuildCollectionTarget("channels", request.guildId),
+        writeGuildCollectionTarget("invites", request.guildId),
+        writeGuildCollectionTarget("emojis", request.guildId),
+        writeGuildCollectionTarget("onboarding", request.guildId),
+        writeGuildCollectionTarget("automod", request.guildId),
+        writeGuildCollectionTarget("integrations", request.guildId),
+        writeGuildCollectionTarget("application-commands", request.guildId),
+      ],
+      () => this.#roleDeletionService.execute(
         identity.application.id,
         identity.bot.id,
         request,

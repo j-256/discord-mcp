@@ -103,6 +103,8 @@ export interface ConnectorConfig {
   allowReactionUserAudit: boolean
   allowRoleCreation: boolean
   allowRoleConfiguration: boolean
+  allowRoleDeletionAudit: boolean
+  allowRoleDeletions: boolean
   allowRoleOrderingAudit: boolean
   allowRoleOrderingChanges: boolean
   allowScheduledEventAudit: boolean
@@ -183,6 +185,7 @@ export interface ConnectorConfig {
   reactionChannelIds: ReadonlySet<string>
   roleCreationGuildIds: ReadonlySet<string>
   roleConfigurationIds: ReadonlySet<string>
+  roleDeletionIds: ReadonlySet<string>
   roleOrderingGuildIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
@@ -580,6 +583,11 @@ function loadConnectorEnvironmentConfig(
     ENVIRONMENT_NAMES.roleConfigurationIds,
     CONNECTOR_LIMITS.roleConfigurationAllowlist,
   )
+  const roleDeletionIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.roleDeletionIds],
+    ENVIRONMENT_NAMES.roleDeletionIds,
+    CONNECTOR_LIMITS.roleDeletionAllowlist,
+  )
   const roleOrderingGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.roleOrderingGuildIds],
     ENVIRONMENT_NAMES.roleOrderingGuildIds,
@@ -964,6 +972,39 @@ function loadConnectorEnvironmentConfig(
   if (allowRoleOrderingChanges && !allowRoleOrderingAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowRoleOrderingChanges} requires ${ENVIRONMENT_NAMES.allowRoleOrderingAudit}`,
+    )
+  }
+  const allowRoleDeletionAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowRoleDeletionAudit],
+    ENVIRONMENT_NAMES.allowRoleDeletionAudit,
+  )
+  const allowRoleDeletions = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowRoleDeletions],
+    ENVIRONMENT_NAMES.allowRoleDeletions,
+  )
+  if (allowRoleDeletions && !allowRoleDeletionAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowRoleDeletions} requires ${ENVIRONMENT_NAMES.allowRoleDeletionAudit}`,
+    )
+  }
+  if (allowRoleDeletionAudit && roleDeletionIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowRoleDeletionAudit} requires ${ENVIRONMENT_NAMES.roleDeletionIds}`,
+    )
+  }
+  if (allowRoleDeletionAudit && allowedGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowRoleDeletionAudit} requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+    )
+  }
+  if (allowRoleDeletionAudit && !allowGateway) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowRoleDeletionAudit} requires ${ENVIRONMENT_NAMES.allowGateway}`,
+    )
+  }
+  if (allowRoleDeletionAudit && (!expectedApplicationId || !expectedBotId)) {
+    throw new ConfigurationError(
+      `Role-deletion audit requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
     )
   }
   const allowInviteAudit = parseBoolean(
@@ -1386,6 +1427,8 @@ function loadConnectorEnvironmentConfig(
       environment[ENVIRONMENT_NAMES.allowRoleConfiguration],
       ENVIRONMENT_NAMES.allowRoleConfiguration,
     ),
+    allowRoleDeletionAudit,
+    allowRoleDeletions,
     allowRoleOrderingAudit,
     allowRoleOrderingChanges,
     allowScheduledEventAudit,
@@ -1520,6 +1563,7 @@ function loadConnectorEnvironmentConfig(
     reactionChannelIds,
     roleCreationGuildIds,
     roleConfigurationIds,
+    roleDeletionIds,
     roleOrderingGuildIds,
     scheduledEventGuildIds,
     scheduledEventRoots: parseOwnedRoots(

@@ -243,6 +243,14 @@
           "type": "boolean",
           "description": "Enable role configuration policy"
         },
+        "roleDeletionAudit": {
+          "type": "boolean",
+          "description": "Enable role deletion audit policy"
+        },
+        "roleDeletions": {
+          "type": "boolean",
+          "description": "Enable role deletions policy"
+        },
         "roleOrderingAudit": {
           "type": "boolean",
           "description": "Enable role ordering audit policy"
@@ -1132,6 +1140,16 @@
           },
           "description": "Exact Discord ID allowlist for role configuration ids"
         },
+        "roleDeletionIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact Discord ID allowlist for role deletion ids"
+        },
         "roleOrderingGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1323,7 +1341,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 53,
+          "maxItems": 54,
           "type": "array",
           "items": {
             "type": "string",
@@ -1370,6 +1388,7 @@
               "polls",
               "role-configuration",
               "role-creation",
+              "role-deletion",
               "role-ordering",
               "roles",
               "scheduled-events",

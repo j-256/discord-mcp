@@ -73,6 +73,10 @@ import type {
   ChannelDeletionRequest,
 } from "../src/channel-deletion-service.js"
 import type {
+  RoleDeletionPlan,
+  RoleDeletionRequest,
+} from "../src/role-deletion-service.js"
+import type {
   ChannelMetadataChangePlan,
   ChannelMetadataChangeRequest,
   ChannelMetadataReadResult,
@@ -304,6 +308,8 @@ import {
   RoleCreationOperationConflictError,
   RoleConfigurationExecutionError,
   RoleConfigurationOperationConflictError,
+  RoleDeletionExecutionError,
+  RoleDeletionOperationConflictError,
   RoleOrderingExecutionError,
   RoleOrderingOperationConflictError,
   ScheduledEventExecutionError,
@@ -406,6 +412,7 @@ const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
 const ROLE_CONFIGURATION_OPERATION_KEY = "role-configuration-attempt-0001"
+const ROLE_DELETION_OPERATION_KEY = "role-deletion-attempt-0001"
 const ROLE_ORDERING_OPERATION_KEY = "role-ordering-attempt-0001"
 const ROLE_ORDERING_ANCHOR_ID = "350000000000000002"
 const CHANNEL_ORDERING_ANCHOR_ID = "200000000000000004"
@@ -4977,6 +4984,110 @@ function channelDeletionPlan(
   }
 }
 
+function roleDeletionInput(
+  overrides: Partial<RoleDeletionRequest> = {},
+): RoleDeletionRequest & Record<string, unknown> {
+  return {
+    acknowledgeIrreversibleRoleLoss: true,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: ROLE_DELETION_OPERATION_KEY,
+    roleId: ROLE_ID,
+    ...overrides,
+  } as RoleDeletionRequest & Record<string, unknown>
+}
+
+function roleDeletionPlan(
+  request: RoleDeletionRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): RoleDeletionPlan {
+  const memberCount = writeRequired ? 0 : 1
+  return {
+    acknowledgeIrreversibleRoleLoss: true,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    blockers: writeRequired ? [] : [{ count: memberCount, kind: "member-holder" }],
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    dependencies: {
+      blockerCount: writeRequired ? 0 : memberCount,
+      counts: {
+        applicationCommandPermissions: 0,
+        autoModerationExemptions: 0,
+        channelOverwrites: 0,
+        emojiRestrictions: 0,
+        integrationRoles: 0,
+        inviteRoleGrants: 0,
+        onboardingOptions: 0,
+      },
+      digest: `hmac-sha256:${"b".repeat(64)}`,
+    },
+    digest,
+    guild: {
+      features: [],
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: GUILD_OWNER_ID,
+    },
+    layout: {
+      channelCount: 3,
+      httpEvidenceMode: "complete",
+      obfuscatedChannelCount: 0,
+      revision: 7,
+      updatedAt: "2026-08-23T00:00:00.000Z",
+    },
+    memberCount,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      botEffectivePermissionNames: ["MANAGE_GUILD", "MANAGE_ROLES"],
+      botEffectivePermissions: (
+        DISCORD_PERMISSIONS.MANAGE_GUILD | DISCORD_PERMISSIONS.MANAGE_ROLES
+      ).toString(),
+      botHighestRoleIds: ["350000000000000002"],
+      botHighestRolePosition: 10,
+      guildManageGuild: true,
+      guildManageRoles: true,
+    },
+    privacy: {
+      contentFetched: false,
+      dependencyIdentifiersPersisted: false,
+      roleNamePersisted: false,
+    },
+    risks: ["Guild role deletion is irreversible and removes the role identity from Discord"],
+    roleCount: 3,
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "blocked",
+    target: {
+      colors: {
+        primaryColor: 0,
+        secondaryColor: null,
+        tertiaryColor: null,
+      },
+      flags: 0,
+      hoist: false,
+      icon: null,
+      id: request.roleId,
+      managed: false,
+      management: { id: null, type: "standard" },
+      mentionable: false,
+      name: "Private retiring role",
+      permissionNames: [],
+      permissions: "0",
+      position: 2,
+      unicodeEmoji: null,
+      unknownFieldCount: 0,
+      unknownPermissionBits: "0",
+    },
+    warnings: [
+      "Discord exposes no complete search for historical role mentions",
+      "Discord exposes this application's command permission overrides only",
+    ],
+    writeRequired,
+  }
+}
+
 function memberRolePlan(
   request: MemberRoleChangeRequest,
   digest = DIGEST,
@@ -5645,6 +5756,9 @@ function fixturePolicy(): PolicyDescription {
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
     roleConfigurationIds: [],
+    roleDeletionAuditEnabled: false,
+    roleDeletionIds: [],
+    roleDeletionsEnabled: false,
     roleOrderingAuditEnabled: false,
     roleOrderingChangesEnabled: false,
     roleOrderingGuildIds: [],
@@ -5696,6 +5810,9 @@ function serviceFixture(overrides: {
   channelDeletionError?: Error
   channelDeletionPlanDigest?: string
   channelDeletionWriteRequired?: boolean
+  roleDeletionError?: Error
+  roleDeletionPlanDigest?: string
+  roleDeletionWriteRequired?: boolean
   channelMetadataEffect?: "change" | "none"
   channelMetadataError?: Error
   channelMetadataPlanDigest?: string
@@ -5932,6 +6049,9 @@ function serviceFixture(overrides: {
     roleCreationPlan: 0,
     roleConfigurationExecute: 0,
     roleConfigurationPlan: 0,
+    roleDeletionAudit: 0,
+    roleDeletionExecute: 0,
+    roleDeletionPlan: 0,
     roleOrderingExecute: 0,
     roleOrderingPlan: 0,
     scheduledEventExecute: 0,
@@ -6059,6 +6179,26 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async auditRoleDeletion(guildId, roleId) {
+      calls.roleDeletionAudit += 1
+      const planned = roleDeletionPlan(roleDeletionInput({ guildId, roleId }))
+      const {
+        acknowledgeIrreversibleRoleLoss: _acknowledgement,
+        auditReason: _auditReason,
+        createdAt: _createdAt,
+        digest: _digest,
+        operationKeyHash: _operationKeyHash,
+        status: _status,
+        writeRequired: _writeRequired,
+        ...readiness
+      } = planned
+      return {
+        ...readiness,
+        evidenceDigest: `hmac-sha256:${"e".repeat(64)}`,
+        ready: true,
+        status: "ready",
+      }
+    },
     async auditChannelDeletion(guildId, channelId) {
       calls.channelDeletionAudit += 1
       const planned = channelDeletionPlan(channelDeletionInput({
@@ -6112,12 +6252,53 @@ function serviceFixture(overrides: {
         verification: planned.writeRequired ? "match" : "not-required",
       }
     },
+    async executeRoleDeletion(request, planDigest) {
+      if (overrides.roleDeletionError) throw overrides.roleDeletionError
+      calls.roleDeletionExecute += 1
+      const planned = roleDeletionPlan(
+        request,
+        planDigest,
+        overrides.roleDeletionWriteRequired ?? true,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-role-deletion" : null,
+        addedEvidence: {
+          applicationCommands: 0,
+          autoModerationRules: 0,
+          channels: 0,
+          emojis: 0,
+          integrations: 0,
+          invites: 0,
+          onboardingOptions: 0,
+          roles: 0,
+        },
+        baselineRoleCount: planned.roleCount,
+        blockerCount: planned.blockers.length,
+        guildId: request.guildId,
+        memberCount: planned.memberCount,
+        observedRoleCount: planned.writeRequired ? planned.roleCount - 1 : null,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        roleId: request.roleId,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "blocked",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
     async planChannelDeletion(request) {
       calls.channelDeletionPlan += 1
       return channelDeletionPlan(
         request,
         overrides.channelDeletionPlanDigest || DIGEST,
         overrides.channelDeletionWriteRequired ?? true,
+      )
+    },
+    async planRoleDeletion(request) {
+      calls.roleDeletionPlan += 1
+      return roleDeletionPlan(
+        request,
+        overrides.roleDeletionPlanDigest || DIGEST,
+        overrides.roleDeletionWriteRequired ?? true,
       )
     },
     async executeApplicationEmojiChange(request, planDigest) {
@@ -9200,6 +9381,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_channel_order",
       "plan_channel_deletion",
       "execute_channel_deletion",
+      "audit_role_deletion",
+      "plan_role_deletion",
+      "execute_role_deletion",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -9282,6 +9466,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const roleConfiguration = result.tools.find((tool) => (
     tool.name === "execute_role_configuration"
+  ))
+  const roleDeletion = result.tools.find((tool) => (
+    tool.name === "execute_role_deletion"
   ))
   const roleOrdering = result.tools.find((tool) => (
     tool.name === "execute_role_order"
@@ -9374,6 +9561,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     readOnlyHint: false,
   })
   assert.deepEqual(webhookCreation?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(roleDeletion?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
     openWorldHint: true,
@@ -9929,6 +10122,36 @@ test("progressive discovery separates channel-order audit from reviewed changes"
       "audit_channel_order",
       "plan_channel_order",
       "execute_channel_order",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery separates role-deletion audit from reviewed changes", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const auditDiscovery = structuredContent(await client.callTool({
+    arguments: { query: "audit_role_deletion" },
+    name: "discover_discord_tools",
+  }))
+  assert.deepEqual(auditDiscovery.newlyEnabledToolNames, ["audit_role_deletion"])
+
+  const changeDiscovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_role_deletion" },
+    name: "discover_discord_tools",
+  }))
+  assert.deepEqual(changeDiscovery.newlyEnabledToolNames, [
+    "execute_role_deletion",
+    "plan_role_deletion",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "audit_role_deletion",
+      "plan_role_deletion",
+      "execute_role_deletion",
       "discover_discord_tools",
     ],
   )
@@ -10924,6 +11147,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     roleCreationPlan: 0,
     roleConfigurationExecute: 0,
     roleConfigurationPlan: 0,
+    roleDeletionAudit: 0,
+    roleDeletionExecute: 0,
+    roleDeletionPlan: 0,
     roleOrderingExecute: 0,
     roleOrderingPlan: 0,
     scheduledEventExecute: 0,
@@ -23513,6 +23739,219 @@ test("MCP channel deletion exposes uncertainty and content-free conflicts", asyn
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(CHANNEL_DELETION_OPERATION_KEY),
+  )
+})
+
+test("MCP role deletion exposes readiness and requires exact irreversible intent", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const readiness = await client.callTool({
+    arguments: { guildId: GUILD_ID, roleId: ROLE_ID },
+    name: "audit_role_deletion",
+  })
+  const planned = await client.callTool({
+    arguments: roleDeletionInput(),
+    name: "plan_role_deletion",
+  })
+  const unacknowledged = await client.callTool({
+    arguments: {
+      ...roleDeletionInput(),
+      acknowledgeIrreversibleRoleLoss: false,
+    },
+    name: "plan_role_deletion",
+  })
+  const extraField = await client.callTool({
+    arguments: { ...roleDeletionInput(), roleName: "unsafe-target" },
+    name: "plan_role_deletion",
+  })
+
+  assert.equal(structuredContent(readiness).status, "ready")
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(structuredContent(planned).writeRequired, true)
+  assert.equal(
+    (structuredContent(planned).dependencies as Record<string, unknown>).blockerCount,
+    0,
+  )
+  assert.equal(unacknowledged.isError, true)
+  assert.equal(extraField.isError, true)
+  assert.equal(calls.roleDeletionAudit, 1)
+  assert.equal(calls.roleDeletionPlan, 1)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(ROLE_DELETION_OPERATION_KEY))
+})
+
+test("MCP role deletion binds signed approval to complete irreversible evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: { ...roleDeletionInput(), planDigest: DIGEST },
+    name: "execute_role_deletion",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.roleDeletionPlan, 1)
+  assert.equal(calls.roleDeletionExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    ROLE_ID,
+    "Private retiring role",
+    "MANAGE_GUILD",
+    "MANAGE_ROLES",
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) assert.match(confirmationMessage, new RegExp(value))
+  assert.match(confirmationMessage, /Irreversible role-loss acknowledged: true/)
+  assert.match(confirmationMessage, /Historical mentions/)
+  assert.match(confirmationMessage, /other applications/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(ROLE_DELETION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(ROLE_DELETION_OPERATION_KEY),
+  )
+})
+
+test("MCP role deletion skips approval for blockers and stops on refusal or drift", async (context) => {
+  const argumentsValue = { ...roleDeletionInput(), planDigest: DIGEST }
+  let blockedConfirmations = 0
+  const blocked = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      blockedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { roleDeletionWriteRequired: false },
+  })
+  const blockedResult = await blocked.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_deletion",
+  })
+  assert.equal(structuredContent(blockedResult).status, "blocked")
+  assert.equal(blockedConfirmations, 0)
+  assert.equal(blocked.calls.roleDeletionExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_deletion",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.roleDeletionExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { roleDeletionPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_deletion",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.roleDeletionExecute, 0)
+})
+
+test("MCP role-deletion approval state binds the exact destructive target", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = { ...roleDeletionInput(), planDigest: DIGEST }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_role_deletion",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        roleId: "350000000000000009",
+      },
+      inputResponses: {
+        confirm_role_deletion: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_role_deletion",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.roleDeletionExecute, 0)
+})
+
+test("MCP role deletion exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = { ...roleDeletionInput(), planDigest: DIGEST }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleDeletionError: new RoleDeletionExecutionError(
+        "Discord role-deletion outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_deletion",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-role-deletion",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    roleId: ROLE_ID,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      roleDeletionError: new RoleDeletionOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_role_deletion",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(ROLE_DELETION_OPERATION_KEY),
   )
 })
 

@@ -137,6 +137,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   reactionUserAuditPolicy: "reaction-user-audit-policy",
   roleCreationPolicy: "role-creation-policy",
   roleConfigurationPolicy: "role-configuration-policy",
+  roleDeletionAuditPolicy: "role-deletion-audit-policy",
+  roleDeletionChangePolicy: "role-deletion-change-policy",
   channelOrderingAuditPolicy: "channel-ordering-audit-policy",
   channelOrderingChangePolicy: "channel-ordering-change-policy",
   channelDeletionAuditPolicy: "channel-deletion-audit-policy",
@@ -522,6 +524,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowRoleConfiguration && config.roleConfigurationIds.size === 0) {
     warnings.push("The role-configuration toggle is enabled but role changes remain blocked because no exact role allowlist is configured")
   }
+  if (config.allowRoleDeletionAudit && config.roleDeletionIds.size === 0) {
+    warnings.push("The role-deletion audit toggle is enabled but readiness inspection remains blocked because no exact role allowlist is configured")
+  }
+  if (config.allowRoleDeletions && config.roleDeletionIds.size === 0) {
+    warnings.push("The role-deletion change toggle is enabled but deletion remains blocked because no exact role allowlist is configured")
+  }
   if (config.allowRoleOrderingAudit && config.roleOrderingGuildIds.size === 0) {
     warnings.push("The role-ordering audit toggle is enabled but hierarchy inspection remains blocked because no exact guild allowlist is configured")
   }
@@ -826,6 +834,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowChannelDeletionAudit || config.allowChannelDeletions,
       "channel-deletion",
       "Channel-deletion readiness and reviewed execution",
+    ],
+    [
+      config.allowRoleDeletionAudit || config.allowRoleDeletions,
+      "role-deletion",
+      "Role-deletion readiness and reviewed execution",
     ],
     [
       config.allowRoleOrderingAudit || config.allowRoleOrderingChanges,
@@ -1580,6 +1593,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.roleConfigurationPolicy,
         "pass",
         `Reviewed role configuration is constrained to ${config.roleConfigurationIds.size} exact roles with partial updates, one-shot execution, and complete readback`,
+      ))
+    }
+    if (!config.allowRoleDeletionAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleDeletionAuditPolicy,
+        "pass",
+        "Role-deletion readiness audit is disabled",
+      ))
+    } else if (config.roleDeletionIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleDeletionAuditPolicy,
+        "warn",
+        "Role-deletion audit is enabled, but the required exact role allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleDeletionAuditPolicy,
+        "pass",
+        `Role-deletion readiness is constrained to ${config.roleDeletionIds.size} exact roles with complete holder, hierarchy, dependency, permission, and privacy-safe evidence`,
+      ))
+    }
+    if (!config.allowRoleDeletions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleDeletionChangePolicy,
+        "pass",
+        "Reviewed role deletion is disabled",
+      ))
+    } else if (config.roleDeletionIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleDeletionChangePolicy,
+        "warn",
+        "Role deletion is enabled, but the required exact role allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleDeletionChangePolicy,
+        "pass",
+        `Reviewed role deletion is constrained to ${config.roleDeletionIds.size} exact roles with irreversible acknowledgement, signed approval, one-shot execution, content-free auditing, durable guild-wide coordination, and fresh absence verification`,
       ))
     }
     if (!config.allowRoleOrderingAudit) {
@@ -2733,6 +2784,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.roleCreationGuildIds,
     ENVIRONMENT_NAMES.allowRoleConfiguration,
     ENVIRONMENT_NAMES.roleConfigurationIds,
+    ENVIRONMENT_NAMES.allowRoleDeletionAudit,
+    ENVIRONMENT_NAMES.allowRoleDeletions,
+    ENVIRONMENT_NAMES.roleDeletionIds,
     ENVIRONMENT_NAMES.allowRoleOrderingAudit,
     ENVIRONMENT_NAMES.allowRoleOrderingChanges,
     ENVIRONMENT_NAMES.roleOrderingGuildIds,

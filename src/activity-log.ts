@@ -1071,6 +1071,31 @@ export interface ChannelDeletionActivity {
   verification: "drift" | "match" | null
 }
 
+export type RoleDeletionActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface RoleDeletionActivity {
+  baselineRoleCount: number
+  blockerCount: number
+  error: string | null
+  guildId: string
+  id: string
+  kind: "role-deletion"
+  memberCount: number
+  observedRoleCount: number | null
+  operationKeyHash: string
+  planDigest: string
+  roleId: string
+  schemaVersion: number
+  status: RoleDeletionActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ForumTagActivityStatus =
   | "completed"
   | "failed"
@@ -1156,6 +1181,7 @@ export type ActivityEntry =
   | ReactionModerationActivity
   | RoleCreationActivity
   | RoleConfigurationActivity
+  | RoleDeletionActivity
   | RoleOrderingActivity
   | ScheduledEventActivity
   | SoundboardActivity
@@ -2748,6 +2774,89 @@ function parseChannelDeletionActivity(
     schemaVersion: SCHEMA_VERSION,
     status: status as ChannelDeletionActivityStatus,
     targetKind: record.targetKind as ChannelDeletionActivity["targetKind"],
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseRoleDeletionActivity(
+  value: unknown,
+): RoleDeletionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const status = String(record.status)
+  const observedRoleCount = record.observedRoleCount
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "role-deletion"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.roleId !== "string"
+    || !positiveActivitySnowflake(record.roleId)
+    || !Number.isSafeInteger(record.baselineRoleCount)
+    || (record.baselineRoleCount as number) < 2
+    || !Number.isSafeInteger(record.blockerCount)
+    || (record.blockerCount as number) < 0
+    || !Number.isSafeInteger(record.memberCount)
+    || (record.memberCount as number) < 0
+    || !(observedRoleCount === null || (
+      Number.isSafeInteger(observedRoleCount)
+      && (observedRoleCount as number) >= 1
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null
+      || observedRoleCount !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || observedRoleCount === null
+      || record.verification !== "match"
+    ))
+    || (status === "completed-with-drift" && (
+      record.error !== null
+      || observedRoleCount === null
+      || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    baselineRoleCount: record.baselineRoleCount as number,
+    blockerCount: record.blockerCount as number,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "role-deletion",
+    memberCount: record.memberCount as number,
+    observedRoleCount: observedRoleCount as number | null,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    roleId: record.roleId,
+    schemaVersion: SCHEMA_VERSION,
+    status: status as RoleDeletionActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
@@ -4544,6 +4653,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseChannelMetadataActivity(value)
     || parseChannelCloneActivity(value)
     || parseChannelDeletionActivity(value)
+    || parseRoleDeletionActivity(value)
     || parseChannelOrderingActivity(value)
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)

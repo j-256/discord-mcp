@@ -182,6 +182,7 @@ const MAX_CLAIM_BYTES = 16_384
 const MAX_RESOLUTION_BYTES = 32_768
 const MAX_TARGETS = 8
 const MAX_DELETION_TARGETS = 100
+const MAX_ROLE_DELETION_TARGETS = 9
 const CLAIM_FILE = "claim.json"
 const ACKNOWLEDGEMENT_FILE = "acknowledgement.json"
 const RESOLUTION_REASON = "operator-reviewed"
@@ -317,7 +318,9 @@ function normalizeTargets(
 ): WriteCoordinationTarget[] {
   const maximum = kind === "message-deletion"
     ? MAX_DELETION_TARGETS
-    : MAX_TARGETS
+    : kind === "role-deletion"
+      ? MAX_ROLE_DELETION_TARGETS
+      : MAX_TARGETS
   if (!Array.isArray(values) || values.length < 1 || values.length > maximum) {
     throw new WriteCoordinationStateError(
       `Discord write coordination requires 1-${maximum} targets for ${kind}`,

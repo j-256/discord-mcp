@@ -133,6 +133,9 @@ export interface PolicyDescription {
   roleCreationGuildIds: string[]
   roleConfigurationEnabled: boolean
   roleConfigurationIds: string[]
+  roleDeletionAuditEnabled: boolean
+  roleDeletionIds: string[]
+  roleDeletionsEnabled: boolean
   roleOrderingAuditEnabled: boolean
   roleOrderingChangesEnabled: boolean
   roleOrderingGuildIds: string[]
@@ -244,6 +247,8 @@ export class ScopePolicy {
   readonly #allowForumTagChanges: boolean
   readonly #allowRoleCreation: boolean
   readonly #allowRoleConfiguration: boolean
+  readonly #allowRoleDeletionAudit: boolean
+  readonly #allowRoleDeletions: boolean
   readonly #allowRoleOrderingAudit: boolean
   readonly #allowRoleOrderingChanges: boolean
   readonly #allowScheduledEventAudit: boolean
@@ -323,6 +328,7 @@ export class ScopePolicy {
   readonly #reactionChannelIds: ReadonlySet<string>
   readonly #roleCreationGuildIds: ReadonlySet<string>
   readonly #roleConfigurationIds: ReadonlySet<string>
+  readonly #roleDeletionIds: ReadonlySet<string>
   readonly #roleOrderingGuildIds: ReadonlySet<string>
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
@@ -405,6 +411,8 @@ export class ScopePolicy {
     | "allowChannelCreation"
     | "allowRoleCreation"
     | "allowRoleConfiguration"
+    | "allowRoleDeletionAudit"
+    | "allowRoleDeletions"
     | "allowRoleOrderingAudit"
     | "allowRoleOrderingChanges"
     | "allowGuildProfileAudit"
@@ -482,6 +490,7 @@ export class ScopePolicy {
     | "reactionChannelIds"
     | "roleCreationGuildIds"
     | "roleConfigurationIds"
+    | "roleDeletionIds"
     | "roleOrderingGuildIds"
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
@@ -561,6 +570,8 @@ export class ScopePolicy {
     this.#allowForumTagChanges = config.allowForumTagChanges ?? false
     this.#allowRoleCreation = config.allowRoleCreation ?? false
     this.#allowRoleConfiguration = config.allowRoleConfiguration ?? false
+    this.#allowRoleDeletionAudit = config.allowRoleDeletionAudit ?? false
+    this.#allowRoleDeletions = config.allowRoleDeletions ?? false
     this.#allowRoleOrderingAudit = config.allowRoleOrderingAudit ?? false
     this.#allowRoleOrderingChanges = config.allowRoleOrderingChanges ?? false
     this.#allowScheduledEventAudit = config.allowScheduledEventAudit ?? false
@@ -643,6 +654,7 @@ export class ScopePolicy {
     this.#reactionChannelIds = config.reactionChannelIds ?? new Set()
     this.#roleCreationGuildIds = config.roleCreationGuildIds ?? new Set()
     this.#roleConfigurationIds = config.roleConfigurationIds ?? new Set()
+    this.#roleDeletionIds = config.roleDeletionIds ?? new Set()
     this.#roleOrderingGuildIds = config.roleOrderingGuildIds ?? new Set()
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
@@ -870,6 +882,12 @@ export class ScopePolicy {
       roleConfigurationEnabled: this.#allowRoleConfiguration
         && this.#roleConfigurationIds.size > 0,
       roleConfigurationIds: [...this.#roleConfigurationIds].sort(),
+      roleDeletionAuditEnabled: this.#allowRoleDeletionAudit
+        && this.#roleDeletionIds.size > 0,
+      roleDeletionIds: [...this.#roleDeletionIds].sort(),
+      roleDeletionsEnabled: this.#allowRoleDeletionAudit
+        && this.#allowRoleDeletions
+        && this.#roleDeletionIds.size > 0,
       roleOrderingAuditEnabled: this.#allowRoleOrderingAudit
         && this.#roleOrderingGuildIds.size > 0,
       roleOrderingChangesEnabled: this.#allowRoleOrderingAudit
@@ -1358,6 +1376,26 @@ export class ScopePolicy {
     }
     if (!this.#roleConfigurationIds.has(roleId)) {
       throw new PolicyError(`Discord role ${roleId} is outside the role-configuration scope`)
+    }
+  }
+
+  assertRoleDeletionAuditable(guildId: string, roleId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowRoleDeletionAudit) {
+      throw new PolicyError("Discord role-deletion audit is disabled by connector configuration")
+    }
+    if (this.#roleDeletionIds.size === 0) {
+      throw new PolicyError("Discord role-deletion audit requires an exact role allowlist")
+    }
+    if (!this.#roleDeletionIds.has(roleId)) {
+      throw new PolicyError(`Discord role ${roleId} is outside the role-deletion scope`)
+    }
+  }
+
+  assertRoleDeletionAllowed(guildId: string, roleId: string): void {
+    this.assertRoleDeletionAuditable(guildId, roleId)
+    if (!this.#allowRoleDeletions) {
+      throw new PolicyError("Discord role deletion is disabled by connector configuration")
     }
   }
 
