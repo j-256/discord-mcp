@@ -3220,6 +3220,7 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
       .filter((name) => (
         name !== ENVIRONMENT_NAMES.applicationId
         && name !== ENVIRONMENT_NAMES.botId
+        && name !== ENVIRONMENT_NAMES.configFile
       ))
       .sort(),
   )
@@ -3306,7 +3307,7 @@ test("stdio launch descriptor makes a saved profile the non-overridable read bou
   }
   assert.equal(
     result.environment.forward.includes(ENVIRONMENT_NAMES.allowDeletions),
-    true,
+    false,
   )
   assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
   assert.deepEqual(createStdioLaunchDescriptor({
@@ -3474,6 +3475,8 @@ test("setup verifies and saves a profile without persisting or reporting its cre
     [ENVIRONMENT_NAMES.token]: undefined,
     [TOKEN_ALIAS]: TOKEN,
     [ENVIRONMENT_NAMES.allowGateway]: "true",
+    [ENVIRONMENT_NAMES.allowDeletions]: "true",
+    [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
     [ENVIRONMENT_NAMES.gatewayEventBufferSize]: "250",
     [ENVIRONMENT_NAMES.toolSurface]: "progressive",
     [ENVIRONMENT_NAMES.toolsets]: "connector,messages",
@@ -3508,6 +3511,18 @@ test("setup verifies and saves a profile without persisting or reporting its cre
     enabled: true,
     eventBufferSize: 250,
   })
+  assert.equal(
+    report.profile?.schemaVersion === 2
+      ? report.profile.capabilities.deletions
+      : undefined,
+    true,
+  )
+  assert.deepEqual(
+    report.profile?.schemaVersion === 2
+      ? report.profile.scopes.deleteChannelIds
+      : undefined,
+    [CHANNEL_ID],
+  )
   assert.deepEqual(
     await loadProfile("support-bot", { directory: profileDirectory }),
     report.profile,
@@ -3519,7 +3534,7 @@ test("setup verifies and saves a profile without persisting or reporting its cre
     "support-bot",
   ])
   assert.deepEqual(report.launch.environment.set, {})
-  assert.equal(report.launch.environment.forward.includes(TOKEN_ALIAS), true)
+  assert.deepEqual(report.launch.environment.forward, [TOKEN_ALIAS])
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
   await assert.rejects(

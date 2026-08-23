@@ -23,6 +23,10 @@ import {
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
+import {
+  activateConnectorConfigFile,
+  configDocumentConfigurationError,
+} from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 import {
   parseMcpToolsets,
@@ -333,16 +337,39 @@ export function resolveConnectorAuditFile(
   environment: NodeJS.ProcessEnv = process.env,
   options: ConfigOptions = {},
 ): string {
-  return auditFile(
-    environment[ENVIRONMENT_NAMES.auditFile],
-    environment,
-    options.homeDirectory || homedir(),
-  )
+  const activated = activateConnectorConfigFile(environment)
+  const selected = activated?.environment ?? environment
+  try {
+    return auditFile(
+      selected[ENVIRONMENT_NAMES.auditFile],
+      selected,
+      options.homeDirectory || homedir(),
+    )
+  } catch (error) {
+    if (activated) throw configDocumentConfigurationError(error)
+    throw error
+  }
 }
 
 export function loadConnectorConfig(
   environment: NodeJS.ProcessEnv = process.env,
   options: ConfigOptions = {},
+): ConnectorConfig {
+  const activated = activateConnectorConfigFile(environment)
+  try {
+    return loadConnectorEnvironmentConfig(
+      activated?.environment ?? environment,
+      options,
+    )
+  } catch (error) {
+    if (activated) throw configDocumentConfigurationError(error)
+    throw error
+  }
+}
+
+function loadConnectorEnvironmentConfig(
+  environment: NodeJS.ProcessEnv,
+  options: ConfigOptions,
 ): ConnectorConfig {
   const rawToken = environment[ENVIRONMENT_NAMES.token]
   const token = rawToken?.trim()

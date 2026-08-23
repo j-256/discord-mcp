@@ -38,6 +38,11 @@
           "format": "string"
         },
         {
+          "name": "DISCORD_MCP_CONFIG_FILE",
+          "description": "Absolute path to one strict versioned non-secret configuration document",
+          "format": "string"
+        },
+        {
           "name": "DISCORD_MCP_APPLICATION_ID",
           "description": "Expected Discord application ID; startup rejects a token for another application",
           "format": "string"
@@ -1261,6 +1266,11 @@
           "description": "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
           "isRequired": true,
           "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_CONFIG_FILE",
+          "description": "Absolute path to one strict versioned non-secret configuration document",
           "format": "string"
         },
         {

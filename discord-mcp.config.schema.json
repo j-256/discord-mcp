@@ -1,0 +1,1193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json"
+    },
+    "capabilities": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "administration": {
+          "type": "boolean"
+        },
+        "announcementCrossposts": {
+          "type": "boolean"
+        },
+        "announcementSubscriptionAudit": {
+          "type": "boolean"
+        },
+        "announcementSubscriptionChanges": {
+          "type": "boolean"
+        },
+        "attachments": {
+          "type": "boolean"
+        },
+        "automodAudit": {
+          "type": "boolean"
+        },
+        "automodChanges": {
+          "type": "boolean"
+        },
+        "banAudit": {
+          "type": "boolean"
+        },
+        "channelCreation": {
+          "type": "boolean"
+        },
+        "channelCloneAudit": {
+          "type": "boolean"
+        },
+        "channelCloning": {
+          "type": "boolean"
+        },
+        "channelMetadataChanges": {
+          "type": "boolean"
+        },
+        "channelOrderingAudit": {
+          "type": "boolean"
+        },
+        "channelOrderingChanges": {
+          "type": "boolean"
+        },
+        "deletions": {
+          "type": "boolean"
+        },
+        "forumPosts": {
+          "type": "boolean"
+        },
+        "forumTagAudit": {
+          "type": "boolean"
+        },
+        "forumTagChanges": {
+          "type": "boolean"
+        },
+        "guildExpressionAudit": {
+          "type": "boolean"
+        },
+        "guildExpressionChanges": {
+          "type": "boolean"
+        },
+        "guildProfileAudit": {
+          "type": "boolean"
+        },
+        "guildProfileChanges": {
+          "type": "boolean"
+        },
+        "guildScaffolds": {
+          "type": "boolean"
+        },
+        "guildSettingsAudit": {
+          "type": "boolean"
+        },
+        "guildSettingsChanges": {
+          "type": "boolean"
+        },
+        "guildTemplateAudit": {
+          "type": "boolean"
+        },
+        "guildTemplateChanges": {
+          "type": "boolean"
+        },
+        "integrationAudit": {
+          "type": "boolean"
+        },
+        "integrationDeletions": {
+          "type": "boolean"
+        },
+        "interactions": {
+          "type": "boolean"
+        },
+        "inviteAudit": {
+          "type": "boolean"
+        },
+        "inviteDeletions": {
+          "type": "boolean"
+        },
+        "memberDirectory": {
+          "type": "boolean"
+        },
+        "nicknameChanges": {
+          "type": "boolean"
+        },
+        "otherMemberNicknameChanges": {
+          "type": "boolean"
+        },
+        "memberRoleChanges": {
+          "type": "boolean"
+        },
+        "memberVoiceAudit": {
+          "type": "boolean"
+        },
+        "memberVoiceChanges": {
+          "type": "boolean"
+        },
+        "messageForwarding": {
+          "type": "boolean"
+        },
+        "crossGuildMessageForwarding": {
+          "type": "boolean"
+        },
+        "nativeCommandChanges": {
+          "type": "boolean"
+        },
+        "nativeInteractions": {
+          "type": "boolean"
+        },
+        "onboardingAudit": {
+          "type": "boolean"
+        },
+        "onboardingChanges": {
+          "type": "boolean"
+        },
+        "pinManagement": {
+          "type": "boolean"
+        },
+        "permissionOverwrites": {
+          "type": "boolean"
+        },
+        "pollAudit": {
+          "type": "boolean"
+        },
+        "pollCreation": {
+          "type": "boolean"
+        },
+        "pollEnding": {
+          "type": "boolean"
+        },
+        "pollVoterAudit": {
+          "type": "boolean"
+        },
+        "reactionModeration": {
+          "type": "boolean"
+        },
+        "reactionUserAudit": {
+          "type": "boolean"
+        },
+        "roleCreation": {
+          "type": "boolean"
+        },
+        "roleConfiguration": {
+          "type": "boolean"
+        },
+        "roleOrderingAudit": {
+          "type": "boolean"
+        },
+        "roleOrderingChanges": {
+          "type": "boolean"
+        },
+        "scheduledEventAudit": {
+          "type": "boolean"
+        },
+        "scheduledEventUserAudit": {
+          "type": "boolean"
+        },
+        "scheduledEventChanges": {
+          "type": "boolean"
+        },
+        "soundboardAudit": {
+          "type": "boolean"
+        },
+        "soundboardChanges": {
+          "type": "boolean"
+        },
+        "stageInstanceAudit": {
+          "type": "boolean"
+        },
+        "stageInstanceChanges": {
+          "type": "boolean"
+        },
+        "stageStartNotifications": {
+          "type": "boolean"
+        },
+        "threadCreation": {
+          "type": "boolean"
+        },
+        "threadAudit": {
+          "type": "boolean"
+        },
+        "threadChanges": {
+          "type": "boolean"
+        },
+        "welcomeScreenAudit": {
+          "type": "boolean"
+        },
+        "welcomeScreenChanges": {
+          "type": "boolean"
+        },
+        "webhookAudit": {
+          "type": "boolean"
+        },
+        "webhookChanges": {
+          "type": "boolean"
+        },
+        "webhookCreation": {
+          "type": "boolean"
+        },
+        "webhookDeletions": {
+          "type": "boolean"
+        },
+        "widgetPublicExposure": {
+          "type": "boolean"
+        },
+        "widgetSettingsAudit": {
+          "type": "boolean"
+        },
+        "widgetSettingsChanges": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "credential": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "const": "environment"
+        },
+        "variable": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^DISCORD_(?:[A-Z0-9]+_)*TOKEN$"
+        }
+      },
+      "required": [
+        "provider",
+        "variable"
+      ],
+      "additionalProperties": false
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "eventBufferSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "enabled",
+        "eventBufferSize"
+      ],
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "applicationId": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "botId": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        }
+      },
+      "required": [
+        "applicationId",
+        "botId"
+      ],
+      "additionalProperties": false
+    },
+    "limits": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "attachmentMaxBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "interactionMaxWritesPerMinute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "interactionMinWriteIntervalMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "nativeInteractionMaxPending": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "nativeInteractionTtlSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+    },
+    "observability": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "compression": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "exportEnabled": {
+          "type": "boolean"
+        },
+        "headers": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "environment"
+            },
+            "variable": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Z][A-Z0-9_]{0,118}_HEADERS$"
+            }
+          },
+          "required": [
+            "provider",
+            "variable"
+          ],
+          "additionalProperties": false
+        },
+        "jsonLogsEnabled": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "compression": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "endpoint": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "headers": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "const": "environment"
+                },
+                "variable": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[A-Z][A-Z0-9_]{0,118}_HEADERS$"
+                }
+              },
+              "required": [
+                "provider",
+                "variable"
+              ],
+              "additionalProperties": false
+            },
+            "protocol": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        "protocol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "serviceName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "traceSampleRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "traceSampler": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "traces": {
+          "type": "object",
+          "properties": {
+            "compression": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "endpoint": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "headers": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "const": "environment"
+                },
+                "variable": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[A-Z][A-Z0-9_]{0,118}_HEADERS$"
+                }
+              },
+              "required": [
+                "provider",
+                "variable"
+              ],
+              "additionalProperties": false
+            },
+            "protocol": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "readScope": {
+      "type": "object",
+      "properties": {
+        "channelIds": {
+          "minItems": 0,
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "guildIds": {
+          "minItems": 1,
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        }
+      },
+      "required": [
+        "channelIds",
+        "guildIds"
+      ],
+      "additionalProperties": false
+    },
+    "runtime": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "nativeCommandName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "additionalProperties": false
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 2
+    },
+    "scopes": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "adminGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "announcementCrosspostChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "announcementSubscriptionSourceChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "announcementSubscriptionTargetChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "attachmentChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "automodAlertChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "automodGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "banAuditGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "channelCreationGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "channelCloneGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "channelCloneSourceIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "channelMetadataIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "channelOrderingGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "deleteChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "forumPostChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "forumTagChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "guildScaffoldGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "guildExpressionGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "guildProfileGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "guildSettingsGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "guildTemplateGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "integrationGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "integrationIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "interactionChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "inviteGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "mentionUserIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "memberDirectoryGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "nicknameGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "memberRoleGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "memberRoleIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "memberVoiceChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "memberVoiceGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "messageForwardSourceChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "messageForwardTargetChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "nativeInteractionChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "nativeInteractionGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "nativeInteractionUserIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "onboardingGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "protectedUserIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "pinChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "pollChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "reactionChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "permissionOverwriteChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "roleCreationGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "roleConfigurationIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "roleOrderingGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "scheduledEventGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "soundboardGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "stageChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "threadParentIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "threadGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "threadIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "threadMemberUserIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "welcomeScreenGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "webhookChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "widgetSettingsGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "storage": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "attachmentRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "auditFile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "guildExpressionRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "scheduledEventRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "soundboardRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "surface": {
+          "type": "string",
+          "enum": [
+            "full",
+            "progressive"
+          ]
+        },
+        "toolsets": {
+          "minItems": 1,
+          "maxItems": 51,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "activity",
+              "announcement-crossposts",
+              "announcement-subscriptions",
+              "attachments",
+              "audit-logs",
+              "automod",
+              "bans",
+              "channel-creation",
+              "channel-cloning",
+              "channel-metadata",
+              "channel-ordering",
+              "connector",
+              "deletion",
+              "forum-posts",
+              "forum-tags",
+              "gateway",
+              "guild-expressions",
+              "guild-profile",
+              "guild-scaffolds",
+              "guild-settings",
+              "guild-templates",
+              "guilds",
+              "integrations",
+              "interactions",
+              "invites",
+              "member-nicknames",
+              "member-roles",
+              "members",
+              "message-forwarding",
+              "messages",
+              "moderation",
+              "native-interactions",
+              "observability",
+              "onboarding",
+              "permission-overwrites",
+              "permissions",
+              "pins",
+              "polls",
+              "role-configuration",
+              "role-creation",
+              "role-ordering",
+              "roles",
+              "scheduled-events",
+              "soundboard",
+              "stage-instances",
+              "thread-governance",
+              "threads",
+              "voice-moderation",
+              "welcome-screen",
+              "webhooks",
+              "widget-settings"
+            ]
+          }
+        }
+      },
+      "required": [
+        "surface",
+        "toolsets"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "capabilities",
+    "credential",
+    "gateway",
+    "identity",
+    "limits",
+    "name",
+    "observability",
+    "readScope",
+    "runtime",
+    "schemaVersion",
+    "scopes",
+    "storage",
+    "tools"
+  ],
+  "additionalProperties": false,
+  "description": "Strict non-secret configuration for discord-mcp",
+  "title": "discord-mcp configuration",
+  "$id": "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json"
+}

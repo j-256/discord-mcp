@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { resolve } from "node:path"
+
 import {
   checkDiscordCatalog,
   runDiscordMcpCatalog,
@@ -97,7 +99,7 @@ export type ParsedCliArguments =
     confirmation: string
     json: boolean
   }
-  | { command: "doctor"; json: boolean; online: boolean; profileName?: string }
+  | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
   | { command: "help"; topic: CliCommand | undefined }
   | {
     action: "list"
@@ -128,7 +130,7 @@ export type ParsedCliArguments =
     json: boolean
     name: string
   }
-  | { command: "serve"; profileName?: string }
+  | { command: "serve"; configFile?: string; profileName?: string }
   | {
     command: "setup"
     credentialVariable?: string
@@ -139,7 +141,7 @@ export type ParsedCliArguments =
     profileName?: string
     serverName: string | undefined
   }
-  | { command: "smoke"; json: boolean; profileName?: string }
+  | { command: "smoke"; configFile?: string; json: boolean; profileName?: string }
   | { command: "version" }
 
 export interface CliDependencies {
@@ -367,10 +369,11 @@ function parsePresetCommand(
   }
 }
 
-function parseProfileSelectionOptions(
+function parseRuntimeSelectionOptions(
   args: readonly string[],
   booleanOptions: ReadonlySet<string>,
-): { present: ReadonlySet<string>; profileName?: string } {
+): { configFile?: string; present: ReadonlySet<string>; profileName?: string } {
+  let configFile: string | undefined
   const present = new Set<string>()
   let profileName: string | undefined
   for (let index = 0; index < args.length; index += 1) {
@@ -382,12 +385,13 @@ function parseProfileSelectionOptions(
       throw new ConfigurationError(`Option ${argument} may be provided only once`)
     }
     present.add(argument)
-    if (argument === "--profile") {
+    if (argument === "--config" || argument === "--profile") {
       const value = args[index + 1]
       if (!value || value.startsWith("--")) {
-        throw new ConfigurationError("Option --profile requires a value")
+        throw new ConfigurationError(`Option ${argument} requires a value`)
       }
-      profileName = value
+      if (argument === "--config") configFile = value
+      if (argument === "--profile") profileName = value
       index += 1
       continue
     }
@@ -395,7 +399,11 @@ function parseProfileSelectionOptions(
       throw new ConfigurationError(`Unknown option ${argument}`)
     }
   }
+  if (configFile && profileName) {
+    throw new ConfigurationError("Options --config and --profile are mutually exclusive")
+  }
   return {
+    ...(configFile ? { configFile } : {}),
     present,
     ...(profileName ? { profileName } : {}),
   }
@@ -539,16 +547,18 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
     return { command }
   }
   if (command === "serve") {
-    const options = parseProfileSelectionOptions(rest, new Set())
+    const options = parseRuntimeSelectionOptions(rest, new Set())
     return {
       command,
+      ...(options.configFile ? { configFile: options.configFile } : {}),
       ...(options.profileName ? { profileName: options.profileName } : {}),
     }
   }
   if (command === "doctor") {
-    const options = parseProfileSelectionOptions(rest, new Set(["--json", "--online"]))
+    const options = parseRuntimeSelectionOptions(rest, new Set(["--json", "--online"]))
     return {
       command,
+      ...(options.configFile ? { configFile: options.configFile } : {}),
       json: options.present.has("--json"),
       online: options.present.has("--online"),
       ...(options.profileName ? { profileName: options.profileName } : {}),
@@ -567,9 +577,10 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (command === "setup") return parseSetupOptions(rest)
   if (command === "preset") return parsePresetCommand(rest)
   if (command === "profile") return parseProfileCommand(rest)
-  const options = parseProfileSelectionOptions(rest, new Set(["--json"]))
+  const options = parseRuntimeSelectionOptions(rest, new Set(["--json"]))
   return {
     command: "smoke",
+    ...(options.configFile ? { configFile: options.configFile } : {}),
     json: options.present.has("--json"),
     ...(options.profileName ? { profileName: options.profileName } : {}),
   }
@@ -580,7 +591,7 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp catalog [--check] [--json]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check."
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor [--profile NAME] [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return "Usage: discord-mcp doctor [--config FILE | --profile NAME] [--online] [--json]\n\nValidate the selected configuration and policy. Add --online to verify Discord identity and scoped guild access. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "coordination") {
     return [
@@ -597,10 +608,10 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp setup [--profile NAME [--preset PRESET --guild-id ID... [--channel-id ID...]] [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot, optionally apply an exact-scope read-only preset, save a non-secret profile, and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
-    return "Usage: discord-mcp smoke [--profile NAME] [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool."
+    return "Usage: discord-mcp smoke [--config FILE | --profile NAME] [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool."
   }
   if (topic === "serve") {
-    return "Usage: discord-mcp serve [--profile NAME]\n\nRun the local stdio MCP server. This is also the default command."
+    return "Usage: discord-mcp serve [--config FILE | --profile NAME]\n\nRun the local stdio MCP server. This is also the default command."
   }
   if (topic === "profile") {
     return [
@@ -868,7 +879,7 @@ function profileSummary(profile: ConnectorProfile): ProfileSummary {
     gatewayEnabled: profile.gateway.enabled,
     guildCount: profile.readScope.guildIds.length,
     name: profile.name,
-    toolsets: profile.tools.toolsets,
+    toolsets: [...profile.tools.toolsets],
     toolSurface: profile.tools.surface,
   }
 }
@@ -928,6 +939,38 @@ function jsonReport(value: object): string {
   return JSON.stringify(value, null, 2)
 }
 
+function configSelectionEnvironment(
+  file: string | undefined,
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  if (!file) return environment
+  if (!file.trim() || file.includes("\0")) {
+    throw new ConfigurationError("Option --config requires a valid file path")
+  }
+  const selected = resolve(file)
+  const ambient = environment[ENVIRONMENT_NAMES.configFile]?.trim()
+  if (ambient && ambient !== selected) {
+    throw new ConfigurationError(
+      `Option --config conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+    )
+  }
+  return {
+    ...environment,
+    [ENVIRONMENT_NAMES.configFile]: selected,
+  }
+}
+
+async function runtimeSelectionEnvironment(
+  selection: { configFile?: string; profileName?: string },
+  environment: NodeJS.ProcessEnv,
+  dependencies: CliDependencies,
+): Promise<NodeJS.ProcessEnv> {
+  if (selection.profileName) {
+    return (await dependencies.activateProfile(selection.profileName, { environment })).environment
+  }
+  return configSelectionEnvironment(selection.configFile, environment)
+}
+
 export async function runCli(options: CliOptions = {}): Promise<number> {
   const args = options.args || process.argv.slice(2)
   const environment = options.environment || process.env
@@ -948,9 +991,11 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "doctor": {
-        const runtimeEnvironment = parsed.profileName
-          ? (await dependencies.activateProfile(parsed.profileName, { environment })).environment
-          : environment
+        const runtimeEnvironment = await runtimeSelectionEnvironment(
+          parsed,
+          environment,
+          dependencies,
+        )
         const report = await dependencies.diagnose({
           environment: runtimeEnvironment,
           ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}),
@@ -1071,9 +1116,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
       }
       case "serve":
         dependencies.serve({
-          environment: parsed.profileName
-            ? (await dependencies.activateProfile(parsed.profileName, { environment })).environment
-            : environment,
+          environment: await runtimeSelectionEnvironment(parsed, environment, dependencies),
           stderr,
         })
         return CLI_EXIT_CODES.success
@@ -1106,9 +1149,11 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           : CLI_EXIT_CODES.success
       }
       case "smoke": {
-        const runtimeEnvironment = parsed.profileName
-          ? (await dependencies.activateProfile(parsed.profileName, { environment })).environment
-          : environment
+        const runtimeEnvironment = await runtimeSelectionEnvironment(
+          parsed,
+          environment,
+          dependencies,
+        )
         const report = await dependencies.smoke({ environment: runtimeEnvironment })
         safeWrite(
           stdout,

@@ -15,7 +15,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import test from "node:test"
 
-import { ENVIRONMENT_NAMES } from "../src/constants.js"
+import { CONNECTOR_LIMITS, ENVIRONMENT_NAMES } from "../src/constants.js"
 import { ProfileError } from "../src/errors.js"
 import {
   activateProfile,
@@ -31,6 +31,7 @@ import {
   saveProfile,
   trashProfile,
   type ConnectorProfile,
+  type LegacyConnectorProfile,
 } from "../src/profile.js"
 
 const APPLICATION_ID = "300000000000000001"
@@ -51,19 +52,35 @@ function profile(overrides: Partial<{
   gatewayEventBufferSize: number
   guildIds: readonly string[]
   name: string
+  capabilities: Readonly<Record<string, boolean>>
+  scopes: Readonly<Record<string, readonly string[]>>
 }> = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: overrides.applicationId ?? APPLICATION_ID,
     botId: overrides.botId ?? BOT_ID,
+    ...(overrides.capabilities ? { capabilities: overrides.capabilities } : {}),
     channelIds: overrides.channelIds ?? [CHANNEL_ID],
     credentialVariable: overrides.credentialVariable ?? ALIAS,
     gatewayEnabled: overrides.gatewayEnabled ?? false,
     gatewayEventBufferSize: overrides.gatewayEventBufferSize ?? 100,
     guildIds: overrides.guildIds ?? [GUILD_ID],
     name: overrides.name ?? "support-bot",
+    ...(overrides.scopes ? { scopes: overrides.scopes } : {}),
     toolsets: ["connector", "messages"],
     toolSurface: "progressive",
   })
+}
+
+function legacyProfile(): LegacyConnectorProfile {
+  return {
+    credential: { provider: "environment", variable: ALIAS },
+    gateway: { enabled: false, eventBufferSize: 100 },
+    identity: { applicationId: APPLICATION_ID, botId: BOT_ID },
+    name: "legacy-support-bot",
+    readScope: { channelIds: [CHANNEL_ID], guildIds: [GUILD_ID] },
+    schemaVersion: 1,
+    tools: { surface: "progressive", toolsets: ["connector", "messages"] },
+  }
 }
 
 async function profileRoot(context: test.TestContext): Promise<string> {
@@ -113,7 +130,7 @@ test("profile parsing requires one exact canonical non-secret contract", () => {
   assert.deepEqual(parseConnectorProfile(valid, valid.name), valid)
 
   const invalid: unknown[] = [
-    { ...valid, schemaVersion: 2 },
+    { ...valid, schemaVersion: 3 },
     { ...valid, name: null },
     { ...valid, token: TOKEN },
     {
@@ -174,7 +191,7 @@ test("profile parsing requires one exact canonical non-secret contract", () => {
   )
   assert.throws(
     () => profile({ gatewayEventBufferSize: 0 }),
-    /buffer size is invalid/,
+    /gateway\.eventBufferSize/,
   )
 })
 
@@ -338,7 +355,11 @@ test("profile reads fail closed on permission, link, format, and size drift", as
     () => loadProfile(candidate.name, { directory }),
     /one complete JSON document/,
   )
-  await writeFile(file, `${"x".repeat(16_385)}\n`, { mode: 0o600 })
+  await writeFile(
+    file,
+    `${"x".repeat(CONNECTOR_LIMITS.configBytes + 1)}\n`,
+    { mode: 0o600 },
+  )
   await assert.rejects(
     () => loadProfile(candidate.name, { directory }),
     /private canonical regular file/,
@@ -366,27 +387,19 @@ test("profile directory validation rejects public and linked storage", async (co
   )
 })
 
-test("profile activation clones policy, consumes an alias, and preserves write gates", async (context) => {
+test("profile activation clones complete policy, consumes aliases, and rejects ambient policy", async (context) => {
   const directory = await profileRoot(context)
   const candidate = profile({
     channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
     gatewayEnabled: true,
     gatewayEventBufferSize: 250,
     guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    capabilities: { deletions: true },
+    scopes: { deleteChannelIds: [CHANNEL_ID] },
   })
   await saveProfile(candidate, { directory })
   const source: NodeJS.ProcessEnv = {
     [ALIAS]: ` ${TOKEN} `,
-    [ENVIRONMENT_NAMES.allowedChannelIds]: "999",
-    [ENVIRONMENT_NAMES.allowedGuildIds]: "999",
-    [ENVIRONMENT_NAMES.allowDeletions]: "true",
-    [ENVIRONMENT_NAMES.allowGateway]: "false",
-    [ENVIRONMENT_NAMES.applicationId]: "999",
-    [ENVIRONMENT_NAMES.botId]: "999",
-    [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-    [ENVIRONMENT_NAMES.gatewayEventBufferSize]: "1",
-    [ENVIRONMENT_NAMES.toolSurface]: "full",
-    [ENVIRONMENT_NAMES.toolsets]: "all",
     PATH: "/usr/bin",
   }
   const before = { ...source }
@@ -439,17 +452,38 @@ test("profile activation clones policy, consumes an alias, and preserves write g
         [ENVIRONMENT_NAMES.token]: "different-token",
       },
     }),
-    /conflicting Discord credentials/,
+    /conflicts with policy environment variables.*DISCORD_BOT_TOKEN/,
   )
-  const matching = await activateProfile(candidate.name, {
+  await assert.rejects(
+    () => activateProfile(candidate.name, {
+      directory,
+      environment: {
+        [ALIAS]: TOKEN,
+        [ENVIRONMENT_NAMES.allowDeletions]: "false",
+      },
+    }),
+    new RegExp(`conflicts.*${ENVIRONMENT_NAMES.allowDeletions}`),
+  )
+})
+
+test("legacy profiles remain readable and retain their environment compatibility window", async (context) => {
+  const directory = await profileRoot(context)
+  const candidate = legacyProfile()
+  assert.deepEqual(parseConnectorProfile(candidate), candidate)
+  await saveProfile(candidate, { directory })
+
+  const activated = await activateProfile(candidate.name, {
     directory,
     environment: {
       [ALIAS]: TOKEN,
-      [ENVIRONMENT_NAMES.token]: TOKEN,
+      [ENVIRONMENT_NAMES.allowDeletions]: "true",
+      [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
     },
   })
-  assert.equal(matching.environment[ALIAS], undefined)
-  assert.equal(matching.environment[ENVIRONMENT_NAMES.token], TOKEN)
+  assert.equal(activated.profile.schemaVersion, 1)
+  assert.equal(activated.environment[ENVIRONMENT_NAMES.token], TOKEN)
+  assert.equal(activated.environment[ENVIRONMENT_NAMES.allowDeletions], "true")
+  assert.equal(activated.environment[ENVIRONMENT_NAMES.deleteChannelIds], CHANNEL_ID)
 })
 
 test("profile removal is recoverable and restore chooses the newest generation", async (context) => {

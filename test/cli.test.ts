@@ -10,6 +10,7 @@ import {
   type CliDependencies,
 } from "../src/cli.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
+import { ENVIRONMENT_NAMES } from "../src/constants.js"
 import {
   ConfigurationError,
   DiscordApiError,
@@ -290,6 +291,10 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "serve",
     profileName: "support-bot",
   })
+  assert.deepEqual(parseCliArguments(["serve", "--config", "/configuration/discord.json"]), {
+    command: "serve",
+    configFile: "/configuration/discord.json",
+  })
   assert.deepEqual(parseCliArguments([
     "setup",
     "--name",
@@ -388,6 +393,16 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   })
   assert.throws(() => parseCliArguments(["unknown"]), /Unknown command/)
   assert.throws(() => parseCliArguments(["doctor", "--online", "--online"]), /only once/)
+  assert.throws(
+    () => parseCliArguments([
+      "serve",
+      "--config",
+      "/configuration/discord.json",
+      "--profile",
+      "support-bot",
+    ]),
+    /mutually exclusive/,
+  )
   assert.throws(
     () => parseCliArguments(["setup", "--client", "legacy"]),
     /Unknown option --client/,
@@ -1036,6 +1051,53 @@ test("CLI activates profiles before serve, doctor, and smoke without mutating th
   ])
 })
 
+test("CLI selects one explicit configuration file before serve, doctor, and smoke", async () => {
+  const file = "/configuration/discord-mcp.json"
+  const source = { KEEP: "value" }
+  const before = { ...source }
+  const events: string[] = []
+  const configDependencies = dependencies({
+    async activateProfile() {
+      throw new Error("Config selection must not activate a profile")
+    },
+    async diagnose(options) {
+      events.push("doctor")
+      assert.equal(options.environment?.[ENVIRONMENT_NAMES.configFile], file)
+      return doctorReport()
+    },
+    serve(options) {
+      events.push("serve")
+      assert.equal(options.environment[ENVIRONMENT_NAMES.configFile], file)
+    },
+    async smoke(options) {
+      events.push("smoke")
+      assert.equal(options.environment?.[ENVIRONMENT_NAMES.configFile], file)
+      return smokeReport()
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["serve", "--config", file],
+    dependencies: configDependencies,
+    environment: source,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["doctor", "--config", file],
+    dependencies: configDependencies,
+    environment: source,
+    stdout: outputStream().stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["smoke", "--config", file],
+    dependencies: configDependencies,
+    environment: source,
+    stdout: outputStream().stream,
+  }), 0)
+
+  assert.deepEqual(source, before)
+  assert.deepEqual(events, ["serve", "doctor", "smoke"])
+})
+
 test("CLI profile lifecycle is credential-free, recoverable, and exactly confirmed", async () => {
   const events: string[] = []
   let activations = 0
@@ -1177,7 +1239,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Discord MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
-  assert.match(helpOutput.value(), /doctor \[--profile NAME\]/)
+  assert.match(helpOutput.value(), /doctor \[--config FILE \| --profile NAME\]/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\]/)
   assert.match(versionOutput.value(), /0\.1\.0/)
 })

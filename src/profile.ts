@@ -23,15 +23,28 @@ import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
   ENVIRONMENT_NAMES,
-  GATEWAY_DEFAULTS,
   MCP_TOOLSET_NAMES,
   MCP_TOOL_SURFACES,
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
-import { ProfileCredentialError, ProfileError } from "./errors.js"
+import {
+  activateConnectorConfigDocument,
+  CONFIG_DOCUMENT_SCHEMA_VERSION,
+  createConnectorConfigDocument,
+  parseConnectorConfigDocument,
+  parseStrictConfigJson,
+  type ConnectorConfigDocument,
+  type ConnectorConfigDocumentObservability,
+} from "./config-document.js"
+import {
+  ConfigDocumentError,
+  ProfileCredentialError,
+  ProfileError,
+} from "./errors.js"
 
-export const PROFILE_SCHEMA_VERSION = 1
+export const PROFILE_SCHEMA_VERSION = CONFIG_DOCUMENT_SCHEMA_VERSION
+export const LEGACY_PROFILE_SCHEMA_VERSION = 1
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/
@@ -59,7 +72,7 @@ const PROFILE_KEYS = Object.freeze([
   "tools",
 ] as const)
 
-export interface ConnectorProfile {
+export interface LegacyConnectorProfile {
   credential: {
     provider: "environment"
     variable: string
@@ -83,6 +96,8 @@ export interface ConnectorProfile {
     toolsets: McpToolsetName[]
   }
 }
+
+export type ConnectorProfile = LegacyConnectorProfile | ConnectorConfigDocument
 
 export interface ProfileLocationOptions {
   directory?: string
@@ -263,8 +278,20 @@ export function parseConnectorProfile(
   expectedName?: string,
 ): ConnectorProfile {
   if (!isRecord(value)) throw new ProfileError("Profile must be a JSON object")
+  if (value.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
+    try {
+      return parseConnectorConfigDocument(value, expectedName)
+    } catch (error) {
+      if (error instanceof ConfigDocumentError) {
+        throw new ProfileError(error.message.replace("Configuration", "Profile"), {
+          cause: error,
+        })
+      }
+      throw error
+    }
+  }
   assertExactKeys(value, PROFILE_KEYS, "Profile")
-  if (value.schemaVersion !== PROFILE_SCHEMA_VERSION) {
+  if (value.schemaVersion !== LEGACY_PROFILE_SCHEMA_VERSION) {
     throw new ProfileError(`Unsupported profile schema version: ${String(value.schemaVersion)}`)
   }
   if (typeof value.name !== "string") {
@@ -344,7 +371,7 @@ export function parseConnectorProfile(
     identity: { applicationId, botId },
     name,
     readScope: { channelIds, guildIds },
-    schemaVersion: PROFILE_SCHEMA_VERSION,
+    schemaVersion: LEGACY_PROFILE_SCHEMA_VERSION,
     tools: {
       surface: value.tools.surface as McpToolSurface,
       toolsets,
@@ -355,39 +382,22 @@ export function parseConnectorProfile(
 export function createConnectorProfile(options: {
   applicationId: string
   botId: string
+  capabilities?: Readonly<Record<string, boolean>>
   channelIds?: readonly string[]
   credentialVariable?: string
   gatewayEnabled?: boolean
   gatewayEventBufferSize?: number
   guildIds: readonly string[]
+  limits?: Readonly<Record<string, number>>
   name: string
+  observability?: ConnectorConfigDocumentObservability
+  runtime?: Readonly<Record<string, string>>
+  scopes?: Readonly<Record<string, readonly string[]>>
+  storage?: Readonly<Record<string, string | readonly string[]>>
   toolsets: readonly McpToolsetName[]
   toolSurface: McpToolSurface
 }): ConnectorProfile {
-  return parseConnectorProfile({
-    credential: {
-      provider: "environment",
-      variable: options.credentialVariable ?? ENVIRONMENT_NAMES.token,
-    },
-    gateway: {
-      enabled: options.gatewayEnabled ?? false,
-      eventBufferSize: options.gatewayEventBufferSize ?? GATEWAY_DEFAULTS.eventBufferSize,
-    },
-    identity: {
-      applicationId: options.applicationId,
-      botId: options.botId,
-    },
-    name: options.name,
-    readScope: {
-      channelIds: [...(options.channelIds ?? [])].sort(),
-      guildIds: [...options.guildIds].sort(),
-    },
-    schemaVersion: PROFILE_SCHEMA_VERSION,
-    tools: {
-      surface: options.toolSurface,
-      toolsets: MCP_TOOLSET_NAMES.filter((entry) => options.toolsets.includes(entry)),
-    },
-  })
+  return createConnectorConfigDocument(options)
 }
 
 export function resolveProfileDirectory(
@@ -497,7 +507,7 @@ async function readProfileFile(
     || metadata.isSymbolicLink()
     || metadata.nlink !== 1
     || metadata.size < 3
-    || metadata.size > CONNECTOR_LIMITS.profileBytes
+    || metadata.size > CONNECTOR_LIMITS.configBytes
     || resolve(canonical) !== resolve(file)
     || (process.platform !== "win32" && (metadata.mode & 0o077) !== 0)
     || (typeof process.getuid === "function" && metadata.uid !== process.getuid())
@@ -514,9 +524,14 @@ async function readProfileFile(
     throw new ProfileError("Profile must contain one complete JSON document")
   }
   try {
-    return parseConnectorProfile(JSON.parse(text) as unknown, expectedName)
+    return parseConnectorProfile(parseStrictConfigJson(text), expectedName)
   } catch (error) {
     if (error instanceof ProfileError) throw error
+    if (error instanceof ConfigDocumentError) {
+      throw new ProfileError(error.message.replace("Configuration file", "Profile"), {
+        cause: error,
+      })
+    }
     throw new ProfileError("Profile is not valid JSON", { cause: error })
   }
 }
@@ -855,6 +870,12 @@ export async function activateProfile(
 ): Promise<ActivatedProfile> {
   const profile = await loadProfile(name, options)
   const source = options.environment || process.env
+  if (profile.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
+    return {
+      environment: activateConnectorConfigDocument(profile, source),
+      profile,
+    }
+  }
   const environment = clonedCredentialEnvironment(
     profile.credential.variable,
     source,

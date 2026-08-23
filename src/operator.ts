@@ -6,6 +6,11 @@ import {
 import type { ConnectorConfig } from "./config.js"
 import { loadConnectorConfig } from "./config.js"
 import {
+  CONFIG_DOCUMENT_SCHEMA_VERSION,
+  configDocumentPolicyFromEnvironment,
+  connectorConfigSecretEnvironmentNames,
+} from "./config-document.js"
+import {
   CONNECTOR_LIMITS,
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
@@ -2729,17 +2734,21 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.auditFile,
   ]
   if (profile) {
-    const managed = new Set<string>(PROFILE_MANAGED_ENVIRONMENT_NAMES)
-    environmentVariables = profileEnvironmentForwarding
-      === PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
-      ? [profile.credential.variable]
-      : [
-          profile.credential.variable,
-          ...environmentVariables.filter((name) => (
-            name !== ENVIRONMENT_NAMES.token
-            && !managed.has(name)
-          )),
-        ]
+    if (profile.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
+      environmentVariables = [...connectorConfigSecretEnvironmentNames(profile)]
+    } else {
+      const managed = new Set<string>(PROFILE_MANAGED_ENVIRONMENT_NAMES)
+      environmentVariables = profileEnvironmentForwarding
+        === PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
+        ? [profile.credential.variable]
+        : [
+            profile.credential.variable,
+            ...environmentVariables.filter((name) => (
+              name !== ENVIRONMENT_NAMES.token
+              && !managed.has(name)
+            )),
+          ]
+    }
   }
   return {
     args,
@@ -2828,6 +2837,7 @@ export async function prepareSetup(
       applicationId: status.application.id,
       botId: status.bot.id,
       channelIds: [...config.allowedChannelIds],
+      ...configDocumentPolicyFromEnvironment(runtimeEnvironment),
       credentialVariable,
       gatewayEnabled: config.allowGateway,
       gatewayEventBufferSize: config.gatewayEventBufferSize,
