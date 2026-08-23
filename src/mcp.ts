@@ -321,6 +321,7 @@ import { registerDiscordGuidance } from "./mcp-guidance.js"
 import { registerDiscordNativeInteractionMcp } from "./mcp-native-interactions.js"
 import { registerDiscordObservabilityMcp } from "./mcp-observability.js"
 import { redactMcpValue } from "./mcp-output.js"
+import { runReviewedToolExecution } from "./mcp-reviewed-execution.js"
 import {
   createDiscordToolDiscoveryCatalog,
   discoverDiscordTools,
@@ -3887,12 +3888,6 @@ const welcomeScreenConfirmationSchema = z.strictObject({
   approve: z.boolean(),
 })
 const widgetSettingsConfirmationSchema = z.strictObject({
-  approve: z.boolean(),
-})
-const guildSettingsConfirmationSchema = z.strictObject({
-  approve: z.boolean(),
-})
-const guildProfileConfirmationSchema = z.strictObject({
   approve: z.boolean(),
 })
 const pollCreationConfirmationSchema = z.strictObject({
@@ -16699,115 +16694,69 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       context,
     ) => {
       const request = guildSettingsRequest(input)
-      const requestState = context.mcpReq.requestState()
-      if (requestState !== undefined) {
-        if (!validGuildSettingsRequestState(
-          requestState,
-          request,
-          input.planDigest,
-        )) {
-          const result = guildSettingsConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Signed confirmation state does not match the exact guild, requested settings, audit reason, one-shot operation key, or plan digest",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const response = inputResponse(
-          context.mcpReq.inputResponses,
-          GUILD_SETTINGS_CONFIRMATION_KEY,
-        )
-        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
-          const reason = response.action === "cancel"
-            ? "Discord guild-settings confirmation was canceled"
-            : "Discord guild-settings confirmation was declined"
-          const result = guildSettingsConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-declined",
-            reason,
-          )
-          return toolResult(result, reason)
-        }
-        const confirmation = acceptedContent(
-          context.mcpReq.inputResponses,
-          GUILD_SETTINGS_CONFIRMATION_KEY,
-          guildSettingsConfirmationSchema,
-        )
-        if (!confirmation || confirmation.approve !== true) {
-          const result = guildSettingsConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Discord guild-settings change requires explicit approval of the displayed plan",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const result = await service.executeGuildSettingsChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        const verification = result.status === "already-current"
-          ? " without a write"
-          : result.status === "completed-with-drift"
-            ? " with readback drift"
-            : " with matching authoritative response and readback"
-        return toolResult(
-          result,
-          `Discord guild-settings change ${result.status} for guild ${result.guildId}${verification}`,
-        )
-      }
-      if (context.mcpReq.inputResponses !== undefined) {
-        const result = guildSettingsConfirmationOutcome(
-          request,
-          input.planDigest,
-          "confirmation-invalid",
-          "Discord confirmation responses require signed request state",
-        )
-        return toolResult(result, result.reason, { isError: true })
-      }
-
-      const plan = await service.planGuildSettingsChange(request, {
-        signal: context.mcpReq.signal,
-      })
-      if (plan.digest !== input.planDigest) {
-        const normalized = normalizeGuildSettingsChangeRequest(request)
-        const result = {
-          actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
-          guildId: normalized.guildId,
-          operationKeyHash: normalized.operationKeyHash,
-          reason: "The fresh Discord guild-settings snapshot does not match the requested digest",
-          schemaVersion: SCHEMA_VERSION,
-          status: "plan-changed",
-        }
-        return toolResult(result, result.reason, { isError: true })
-      }
-      if (!plan.writeRequired) {
-        const result = await service.executeGuildSettingsChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        return toolResult(
-          result,
-          `Discord guild settings for guild ${result.guildId} already match the reviewed state`,
-        )
-      }
-      const signedState = await requestStateCodec.mint({
-        ...guildSettingsRequestStatePayload(request),
-        planDigest: input.planDigest,
-      }, context)
-      return inputRequired({
-        inputRequests: {
-          [GUILD_SETTINGS_CONFIRMATION_KEY]: inputRequired.elicit({
-            message: guildSettingsConfirmationMessage(plan),
-            requestedSchema: guildSettingsConfirmationRequestSchema,
-          }),
+      return runReviewedToolExecution({
+        confirmation: {
+          approvalRequiredReason: "Discord guild-settings change requires explicit approval of the displayed plan",
+          declinedReason(action) {
+            return action === "cancel"
+              ? "Discord guild-settings confirmation was canceled"
+              : "Discord guild-settings confirmation was declined"
+          },
+          invalidStateReason: "Signed confirmation state does not match the exact guild, requested settings, audit reason, one-shot operation key, or plan digest",
+          key: GUILD_SETTINGS_CONFIRMATION_KEY,
+          message: guildSettingsConfirmationMessage,
+          missingStateReason: "Discord confirmation responses require signed request state",
+          requestedSchema: guildSettingsConfirmationRequestSchema,
         },
-        requestState: signedState,
+        execute: () => service.executeGuildSettingsChange(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        ),
+        inputResponses: context.mcpReq.inputResponses,
+        mintRequestState: (payload) => requestStateCodec.mint(payload, context),
+        outcome: (status, reason) => guildSettingsConfirmationOutcome(
+          request,
+          input.planDigest,
+          status,
+          reason,
+        ),
+        plan: () => service.planGuildSettingsChange(request, {
+          signal: context.mcpReq.signal,
+        }),
+        planChanged(plan) {
+          const normalized = normalizeGuildSettingsChangeRequest(request)
+          const result = {
+            actualDigest: plan.digest,
+            expectedDigest: input.planDigest,
+            guildId: normalized.guildId,
+            operationKeyHash: normalized.operationKeyHash,
+            reason: "The fresh Discord guild-settings snapshot does not match the requested digest",
+            schemaVersion: SCHEMA_VERSION,
+            status: "plan-changed",
+          }
+          return { result, summary: result.reason }
+        },
+        planDigest: input.planDigest,
+        render: toolResult,
+        requestState: context.mcpReq.requestState(),
+        requestStatePayload: guildSettingsRequestStatePayload(request),
+        summarizeExecution(result) {
+          const verification = result.status === "already-current"
+            ? " without a write"
+            : result.status === "completed-with-drift"
+              ? " with readback drift"
+              : " with matching authoritative response and readback"
+          return `Discord guild-settings change ${result.status} for guild ${result.guildId}${verification}`
+        },
+        summarizeNoWrite: (result) => (
+          `Discord guild settings for guild ${result.guildId} already match the reviewed state`
+        ),
+        validRequestState: (value) => validGuildSettingsRequestState(
+          value,
+          request,
+          input.planDigest,
+        ),
       })
     }, secrets, observability),
   ))
@@ -16850,115 +16799,69 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       context,
     ) => {
       const request = guildProfileRequest(input)
-      const requestState = context.mcpReq.requestState()
-      if (requestState !== undefined) {
-        if (!validGuildProfileRequestState(
-          requestState,
-          request,
-          input.planDigest,
-        )) {
-          const result = guildProfileConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Signed confirmation state does not match the exact guild, requested profile text, audit reason, one-shot operation key, or plan digest",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const response = inputResponse(
-          context.mcpReq.inputResponses,
-          GUILD_PROFILE_CONFIRMATION_KEY,
-        )
-        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
-          const reason = response.action === "cancel"
-            ? "Discord guild profile confirmation was canceled"
-            : "Discord guild profile confirmation was declined"
-          const result = guildProfileConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-declined",
-            reason,
-          )
-          return toolResult(result, reason)
-        }
-        const confirmation = acceptedContent(
-          context.mcpReq.inputResponses,
-          GUILD_PROFILE_CONFIRMATION_KEY,
-          guildProfileConfirmationSchema,
-        )
-        if (!confirmation || confirmation.approve !== true) {
-          const result = guildProfileConfirmationOutcome(
-            request,
-            input.planDigest,
-            "confirmation-invalid",
-            "Discord guild profile change requires explicit approval of the displayed plan",
-          )
-          return toolResult(result, result.reason, { isError: true })
-        }
-        const result = await service.executeGuildProfileChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        const verification = result.status === "already-current"
-          ? " without a write"
-          : result.status === "completed-with-drift"
-            ? " with readback drift"
-            : " with matching response and readback"
-        return toolResult(
-          result,
-          `Discord guild profile change ${result.status} for guild ${result.guildId}${verification}`,
-        )
-      }
-      if (context.mcpReq.inputResponses !== undefined) {
-        const result = guildProfileConfirmationOutcome(
-          request,
-          input.planDigest,
-          "confirmation-invalid",
-          "Discord confirmation responses require signed request state",
-        )
-        return toolResult(result, result.reason, { isError: true })
-      }
-
-      const plan = await service.planGuildProfileChange(request, {
-        signal: context.mcpReq.signal,
-      })
-      if (plan.digest !== input.planDigest) {
-        const normalized = normalizeGuildProfileChangeRequest(request)
-        const result = {
-          actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
-          guildId: normalized.guildId,
-          operationKeyHash: normalized.operationKeyHash,
-          reason: "The fresh Discord guild profile snapshot does not match the requested digest",
-          schemaVersion: SCHEMA_VERSION,
-          status: "plan-changed",
-        }
-        return toolResult(result, result.reason, { isError: true })
-      }
-      if (!plan.writeRequired) {
-        const result = await service.executeGuildProfileChange(
-          request,
-          input.planDigest,
-          { signal: context.mcpReq.signal },
-        )
-        return toolResult(
-          result,
-          `Discord guild profile for guild ${result.guildId} already matches the reviewed state`,
-        )
-      }
-      const signedState = await requestStateCodec.mint({
-        ...guildProfileRequestStatePayload(request),
-        planDigest: input.planDigest,
-      }, context)
-      return inputRequired({
-        inputRequests: {
-          [GUILD_PROFILE_CONFIRMATION_KEY]: inputRequired.elicit({
-            message: guildProfileConfirmationMessage(plan),
-            requestedSchema: guildProfileConfirmationRequestSchema,
-          }),
+      return runReviewedToolExecution({
+        confirmation: {
+          approvalRequiredReason: "Discord guild profile change requires explicit approval of the displayed plan",
+          declinedReason(action) {
+            return action === "cancel"
+              ? "Discord guild profile confirmation was canceled"
+              : "Discord guild profile confirmation was declined"
+          },
+          invalidStateReason: "Signed confirmation state does not match the exact guild, requested profile text, audit reason, one-shot operation key, or plan digest",
+          key: GUILD_PROFILE_CONFIRMATION_KEY,
+          message: guildProfileConfirmationMessage,
+          missingStateReason: "Discord confirmation responses require signed request state",
+          requestedSchema: guildProfileConfirmationRequestSchema,
         },
-        requestState: signedState,
+        execute: () => service.executeGuildProfileChange(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        ),
+        inputResponses: context.mcpReq.inputResponses,
+        mintRequestState: (payload) => requestStateCodec.mint(payload, context),
+        outcome: (status, reason) => guildProfileConfirmationOutcome(
+          request,
+          input.planDigest,
+          status,
+          reason,
+        ),
+        plan: () => service.planGuildProfileChange(request, {
+          signal: context.mcpReq.signal,
+        }),
+        planChanged(plan) {
+          const normalized = normalizeGuildProfileChangeRequest(request)
+          const result = {
+            actualDigest: plan.digest,
+            expectedDigest: input.planDigest,
+            guildId: normalized.guildId,
+            operationKeyHash: normalized.operationKeyHash,
+            reason: "The fresh Discord guild profile snapshot does not match the requested digest",
+            schemaVersion: SCHEMA_VERSION,
+            status: "plan-changed",
+          }
+          return { result, summary: result.reason }
+        },
+        planDigest: input.planDigest,
+        render: toolResult,
+        requestState: context.mcpReq.requestState(),
+        requestStatePayload: guildProfileRequestStatePayload(request),
+        summarizeExecution(result) {
+          const verification = result.status === "already-current"
+            ? " without a write"
+            : result.status === "completed-with-drift"
+              ? " with readback drift"
+              : " with matching response and readback"
+          return `Discord guild profile change ${result.status} for guild ${result.guildId}${verification}`
+        },
+        summarizeNoWrite: (result) => (
+          `Discord guild profile for guild ${result.guildId} already matches the reviewed state`
+        ),
+        validRequestState: (value) => validGuildProfileRequestState(
+          value,
+          request,
+          input.planDigest,
+        ),
       })
     }, secrets, observability),
   ))
