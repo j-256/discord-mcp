@@ -779,6 +779,8 @@ async function checkAutomation() {
     "mcp-publisher_linux_amd64.tar.gz",
     "test \"$(uname -m)\" = \"x86_64\"",
     "mcp-publisher 1.8.1 ",
+    "Attest catalog evidence",
+    "catalog-evidence.json",
     "v1.8.1",
     "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc",
   ]) {
@@ -789,8 +791,13 @@ async function checkAutomation() {
     invariant(workflow.includes("NPM_CONFIG_REGISTRY: https://registry.npmjs.org"), `${workflowName} must pin the npm registry`)
     invariant(workflow.includes("NPM_CONFIG_REPLACE_REGISTRY_HOST: never"), `${workflowName} must preserve lockfile registry origins`)
   }
-  invariant((release.match(/uses: actions\/attest@/g) || []).length === 2, "release workflow must create provenance and SBOM attestations")
+  invariant((release.match(/uses: actions\/attest@/g) || []).length === 3, "release workflow must attest provenance, SBOM, and catalog evidence")
   invariant(!release.includes("secrets.NPM_TOKEN"), "release workflow must not use a standing npm token")
+  const ci = await readFile(join(workflowsDirectory, "ci.yml"), "utf8")
+  invariant(
+    (ci.match(/catalog-evidence\.json/g) || []).length >= 2,
+    "CI must retain and compare catalog evidence across runtimes",
+  )
   const codeowners = await readFile(join(REPOSITORY_ROOT, ".github/CODEOWNERS"), "utf8")
   for (const path of [
     "/.github/",

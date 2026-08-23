@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type { Readable, Writable } from "node:stream"
 
 import {
@@ -36,8 +37,17 @@ import {
   selectedCanonicalMcpToolNames,
 } from "./mcp-tool-catalog.js"
 import { stableString } from "./normalize.js"
+import {
+  DISCORD_REST_OPERATIONS,
+  MCP_TOOL_RISK_CLASSES,
+  type DiscordRestMethod,
+  type McpToolName,
+  type McpToolRiskClass,
+} from "./observability-catalog.js"
 import type { OperationalObserver } from "./observability.js"
 import { ScopePolicy } from "./policy.js"
+
+export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 
 const CATALOG_HOME_DIRECTORY = "/discord-mcp-catalog"
 const CATALOG_TOKEN_PLACEHOLDER = "catalog-only-placeholder"
@@ -77,19 +87,30 @@ const EXPECTED_RESOURCE_TEMPLATE_URIS = Object.freeze(
 
 export interface DiscordCatalogCheckReport {
   activityRecordsCreated: false
+  contractDigest: string
   credentialsRequired: false
   discordExecution: "disabled"
+  evidenceFormat: typeof CATALOG_EVIDENCE_FORMAT
   executionGuard: typeof CATALOG_ONLY_ERROR_CODE
   gateway: "disabled"
   observabilityExport: "disabled"
   promptCount: number
+  promptNames: string[]
   resourceCount: number
   resourceTemplateCount: number
+  resourceTemplateUris: string[]
+  resourceUris: string[]
+  restMethodCounts: Record<DiscordRestMethod, number>
+  restOperationCount: number
+  riskClassCounts: Record<McpToolRiskClass, number>
+  safetyResourceDigest: string
   schemaVersion: number
   serverName: string
   serverVersion: string
   status: "ok"
   toolCount: number
+  toolNames: string[]
+  toolsetNames: string[]
 }
 
 export interface DiscordCatalogRunOptions {
@@ -167,6 +188,52 @@ function catalogInvariant(
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   return value as Record<string, unknown>
+}
+
+function jsonValue(value: unknown, label: string): unknown {
+  const encoded = JSON.stringify(value)
+  catalogInvariant(encoded !== undefined, `${label} is not JSON serializable`)
+  return JSON.parse(encoded) as unknown
+}
+
+function sha256Digest(value: unknown, label: string): string {
+  return `sha256:${createHash("sha256")
+    .update(stableString(jsonValue(value, label)))
+    .digest("hex")}`
+}
+
+function sortedByIdentity<T>(
+  values: readonly T[],
+  identity: (value: T) => string,
+): T[] {
+  return [...values].sort((left, right) => {
+    const leftIdentity = identity(left)
+    const rightIdentity = identity(right)
+    if (leftIdentity < rightIdentity) return -1
+    if (leftIdentity > rightIdentity) return 1
+    return 0
+  })
+}
+
+function valueCounts<T extends string>(values: readonly T[]): Record<T, number> {
+  const counts = Object.fromEntries(
+    [...new Set(values)].sort().map((value) => [value, 0]),
+  ) as Record<T, number>
+  for (const value of values) counts[value] += 1
+  return counts
+}
+
+function catalogRiskClassCounts(
+  toolNames: readonly string[],
+): Record<McpToolRiskClass, number> {
+  const riskClasses = toolNames.map((name) => {
+    catalogInvariant(
+      Object.hasOwn(MCP_TOOL_RISK_CLASSES, name),
+      `${name} lacks an internal risk classification`,
+    )
+    return MCP_TOOL_RISK_CLASSES[name as McpToolName]
+  })
+  return valueCounts(riskClasses)
 }
 
 function assertExactCatalog(
@@ -299,21 +366,52 @@ export async function checkDiscordCatalog(): Promise<DiscordCatalogCheckReport> 
       "known and unknown tool guards differ",
     )
 
+    const toolNames = toolsResult.tools.map((tool) => tool.name).sort()
+    const promptNames = promptsResult.prompts.map((prompt) => prompt.name).sort()
+    const resourceUris = resourcesResult.resources.map((resource) => resource.uri).sort()
+    const resourceTemplateUris = templatesResult.resourceTemplates
+      .map((template) => template.uriTemplate)
+      .sort()
+    const protocolContract = {
+      executionGuard: knownGuard,
+      instructions: client.getInstructions() || "",
+      prompts: sortedByIdentity(promptsResult.prompts, (prompt) => prompt.name),
+      resourceTemplates: sortedByIdentity(
+        templatesResult.resourceTemplates,
+        (template) => template.uriTemplate,
+      ),
+      resources: sortedByIdentity(resourcesResult.resources, (resource) => resource.uri),
+      safetyResource: safety,
+      tools: sortedByIdentity(toolsResult.tools, (tool) => tool.name),
+    }
+    const restMethods = Object.values(DISCORD_REST_OPERATIONS)
+
     return {
       activityRecordsCreated: false,
+      contractDigest: sha256Digest(protocolContract, "protocol contract"),
       credentialsRequired: false,
       discordExecution: "disabled",
+      evidenceFormat: CATALOG_EVIDENCE_FORMAT,
       executionGuard: CATALOG_ONLY_ERROR_CODE,
       gateway: "disabled",
       observabilityExport: "disabled",
       promptCount: promptsResult.prompts.length,
+      promptNames,
       resourceCount: resourcesResult.resources.length,
       resourceTemplateCount: templatesResult.resourceTemplates.length,
+      resourceTemplateUris,
+      resourceUris,
+      restMethodCounts: valueCounts(restMethods),
+      restOperationCount: restMethods.length,
+      riskClassCounts: catalogRiskClassCounts(toolNames),
+      safetyResourceDigest: sha256Digest(safety, "safety resource"),
       schemaVersion: SCHEMA_VERSION,
       serverName: CONNECTOR_NAME,
       serverVersion: CONNECTOR_VERSION,
       status: "ok",
       toolCount: toolsResult.tools.length,
+      toolNames,
+      toolsetNames: [...MCP_TOOLSET_NAMES].sort(),
     }
   } finally {
     await client.close().catch(() => undefined)

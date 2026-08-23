@@ -117,19 +117,42 @@ function smokeReport(): SmokeReport {
 function catalogReport(): DiscordCatalogCheckReport {
   return {
     activityRecordsCreated: false,
+    contractDigest: `sha256:${"a".repeat(64)}`,
     credentialsRequired: false,
     discordExecution: "disabled",
+    evidenceFormat: "discord-mcp.catalog-evidence.v1",
     executionGuard: "CATALOG_ONLY",
     gateway: "disabled",
     observabilityExport: "disabled",
-    promptCount: 8,
-    resourceCount: 7,
-    resourceTemplateCount: 5,
+    promptCount: 2,
+    promptNames: ["review_change", "summarize_channel"],
+    resourceCount: 2,
+    resourceTemplateCount: 1,
+    resourceTemplateUris: ["discord://channels/{channelId}"],
+    resourceUris: ["discord://connector/policy", "discord://connector/safety"],
+    restMethodCounts: {
+      DELETE: 1,
+      GET: 2,
+      PATCH: 1,
+      POST: 1,
+      PUT: 1,
+    },
+    restOperationCount: 6,
+    riskClassCounts: {
+      "administrative-write": 0,
+      "destructive-write": 1,
+      "discord-read": 1,
+      "interaction-write": 0,
+      "local-read": 1,
+    },
+    safetyResourceDigest: `sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
     serverName: "discord-mcp",
     serverVersion: "0.1.0",
     status: "ok",
-    toolCount: 35,
+    toolCount: 3,
+    toolNames: ["delete_messages", "discover_discord_tools", "read_messages"],
+    toolsetNames: ["deletion", "messages"],
   }
 }
 
@@ -393,6 +416,9 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
   }), 0)
 
   assert.match(textOutput.value(), /Discord MCP catalog: ok/)
+  assert.match(textOutput.value(), /Contract digest: sha256:[a-f0-9]{64}/)
+  assert.match(textOutput.value(), /Risk classes: administrative-write=0/)
+  assert.match(textOutput.value(), /Discord REST operations: 6/)
   assert.match(textOutput.value(), /Execution guard: CATALOG_ONLY/)
   assert.match(textOutput.value(), /Credentials required: no/)
   assert.deepEqual(JSON.parse(jsonOutput.value()), catalogReport())

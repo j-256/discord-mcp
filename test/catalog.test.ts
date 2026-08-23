@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import {
   mkdtemp,
   rm,
@@ -14,6 +15,7 @@ import {
 } from "@modelcontextprotocol/client"
 
 import {
+  CATALOG_EVIDENCE_FORMAT,
   CATALOG_ONLY_ERROR_CODE,
   checkDiscordCatalog,
   createDiscordCatalogServer,
@@ -30,6 +32,11 @@ import {
   selectedMcpPromptNames,
 } from "../src/mcp-guidance.js"
 import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
+import { stableString } from "../src/normalize.js"
+import {
+  DISCORD_REST_OPERATIONS,
+  MCP_TOOL_RISK_CLASSES,
+} from "../src/observability-catalog.js"
 
 const CHANNEL_ID = "200000000000000001"
 const EXPECTED_TOOL_NAMES = [
@@ -49,6 +56,7 @@ const REQUIRED_ANNOTATIONS = [
   "openWorldHint",
   "readOnlyHint",
 ] as const
+const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
 async function withCatalogClient(
   callback: (client: Client) => Promise<void>,
@@ -71,6 +79,24 @@ async function withCatalogClient(
 
 function sorted(values: readonly string[]): string[] {
   return [...values].sort()
+}
+
+function sortedByIdentity<T>(
+  values: readonly T[],
+  identity: (value: T) => string,
+): T[] {
+  return [...values].sort((left, right) => {
+    const leftIdentity = identity(left)
+    const rightIdentity = identity(right)
+    if (leftIdentity < rightIdentity) return -1
+    if (leftIdentity > rightIdentity) return 1
+    return 0
+  })
+}
+
+function evidenceDigest(value: unknown): string {
+  const normalized = JSON.parse(JSON.stringify(value)) as unknown
+  return `sha256:${createHash("sha256").update(stableString(normalized)).digest("hex")}`
 }
 
 function restoreEnvironment(
@@ -177,6 +203,41 @@ test("catalog serves local guidance while live resources remain isolated", async
   })
 })
 
+test("catalog evidence digest binds the normalized advertised contract and safety response", async () => {
+  let expectedContractDigest = ""
+  let expectedSafetyResourceDigest = ""
+  await withCatalogClient(async (client) => {
+    const [tools, prompts, resources, templates] = await Promise.all([
+      client.listTools(),
+      client.listPrompts(),
+      client.listResources(),
+      client.listResourceTemplates(),
+    ])
+    const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+    const executionGuard = await client.callTool({
+      arguments: {},
+      name: "read_messages",
+    })
+    expectedContractDigest = evidenceDigest({
+      executionGuard,
+      instructions: client.getInstructions() || "",
+      prompts: sortedByIdentity(prompts.prompts, (prompt) => prompt.name),
+      resourceTemplates: sortedByIdentity(
+        templates.resourceTemplates,
+        (template) => template.uriTemplate,
+      ),
+      resources: sortedByIdentity(resources.resources, (resource) => resource.uri),
+      safetyResource: safety,
+      tools: sortedByIdentity(tools.tools, (tool) => tool.name),
+    })
+    expectedSafetyResourceDigest = evidenceDigest(safety)
+  })
+
+  const report = await checkDiscordCatalog()
+  assert.equal(report.contractDigest, expectedContractDigest)
+  assert.equal(report.safetyResourceDigest, expectedSafetyResourceDigest)
+})
+
 test("catalog self-check ignores hostile ambient credentials, policy, Gateway, telemetry, and activity paths", async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-catalog-test-"))
   const activityFile = join(temporaryDirectory, "activity.jsonl")
@@ -204,8 +265,11 @@ test("catalog self-check ignores hostile ambient credentials, policy, Gateway, t
     }) as typeof fetch
 
     const report = await checkDiscordCatalog()
+    const repeatedReport = await checkDiscordCatalog()
 
+    assert.deepEqual(repeatedReport, report)
     assert.equal(report.status, "ok")
+    assert.equal(report.evidenceFormat, CATALOG_EVIDENCE_FORMAT)
     assert.equal(report.credentialsRequired, false)
     assert.equal(report.discordExecution, "disabled")
     assert.equal(report.executionGuard, CATALOG_ONLY_ERROR_CODE)
@@ -213,9 +277,37 @@ test("catalog self-check ignores hostile ambient credentials, policy, Gateway, t
     assert.equal(report.observabilityExport, "disabled")
     assert.equal(report.activityRecordsCreated, false)
     assert.equal(report.toolCount, EXPECTED_TOOL_NAMES.length)
+    assert.deepEqual(report.toolNames, EXPECTED_TOOL_NAMES)
     assert.equal(report.promptCount, EXPECTED_PROMPT_NAMES.length)
+    assert.deepEqual(report.promptNames, EXPECTED_PROMPT_NAMES)
     assert.equal(report.resourceCount, EXPECTED_RESOURCE_URIS.length)
+    assert.deepEqual(report.resourceUris, EXPECTED_RESOURCE_URIS)
     assert.equal(report.resourceTemplateCount, EXPECTED_RESOURCE_TEMPLATE_URIS.length)
+    assert.deepEqual(report.resourceTemplateUris, EXPECTED_RESOURCE_TEMPLATE_URIS)
+    assert.deepEqual(report.toolsetNames, [...MCP_TOOLSET_NAMES].sort())
+    assert.match(report.contractDigest, SHA256_DIGEST_PATTERN)
+    assert.match(report.safetyResourceDigest, SHA256_DIGEST_PATTERN)
+    assert.notEqual(report.contractDigest, report.safetyResourceDigest)
+    assert.deepEqual(
+      report.riskClassCounts,
+      Object.fromEntries(
+        Object.values(MCP_TOOL_RISK_CLASSES)
+          .sort()
+          .reduce((entries, riskClass) => {
+            entries.set(riskClass, (entries.get(riskClass) || 0) + 1)
+            return entries
+          }, new Map<string, number>()),
+      ),
+    )
+    assert.equal(
+      Object.values(report.riskClassCounts).reduce((total, count) => total + count, 0),
+      report.toolCount,
+    )
+    assert.equal(report.restOperationCount, Object.keys(DISCORD_REST_OPERATIONS).length)
+    assert.equal(
+      Object.values(report.restMethodCounts).reduce((total, count) => total + count, 0),
+      report.restOperationCount,
+    )
     assert.equal(fetchCalls, 0)
     assert.doesNotMatch(JSON.stringify(report), new RegExp(ambientSecret))
     assert.doesNotMatch(JSON.stringify(report), new RegExp(temporaryDirectory))

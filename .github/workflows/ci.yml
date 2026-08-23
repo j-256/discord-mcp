@@ -75,7 +75,9 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-node-${{ matrix.node }}
-          path: ${{ runner.temp }}/package/*.tgz
+          path: |
+            ${{ runner.temp }}/package/*.tgz
+            ${{ runner.temp }}/package/catalog-evidence.json
           if-no-files-found: error
           retention-days: 1
 
@@ -103,6 +105,14 @@ jobs:
           do
             gzip -dc "$candidate" > "$candidate_tar"
             cmp "$reference_tar" "$candidate_tar"
+          done
+          set -- packages/package-node-*/catalog-evidence.json
+          test "$#" -eq 3
+          evidence_reference="$1"
+          shift
+          for candidate in "$@"
+          do
+            cmp "$evidence_reference" "$candidate"
           done
 
   security:

@@ -71,7 +71,7 @@ Do not include `sbom.spdx.json` from the local command in the commit. The workfl
 gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=stage -f tag=vMAJOR.MINOR.PATCH
 ```
 
-2. Review the workflow's package and SPDX artifacts and the GitHub attestation summary. The workflow verifies source, dependency locks, registry signatures, vulnerabilities, the public versioned icon, official MCP manifest validation, byte-for-byte repeatability, installed CLI behavior, and a content-free installed MCP handshake before staging.
+2. Review the workflow's package, deterministic catalog evidence, SPDX artifacts, and GitHub attestation summary. The workflow verifies source, dependency locks, registry signatures, vulnerabilities, the public versioned icon, official MCP manifest validation, byte-for-byte repeatability, installed CLI behavior, and a content-free installed MCP handshake before staging.
 3. Inspect the private npm stage from a maintainer workstation:
 
 ```sh
@@ -116,7 +116,21 @@ gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
+gh attestation verify catalog-evidence.json \
+  --repo j-256/discord-mcp \
+  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+  --source-ref refs/tags/vMAJOR.MINOR.PATCH \
+  --deny-self-hosted-runners
 ```
+
+From an isolated consumer directory, install the downloaded archive without lifecycle scripts and save the credential-free catalog evidence:
+
+```sh
+npm install --ignore-scripts ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz
+./node_modules/.bin/discord-mcp catalog --check --json > catalog-evidence.json
+```
+
+The evidence must be identical across repeated runs of the same installed archive. Review its exact inventories and accounting fields, preserve its `contractDigest` for contract comparison, and preserve its separate `safetyResourceDigest` for focused safety-guidance comparison. The report must state that credentials, Discord execution, Gateway access, telemetry export, and activity persistence are disabled.
 
 From a checkout of the same tag, compare npm and MCP Registry state with the same code used by release automation:
 

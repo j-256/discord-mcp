@@ -24,7 +24,18 @@ import {
 } from "./release-lib.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
+const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
+const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
+const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
+const EXPECTED_RISK_CLASSES = [
+  "administrative-write",
+  "destructive-write",
+  "discord-read",
+  "interaction-write",
+  "local-read",
+]
+const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 const STATIC_RESOURCE_URI = "discord://connector/safety"
 const REQUIRED_FILES = [
   "LICENSE",
@@ -78,6 +89,26 @@ function assertPackageFiles(files) {
   for (const path of files) {
     invariant(STATIC_FILES.has(path) || DIST_FILE.test(path), `npm archive contains unexpected path ${path}`)
   }
+}
+
+function assertSortedUniqueStrings(values, label) {
+  invariant(Array.isArray(values) && values.length > 0, `${label} is not a non-empty array`)
+  invariant(values.every((value) => typeof value === "string" && value.length > 0), `${label} contains an invalid identity`)
+  invariant(new Set(values).size === values.length, `${label} contains duplicate identities`)
+  assert.deepEqual(values, [...values].sort(), `${label} is not sorted`)
+}
+
+function assertCountMap(value, expectedKeys, expectedTotal, label) {
+  invariant(value && typeof value === "object" && !Array.isArray(value), `${label} is not an object`)
+  assert.deepEqual(Object.keys(value), expectedKeys, `${label} keys changed`)
+  invariant(
+    Object.values(value).every((count) => Number.isSafeInteger(count) && count >= 0),
+    `${label} contains an invalid count`,
+  )
+  invariant(
+    Object.values(value).reduce((total, count) => total + count, 0) === expectedTotal,
+    `${label} total does not match its inventory`,
+  )
 }
 
 async function listFiles(directory, prefix = "") {
@@ -296,8 +327,18 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     cwd: consumer,
     env: catalogEnvironment,
   })
+  const repeatedCatalogResult = await run(bin, ["catalog", "--check", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  assert.equal(repeatedCatalogResult.stdout, catalogResult.stdout, "installed catalog evidence is not deterministic")
   const catalog = JSON.parse(catalogResult.stdout)
   invariant(catalog.status === "ok", "installed credential-free catalog check failed")
+  invariant(catalog.evidenceFormat === CATALOG_EVIDENCE_FORMAT, "installed catalog evidence format changed")
+  invariant(SHA256_DIGEST_PATTERN.test(catalog.contractDigest), "installed catalog contract digest is invalid")
+  invariant(SHA256_DIGEST_PATTERN.test(catalog.safetyResourceDigest), "installed catalog safety digest is invalid")
+  invariant(catalog.contractDigest !== catalog.safetyResourceDigest, "installed catalog digests unexpectedly match")
   invariant(catalog.credentialsRequired === false, "installed catalog unexpectedly requires credentials")
   invariant(catalog.discordExecution === "disabled", "installed catalog enabled Discord execution")
   invariant(catalog.executionGuard === "CATALOG_ONLY", "installed catalog execution guard changed")
@@ -312,6 +353,32 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   ]) {
     invariant(Number.isSafeInteger(catalog[name]) && catalog[name] > 0, `installed catalog ${name} is invalid`)
   }
+  for (const [names, count, label] of [
+    [catalog.toolNames, catalog.toolCount, "installed tool inventory"],
+    [catalog.promptNames, catalog.promptCount, "installed prompt inventory"],
+    [catalog.resourceUris, catalog.resourceCount, "installed resource inventory"],
+    [catalog.resourceTemplateUris, catalog.resourceTemplateCount, "installed resource-template inventory"],
+  ]) {
+    assertSortedUniqueStrings(names, label)
+    invariant(names.length === count, `${label} count does not match`)
+  }
+  assertSortedUniqueStrings(catalog.toolsetNames, "installed toolset inventory")
+  invariant(
+    Number.isSafeInteger(catalog.restOperationCount) && catalog.restOperationCount > 0,
+    "installed REST operation count is invalid",
+  )
+  assertCountMap(
+    catalog.riskClassCounts,
+    EXPECTED_RISK_CLASSES,
+    catalog.toolCount,
+    "installed risk-class counts",
+  )
+  assertCountMap(
+    catalog.restMethodCounts,
+    EXPECTED_REST_METHODS,
+    catalog.restOperationCount,
+    "installed REST method counts",
+  )
   const doctorResult = await run(process.execPath, [entrypoint, "doctor", "--json"], {
     capture: true,
     cwd: consumer,
@@ -393,6 +460,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     },
   })
   invariant(JSON.parse(profileDoctorResult.stdout).status !== "error", "installed profile activation failed")
+  return catalog
 }
 
 const outputDirectory = parseOutputDirectory(process.argv.slice(2))
@@ -423,10 +491,19 @@ try {
   const extractedFiles = await listFiles(extractedPackage)
   assert.deepEqual(extractedFiles, first.files)
   await assertNoSecrets(extractedPackage, extractedFiles)
-  await verifyInstalledPackage(first.archive, workDirectory, packageJson.version)
+  const catalogEvidence = await verifyInstalledPackage(
+    first.archive,
+    workDirectory,
+    packageJson.version,
+  )
   if (outputDirectory) {
     await mkdir(outputDirectory, { recursive: true })
     await copyFile(first.archive, join(outputDirectory, basename(first.archive)), constants.COPYFILE_EXCL)
+    await writeFile(
+      join(outputDirectory, CATALOG_EVIDENCE_FILENAME),
+      `${JSON.stringify(catalogEvidence, null, 2)}\n`,
+      { flag: "wx" },
+    )
   }
   process.stdout.write(`Verified reproducible npm archive ${basename(first.archive)} sha256:${sha256(firstBytes)}\n`)
 } finally {

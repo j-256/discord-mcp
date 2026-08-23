@@ -459,7 +459,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
 
 function helpText(topic: CliCommand | undefined): string {
   if (topic === "catalog") {
-    return "Usage: discord-mcp catalog [--check] [--json]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify the packaged contract; --json requires --check."
+    return "Usage: discord-mcp catalog [--check] [--json]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check."
   }
   if (topic === "doctor") {
     return "Usage: discord-mcp doctor [--profile NAME] [--online] [--json]\n\nValidate the local environment and policy. Add --online to verify Discord identity and scoped guild access."
@@ -515,13 +515,25 @@ function helpText(topic: CliCommand | undefined): string {
 }
 
 function renderCatalog(report: DiscordCatalogCheckReport): string {
+  const riskClasses = Object.entries(report.riskClassCounts)
+    .map(([risk, count]) => `${risk}=${count}`)
+    .join(", ")
+  const restMethods = Object.entries(report.restMethodCounts)
+    .map(([method, count]) => `${method}=${count}`)
+    .join(", ")
   return [
     "Discord MCP catalog: ok",
     `Server: ${report.serverName}@${report.serverVersion}`,
+    `Evidence format: ${report.evidenceFormat}`,
+    `Contract digest: ${report.contractDigest}`,
+    `Safety resource digest: ${report.safetyResourceDigest}`,
     `Tools: ${report.toolCount}`,
+    `Toolsets: ${report.toolsetNames.length}`,
+    `Risk classes: ${riskClasses}`,
     `Prompts: ${report.promptCount}`,
     `Resources: ${report.resourceCount}`,
     `Resource templates: ${report.resourceTemplateCount}`,
+    `Discord REST operations: ${report.restOperationCount} (${restMethods})`,
     `Execution guard: ${report.executionGuard}`,
     "Credentials required: no",
     "Discord execution: disabled",
