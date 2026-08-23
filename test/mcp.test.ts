@@ -19762,6 +19762,9 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
   }
   const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
     enabled: true,
+    layoutEnabled: feed.layoutEnabled,
+    getChannelLayout: (guildId) => feed.getChannelLayout(guildId),
+    getChannelLayoutStatus: () => feed.getChannelLayoutStatus(),
     getStatus: () => feed.getStatus(),
     listEvents: (options) => feed.listEvents(options),
     start() {
@@ -19771,6 +19774,7 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
       lifecycle.push("gateway-stop")
     },
     subscribe: (listener) => feed.subscribe(listener),
+    subscribeChannelLayouts: (listener) => feed.subscribeChannelLayouts(listener),
   }
   const serviceData = serviceFixture()
   const handle = runDiscordMcpServer({
@@ -19821,6 +19825,9 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   })
   const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
     enabled: true,
+    layoutEnabled: feed.layoutEnabled,
+    getChannelLayout: (guildId) => feed.getChannelLayout(guildId),
+    getChannelLayoutStatus: () => feed.getChannelLayoutStatus(),
     getStatus: () => feed.getStatus(),
     listEvents: (options) => feed.listEvents(options),
     start() {
@@ -19831,6 +19838,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
       reportStopped?.()
     },
     subscribe: (listener) => feed.subscribe(listener),
+    subscribeChannelLayouts: (listener) => feed.subscribeChannelLayouts(listener),
   }
   let flushes = 0
   let telemetryStops = 0

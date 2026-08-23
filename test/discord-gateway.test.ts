@@ -2,7 +2,10 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  DISCORD_CHANNEL_FLAGS,
+  DISCORD_CHANNEL_TYPES,
   DISCORD_GATEWAY_INTENT_MASK,
+  DISCORD_GATEWAY_INTENTS,
   DISCORD_GATEWAY_URL,
 } from "../src/constants.js"
 import {
@@ -226,6 +229,7 @@ test("Gateway identifies with fixed nonprivileged intents and exposes no session
   assert.equal((Number(data.intents) & (1 << 15)) === 0, true)
   assert.equal((Number(data.intents) & (1 << 1)) === 0, true)
   assert.equal((Number(data.intents) & (1 << 8)) === 0, true)
+  assert.equal(Object.hasOwn(data, "capabilities"), false)
   assert.deepEqual(data.properties, {
     browser: "discord-mcp",
     device: "discord-mcp",
@@ -316,6 +320,75 @@ test("Interaction-only Gateway uses zero intents and routes payloads outside the
   assert.deepEqual(gateway.getStatus().intents, [])
   assert.deepEqual(gateway.listEvents().events, [])
   assert.equal(JSON.stringify(gateway.getStatus()).includes(TOKEN), false)
+  await gateway.stop()
+})
+
+test("Layout-only Gateway requests only GUILDS and ingests a content-free seed", async () => {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: new Set(),
+    allowedGuildIds: new Set([GUILD_ID]),
+    bufferSize: 10,
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "layoutgateway1",
+    enabled: true,
+    eventFeedEnabled: false,
+    layoutGuildIds: new Set([GUILD_ID]),
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: new Set(),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowGateway: false,
+      allowNativeInteractions: true,
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+    eventStore,
+    interactionHandler: { ingestInteraction() {} },
+    random: () => 0,
+    scheduler,
+    webSocketFactory() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  const identify = payloads(socket)[0]
+  const data = identify?.d as Record<string, unknown>
+  assert.equal(data.intents, DISCORD_GATEWAY_INTENTS.guilds)
+  assert.equal(Object.hasOwn(data, "capabilities"), false)
+  ready(socket)
+  socket.message({
+    d: {
+      channels: [{
+        flags: DISCORD_CHANNEL_FLAGS.channelObfuscated,
+        id: CHANNEL_ID,
+        name: TOKEN,
+        parent_id: null,
+        position: 0,
+        topic: TOKEN,
+        type: DISCORD_CHANNEL_TYPES.text,
+      }],
+      id: GUILD_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "GUILD_CREATE",
+  })
+  assert.equal(gateway.getChannelLayout(GUILD_ID).state, "ready")
+  assert.equal(gateway.getChannelLayout(GUILD_ID).channels[0]?.obfuscated, true)
+  assert.deepEqual(gateway.listEvents().events, [])
+  assert.doesNotMatch(JSON.stringify(gateway.getChannelLayout(GUILD_ID)), new RegExp(TOKEN))
   await gateway.stop()
 })
 
@@ -430,7 +503,28 @@ test("Gateway resumes with only vetted Discord origins", async () => {
   assert.ok(first)
   hello(first)
   ready(first)
+  first.message({
+    d: {
+      channels: [{
+        flags: DISCORD_CHANNEL_FLAGS.channelObfuscated,
+        id: CHANNEL_ID,
+        parent_id: null,
+        position: 0,
+        type: DISCORD_CHANNEL_TYPES.text,
+      }],
+      id: GUILD_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "GUILD_CREATE",
+  })
+  assert.equal(gateway.getChannelLayout(GUILD_ID).state, "ready")
   first.serverClose(1_006)
+  assert.equal(gateway.getChannelLayout(GUILD_ID).state, "resuming")
+  assert.equal(gateway.getChannelLayout(GUILD_ID).complete, false)
+  assert.deepEqual(gateway.getChannelLayout(GUILD_ID).channels, [])
+  assert.equal(gateway.getStatus().layout.channels.retained, 1)
+  assert.equal(gateway.getStatus().layout.guilds.resuming, 1)
 
   assert.equal(scheduler.runNext(), 800)
   const second = sockets[1]
@@ -440,10 +534,25 @@ test("Gateway resumes with only vetted Discord origins", async () => {
   const resume = payloads(second)[0]
   assert.equal(resume?.op, 6)
   assert.deepEqual(resume?.d, {
-    seq: 1,
+    seq: 2,
     session_id: "private-session-id",
     token: TOKEN,
   })
+  second.message({
+    d: {
+      flags: 0,
+      guild_id: GUILD_ID,
+      id: CHANNEL_ID,
+      parent_id: null,
+      position: 2,
+      type: DISCORD_CHANNEL_TYPES.text,
+    },
+    op: 0,
+    s: 3,
+    t: "CHANNEL_UPDATE",
+  })
+  assert.equal(gateway.getChannelLayout(GUILD_ID).state, "resuming")
+  assert.deepEqual(gateway.getChannelLayout(GUILD_ID).channels, [])
   second.message({
     d: {
       channel_id: CHANNEL_ID,
@@ -451,15 +560,19 @@ test("Gateway resumes with only vetted Discord origins", async () => {
       id: MESSAGE_ID,
     },
     op: 0,
-    s: 2,
+    s: 4,
     t: "MESSAGE_DELETE",
   })
-  second.message({ d: {}, op: 0, s: 3, t: "RESUMED" })
+  second.message({ d: {}, op: 0, s: 5, t: "RESUMED" })
   assert.equal(gateway.getStatus().connection.state, "ready")
   assert.equal(gateway.getStatus().connection.identifies, 1)
   assert.equal(gateway.getStatus().connection.resumes, 1)
   assert.equal(gateway.getStatus().buffer.continuityGaps, 0)
-  assert.equal(gateway.listEvents().events[0]?.messageId, MESSAGE_ID)
+  assert.equal(gateway.listEvents().events.at(-1)?.messageId, MESSAGE_ID)
+  const layout = gateway.getChannelLayout(GUILD_ID)
+  assert.equal(layout.state, "ready")
+  assert.equal(layout.revision, 4)
+  assert.equal(layout.channels[0]?.position, 2)
   await gateway.stop()
 })
 
@@ -491,8 +604,24 @@ test("Gateway invalid sessions re-identify only after Discord's delay and local 
   assert.ok(first)
   hello(first)
   ready(first)
+  first.message({
+    d: {
+      channels: [{
+        id: CHANNEL_ID,
+        parent_id: null,
+        position: 0,
+        type: DISCORD_CHANNEL_TYPES.text,
+      }],
+      id: GUILD_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "GUILD_CREATE",
+  })
   first.message({ d: false, op: 9, s: null, t: null })
   assert.equal(gateway.getStatus().buffer.continuityGaps, 1)
+  assert.equal(gateway.getChannelLayout(GUILD_ID).state, "invalidated")
+  assert.equal(gateway.getChannelLayout(GUILD_ID).reason, "connection-gap")
 
   assert.equal(scheduler.runNext(), 1_000)
   const second = sockets[1]

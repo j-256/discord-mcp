@@ -74,7 +74,7 @@
         },
         {
           "name": "DISCORD_MCP_ALLOW_GATEWAY",
-          "description": "Enable a scoped, content-free Gateway event feed with only nonprivileged intents",
+          "description": "Enable a scoped, content-free Gateway event feed and exact-guild privacy-safe layout evidence with only nonprivileged intents",
           "default": "false",
           "choices": [
             "false",

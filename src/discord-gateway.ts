@@ -4,10 +4,16 @@ import type { ConnectorConfig } from "./config.js"
 import {
   CONNECTOR_NAME,
   DISCORD_GATEWAY_INTENT_MASK,
+  DISCORD_GATEWAY_INTENTS,
   DISCORD_GATEWAY_URL,
   DISCORD_SNOWFLAKE_PATTERN,
   GATEWAY_DEFAULTS,
 } from "./constants.js"
+import type {
+  GatewayChannelLayoutListener,
+  GatewayChannelLayoutSnapshot,
+  GatewayChannelLayoutStatus,
+} from "./gateway-channel-layout.js"
 import {
   GatewayEventStore,
   type GatewayChangeListener,
@@ -284,6 +290,22 @@ export class DiscordGateway implements GatewayRuntime {
     return this.#eventStore.listEvents(options)
   }
 
+  get layoutEnabled(): boolean {
+    return this.#eventStore.layoutEnabled
+  }
+
+  getChannelLayout(guildId: string): GatewayChannelLayoutSnapshot {
+    return this.#eventStore.getChannelLayout(guildId)
+  }
+
+  getChannelLayoutStatus(): GatewayChannelLayoutStatus {
+    return this.#eventStore.getChannelLayoutStatus()
+  }
+
+  subscribeChannelLayouts(listener: GatewayChannelLayoutListener): () => void {
+    return this.#eventStore.subscribeChannelLayouts(listener)
+  }
+
   subscribe(listener: GatewayChangeListener): () => void {
     return this.#eventStore.subscribe(listener)
   }
@@ -512,7 +534,9 @@ export class DiscordGateway implements GatewayRuntime {
       d: {
         intents: this.#eventStore.eventFeedEnabled
           ? DISCORD_GATEWAY_INTENT_MASK
-          : 0,
+          : this.#eventStore.layoutEnabled
+            ? DISCORD_GATEWAY_INTENTS.guilds
+            : 0,
         properties: {
           browser: CONNECTOR_NAME,
           device: CONNECTOR_NAME,
@@ -661,6 +685,7 @@ export class DiscordGateway implements GatewayRuntime {
 
   #requestReconnect(options: PendingReconnect): void {
     if (!this.#running || this.#terminal || this.#pendingReconnect) return
+    this.#eventStore.suspendChannelLayoutsForResume()
     this.#pendingReconnect = options
     const socket = this.#socket
     if (!socket) {

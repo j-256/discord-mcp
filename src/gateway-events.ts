@@ -8,6 +8,13 @@ import {
   GATEWAY_DEFAULTS,
   SCHEMA_VERSION,
 } from "./constants.js"
+import {
+  GatewayChannelLayoutStore,
+  type GatewayChannelLayoutListener,
+  type GatewayChannelLayoutSnapshot,
+  type GatewayChannelLayoutSource,
+  type GatewayChannelLayoutStatus,
+} from "./gateway-channel-layout.js"
 
 export const GATEWAY_EVENT_KINDS = [
   "channel-created",
@@ -73,7 +80,7 @@ export type GatewayErrorCategory =
   | "sharding-required"
   | "unknown-fatal-close"
 
-export type GatewayChangeKind = "events" | "status"
+export type GatewayChangeKind = "events" | "layout" | "status"
 export type GatewayChangeListener = (kind: GatewayChangeKind) => void
 
 export interface ContentFreeGatewayEvent {
@@ -141,6 +148,7 @@ export interface GatewayStatusSnapshot {
     | "GUILD_MESSAGE_REACTIONS"
     | "GUILD_MESSAGE_POLLS"
   )[]
+  layout: GatewayChannelLayoutStatus
   privacy: {
     contentStored: false
     persistent: false
@@ -150,7 +158,7 @@ export interface GatewayStatusSnapshot {
   status: "ok"
 }
 
-export interface GatewayEventSource {
+export interface GatewayEventSource extends GatewayChannelLayoutSource {
   readonly enabled: boolean
   getStatus(): GatewayStatusSnapshot
   listEvents(options?: {
@@ -168,6 +176,7 @@ export interface GatewayEventStoreOptions {
   cursorNamespace?: string
   enabled: boolean
   eventFeedEnabled?: boolean
+  layoutGuildIds?: ReadonlySet<string>
 }
 
 interface StoredGatewayEvent extends ContentFreeGatewayEvent {
@@ -268,6 +277,7 @@ export class GatewayEventStore implements GatewayEventSource {
   readonly #bufferSize: number
   readonly #channels = new Map<string, ChannelMapping>()
   readonly #clock: () => Date
+  readonly #channelLayouts: GatewayChannelLayoutStore
   #connectedAt: string | null = null
   #continuityGaps = 0
   readonly #cursorNamespace: string
@@ -284,6 +294,7 @@ export class GatewayEventStore implements GatewayEventSource {
   #state: GatewayConnectionState
   readonly enabled: boolean
   readonly eventFeedEnabled: boolean
+  readonly layoutEnabled: boolean
 
   constructor(options: GatewayEventStoreOptions) {
     const bufferSize = options.bufferSize ?? GATEWAY_DEFAULTS.eventBufferSize
@@ -311,12 +322,21 @@ export class GatewayEventStore implements GatewayEventSource {
     ) {
       throw new RangeError("Enabled Gateway events require an exact guild or channel scope")
     }
+    const clock = options.clock || (() => new Date())
+    const layoutGuildIds = options.layoutGuildIds
+      ?? (eventFeedEnabled ? options.allowedGuildIds : new Set<string>())
     this.enabled = options.enabled
     this.eventFeedEnabled = eventFeedEnabled
     this.#allowedChannelIds = new Set(options.allowedChannelIds)
     this.#allowedGuildIds = new Set(options.allowedGuildIds)
     this.#bufferSize = bufferSize
-    this.#clock = options.clock || (() => new Date())
+    this.#clock = clock
+    this.#channelLayouts = new GatewayChannelLayoutStore({
+      clock,
+      enabled: options.enabled,
+      guildIds: layoutGuildIds,
+    })
+    this.layoutEnabled = this.#channelLayouts.layoutEnabled
     this.#cursorNamespace = cursorNamespace
     this.#state = options.enabled ? "stopped" : "disabled"
   }
@@ -567,6 +587,10 @@ export class GatewayEventStore implements GatewayEventSource {
   }
 
   ingestDispatch(name: string, raw: unknown): boolean {
+    if (this.#channelLayouts.ingestDispatch(name, raw)) {
+      this.#emit("layout")
+      this.#emit("status")
+    }
     if (!this.eventFeedEnabled) return false
     switch (name) {
       case "GUILD_CREATE":
@@ -678,7 +702,13 @@ export class GatewayEventStore implements GatewayEventSource {
   ): void {
     if (!this.enabled && state !== "disabled") return
     const timestamp = this.#timestamp()
-    const changed = this.#state !== state || Boolean(errorCategory)
+    const layoutChanged = state === "reconnecting"
+      ? this.#channelLayouts.suspendForResume()
+      : state === "ready"
+        ? this.#channelLayouts.confirmResume()
+        : false
+    if (layoutChanged) this.#emit("layout")
+    const changed = this.#state !== state || Boolean(errorCategory) || layoutChanged
     this.#state = state
     if (state === "authenticating" && this.#connectedAt === null) {
       this.#connectedAt = timestamp
@@ -690,12 +720,18 @@ export class GatewayEventStore implements GatewayEventSource {
 
   recordIdentify(): void {
     if (!this.enabled) return
+    if (this.#channelLayouts.invalidateForIdentify()) {
+      this.#emit("layout")
+    }
     this.#identifies += 1
     this.#emit("status")
   }
 
   recordContinuityGap(): void {
     if (!this.enabled) return
+    if (this.#channelLayouts.invalidateForContinuityGap()) {
+      this.#emit("layout")
+    }
     this.#generation += 1
     this.#continuityGaps += 1
     this.#emit("events")
@@ -705,6 +741,13 @@ export class GatewayEventStore implements GatewayEventSource {
   recordReconnect(): void {
     if (!this.enabled) return
     this.#reconnects += 1
+    this.#emit("status")
+  }
+
+  suspendChannelLayoutsForResume(): void {
+    if (!this.enabled) return
+    if (!this.#channelLayouts.suspendForResume()) return
+    this.#emit("layout")
     this.#emit("status")
   }
 
@@ -741,7 +784,10 @@ export class GatewayEventStore implements GatewayEventSource {
             "GUILD_MESSAGE_REACTIONS" as const,
             "GUILD_MESSAGE_POLLS" as const,
           ]
-        : [],
+        : this.layoutEnabled
+          ? ["GUILDS" as const]
+          : [],
+      layout: this.#channelLayouts.getChannelLayoutStatus(),
       privacy: {
         contentStored: false,
         persistent: false,
@@ -818,6 +864,18 @@ export class GatewayEventStore implements GatewayEventSource {
       schemaVersion: SCHEMA_VERSION,
       status: this.eventFeedEnabled ? "ok" : "disabled",
     }
+  }
+
+  getChannelLayout(guildId: string): GatewayChannelLayoutSnapshot {
+    return this.#channelLayouts.getChannelLayout(guildId)
+  }
+
+  getChannelLayoutStatus(): GatewayChannelLayoutStatus {
+    return this.#channelLayouts.getChannelLayoutStatus()
+  }
+
+  subscribeChannelLayouts(listener: GatewayChannelLayoutListener): () => void {
+    return this.#channelLayouts.subscribeChannelLayouts(listener)
   }
 
   subscribe(listener: GatewayChangeListener): () => void {

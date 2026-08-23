@@ -33,6 +33,7 @@ function store(options: {
     },
     cursorNamespace: "testcursor12",
     enabled: options.enabled ?? true,
+    layoutGuildIds: new Set(),
   })
 }
 
@@ -79,6 +80,24 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
     enabled: false,
     feedEnabled: false,
     intents: [],
+    layout: {
+      channels: {
+        obfuscated: 0,
+        retained: 0,
+      },
+      enabled: false,
+      guilds: {
+        invalidated: 0,
+        pending: 0,
+        ready: 0,
+        resuming: 0,
+        scoped: 0,
+        unavailable: 0,
+      },
+      invalidations: 0,
+      schemaVersion: 1,
+      updates: 0,
+    },
     privacy: {
       contentStored: false,
       persistent: false,

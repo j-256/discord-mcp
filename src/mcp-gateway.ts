@@ -108,7 +108,7 @@ export function registerDiscordGatewayMcp(
     {
       annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
       cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
-      description: "Content-free health, privacy guarantees, reconnect and continuity-gap counters, and bounded-buffer state for the optional Discord Gateway connection.",
+      description: "Content-free health, privacy guarantees, reconnect and continuity-gap counters, bounded-buffer state, and aggregate channel-layout readiness for the optional Discord Gateway connection.",
       mimeType: "application/json",
       title: "Discord Gateway status",
     },

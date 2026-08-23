@@ -657,6 +657,7 @@ export const DISCORD_CHANNEL_TYPES = Object.freeze({
 })
 
 export const DISCORD_CHANNEL_FLAGS = Object.freeze({
+  channelObfuscated: 1 << 17,
   requireTag: 1 << 4,
 })
 

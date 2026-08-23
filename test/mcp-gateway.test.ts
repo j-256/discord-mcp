@@ -9,6 +9,10 @@ import {
 import { McpServer } from "@modelcontextprotocol/server"
 import { serveStdio } from "@modelcontextprotocol/server/stdio"
 
+import {
+  DISCORD_CHANNEL_FLAGS,
+  DISCORD_CHANNEL_TYPES,
+} from "../src/constants.js"
 import { GatewayEventStore } from "../src/gateway-events.js"
 import { registerDiscordGatewayMcp } from "../src/mcp-gateway.js"
 import {
@@ -194,6 +198,37 @@ test("Legacy Gateway subscriptions are exact, coalesced, and removable", async (
   })
   await new Promise((resolve) => setTimeout(resolve, 25))
   assert.equal(notifications, 0)
+})
+
+test("Gateway layout changes notify only aggregate status subscribers", async (context) => {
+  const { client, gateway } = await legacyFixture(context)
+  const nextNotification = notificationPromise(client)
+  await client.subscribeResource({ uri: MCP_RESOURCE_URIS.gatewayStatus })
+
+  gateway.ingestDispatch("GUILD_CREATE", {
+    channels: [{
+      flags: DISCORD_CHANNEL_FLAGS.channelObfuscated,
+      id: CHANNEL_ID,
+      name: TOKEN,
+      parent_id: null,
+      permission_overwrites: [{ deny: TOKEN }],
+      position: 0,
+      topic: TOKEN,
+      type: DISCORD_CHANNEL_TYPES.text,
+    }],
+    id: GUILD_ID,
+  })
+  const notification = await nextNotification
+  assert.equal(notification.params.uri, MCP_RESOURCE_URIS.gatewayStatus)
+
+  const status = await readJson(client, MCP_RESOURCE_URIS.gatewayStatus)
+  const data = status.data as Record<string, unknown>
+  const layout = data.layout as Record<string, unknown>
+  assert.equal(layout.enabled, true)
+  assert.deepEqual(layout.channels, { obfuscated: 1, retained: 1 })
+  assert.doesNotMatch(JSON.stringify(status), new RegExp(TOKEN))
+  assert.doesNotMatch(JSON.stringify(status), new RegExp(GUILD_ID))
+  assert.doesNotMatch(JSON.stringify(status), new RegExp(CHANNEL_ID))
 })
 
 test("Disabled Gateway resources stay readable without advertising subscriptions", async (context) => {

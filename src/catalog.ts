@@ -121,6 +121,13 @@ function catalogService(): DiscordToolService {
 function catalogGateway(): GatewayEventSource {
   return {
     enabled: false,
+    layoutEnabled: false,
+    getChannelLayout() {
+      throw new CatalogOnlyError()
+    },
+    getChannelLayoutStatus() {
+      throw new CatalogOnlyError()
+    },
     getStatus() {
       throw new CatalogOnlyError()
     },
@@ -128,6 +135,9 @@ function catalogGateway(): GatewayEventSource {
       throw new CatalogOnlyError()
     },
     subscribe() {
+      throw new CatalogOnlyError()
+    },
+    subscribeChannelLayouts() {
       throw new CatalogOnlyError()
     },
   }
