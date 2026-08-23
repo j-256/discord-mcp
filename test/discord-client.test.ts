@@ -20,6 +20,7 @@ import {
   RoleConfigurationEvidenceError,
   StageInstanceEvidenceError,
   ThreadGovernanceEvidenceError,
+  VoiceRegionEvidenceError,
   WelcomeScreenEvidenceError,
   WidgetSettingsEvidenceError,
 } from "../src/errors.js"
@@ -6181,6 +6182,7 @@ test("Discord client projects exact guild channel metadata and counts unknown fi
   const result = await client.getGuildChannelMetadata("200")
 
   assert.deepEqual(result, {
+    bitrate: null,
     defaultAutoArchiveDuration: 1_440,
     defaultThreadRateLimitPerUser: 15,
     guildId: "100",
@@ -6196,11 +6198,167 @@ test("Discord client projects exact guild channel metadata and counts unknown fi
     }],
     position: 4,
     rateLimitPerUser: 30,
+    rtcRegion: null,
     topic: "Share product feedback",
     type: 15,
     unknownFieldCount: 2,
+    userLimit: null,
+    videoQualityMode: null,
   })
   assert.equal(records[0]?.operation, "get_channel_metadata")
+})
+
+test("Discord client lists strict global and guild voice-region inventories", async () => {
+  const requests: Array<{ method: string | undefined; url: string }> = []
+  const records: RecordedObservation[] = []
+  const payload = [
+    {
+      custom: false,
+      deprecated: false,
+      future_region_field: "omitted",
+      id: "us-central",
+      name: "US Central",
+      optimal: true,
+    },
+    {
+      custom: true,
+      deprecated: false,
+      id: "amsterdam",
+      name: "Amsterdam",
+      optimal: false,
+    },
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method, url: String(input) })
+      return jsonResponse(payload)
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const global = await client.listVoiceRegions()
+  const guild = await client.listGuildVoiceRegions("100")
+
+  assert.deepEqual(global, [
+    {
+      custom: true,
+      deprecated: false,
+      id: "amsterdam",
+      name: "Amsterdam",
+      optimal: false,
+      unknownFieldCount: 0,
+    },
+    {
+      custom: false,
+      deprecated: false,
+      id: "us-central",
+      name: "US Central",
+      optimal: true,
+      unknownFieldCount: 1,
+    },
+  ])
+  assert.deepEqual(guild, global)
+  assert.deepEqual(requests, [
+    { method: "GET", url: `${API_BASE_URL}/voice/regions` },
+    { method: "GET", url: `${API_BASE_URL}/guilds/100/regions` },
+  ])
+  assert.deepEqual(records.map(({ operation }) => operation), [
+    "list_voice_regions",
+    "list_guild_voice_regions",
+  ])
+})
+
+test("Discord client rejects malformed voice-region evidence before returning it", async () => {
+  for (const payload of [
+    {},
+    [{ custom: false, deprecated: false, id: "us-central", name: "US Central" }],
+    [{ custom: false, deprecated: false, id: " bad", name: "US Central", optimal: true }],
+    [
+      { custom: false, deprecated: false, id: "same", name: "One", optimal: true },
+      { custom: true, deprecated: false, id: "same", name: "Two", optimal: false },
+    ],
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(payload),
+      token: TOKEN,
+    })
+    await assert.rejects(client.listVoiceRegions(), VoiceRegionEvidenceError)
+  }
+})
+
+test("Discord client projects voice metadata and sends one exact sparse voice patch", async () => {
+  const requests: Array<{ body: unknown; method: string | undefined; url: string }> = []
+  const records: RecordedObservation[] = []
+  const voicePayload = channelMetadataPayload({
+    bitrate: 96_000,
+    default_auto_archive_duration: null,
+    default_thread_rate_limit_per_user: 0,
+    nsfw: false,
+    rate_limit_per_user: 0,
+    rtc_region: "us-central",
+    topic: null,
+    type: 2,
+    user_limit: 12,
+    video_quality_mode: 1,
+  })
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body ? JSON.parse(String(init.body)) as unknown : null,
+        method: init?.method,
+        url: String(input),
+      })
+      return jsonResponse({
+        ...voicePayload,
+        bitrate: 128_000,
+        rtc_region: null,
+        user_limit: 25,
+        video_quality_mode: 2,
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    sleep: async () => {
+      throw new Error("Voice metadata PATCH must not retry")
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildChannelMetadata(
+    "200",
+    {
+      bitrate: 128_000,
+      rtcRegion: null,
+      userLimit: 25,
+      videoQualityMode: 2,
+    },
+    "Reviewed voice settings",
+  )
+
+  assert.equal(result.bitrate, 128_000)
+  assert.equal(result.rtcRegion, null)
+  assert.equal(result.userLimit, 25)
+  assert.equal(result.videoQualityMode, 2)
+  assert.deepEqual(requests, [{
+    body: {
+      bitrate: 128_000,
+      rtc_region: null,
+      user_limit: 25,
+      video_quality_mode: 2,
+    },
+    method: "PATCH",
+    url: `${API_BASE_URL}/channels/200`,
+  }])
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "modify_channel_metadata",
+    retries: 0,
+    runs: 1,
+  }])
 })
 
 test("Discord client sends one exact non-retried partial channel metadata patch", async () => {
@@ -6269,6 +6427,40 @@ test("Discord client rejects malformed and unsupported channel metadata evidence
   }
 })
 
+test("Discord client rejects invalid type-specific voice metadata evidence", async () => {
+  const voice = {
+    bitrate: 96_000,
+    default_auto_archive_duration: null,
+    default_thread_rate_limit_per_user: 0,
+    rate_limit_per_user: 0,
+    rtc_region: null,
+    topic: null,
+    type: 2,
+    user_limit: 0,
+    video_quality_mode: 1,
+  }
+  for (const payload of [
+    channelMetadataPayload({ ...voice, bitrate: undefined }),
+    channelMetadataPayload({ ...voice, bitrate: 384_001 }),
+    channelMetadataPayload({ ...voice, user_limit: 100 }),
+    channelMetadataPayload({ ...voice, rtc_region: "" }),
+    channelMetadataPayload({ ...voice, video_quality_mode: 3 }),
+    channelMetadataPayload({ ...voice, bitrate: 64_001, type: 13 }),
+    channelMetadataPayload({ ...voice, bitrate: 64_000, type: 13, user_limit: 10_001 }),
+    channelMetadataPayload({ bitrate: 96_000 }),
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(payload),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      client.getGuildChannelMetadata("200"),
+      ChannelMetadataEvidenceError,
+    )
+  }
+})
+
 test("Discord client validates channel metadata input before fetching", async () => {
   let requests = 0
   const client = new DiscordClient({
@@ -6296,7 +6488,24 @@ test("Discord client validates channel metadata input before fetching", async ()
     ),
     /unsupported/,
   )
+  await assert.rejects(
+    client.modifyGuildChannelMetadata("200", { bitrate: 7_999 }, "Reviewed"),
+    /between 8000 and 384000/,
+  )
+  await assert.rejects(
+    client.modifyGuildChannelMetadata("200", { userLimit: 10_001 }, "Reviewed"),
+    /between 0 and 10000/,
+  )
+  await assert.rejects(
+    client.modifyGuildChannelMetadata("200", { rtcRegion: " bad" }, "Reviewed"),
+    /voice region is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildChannelMetadata("200", { videoQualityMode: 3 }, "Reviewed"),
+    /video quality mode is unsupported/,
+  )
   await assert.rejects(client.getGuildChannelMetadata("invalid"), /positive Discord snowflake/)
+  await assert.rejects(client.listGuildVoiceRegions("invalid"), /positive Discord snowflake/)
   assert.equal(requests, 0)
 })
 

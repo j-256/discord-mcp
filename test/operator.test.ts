@@ -315,6 +315,7 @@ function toolService(): DiscordToolService {
     getGuildSoundboardSound: unexpected,
     listGuildTemplates: unexpected,
     listGuildIntegrations: unexpected,
+    listGuildVoiceRegions: unexpected,
     getAutoModerationRule: unexpected,
     getScheduledEvent: unexpected,
     getStageInstance: unexpected,
@@ -337,6 +338,7 @@ function toolService(): DiscordToolService {
     listScheduledEvents: unexpected,
     listScheduledEventUsers: unexpected,
     listStageInstances: unexpected,
+    listVoiceRegions: unexpected,
     planWebhookChange: unexpected,
     planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
@@ -3984,6 +3986,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://interactions/pending",
     "discord://interactions/status",
     "discord://soundboard/defaults",
+    "discord://voice/regions",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://channels/{channelId}",
@@ -4019,6 +4022,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/templates",
     "discord://guilds/{guildId}/threads/{threadId}",
     "discord://guilds/{guildId}/threads/{threadId}/members/{userId}",
+    "discord://guilds/{guildId}/voice-regions",
     "discord://guilds/{guildId}/welcome-screen",
     "discord://guilds/{guildId}/widget-settings",
   ])

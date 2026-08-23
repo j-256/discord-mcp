@@ -441,6 +441,8 @@ export const DISCORD_LIMITS = Object.freeze({
   voiceChannelBitrateMaximum: 384_000,
   voiceChannelUserLimit: 99,
   voiceRegionIdCharacters: 100,
+  voiceRegionNameCharacters: 100,
+  voiceRegions: 100,
 })
 
 export const PERMISSION_LIMITS = Object.freeze({

@@ -11,12 +11,14 @@ import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
+  DISCORD_VIDEO_QUALITY_MODES,
   SCHEMA_VERSION,
 } from "./constants.js"
 import {
   encodeDiscordAuditReason,
   type DiscordChannelMetadata,
   type DiscordClient,
+  type DiscordVoiceRegion,
   type ModifyChannelMetadataInput,
 } from "./discord-client.js"
 import {
@@ -57,12 +59,16 @@ import type {
 } from "./types.js"
 
 export const CHANNEL_METADATA_FIELD_NAMES = [
+  "bitrate",
   "defaultAutoArchiveDuration",
   "defaultThreadRateLimitPerUser",
   "name",
   "nsfw",
   "rateLimitPerUser",
+  "rtcRegion",
   "topic",
+  "userLimit",
+  "videoQualityMode",
 ] as const
 
 export type ChannelMetadataFieldName = typeof CHANNEL_METADATA_FIELD_NAMES[number]
@@ -74,6 +80,7 @@ const CHANNEL_METADATA_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001
 const CHANNEL_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const CHANNEL_METADATA_REQUEST_KEYS = [
   "auditReason",
+  "bitrate",
   "channelId",
   "defaultAutoArchiveDuration",
   "defaultThreadRateLimitPerUser",
@@ -82,9 +89,13 @@ const CHANNEL_METADATA_REQUEST_KEYS = [
   "nsfw",
   "operationKey",
   "rateLimitPerUser",
+  "rtcRegion",
   "topic",
+  "userLimit",
+  "videoQualityMode",
 ] as const
 const PROJECTED_METADATA_KEYS = [
+  "bitrate",
   "defaultAutoArchiveDuration",
   "defaultThreadRateLimitPerUser",
   "guildId",
@@ -95,9 +106,12 @@ const PROJECTED_METADATA_KEYS = [
   "permissionOverwrites",
   "position",
   "rateLimitPerUser",
+  "rtcRegion",
   "topic",
   "type",
   "unknownFieldCount",
+  "userLimit",
+  "videoQualityMode",
 ] as const
 const METADATA_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
@@ -140,12 +154,28 @@ const THREAD_RATE_LIMIT_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.media,
   DISCORD_CHANNEL_TYPES.text,
 ])
+const VOICE_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+export const CHANNEL_METADATA_VIDEO_QUALITY_MODES = [
+  "automatic",
+  "full",
+] as const
+export type ChannelMetadataVideoQualityMode =
+  typeof CHANNEL_METADATA_VIDEO_QUALITY_MODES[number]
 const CHANNEL_METADATA_LOCAL_LIMITS = Object.freeze({
+  bitrateMinimum: DISCORD_LIMITS.channelBitrateMinimum,
   defaultAutoArchiveDurations: [...CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS],
   nameCharacters: DISCORD_LIMITS.channelNameCharacters,
   rateLimitSeconds: DISCORD_LIMITS.channelRateLimitSeconds,
+  stageBitrateMaximum: DISCORD_LIMITS.stageChannelBitrateMaximum,
+  stageUserLimit: DISCORD_LIMITS.stageChannelUserLimit,
   standardTopicCharacters: DISCORD_LIMITS.channelTopicCharacters,
   forumAndMediaTopicCharacters: DISCORD_LIMITS.forumChannelTopicCharacters,
+  videoQualityModes: [...CHANNEL_METADATA_VIDEO_QUALITY_MODES],
+  voiceBitrateMaximum: DISCORD_LIMITS.voiceChannelBitrateMaximum,
+  voiceUserLimit: DISCORD_LIMITS.voiceChannelUserLimit,
 })
 
 type ChannelMetadataTargetOutcome = "settled" | "uncertain"
@@ -154,6 +184,7 @@ const CHANNEL_METADATA_UNCERTAIN_CHANNELS = new Set<string>()
 
 export interface ChannelMetadataChangeRequest {
   auditReason: string
+  bitrate?: number
   channelId: string
   defaultAutoArchiveDuration?: number
   defaultThreadRateLimitPerUser?: number
@@ -162,7 +193,10 @@ export interface ChannelMetadataChangeRequest {
   nsfw?: boolean
   operationKey: string
   rateLimitPerUser?: number
+  rtcRegion?: string | null
   topic?: string | null
+  userLimit?: number
+  videoQualityMode?: ChannelMetadataVideoQualityMode
 }
 
 export interface NormalizedChannelMetadataChangeRequest
@@ -173,6 +207,7 @@ export interface NormalizedChannelMetadataChangeRequest
 
 export interface ChannelMetadataView {
   applicableFields: ChannelMetadataFieldName[]
+  bitrate: number | null
   defaultAutoArchiveDuration: number | null
   defaultThreadRateLimitPerUser: number | null
   guildId: string
@@ -183,9 +218,12 @@ export interface ChannelMetadataView {
   permissionOverwriteCount: number
   position: number
   rateLimitPerUser: number | null
+  rtcRegion: string | null
   topic: string | null
   type: number
   unknownFieldCount: number
+  userLimit: number | null
+  videoQualityMode: ChannelMetadataVideoQualityMode | null
 }
 
 export interface ChannelMetadataReadResult {
@@ -212,6 +250,24 @@ export interface ChannelMetadataAccessEvidence {
   requiredChangePermissions: DiscordPermissionName[]
   unknownPermissionBits: string
   viewChannel: true
+}
+
+export type ChannelMetadataRtcRegionValidation =
+  | { kind: "not-requested" }
+  | { kind: "automatic" }
+  | {
+      inventoryCount: number
+      inventoryDigest: string
+      kind: "available"
+      selected: DiscordVoiceRegion
+    }
+
+export interface ChannelMetadataVoiceSettingsEvidence {
+  bitrateMaximum: number
+  guildPremiumTier: number
+  guildVipRegions: boolean
+  rtcRegionValidation: ChannelMetadataRtcRegionValidation
+  userLimitMaximum: number
 }
 
 export interface ChannelMetadataChange {
@@ -243,6 +299,7 @@ export interface ChannelMetadataChangePlan {
   schemaVersion: number
   status: "already-current" | "planned"
   warnings: string[]
+  voiceSettings: ChannelMetadataVoiceSettingsEvidence | null
   writeRequired: boolean
 }
 
@@ -266,6 +323,7 @@ export interface ChannelMetadataServiceClient extends Pick<
   | "getGuildChannelMetadata"
   | "getGuildMember"
   | "getGuildRoles"
+  | "listGuildVoiceRegions"
   | "modifyGuildChannelMetadata"
 > {}
 
@@ -280,7 +338,9 @@ export interface ChannelMetadataServiceOptions {
 }
 
 interface ValidatedGuild extends DiscordGuild {
+  features: string[]
   owner_id: string
+  premium_tier: number
 }
 
 interface ChannelMetadataState {
@@ -288,6 +348,7 @@ interface ChannelMetadataState {
   botMember: DiscordGuildMember
   guild: ValidatedGuild
   metadata: DiscordChannelMetadata
+  regions: DiscordVoiceRegion[] | null
   roles: DiscordRole[]
 }
 
@@ -372,6 +433,32 @@ function assertRateLimit(value: unknown, name: string): asserts value is number 
   }
 }
 
+function assertIntegerRange(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  name: string,
+): asserts value is number {
+  if (
+    typeof value !== "number"
+    || !Number.isInteger(value)
+    || value < minimum
+    || value > maximum
+  ) throw new RangeError(`${name} must be an integer between ${minimum} and ${maximum}`)
+}
+
+function assertRtcRegion(value: unknown): asserts value is string | null {
+  if (value === null) return
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > DISCORD_LIMITS.voiceRegionIdCharacters
+    || value.trim() !== value
+    || CHANNEL_NAME_CONTROL_PATTERN.test(value)
+    || !validUnicode(value)
+  ) throw new RangeError("Discord channel metadata voice region is invalid")
+}
+
 export function normalizeChannelMetadataChangeRequest(
   request: ChannelMetadataChangeRequest,
 ): NormalizedChannelMetadataChangeRequest {
@@ -406,6 +493,28 @@ export function normalizeChannelMetadataChangeRequest(
   if (Object.hasOwn(record, "rateLimitPerUser")) {
     assertRateLimit(request.rateLimitPerUser, "Discord channel metadata slowmode seconds")
   }
+  if (Object.hasOwn(record, "bitrate")) {
+    assertIntegerRange(
+      request.bitrate,
+      DISCORD_LIMITS.channelBitrateMinimum,
+      DISCORD_LIMITS.voiceChannelBitrateMaximum,
+      "Discord channel metadata bitrate",
+    )
+  }
+  if (Object.hasOwn(record, "userLimit")) {
+    assertIntegerRange(
+      request.userLimit,
+      0,
+      DISCORD_LIMITS.stageChannelUserLimit,
+      "Discord channel metadata user limit",
+    )
+  }
+  if (Object.hasOwn(record, "rtcRegion")) assertRtcRegion(request.rtcRegion)
+  if (
+    Object.hasOwn(record, "videoQualityMode")
+    && !(CHANNEL_METADATA_VIDEO_QUALITY_MODES as readonly unknown[])
+      .includes(request.videoQualityMode)
+  ) throw new RangeError("Discord channel metadata video quality mode is unsupported")
   if (Object.hasOwn(record, "defaultThreadRateLimitPerUser")) {
     assertRateLimit(
       request.defaultThreadRateLimitPerUser,
@@ -424,6 +533,7 @@ export function normalizeChannelMetadataChangeRequest(
   }
   return {
     auditReason: request.auditReason,
+    ...(Object.hasOwn(record, "bitrate") ? { bitrate: request.bitrate } : {}),
     channelId: request.channelId,
     ...(Object.hasOwn(record, "defaultAutoArchiveDuration")
       ? { defaultAutoArchiveDuration: request.defaultAutoArchiveDuration }
@@ -439,9 +549,14 @@ export function normalizeChannelMetadataChangeRequest(
     ...(Object.hasOwn(record, "rateLimitPerUser")
       ? { rateLimitPerUser: request.rateLimitPerUser }
       : {}),
+    ...(Object.hasOwn(record, "rtcRegion") ? { rtcRegion: request.rtcRegion } : {}),
     requestedFields,
     ...(Object.hasOwn(record, "topic")
       ? { topic: request.topic === "" ? null : request.topic }
+      : {}),
+    ...(Object.hasOwn(record, "userLimit") ? { userLimit: request.userLimit } : {}),
+    ...(Object.hasOwn(record, "videoQualityMode")
+      ? { videoQualityMode: request.videoQualityMode }
       : {}),
   }
 }
@@ -453,7 +568,8 @@ function applicableFields(type: number): ChannelMetadataFieldName[] {
     if (field === "nsfw") return NSFW_TYPES.has(type)
     if (field === "rateLimitPerUser") return RATE_LIMIT_TYPES.has(type)
     if (field === "defaultAutoArchiveDuration") return AUTO_ARCHIVE_TYPES.has(type)
-    return THREAD_RATE_LIMIT_TYPES.has(type)
+    if (field === "defaultThreadRateLimitPerUser") return THREAD_RATE_LIMIT_TYPES.has(type)
+    return VOICE_TYPES.has(type)
   })
 }
 
@@ -552,8 +668,47 @@ function exactMetadata(
     || (applicable.has("defaultThreadRateLimitPerUser")
       ? typeof value.defaultThreadRateLimitPerUser !== "number"
       : value.defaultThreadRateLimitPerUser !== null)
+    || (applicable.has("bitrate")
+      ? !(typeof value.bitrate === "number"
+        && Number.isInteger(value.bitrate)
+        && value.bitrate >= DISCORD_LIMITS.channelBitrateMinimum
+        && value.bitrate <= (
+          value.type === DISCORD_CHANNEL_TYPES.stageVoice
+            ? DISCORD_LIMITS.stageChannelBitrateMaximum
+            : DISCORD_LIMITS.voiceChannelBitrateMaximum
+        ))
+      : value.bitrate !== null)
+    || (applicable.has("userLimit")
+      ? !(typeof value.userLimit === "number"
+        && Number.isInteger(value.userLimit)
+        && value.userLimit >= 0
+        && value.userLimit <= (
+          value.type === DISCORD_CHANNEL_TYPES.stageVoice
+            ? DISCORD_LIMITS.stageChannelUserLimit
+            : DISCORD_LIMITS.voiceChannelUserLimit
+        ))
+      : value.userLimit !== null)
+    || (applicable.has("rtcRegion")
+      ? !(value.rtcRegion === null || typeof value.rtcRegion === "string")
+      : value.rtcRegion !== null)
+    || (applicable.has("videoQualityMode")
+      ? !(
+          value.videoQualityMode === DISCORD_VIDEO_QUALITY_MODES.auto
+          || value.videoQualityMode === DISCORD_VIDEO_QUALITY_MODES.full
+        )
+      : value.videoQualityMode !== null)
   ) {
     throw new ChannelMetadataEvidenceError("Discord returned invalid type-specific channel metadata")
+  }
+  if (value.rtcRegion !== null) {
+    try {
+      assertRtcRegion(value.rtcRegion)
+    } catch (error) {
+      throw new ChannelMetadataEvidenceError(
+        "Discord returned invalid channel voice-region evidence",
+        { cause: error },
+      )
+    }
   }
   if (value.topic !== null) {
     const maximum = value.type === DISCORD_CHANNEL_TYPES.forum
@@ -599,6 +754,7 @@ function exactMetadata(
 
 function metadataChannel(metadata: DiscordChannelMetadata): DiscordChannel {
   return {
+    ...(metadata.bitrate !== null ? { bitrate: metadata.bitrate } : {}),
     default_auto_archive_duration: metadata.defaultAutoArchiveDuration,
     default_thread_rate_limit_per_user: metadata.defaultThreadRateLimitPerUser,
     guild_id: metadata.guildId,
@@ -609,14 +765,27 @@ function metadataChannel(metadata: DiscordChannelMetadata): DiscordChannel {
     permission_overwrites: metadata.permissionOverwrites,
     position: metadata.position,
     rate_limit_per_user: metadata.rateLimitPerUser,
+    rtc_region: metadata.rtcRegion,
     topic: metadata.topic,
     type: metadata.type,
+    ...(metadata.userLimit !== null ? { user_limit: metadata.userLimit } : {}),
+    ...(metadata.videoQualityMode !== null
+      ? { video_quality_mode: metadata.videoQualityMode }
+      : {}),
   }
+}
+
+function videoQualityModeName(
+  value: number | null,
+): ChannelMetadataVideoQualityMode | null {
+  if (value === null) return null
+  return value === DISCORD_VIDEO_QUALITY_MODES.auto ? "automatic" : "full"
 }
 
 function metadataView(metadata: DiscordChannelMetadata): ChannelMetadataView {
   return {
     applicableFields: applicableFields(metadata.type),
+    bitrate: metadata.bitrate,
     defaultAutoArchiveDuration: metadata.defaultAutoArchiveDuration,
     defaultThreadRateLimitPerUser: metadata.defaultThreadRateLimitPerUser,
     guildId: metadata.guildId,
@@ -627,9 +796,12 @@ function metadataView(metadata: DiscordChannelMetadata): ChannelMetadataView {
     permissionOverwriteCount: metadata.permissionOverwrites.length,
     position: metadata.position,
     rateLimitPerUser: metadata.rateLimitPerUser,
+    rtcRegion: metadata.rtcRegion,
     topic: metadata.topic,
     type: metadata.type,
     unknownFieldCount: metadata.unknownFieldCount,
+    userLimit: metadata.userLimit,
+    videoQualityMode: videoQualityModeName(metadata.videoQualityMode),
   }
 }
 
@@ -645,14 +817,83 @@ function exactGuild(value: DiscordGuild, guildId: string): ValidatedGuild {
     || CHANNEL_NAME_CONTROL_PATTERN.test(value.name)
     || !validUnicode(value.name)
     || !positiveSnowflake(value.owner_id)
+    || !Array.isArray(value.features)
+    || value.features.length > DISCORD_LIMITS.guildFeatures
+    || value.features.some((feature) => (
+      typeof feature !== "string"
+      || feature.length < 1
+      || feature.length > DISCORD_LIMITS.guildFeatureCharacters
+      || CHANNEL_NAME_CONTROL_PATTERN.test(feature)
+      || !validUnicode(feature)
+    ))
+    || new Set(value.features).size !== value.features.length
+    || !Number.isSafeInteger(value.premium_tier)
+    || (value.premium_tier as number) < 0
+    || (value.premium_tier as number) > 3
   ) {
     throw new ChannelMetadataEvidenceError("Discord returned invalid channel metadata guild evidence")
   }
   return {
+    features: [...value.features].sort(),
     id: value.id,
     name: value.name,
     owner_id: value.owner_id,
+    premium_tier: value.premium_tier as number,
   }
+}
+
+function exactVoiceRegions(value: DiscordVoiceRegion[]): DiscordVoiceRegion[] {
+  if (!Array.isArray(value) || value.length > DISCORD_LIMITS.voiceRegions) {
+    throw new ChannelMetadataEvidenceError("Discord returned invalid voice-region inventory")
+  }
+  const keys = [
+    "custom",
+    "deprecated",
+    "id",
+    "name",
+    "optimal",
+    "unknownFieldCount",
+  ] as const
+  const seen = new Set<string>()
+  return value.map((region) => {
+    if (
+      !region
+      || typeof region !== "object"
+      || Array.isArray(region)
+      || !onlyKeys(region as unknown as Record<string, unknown>, keys)
+      || typeof region.id !== "string"
+      || region.id.length < 1
+      || region.id.length > DISCORD_LIMITS.voiceRegionIdCharacters
+      || region.id.trim() !== region.id
+      || CHANNEL_NAME_CONTROL_PATTERN.test(region.id)
+      || !validUnicode(region.id)
+      || typeof region.name !== "string"
+      || region.name.length < 1
+      || region.name.length > DISCORD_LIMITS.voiceRegionNameCharacters
+      || region.name.trim() !== region.name
+      || CHANNEL_NAME_CONTROL_PATTERN.test(region.name)
+      || !validUnicode(region.name)
+      || typeof region.custom !== "boolean"
+      || typeof region.deprecated !== "boolean"
+      || typeof region.optimal !== "boolean"
+      || !Number.isSafeInteger(region.unknownFieldCount)
+      || region.unknownFieldCount < 0
+      || seen.has(region.id)
+    ) throw new ChannelMetadataEvidenceError("Discord returned invalid voice-region inventory")
+    seen.add(region.id)
+    return { ...region }
+  }).sort((left, right) => (
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  ))
+}
+
+function maximumVoiceBitrate(guild: ValidatedGuild): number {
+  if (guild.premium_tier >= 3 || guild.features.includes("VIP_REGIONS")) {
+    return DISCORD_LIMITS.voiceChannelBitrateMaximum
+  }
+  if (guild.premium_tier === 2) return 256_000
+  if (guild.premium_tier === 1) return 128_000
+  return 96_000
 }
 
 function exactMember(
@@ -862,6 +1103,7 @@ function desiredMetadata(
   }
   return {
     ...current,
+    ...(request.bitrate !== undefined ? { bitrate: request.bitrate } : {}),
     ...(request.defaultAutoArchiveDuration !== undefined
       ? { defaultAutoArchiveDuration: request.defaultAutoArchiveDuration }
       : {}),
@@ -873,7 +1115,85 @@ function desiredMetadata(
     ...(request.rateLimitPerUser !== undefined
       ? { rateLimitPerUser: request.rateLimitPerUser }
       : {}),
+    ...(Object.hasOwn(request, "rtcRegion")
+      ? { rtcRegion: request.rtcRegion as string | null }
+      : {}),
     ...(Object.hasOwn(request, "topic") ? { topic: request.topic as string | null } : {}),
+    ...(request.userLimit !== undefined ? { userLimit: request.userLimit } : {}),
+    ...(request.videoQualityMode !== undefined
+      ? {
+          videoQualityMode: request.videoQualityMode === "automatic"
+            ? DISCORD_VIDEO_QUALITY_MODES.auto
+            : DISCORD_VIDEO_QUALITY_MODES.full,
+        }
+      : {}),
+  }
+}
+
+function voiceSettingsEvidence(options: {
+  guild: ValidatedGuild
+  metadata: DiscordChannelMetadata
+  planKey: Uint8Array
+  regions: DiscordVoiceRegion[] | null
+  request: NormalizedChannelMetadataChangeRequest
+}): ChannelMetadataVoiceSettingsEvidence | null {
+  if (!VOICE_TYPES.has(options.metadata.type)) return null
+  const bitrateMaximum = options.metadata.type === DISCORD_CHANNEL_TYPES.stageVoice
+    ? DISCORD_LIMITS.stageChannelBitrateMaximum
+    : maximumVoiceBitrate(options.guild)
+  const userLimitMaximum = options.metadata.type === DISCORD_CHANNEL_TYPES.stageVoice
+    ? DISCORD_LIMITS.stageChannelUserLimit
+    : DISCORD_LIMITS.voiceChannelUserLimit
+  if (options.request.bitrate !== undefined && options.request.bitrate > bitrateMaximum) {
+    throw new RangeError(
+      `Discord channel metadata bitrate exceeds the current ${bitrateMaximum} bps limit`,
+    )
+  }
+  if (options.request.userLimit !== undefined && options.request.userLimit > userLimitMaximum) {
+    throw new RangeError(
+      `Discord channel metadata user limit exceeds the current ${userLimitMaximum} limit`,
+    )
+  }
+  let rtcRegionValidation: ChannelMetadataRtcRegionValidation = {
+    kind: "not-requested",
+  }
+  if (Object.hasOwn(options.request, "rtcRegion")) {
+    if (options.request.rtcRegion === null) {
+      rtcRegionValidation = { kind: "automatic" }
+    } else {
+      if (!options.regions) {
+        throw new ChannelMetadataEvidenceError(
+          "Discord voice-region inventory is unavailable for the requested selection",
+        )
+      }
+      const matches = options.regions.filter(({ id }) => id === options.request.rtcRegion)
+      const selected = matches[0]
+      if (matches.length !== 1 || !selected) {
+        throw new RangeError(
+          "Discord channel metadata voice region is not available to this guild",
+        )
+      }
+      if (selected.deprecated) {
+        throw new RangeError("Discord channel metadata voice region is deprecated")
+      }
+      rtcRegionValidation = {
+        inventoryCount: options.regions.length,
+        inventoryDigest: reviewedPlanDigest(options.planKey, {
+          guildId: options.metadata.guildId,
+          kind: "channel-metadata-voice-regions",
+          regions: options.regions,
+        }),
+        kind: "available",
+        selected: { ...selected },
+      }
+    }
+  }
+  return {
+    bitrateMaximum,
+    guildPremiumTier: options.guild.premium_tier,
+    guildVipRegions: options.guild.features.includes("VIP_REGIONS"),
+    rtcRegionValidation,
+    userLimitMaximum,
   }
 }
 
@@ -881,6 +1201,7 @@ function fieldValue(
   metadata: DiscordChannelMetadata,
   field: ChannelMetadataFieldName,
 ): boolean | number | string | null {
+  if (field === "videoQualityMode") return videoQualityModeName(metadata.videoQualityMode)
   return metadata[field]
 }
 
@@ -904,6 +1225,7 @@ function patchInput(
 ): ModifyChannelMetadataInput {
   const fieldSet = new Set(fields)
   return {
+    ...(fieldSet.has("bitrate") ? { bitrate: desired.bitrate as number } : {}),
     ...(fieldSet.has("defaultAutoArchiveDuration")
       ? { defaultAutoArchiveDuration: desired.defaultAutoArchiveDuration as number }
       : {}),
@@ -915,7 +1237,12 @@ function patchInput(
     ...(fieldSet.has("rateLimitPerUser")
       ? { rateLimitPerUser: desired.rateLimitPerUser as number }
       : {}),
+    ...(fieldSet.has("rtcRegion") ? { rtcRegion: desired.rtcRegion } : {}),
     ...(fieldSet.has("topic") ? { topic: desired.topic } : {}),
+    ...(fieldSet.has("userLimit") ? { userLimit: desired.userLimit as number } : {}),
+    ...(fieldSet.has("videoQualityMode")
+      ? { videoQualityMode: desired.videoQualityMode as number }
+      : {}),
   }
 }
 
@@ -1110,10 +1437,13 @@ export class ChannelMetadataService {
     if (existingReceipt) {
       throw new ChannelMetadataOperationConflictError(receiptView(existingReceipt))
     }
-    const [guildValue, memberValue, rolesValue] = await Promise.all([
+    const [guildValue, memberValue, rolesValue, regionsValue] = await Promise.all([
       this.#client.getGuild(guildId, options),
       this.#client.getGuildMember(guildId, botId, options),
       this.#client.getGuildRoles(guildId, options),
+      VOICE_TYPES.has(metadata.type) && typeof request.rtcRegion === "string"
+        ? this.#client.listGuildVoiceRegions(guildId, options)
+        : Promise.resolve(null),
     ])
     const guild = exactGuild(guildValue, guildId)
     const botMember = exactMember(memberValue, guildId, botId)
@@ -1123,6 +1453,7 @@ export class ChannelMetadataService {
       botMember,
       guild,
       metadata,
+      regions: regionsValue === null ? null : exactVoiceRegions(regionsValue),
       roles,
     }
   }
@@ -1137,6 +1468,13 @@ export class ChannelMetadataService {
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     const state = await this.#state(botId, request, options)
     const desired = desiredMetadata(state.metadata, request)
+    const voiceSettings = voiceSettingsEvidence({
+      guild: state.guild,
+      metadata: state.metadata,
+      planKey: this.#planKey,
+      regions: state.regions,
+      request,
+    })
     const changes = metadataChanges(state.metadata, desired, request.requestedFields)
     const changedFields = changes.map(({ field }) => field)
     const warnings = [
@@ -1151,13 +1489,26 @@ export class ChannelMetadataService {
       ))
         ? ["Slowmode changes affect how frequently members can send messages"]
         : []),
-      "Channel and guild names and channel topics are untrusted Discord text and are never persisted by this workflow",
+      ...(request.requestedFields.includes("bitrate")
+        ? ["Bitrate changes affect voice quality and network use for active and future participants"]
+        : []),
+      ...(request.requestedFields.includes("userLimit")
+        ? ["User-limit changes can prevent additional members from joining a voice or Stage channel"]
+        : []),
+      ...(request.requestedFields.includes("rtcRegion")
+        ? ["Voice-region changes can interrupt or degrade an active call; null restores Discord's automatic selection"]
+        : []),
+      ...(request.requestedFields.includes("videoQualityMode")
+        ? ["Video-quality changes affect camera resolution and bandwidth for active and future participants"]
+        : []),
+      "Channel, guild, and voice-region text is untrusted Discord data and is never persisted by this workflow",
       "Same-channel serialization is process-local; do not run multiple connector processes with overlapping channel-metadata scope",
       "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
     ]
     const risks = [
       "The PATCH is not automatically retried, so an ambiguous transport outcome remains uncertain",
       "A successful response and a fresh GET are both checked against the complete reviewed metadata snapshot",
+      "Voice-setting limits and explicit region availability are rebound from fresh guild evidence before execution",
       "Deletion, channel moves, type conversion, overwrite replacement, and forum-tag replacement are outside this workflow",
     ]
     const currentView = metadataView(state.metadata)
@@ -1179,6 +1530,7 @@ export class ChannelMetadataService {
       operationKeyHash: request.operationKeyHash,
       requestedFields: request.requestedFields,
       roles: roleSnapshot(state.roles),
+      voiceSettings,
     })
     const plan: ChannelMetadataChangePlan = {
       access: state.access,
@@ -1208,6 +1560,7 @@ export class ChannelMetadataService {
       schemaVersion: SCHEMA_VERSION,
       status: changes.length === 0 ? "already-current" : "planned",
       warnings,
+      voiceSettings,
       writeRequired: changes.length > 0,
     }
     return { plan, request, state }

@@ -226,7 +226,7 @@ export function registerDiscordResources(
           "",
           "Channel creation is additive-only and requires a separate exact guild allowlist. Planning checks visible inventory, logical-name collisions, guild and parent permissions, and capacity. Execution requires a fresh keyed plan, signed approval, a unique one-shot operation key, a pending content-free receipt, and post-write readback. It never edits permission overwrites, deletes, or rolls back channels.",
           "",
-          "Channel metadata reads use an exact strict projection for supported non-thread guild channels, return only type-applicable settings plus parent, position, overwrite count, and unknown-field count, and persist nothing. Changes require a separate feature toggle and exact channel allowlist, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and a fresh exact GET readback. Omitted settings are preserved; null or empty topic clears the topic. Deletion, moves, reordering, type conversion, overwrite replacement, forum-tag replacement, thread mutation, retry, and rollback are unsupported. Same-channel uncertain outcomes fail closed, and names, topics, audit reasons, raw operation keys, and raw payloads are never persisted.",
+          "Channel metadata reads use an exact strict projection for supported non-thread guild channels, return only type-applicable text, slowmode, archive, bitrate, user-limit, RTC-region, and semantic video-quality settings plus parent, position, overwrite count, and unknown-field count, and persist nothing. Global and exact-guild voice-region resources return complete bounded deterministic inventories with transient untrusted names, availability flags, count-only unknown fields, no raw payloads, and no persistence. Changes require a separate feature toggle and exact channel allowlist, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried partial PATCH, complete response validation, and a fresh exact GET readback. Voice plans bind the fresh guild premium tier and VIP_REGIONS capability to the applicable bitrate ceiling; explicit regions require a fresh exact non-deprecated guild-region match and a keyed inventory digest, while null restores automatic selection without fetching unrelated inventory. Omitted settings are preserved; null or empty topic clears the topic. Deletion, moves, reordering, type conversion, overwrite replacement, forum-tag replacement, thread mutation, retry, and rollback are unsupported. Same-channel uncertain outcomes fail closed, and names, topics, region names, audit reasons, raw operation keys, and raw payloads are never persisted.",
           "",
           "Channel ordering requires separate audit and change toggles plus an exact guild allowlist. Audit combines a complete obfuscation-safe Gateway layout with complete legacy HTTP evidence or the exact visible HTTP subset after Discord's channel-obfuscation transition, discards metadata for Gateway-obfuscated channels, and returns canonical same-parent sortable families with complete guild or parent-category MANAGE_CHANNELS authority. Planning accepts one exact target channel, exact anchor channel, and immediate above-or-below placement in the same parent and sortable family; it binds the complete layout, visibility-bounded HTTP evidence, full normalized family payload, identities, authority, reason, and one-shot key into a keyed digest. Unsupported sibling types, incomplete or incoherent evidence, parent moves, family changes, and authority gaps fail closed. Execution requires a fresh matching plan, signed approval, durable claims on the guild channel collection plus target, anchor, and optional parent, one-shot reservation, pending content-free activity, a verification subscription armed before one non-retried complete position PATCH, and a newer complete matching Gateway layout. Uncertain outcomes quarantine the guild channel collection. It never syncs permissions, changes flags or metadata, retries, rolls back, exposes hidden metadata, or persists channel text, layout details, reasons, or raw keys.",
           "",
@@ -373,6 +373,25 @@ export function registerDiscordResources(
   )
 
   server.registerResource(
+    MCP_RESOURCE_NAMES.voiceRegions,
+    MCP_RESOURCE_URIS.voiceRegions,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded global Discord voice-region inventory for voice and Stage channel RTC selection. Region names are transient untrusted data, unknown fields are counts only, raw payloads are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Global Discord voice regions",
+    },
+    (uri, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listVoiceRegions({ signal: context.mcpReq.signal }),
+    ),
+  )
+
+  server.registerResource(
     MCP_RESOURCE_NAMES.applicationEmojis,
     MCP_RESOURCE_URIS.applicationEmojis,
     {
@@ -435,6 +454,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listRoles(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildVoiceRegions,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildVoiceRegions, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded voice-region inventory available to one exact permitted Discord guild, including guild-specific and VIP choices. Region names are transient untrusted data, unknown fields are counts only, raw payloads are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Discord guild voice regions",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.listGuildVoiceRegions(
         templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),

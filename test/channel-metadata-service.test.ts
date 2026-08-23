@@ -44,6 +44,7 @@ function metadata(
   overrides: Partial<DiscordChannelMetadata> = {},
 ): DiscordChannelMetadata {
   return {
+    bitrate: null,
     defaultAutoArchiveDuration: 1_440,
     defaultThreadRateLimitPerUser: 0,
     guildId: GUILD_ID,
@@ -54,11 +55,31 @@ function metadata(
     permissionOverwrites: [],
     position: 1,
     rateLimitPerUser: 0,
+    rtcRegion: null,
     topic: "General discussion",
     type: 0,
     unknownFieldCount: 0,
+    userLimit: null,
+    videoQualityMode: null,
     ...overrides,
   }
+}
+
+function voiceMetadata(
+  overrides: Partial<DiscordChannelMetadata> = {},
+): DiscordChannelMetadata {
+  return metadata({
+    bitrate: 96_000,
+    defaultAutoArchiveDuration: null,
+    defaultThreadRateLimitPerUser: null,
+    rateLimitPerUser: 0,
+    rtcRegion: null,
+    topic: null,
+    type: 2,
+    userLimit: 0,
+    videoQualityMode: 1,
+    ...overrides,
+  })
 }
 
 function cloneMetadata(value: DiscordChannelMetadata): DiscordChannelMetadata {
@@ -119,7 +140,9 @@ class FixtureClient implements ChannelMetadataServiceClient {
   current: DiscordChannelMetadata
   driftReadback = false
   getCalls = 0
+  guildFeatures: string[] = []
   guildOwnerId = OWNER_ID
+  guildPremiumTier = 0
   memberBot = true
   memberRoles: string[] = []
   patchCalls: Array<{
@@ -130,6 +153,15 @@ class FixtureClient implements ChannelMetadataServiceClient {
   patchError: unknown
   permissions = DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
   private patched = false
+  regionCalls = 0
+  regions = [{
+    custom: false,
+    deprecated: false,
+    id: "us-central",
+    name: "US Central",
+    optimal: true,
+    unknownFieldCount: 0,
+  }]
 
   constructor(initial = metadata()) {
     this.current = cloneMetadata(initial)
@@ -137,9 +169,11 @@ class FixtureClient implements ChannelMetadataServiceClient {
 
   async getGuild() {
     return {
+      features: [...this.guildFeatures],
       id: GUILD_ID,
       name: "Private guild name",
       owner_id: this.guildOwnerId,
+      premium_tier: this.guildPremiumTier,
     }
   }
 
@@ -170,6 +204,11 @@ class FixtureClient implements ChannelMetadataServiceClient {
       permissions: this.permissions.toString(),
       position: 0,
     }]
+  }
+
+  async listGuildVoiceRegions() {
+    this.regionCalls += 1
+    return structuredClone(this.regions)
   }
 
   async modifyGuildChannelMetadata(
@@ -224,6 +263,34 @@ function request(
   }
 }
 
+type ChannelMetadataRequestOverrides = {
+  [Key in keyof ChannelMetadataChangeRequest]?:
+    | ChannelMetadataChangeRequest[Key]
+    | undefined
+}
+
+function voiceRequest(
+  overrides: ChannelMetadataRequestOverrides = {},
+): ChannelMetadataChangeRequest {
+  const result = {
+    auditReason: "Reviewed voice settings",
+    bitrate: 128_000,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: "channel-metadata-voice-op-001",
+    rtcRegion: "us-central",
+    userLimit: 25,
+    videoQualityMode: "full",
+    ...overrides,
+  } as ChannelMetadataChangeRequest
+  for (const [key, value] of Object.entries(result)) {
+    if (value === undefined) {
+      delete (result as unknown as Record<string, unknown>)[key]
+    }
+  }
+  return result
+}
+
 function fixture(initial = metadata(), selectedPolicy = policy()) {
   const activityStore = new MemoryActivityStore()
   const client = new FixtureClient(initial)
@@ -255,6 +322,21 @@ test("channel metadata request normalization preserves explicit fields and canon
   assert.equal(normalized.topic, null)
   assert.equal(normalized.nsfw, false)
   assert.match(normalized.operationKeyHash, /^sha256:[a-f0-9]{64}$/)
+})
+
+test("channel metadata request normalization preserves semantic voice settings", () => {
+  const normalized = normalizeChannelMetadataChangeRequest(voiceRequest())
+
+  assert.deepEqual(normalized.requestedFields, [
+    "bitrate",
+    "rtcRegion",
+    "userLimit",
+    "videoQualityMode",
+  ])
+  assert.equal(normalized.bitrate, 128_000)
+  assert.equal(normalized.rtcRegion, "us-central")
+  assert.equal(normalized.userLimit, 25)
+  assert.equal(normalized.videoQualityMode, "full")
 })
 
 test("channel metadata request normalization rejects missing, undefined, unknown, and invalid fields", () => {
@@ -360,10 +442,13 @@ test("channel metadata planning rejects inapplicable fields and incomplete permi
   )
 
   const voice = metadata({
+    bitrate: 96_000,
     defaultAutoArchiveDuration: null,
     defaultThreadRateLimitPerUser: null,
     topic: null,
     type: 2,
+    userLimit: 0,
+    videoQualityMode: 1,
   })
   const voiceFixture = fixture(voice)
   await assert.rejects(
@@ -405,6 +490,142 @@ test("channel metadata planning binds guild-owner authority without weakening ex
     everyoneMemberRoleFixture.service.plan(APPLICATION_ID, BOT_ID, request()),
     /invalid connector membership evidence/,
   )
+})
+
+test("channel metadata planning binds boost-aware voice limits and exact region availability", async () => {
+  const { client, service } = fixture(voiceMetadata())
+  client.permissions |= DISCORD_PERMISSIONS.CONNECT
+  client.guildPremiumTier = 1
+
+  const plan = await service.plan(APPLICATION_ID, BOT_ID, voiceRequest())
+
+  assert.equal(plan.status, "planned")
+  assert.deepEqual(plan.changedFields, [
+    "bitrate",
+    "rtcRegion",
+    "userLimit",
+    "videoQualityMode",
+  ])
+  assert.equal(plan.current.videoQualityMode, "automatic")
+  assert.equal(plan.desired.videoQualityMode, "full")
+  assert.deepEqual(plan.voiceSettings, {
+    bitrateMaximum: 128_000,
+    guildPremiumTier: 1,
+    guildVipRegions: false,
+    rtcRegionValidation: {
+      inventoryCount: 1,
+      inventoryDigest: plan.voiceSettings?.rtcRegionValidation.kind === "available"
+        ? plan.voiceSettings.rtcRegionValidation.inventoryDigest
+        : "missing",
+      kind: "available",
+      selected: {
+        custom: false,
+        deprecated: false,
+        id: "us-central",
+        name: "US Central",
+        optimal: true,
+        unknownFieldCount: 0,
+      },
+    },
+    userLimitMaximum: 99,
+  })
+  assert.match(
+    plan.voiceSettings?.rtcRegionValidation.kind === "available"
+      ? plan.voiceSettings.rtcRegionValidation.inventoryDigest
+      : "",
+    /^hmac-sha256:[a-f0-9]{64}$/,
+  )
+  assert.equal(client.regionCalls, 1)
+
+  const vip = fixture(voiceMetadata())
+  vip.client.permissions |= DISCORD_PERMISSIONS.CONNECT
+  vip.client.guildFeatures = ["VIP_REGIONS"]
+  const vipPlan = await vip.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    voiceRequest({ bitrate: 384_000, rtcRegion: undefined }),
+  )
+  assert.equal(vipPlan.voiceSettings?.bitrateMaximum, 384_000)
+  assert.equal(vipPlan.voiceSettings?.guildPremiumTier, 0)
+  assert.equal(vipPlan.voiceSettings?.guildVipRegions, true)
+  assert.deepEqual(
+    vipPlan.voiceSettings?.rtcRegionValidation,
+    { kind: "not-requested" },
+  )
+  assert.equal(vip.client.regionCalls, 0)
+})
+
+test("channel metadata planning validates voice and Stage limits and region selection", async () => {
+  const cases: Array<{
+    configure?: (client: FixtureClient) => void
+    initial: DiscordChannelMetadata
+    message: RegExp
+    request: ChannelMetadataChangeRequest
+  }> = [
+    {
+      initial: voiceMetadata(),
+      message: /current 96000 bps limit/,
+      request: voiceRequest({ bitrate: 96_001, rtcRegion: undefined }),
+    },
+    {
+      initial: voiceMetadata(),
+      message: /current 99 limit/,
+      request: voiceRequest({ bitrate: 96_000, rtcRegion: undefined, userLimit: 100 }),
+    },
+    {
+      initial: voiceMetadata({ bitrate: 64_000, type: 13 }),
+      message: /current 64000 bps limit/,
+      request: voiceRequest({ bitrate: 64_001, rtcRegion: undefined }),
+    },
+    {
+      initial: voiceMetadata({ bitrate: 64_000, type: 13 }),
+      message: /between 0 and 10000/,
+      request: voiceRequest({ rtcRegion: undefined, userLimit: 10_001 }),
+    },
+    {
+      initial: voiceMetadata(),
+      message: /not available to this guild/,
+      request: voiceRequest({ bitrate: 96_000, rtcRegion: "antarctica" }),
+    },
+    {
+      configure(client) {
+        client.regions[0] = { ...client.regions[0]!, deprecated: true }
+      },
+      initial: voiceMetadata(),
+      message: /voice region is deprecated/,
+      request: voiceRequest({ bitrate: 96_000 }),
+    },
+  ]
+
+  for (const entry of cases) {
+    const { client, service } = fixture(entry.initial)
+    client.permissions |= DISCORD_PERMISSIONS.CONNECT
+    entry.configure?.(client)
+    await assert.rejects(
+      async () => service.plan(APPLICATION_ID, BOT_ID, entry.request),
+      entry.message,
+    )
+  }
+})
+
+test("automatic voice-region planning does not fetch a region inventory", async () => {
+  const { client, service } = fixture(voiceMetadata({ rtcRegion: "us-central" }))
+  client.permissions |= DISCORD_PERMISSIONS.CONNECT
+
+  const plan = await service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    voiceRequest({
+      bitrate: undefined,
+      rtcRegion: null,
+      userLimit: undefined,
+      videoQualityMode: undefined,
+    }),
+  )
+
+  assert.deepEqual(plan.requestedFields, ["rtcRegion"])
+  assert.deepEqual(plan.voiceSettings?.rtcRegionValidation, { kind: "automatic" })
+  assert.equal(client.regionCalls, 0)
 })
 
 test("already-current channel metadata execution skips reservation, activity, and write", async () => {
@@ -467,6 +688,46 @@ test("channel metadata execution writes only changed fields and records content-
   }
 })
 
+test("channel metadata execution writes an exact sparse voice patch and keeps activity content-free", async () => {
+  const { activityStore, client, service } = fixture(voiceMetadata())
+  client.permissions |= DISCORD_PERMISSIONS.CONNECT
+  client.guildPremiumTier = 1
+  const change = voiceRequest()
+  const plan = await service.plan(APPLICATION_ID, BOT_ID, change)
+
+  const result = await service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    change,
+    plan.digest,
+  )
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.responseMatched, true)
+  assert.equal(result.readbackMatched, true)
+  assert.deepEqual(client.patchCalls, [{
+    auditReason: "Reviewed voice settings",
+    channelId: CHANNEL_ID,
+    input: {
+      bitrate: 128_000,
+      rtcRegion: "us-central",
+      userLimit: 25,
+      videoQualityMode: 2,
+    },
+  }])
+  assert.equal(client.regionCalls, 2)
+  const serialized = JSON.stringify(activityStore.entries)
+  for (const forbidden of [
+    "US Central",
+    "us-central",
+    "Private guild name",
+    "Reviewed voice settings",
+    change.operationKey,
+  ]) {
+    assert.equal(serialized.includes(forbidden), false)
+  }
+})
+
 test("channel metadata execution rejects stale plans before reservation or write", async () => {
   const { client, operationStore, service } = fixture()
   const change = request()
@@ -511,6 +772,51 @@ test("channel metadata execution rejects stale plans before reservation or write
     ChannelMetadataPlanChangedError,
   )
   assert.equal(typeDriftFixture.operationStore.reserveCalls, 0)
+})
+
+test("channel metadata execution rejects voice capability and region inventory drift", async () => {
+  const tierFixture = fixture(voiceMetadata())
+  tierFixture.client.permissions |= DISCORD_PERMISSIONS.CONNECT
+  tierFixture.client.guildPremiumTier = 1
+  const tierRequest = voiceRequest({
+    operationKey: "channel-metadata-tier-drift",
+  })
+  const tierPlan = await tierFixture.service.plan(APPLICATION_ID, BOT_ID, tierRequest)
+  tierFixture.client.guildPremiumTier = 2
+
+  await assert.rejects(
+    tierFixture.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      tierRequest,
+      tierPlan.digest,
+    ),
+    ChannelMetadataPlanChangedError,
+  )
+  assert.equal(tierFixture.client.patchCalls.length, 0)
+
+  const regionFixture = fixture(voiceMetadata())
+  regionFixture.client.permissions |= DISCORD_PERMISSIONS.CONNECT
+  regionFixture.client.guildPremiumTier = 1
+  const regionRequest = voiceRequest({
+    operationKey: "channel-metadata-region-drift",
+  })
+  const regionPlan = await regionFixture.service.plan(APPLICATION_ID, BOT_ID, regionRequest)
+  regionFixture.client.regions[0] = {
+    ...regionFixture.client.regions[0]!,
+    optimal: false,
+  }
+
+  await assert.rejects(
+    regionFixture.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      regionRequest,
+      regionPlan.digest,
+    ),
+    ChannelMetadataPlanChangedError,
+  )
+  assert.equal(regionFixture.client.patchCalls.length, 0)
 })
 
 test("channel metadata execution reports complete response or readback drift", async () => {

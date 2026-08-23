@@ -321,6 +321,10 @@ export class ChannelMetadataEvidenceError extends Error {
   override name = "ChannelMetadataEvidenceError"
 }
 
+export class VoiceRegionEvidenceError extends Error {
+  override name = "VoiceRegionEvidenceError"
+}
+
 export class ChannelDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

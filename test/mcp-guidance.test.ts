@@ -174,6 +174,7 @@ interface GuidanceCalls {
   guildExpressions: number
   guildProfiles: number
   guildSettings: number
+  guildVoiceRegions: number
   integrations: number
   invites: number
   lastChannelId: string | null
@@ -202,6 +203,7 @@ interface GuidanceCalls {
   webhooks: number
   widgetSettings: number
   voiceStates: number
+  voiceRegions: number
 }
 
 function guidanceService(options: {
@@ -227,6 +229,7 @@ function guidanceService(options: {
     guildExpressions: 0,
     guildProfiles: 0,
     guildSettings: 0,
+    guildVoiceRegions: 0,
     integrations: 0,
     invites: 0,
     lastChannelId: null,
@@ -255,6 +258,7 @@ function guidanceService(options: {
     webhooks: 0,
     widgetSettings: 0,
     voiceStates: 0,
+    voiceRegions: 0,
   }
   const unexpected = async (..._arguments: unknown[]): Promise<never> => {
     calls.unexpected += 1
@@ -803,6 +807,7 @@ function guidanceService(options: {
             "rateLimitPerUser",
             "topic",
           ],
+          bitrate: null,
           defaultAutoArchiveDuration: 1_440,
           defaultThreadRateLimitPerUser: 0,
           guildId: GUILD_ID,
@@ -813,9 +818,12 @@ function guidanceService(options: {
           permissionOverwriteCount: 0,
           position: 1,
           rateLimitPerUser: 0,
+          rtcRegion: null,
           topic: PRIVATE_CHANNEL_TOPIC,
           type: 0,
           unknownFieldCount: 2,
+          userLimit: null,
+          videoQualityMode: null,
         },
         privacy: {
           persistence: "none",
@@ -825,6 +833,53 @@ function guidanceService(options: {
         },
         schemaVersion: 1,
         status: "ok",
+      }
+    },
+    async listGuildVoiceRegions(guildId) {
+      calls.guildVoiceRegions += 1
+      calls.lastGuildId = guildId
+      return {
+        inventory: { completeness: "complete" as const, returned: 1 },
+        privacy: {
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          text: "transient-untrusted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        regions: [{
+          custom: true,
+          deprecated: false,
+          id: "guild-private",
+          name: "Private Guild Region",
+          optimal: false,
+          unknownFieldCount: 0,
+        }],
+        schemaVersion: 1,
+        scope: { guildId, kind: "guild" as const },
+        status: "ok" as const,
+      }
+    },
+    async listVoiceRegions() {
+      calls.voiceRegions += 1
+      return {
+        inventory: { completeness: "complete" as const, returned: 1 },
+        privacy: {
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          text: "transient-untrusted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        regions: [{
+          custom: false,
+          deprecated: false,
+          id: "us-central",
+          name: "US Central",
+          optimal: true,
+          unknownFieldCount: 1,
+        }],
+        schemaVersion: 1,
+        scope: { guildId: null, kind: "global" as const },
+        status: "ok" as const,
       }
     },
     async getGuildInvite(guildId, inviteRef) {
@@ -2472,6 +2527,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.guildExpressions
     + calls.guildProfiles
     + calls.guildSettings
+    + calls.guildVoiceRegions
     + calls.integrations
     + calls.invites
     + calls.messages
@@ -2492,6 +2548,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.webhooks
     + calls.widgetSettings
     + calls.voiceStates
+    + calls.voiceRegions
 }
 
 async function readTextResource(client: Client, uri: string) {
@@ -2556,6 +2613,7 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       { name: MCP_RESOURCE_NAMES.observability, uri: MCP_RESOURCE_URIS.observability },
       { name: MCP_RESOURCE_NAMES.policy, uri: MCP_RESOURCE_URIS.policy },
       { name: MCP_RESOURCE_NAMES.safety, uri: MCP_RESOURCE_URIS.safety },
+      { name: MCP_RESOURCE_NAMES.voiceRegions, uri: MCP_RESOURCE_URIS.voiceRegions },
     ].sort((a, b) => a.name.localeCompare(b.name)),
   )
   assert.deepEqual(
@@ -2660,6 +2718,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildTemplates,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildVoiceRegions,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildVoiceRegions,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildWelcomeScreen,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWelcomeScreen,
       },
@@ -2734,6 +2796,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Deletion usage is unavailable and explicit/)
   assert.match(safety.text, /exact thread plus starter-message readback/)
   assert.match(safety.text, /permission-overwrite inventory is read-only/)
+  assert.match(safety.text, /Global and exact-guild voice-region resources/)
+  assert.match(safety.text, /fresh guild premium tier and VIP_REGIONS capability/)
   assert.match(safety.text, /Announcement subscriptions separate exact source and target allowlists/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
   assert.match(safety.text, /survive process restarts/)
@@ -2895,6 +2959,38 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(defaultSound?.soundId, SOUNDBOARD_SOUND_ID)
   assert.equal(defaultSound?.guildId, null)
   assert.equal("audioBytes" in (defaultSound || {}), false)
+
+  const globalVoiceRegions = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.voiceRegions,
+  )
+  const globalVoiceRegionData = globalVoiceRegions.value.data as Record<string, unknown>
+  const globalVoiceRegion = (
+    globalVoiceRegionData.regions as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(globalVoiceRegion?.id, "us-central")
+  assert.equal(globalVoiceRegion?.name, "US Central")
+  assert.deepEqual(globalVoiceRegionData.scope, { guildId: null, kind: "global" })
+  assert.equal(
+    (globalVoiceRegionData.privacy as Record<string, unknown>).persistence,
+    "none",
+  )
+
+  const guildVoiceRegions = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/voice-regions`,
+  )
+  const guildVoiceRegionData = guildVoiceRegions.value.data as Record<string, unknown>
+  const guildVoiceRegion = (
+    guildVoiceRegionData.regions as Array<Record<string, unknown>>
+  )[0]
+  assert.equal(guildVoiceRegion?.id, "guild-private")
+  assert.equal(guildVoiceRegion?.name, "Private Guild Region")
+  assert.deepEqual(guildVoiceRegionData.scope, { guildId: GUILD_ID, kind: "guild" })
+  assert.equal(
+    (guildVoiceRegionData.inventory as Record<string, unknown>).completeness,
+    "complete",
+  )
 
   const channels = await readJsonResource(
     client,
@@ -3482,6 +3578,8 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.threadStates, 2)
   assert.equal(calls.webhooks, 1)
   assert.equal(calls.voiceStates, 1)
+  assert.equal(calls.voiceRegions, 1)
+  assert.equal(calls.guildVoiceRegions, 1)
   assert.equal(calls.lastGuildId, GUILD_ID)
   assert.equal(calls.lastChannelId, CHANNEL_ID)
   assert.equal(calls.lastMessageId, MESSAGE_ID)
@@ -3504,6 +3602,12 @@ test("MCP resources reject malformed IDs before service calls and redact failure
       uri: "discord://channels/not-a-snowflake",
     }),
     /channelId must be a Discord snowflake ID/,
+  )
+  await assert.rejects(
+    () => malformed.client.readResource({
+      uri: "discord://guilds/not-a-snowflake/voice-regions",
+    }),
+    /guildId must be a Discord snowflake ID/,
   )
   await assert.rejects(
     () => malformed.client.readResource({

@@ -44,10 +44,12 @@ export type DiscordGuidanceService = Pick<
   | "listMessageReactions"
   | "listGuildExpressions"
   | "listGuildIntegrations"
+  | "listGuildVoiceRegions"
   | "listDefaultSoundboardSounds"
   | "listGuildSoundboardSounds"
   | "listGuildTemplates"
   | "listScheduledEvents"
+  | "listVoiceRegions"
   | "listRoles"
 >
 

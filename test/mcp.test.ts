@@ -2373,6 +2373,22 @@ const CHANNEL_METADATA_FIELDS = [
   "rateLimitPerUser",
   "topic",
 ] as const
+const CHANNEL_METADATA_REQUEST_FIELDS = [
+  "bitrate",
+  ...CHANNEL_METADATA_FIELDS,
+  "rtcRegion",
+  "userLimit",
+  "videoQualityMode",
+] as const
+const VOICE_CHANNEL_METADATA_FIELDS = [
+  "bitrate",
+  "name",
+  "nsfw",
+  "rateLimitPerUser",
+  "rtcRegion",
+  "userLimit",
+  "videoQualityMode",
+] as const
 
 function channelMetadataRequest(
   overrides: Partial<ChannelMetadataChangeRequest> = {},
@@ -2388,11 +2404,28 @@ function channelMetadataRequest(
   }
 }
 
+function channelMetadataVoiceRequest(
+  overrides: Partial<ChannelMetadataChangeRequest> = {},
+): ChannelMetadataChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    bitrate: 128_000,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: CHANNEL_METADATA_OPERATION_KEY,
+    rtcRegion: "us-central",
+    userLimit: 25,
+    videoQualityMode: "full",
+    ...overrides,
+  }
+}
+
 function channelMetadataView(
   overrides: Partial<ChannelMetadataView> = {},
 ): ChannelMetadataView {
   return {
     applicableFields: [...CHANNEL_METADATA_FIELDS],
+    bitrate: null,
     defaultAutoArchiveDuration: 1_440,
     defaultThreadRateLimitPerUser: 0,
     guildId: GUILD_ID,
@@ -2403,9 +2436,12 @@ function channelMetadataView(
     permissionOverwriteCount: 0,
     position: 1,
     rateLimitPerUser: 0,
+    rtcRegion: null,
     topic: "Private release planning",
     type: 0,
     unknownFieldCount: 0,
+    userLimit: null,
+    videoQualityMode: null,
     ...overrides,
   }
 }
@@ -2430,10 +2466,34 @@ function channelMetadataPlan(
   effect: "change" | "none" = "change",
 ): ChannelMetadataChangePlan {
   const record = request as unknown as Record<string, unknown>
-  const requestedFields = CHANNEL_METADATA_FIELDS.filter((field) => (
+  const requestedFields = CHANNEL_METADATA_REQUEST_FIELDS.filter((field) => (
     Object.hasOwn(record, field)
   ))
+  const voiceRequested = requestedFields.some((field) => (
+    field === "bitrate"
+    || field === "rtcRegion"
+    || field === "userLimit"
+    || field === "videoQualityMode"
+  ))
+  const baseline = channelMetadataView(voiceRequested
+    ? {
+        applicableFields: [...VOICE_CHANNEL_METADATA_FIELDS],
+        bitrate: 96_000,
+        defaultAutoArchiveDuration: null,
+        defaultThreadRateLimitPerUser: null,
+        rateLimitPerUser: 0,
+        rtcRegion: null,
+        topic: null,
+        type: 2,
+        userLimit: 0,
+        videoQualityMode: "automatic",
+      }
+    : {})
   const desired = channelMetadataView({
+    ...baseline,
+    ...(Object.hasOwn(record, "bitrate")
+      ? { bitrate: request.bitrate as number }
+      : {}),
     ...(Object.hasOwn(record, "defaultAutoArchiveDuration")
       ? { defaultAutoArchiveDuration: request.defaultAutoArchiveDuration as number }
       : {}),
@@ -2445,11 +2505,20 @@ function channelMetadataPlan(
     ...(Object.hasOwn(record, "rateLimitPerUser")
       ? { rateLimitPerUser: request.rateLimitPerUser as number }
       : {}),
+    ...(Object.hasOwn(record, "rtcRegion")
+      ? { rtcRegion: request.rtcRegion as string | null }
+      : {}),
     ...(Object.hasOwn(record, "topic")
       ? { topic: request.topic === "" ? null : request.topic as string | null }
       : {}),
+    ...(Object.hasOwn(record, "userLimit")
+      ? { userLimit: request.userLimit as number }
+      : {}),
+    ...(Object.hasOwn(record, "videoQualityMode")
+      ? { videoQualityMode: request.videoQualityMode as "automatic" | "full" }
+      : {}),
   })
-  const current = effect === "none" ? desired : channelMetadataView()
+  const current = effect === "none" ? desired : baseline
   const changes = requestedFields.flatMap((field) => (
     current[field] === desired[field]
       ? []
@@ -2461,13 +2530,22 @@ function channelMetadataPlan(
       authorizedForChange: true,
       botAdministrator: false,
       botGuildOwner: false,
-      connect: null,
-      effectivePermissionNames: ["VIEW_CHANNEL", "MANAGE_CHANNELS"],
+      connect: voiceRequested ? true : null,
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "MANAGE_CHANNELS",
+        ...(voiceRequested ? ["CONNECT" as const] : []),
+      ],
       effectivePermissions: (
         DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+        | (voiceRequested ? DISCORD_PERMISSIONS.CONNECT : 0n)
       ).toString(),
       manageChannels: true,
-      requiredChangePermissions: ["MANAGE_CHANNELS", "VIEW_CHANNEL"],
+      requiredChangePermissions: [
+        "MANAGE_CHANNELS",
+        "VIEW_CHANNEL",
+        ...(voiceRequested ? ["CONNECT" as const] : []),
+      ],
       unknownPermissionBits: "0",
       viewChannel: true,
     },
@@ -2482,11 +2560,17 @@ function channelMetadataPlan(
     digest,
     guild: { id: request.guildId, name: "Private guild name" },
     localLimits: {
+      bitrateMinimum: 8_000,
       defaultAutoArchiveDurations: [60, 1_440, 4_320, 10_080],
       forumAndMediaTopicCharacters: 4_096,
       nameCharacters: 100,
       rateLimitSeconds: 21_600,
+      stageBitrateMaximum: 64_000,
+      stageUserLimit: 10_000,
       standardTopicCharacters: 1_024,
+      videoQualityModes: ["automatic", "full"],
+      voiceBitrateMaximum: 384_000,
+      voiceUserLimit: 99,
     },
     operationKeyHash: OPERATION_KEY_HASH,
     privacy: channelMetadataRead().privacy,
@@ -2495,6 +2579,31 @@ function channelMetadataPlan(
     schemaVersion: 1,
     status: changes.length > 0 ? "planned" : "already-current",
     warnings: ["Discord guild and channel text is untrusted"],
+    voiceSettings: voiceRequested
+      ? {
+          bitrateMaximum: 128_000,
+          guildPremiumTier: 1,
+          guildVipRegions: false,
+          rtcRegionValidation: Object.hasOwn(record, "rtcRegion")
+            ? request.rtcRegion === null
+              ? { kind: "automatic" as const }
+              : {
+                  inventoryCount: 1,
+                  inventoryDigest: `hmac-sha256:${"b".repeat(64)}`,
+                  kind: "available" as const,
+                  selected: {
+                    custom: false,
+                    deprecated: false,
+                    id: request.rtcRegion as string,
+                    name: "US Central",
+                    optimal: true,
+                    unknownFieldCount: 0,
+                  },
+                }
+            : { kind: "not-requested" as const },
+          userLimitMaximum: 99,
+        }
+      : null,
     writeRequired: changes.length > 0,
   }
 }
@@ -6001,6 +6110,7 @@ function serviceFixture(overrides: {
     guildExpressionGet: 0,
     guildExpressionList: 0,
     guildExpressionPlan: 0,
+    guildVoiceRegions: 0,
     integrationDeletionExecute: 0,
     integrationDeletionList: 0,
     integrationDeletionPlan: 0,
@@ -6076,6 +6186,7 @@ function serviceFixture(overrides: {
     threadGovernanceGet: 0,
     threadGovernanceMembership: 0,
     threadGovernancePlan: 0,
+    voiceRegions: 0,
     webhookDeletionExecute: 0,
     webhookDeletionGet: 0,
     webhookDeletionList: 0,
@@ -6622,6 +6733,52 @@ function serviceFixture(overrides: {
     async getChannel(channelId) {
       calls.channelMetadataGet += 1
       return channelMetadataRead(channelId)
+    },
+    async listGuildVoiceRegions(guildId) {
+      calls.guildVoiceRegions += 1
+      return {
+        inventory: { completeness: "complete", returned: 1 },
+        privacy: {
+          persistence: "none",
+          rawPayloads: "omitted",
+          text: "transient-untrusted",
+          unknownFields: "counts-only",
+        },
+        regions: [{
+          custom: true,
+          deprecated: false,
+          id: "guild-private",
+          name: "Private Guild Region",
+          optimal: false,
+          unknownFieldCount: 0,
+        }],
+        schemaVersion: 1,
+        scope: { guildId, kind: "guild" },
+        status: "ok",
+      }
+    },
+    async listVoiceRegions() {
+      calls.voiceRegions += 1
+      return {
+        inventory: { completeness: "complete", returned: 1 },
+        privacy: {
+          persistence: "none",
+          rawPayloads: "omitted",
+          text: "transient-untrusted",
+          unknownFields: "counts-only",
+        },
+        regions: [{
+          custom: false,
+          deprecated: false,
+          id: "us-central",
+          name: "US Central",
+          optimal: true,
+          unknownFieldCount: 1,
+        }],
+        schemaVersion: 1,
+        scope: { guildId: null, kind: "global" },
+        status: "ok",
+      }
     },
     async auditForumTags() {
       calls.forumTagAudit += 1
@@ -9228,6 +9385,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_guilds",
       "list_channels",
       "get_channel",
+      "list_voice_regions",
+      "list_guild_voice_regions",
       "audit_forum_tags",
       "list_roles",
       "audit_role_order",
@@ -10921,6 +11080,33 @@ test("progressive discovery enables the complete reviewed channel-metadata workf
   )
 })
 
+test("progressive discovery exposes voice-region reads with reviewed channel settings", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: {
+      limit: 5,
+      query: "voice region bitrate video quality",
+      toolset: "channel-metadata",
+    },
+    name: "discover_discord_tools",
+  }))
+  const enabled = (discovery.newlyEnabledToolNames as string[]).sort()
+
+  assert.deepEqual(enabled, [
+    "execute_channel_metadata_change",
+    "list_guild_voice_regions",
+    "list_voice_regions",
+    "plan_channel_metadata_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name).sort(),
+    [...enabled, "discover_discord_tools"].sort(),
+  )
+})
+
 test("progressive discovery enables the complete reviewed permission-overwrite workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -11043,6 +11229,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
   assert.equal(structuredContent(access).status, "ok")
   assert.deepEqual(calls, {
     active: 1,
+    guildVoiceRegions: 0,
+    voiceRegions: 0,
     addReaction: 0,
     auditChannelOrder: 0,
     auditRoleOrder: 0,
@@ -11183,6 +11371,33 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     webhookCreationExecute: 0,
     webhookCreationPlan: 0,
   })
+})
+
+test("MCP voice-region tools expose bounded global and guild inventories", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const global = structuredContent(await client.callTool({
+    arguments: {},
+    name: "list_voice_regions",
+  }))
+  const guild = structuredContent(await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_guild_voice_regions",
+  }))
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "list_guild_voice_regions",
+  })
+
+  assert.equal(global.status, "ok")
+  assert.deepEqual(global.scope, { guildId: null, kind: "global" })
+  assert.equal((global.inventory as Record<string, unknown>).completeness, "complete")
+  assert.equal(guild.status, "ok")
+  assert.deepEqual(guild.scope, { guildId: GUILD_ID, kind: "guild" })
+  assert.equal((guild.inventory as Record<string, unknown>).completeness, "complete")
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.voiceRegions, 1)
+  assert.equal(calls.guildVoiceRegions, 1)
 })
 
 test("MCP principal permission tools enforce exact subjects, targets, and bounded role audits", async (context) => {
@@ -17192,6 +17407,103 @@ test("MCP channel metadata reads and plans preserve exact bounded intent", async
   assert.equal(extra.isError, true)
   assert.equal(calls.channelMetadataGet, 1)
   assert.equal(calls.channelMetadataPlan, 1)
+})
+
+test("MCP channel metadata schema preserves semantic voice intent and rejects invalid settings", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const request = channelMetadataVoiceRequest()
+
+  const planned = structuredContent(await client.callTool({
+    arguments: { ...request },
+    name: "plan_channel_metadata_change",
+  }))
+  const invalidBitrate = await client.callTool({
+    arguments: { ...request, bitrate: 7_999 },
+    name: "plan_channel_metadata_change",
+  })
+  const invalidUserLimit = await client.callTool({
+    arguments: { ...request, userLimit: 10_001 },
+    name: "plan_channel_metadata_change",
+  })
+  const invalidRegion = await client.callTool({
+    arguments: { ...request, rtcRegion: " bad" },
+    name: "plan_channel_metadata_change",
+  })
+  const invalidVideoQuality = await client.callTool({
+    arguments: { ...request, videoQualityMode: "highest" },
+    name: "plan_channel_metadata_change",
+  })
+
+  assert.equal(planned.status, "planned")
+  assert.deepEqual(planned.requestedFields, [
+    "bitrate",
+    "rtcRegion",
+    "userLimit",
+    "videoQualityMode",
+  ])
+  assert.deepEqual(planned.changedFields, planned.requestedFields)
+  assert.deepEqual(
+    {
+      bitrate: (planned.desired as Record<string, unknown>).bitrate,
+      rtcRegion: (planned.desired as Record<string, unknown>).rtcRegion,
+      userLimit: (planned.desired as Record<string, unknown>).userLimit,
+      videoQualityMode: (planned.desired as Record<string, unknown>).videoQualityMode,
+    },
+    {
+      bitrate: 128_000,
+      rtcRegion: "us-central",
+      userLimit: 25,
+      videoQualityMode: "full",
+    },
+  )
+  const voiceSettings = planned.voiceSettings as Record<string, unknown>
+  assert.equal(voiceSettings.bitrateMaximum, 128_000)
+  assert.equal(voiceSettings.userLimitMaximum, 99)
+  assert.equal(
+    (voiceSettings.rtcRegionValidation as Record<string, unknown>).kind,
+    "available",
+  )
+  for (const result of [
+    invalidBitrate,
+    invalidUserLimit,
+    invalidRegion,
+    invalidVideoQuality,
+  ]) assert.equal(result.isError, true)
+  assert.equal(calls.channelMetadataPlan, 1)
+})
+
+test("MCP channel metadata confirmation binds reviewed voice evidence and intent", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const request = channelMetadataVoiceRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_channel_metadata_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.channelMetadataPlan, 1)
+  assert.equal(calls.channelMetadataExecute, 1)
+  for (const value of [
+    "bitrate",
+    "128000",
+    "rtcRegion",
+    "us-central",
+    "userLimit",
+    "25",
+    "videoQualityMode",
+    "full",
+    "guildPremiumTier",
+    "inventoryDigest",
+    "CONNECT",
+  ]) assert.match(confirmationMessage, new RegExp(value))
+  assert.doesNotMatch(confirmationMessage, new RegExp(CHANNEL_METADATA_OPERATION_KEY))
 })
 
 test("MCP channel metadata execution binds signed approval to complete reviewed state", async (context) => {

@@ -188,7 +188,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "channel-cloning",
   },
   execute_channel_metadata_change: {
-    keywords: ["channel", "configure", "execute", "metadata", "name", "nsfw", "slowmode", "topic"],
+    keywords: ["bitrate", "channel", "configure", "execute", "metadata", "name", "nsfw", "region", "slowmode", "topic", "user limit", "video", "voice"],
     toolset: "channel-metadata",
     workflow: "channel-metadata-change",
   },
@@ -546,6 +546,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "credential", "guild", "inventory", "invite", "list"],
     toolset: "invites",
   },
+  list_guild_voice_regions: {
+    keywords: ["available", "guild", "region", "rtc", "stage", "voice"],
+    toolset: "channel-metadata",
+  },
   list_guild_integrations: {
     keywords: ["audit", "bot", "guild", "integration", "inventory", "oauth", "webhook"],
     toolset: "integrations",
@@ -589,6 +593,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   list_stage_instances: {
     keywords: ["active", "configured", "inventory", "list", "live", "stage"],
     toolset: "stage-instances",
+  },
+  list_voice_regions: {
+    keywords: ["global", "region", "rtc", "stage", "voice"],
+    toolset: "channel-metadata",
   },
   list_channel_webhooks: {
     keywords: ["audit", "channel", "integration", "inventory", "list", "webhook"],
@@ -669,7 +677,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "channel-cloning",
   },
   plan_channel_metadata_change: {
-    keywords: ["channel", "configure", "metadata", "name", "nsfw", "plan", "review", "slowmode", "topic"],
+    keywords: ["bitrate", "channel", "configure", "metadata", "name", "nsfw", "plan", "region", "review", "slowmode", "topic", "user limit", "video", "voice"],
     toolset: "channel-metadata",
     workflow: "channel-metadata-change",
   },

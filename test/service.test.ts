@@ -28,6 +28,7 @@ import {
   type DiscordSoundboardSoundSummary,
   type DiscordStageInstanceSummary,
   type DiscordThreadStateSummary,
+  type DiscordVoiceRegion,
   type DiscordWebhookSummary,
 } from "../src/discord-client.js"
 import {
@@ -541,7 +542,12 @@ function serviceFixture(overrides: {
       return bot()
     },
     async getGuild() {
-      return { ...guild(), owner_id: "700000000000000001" }
+      return {
+        ...guild(),
+        features: [],
+        owner_id: "700000000000000001",
+        premium_tier: 0,
+      }
     },
     async getGuildProfile() {
       throw new Error("Unexpected guild profile lookup")
@@ -680,6 +686,9 @@ function serviceFixture(overrides: {
     async listGuildIntegrations() {
       return []
     },
+    async listGuildVoiceRegions() {
+      return []
+    },
     async listGuildScheduledEvents() {
       return []
     },
@@ -746,6 +755,9 @@ function serviceFixture(overrides: {
     },
     async listPublicArchivedThreads() {
       return { has_more: false, threads: [] }
+    },
+    async listVoiceRegions() {
+      return []
     },
     async modifyGuildMemberTimeout(_guildId, userId, input) {
       return {
@@ -3256,6 +3268,7 @@ test("service pins identity through transient channel metadata reads and reviewe
         assert.equal(channelId, CHANNEL_ID)
         metadataReads += 1
         return {
+          bitrate: null,
           defaultAutoArchiveDuration: 1_440,
           defaultThreadRateLimitPerUser: 0,
           guildId: GUILD_ID,
@@ -3266,9 +3279,12 @@ test("service pins identity through transient channel metadata reads and reviewe
           permissionOverwrites: [],
           position: 1,
           rateLimitPerUser: 0,
+          rtcRegion: null,
           topic: "Private guild topic",
           type: 0,
           unknownFieldCount: 0,
+          userLimit: null,
+          videoQualityMode: null,
         }
       },
       async getGuildMember() {
@@ -3329,6 +3345,67 @@ test("service pins identity through transient channel metadata reads and reviewe
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)
   assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through global and guild voice-region inventories", async () => {
+  let globalCalls = 0
+  let guildCalls = 0
+  const regions: DiscordVoiceRegion[] = [{
+    custom: false,
+    deprecated: false,
+    id: "us-central",
+    name: "US Central",
+    optimal: true,
+    unknownFieldCount: 1,
+  }]
+  const { calls, service } = serviceFixture({
+    client: {
+      async listGuildVoiceRegions(guildId) {
+        guildCalls += 1
+        assert.equal(guildId, GUILD_ID)
+        return structuredClone(regions)
+      },
+      async listVoiceRegions() {
+        globalCalls += 1
+        return structuredClone(regions)
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    },
+  })
+
+  const global = await service.listVoiceRegions()
+  const guild = await service.listGuildVoiceRegions(GUILD_ID)
+
+  assert.deepEqual(global.scope, { guildId: null, kind: "global" })
+  assert.deepEqual(guild.scope, { guildId: GUILD_ID, kind: "guild" })
+  assert.deepEqual(global.regions, regions)
+  assert.deepEqual(guild.regions, regions)
+  assert.equal(globalCalls, 1)
+  assert.equal(guildCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+
+  let deniedCalls = 0
+  const denied = serviceFixture({
+    client: {
+      async listGuildVoiceRegions() {
+        deniedCalls += 1
+        return []
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    },
+  })
+  await assert.rejects(
+    () => denied.service.listGuildVoiceRegions(OTHER_GUILD_ID),
+    PolicyError,
+  )
+  assert.equal(deniedCalls, 0)
+  assert.equal(denied.calls.application, 1)
+  assert.equal(denied.calls.user, 1)
 })
 
 test("service pins identity through privacy-safe guild expression reads and reviewed changes", async () => {

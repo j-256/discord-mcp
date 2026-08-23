@@ -590,6 +590,10 @@ import type {
   DiscordUser,
   RequestOptions,
 } from "./types.js"
+import {
+  VoiceRegionService,
+  type VoiceRegionInventoryResult,
+} from "./voice-region-service.js"
 
 export interface DiscordServiceClient {
   addThreadMember: DiscordClient["addThreadMember"]
@@ -685,6 +689,7 @@ export interface DiscordServiceClient {
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
   listGuildScheduledEventUsers: DiscordClient["listGuildScheduledEventUsers"]
+  listGuildVoiceRegions: DiscordClient["listGuildVoiceRegions"]
   listGuildSoundboardSounds: DiscordClient["listGuildSoundboardSounds"]
   listGuildEmojis: DiscordClient["listGuildEmojis"]
   listGuildStickers: DiscordClient["listGuildStickers"]
@@ -697,6 +702,7 @@ export interface DiscordServiceClient {
   listDefaultSoundboardSounds: DiscordClient["listDefaultSoundboardSounds"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
+  listVoiceRegions: DiscordClient["listVoiceRegions"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyApplicationEmoji: DiscordClient["modifyApplicationEmoji"]
   modifyCurrentMemberNickname: DiscordClient["modifyCurrentMemberNickname"]
@@ -1091,6 +1097,7 @@ export class ConnectorService {
   readonly #stageInstanceService: StageInstanceService
   readonly #threadCreationService: ThreadCreationService
   readonly #threadGovernanceService: ThreadGovernanceService
+  readonly #voiceRegionService: VoiceRegionService
   readonly #webhookService: WebhookService
   readonly #welcomeScreenService: WelcomeScreenService
   readonly #writeCoordinator: WriteCoordinator
@@ -1186,6 +1193,10 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelMetadataOptions,
+    })
+    this.#voiceRegionService = new VoiceRegionService({
+      client: this.#client,
+      policy: this.#policy,
     })
     this.#channelOrderingService = new ChannelOrderingService({
       activityStore: this.#activityStore,
@@ -1623,6 +1634,21 @@ export class ConnectorService {
     assertChannelMetadataChannelId(channelId)
     await this.#verifyIdentity(options)
     return this.#channelMetadataService.get(channelId, options)
+  }
+
+  async listVoiceRegions(
+    options: RequestOptions = {},
+  ): Promise<VoiceRegionInventoryResult> {
+    await this.#verifyIdentity(options)
+    return this.#voiceRegionService.listGlobal(options)
+  }
+
+  async listGuildVoiceRegions(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<VoiceRegionInventoryResult> {
+    await this.#verifyIdentity(options)
+    return this.#voiceRegionService.listGuild(guildId, options)
   }
 
   async auditForumTags(

@@ -60,6 +60,7 @@ import {
   type ChannelCreationRequest,
 } from "./channel-administration-service.js"
 import {
+  CHANNEL_METADATA_VIDEO_QUALITY_MODES,
   normalizeChannelMetadataChangeRequest,
   type ChannelMetadataChangeRequest,
 } from "./channel-metadata-service.js"
@@ -2909,8 +2910,29 @@ const channelMetadataTopicSchema = z.string()
       return false
     }
   }, { message: "topic must contain valid Unicode" })
+const channelMetadataRtcRegionSchema = z.string()
+  .min(1)
+  .max(DISCORD_LIMITS.voiceRegionIdCharacters)
+  .refine((value) => value.trim() === value, {
+    message: "rtcRegion must not have surrounding whitespace",
+  })
+  .refine((value) => !/[\u0000-\u001F\u007F]/u.test(value), {
+    message: "rtcRegion must not contain controls",
+  })
+  .refine((value) => {
+    try {
+      encodeURIComponent(value)
+      return true
+    } catch {
+      return false
+    }
+  }, { message: "rtcRegion must contain valid Unicode" })
 const channelMetadataFields = {
   auditReason: auditReasonSchema,
+  bitrate: z.number().int()
+    .min(DISCORD_LIMITS.channelBitrateMinimum)
+    .max(DISCORD_LIMITS.voiceChannelBitrateMaximum)
+    .optional(),
   channelId: positiveSnowflakeSchema,
   defaultAutoArchiveDuration: channelDefaultAutoArchiveDurationSchema.optional(),
   defaultThreadRateLimitPerUser: z.number().int()
@@ -2929,27 +2951,44 @@ const channelMetadataFields = {
     .min(0)
     .max(DISCORD_LIMITS.channelRateLimitSeconds)
     .optional(),
+  rtcRegion: channelMetadataRtcRegionSchema
+    .nullable()
+    .optional()
+    .describe("Exact available guild voice-region ID, or null for automatic selection"),
   topic: channelMetadataTopicSchema.nullable().optional()
     .describe("Explicit null or empty string clears the topic"),
+  userLimit: z.number().int()
+    .min(0)
+    .max(DISCORD_LIMITS.stageChannelUserLimit)
+    .optional(),
+  videoQualityMode: z.enum(CHANNEL_METADATA_VIDEO_QUALITY_MODES).optional(),
 }
 function channelMetadataRules(
   input: {
+    bitrate?: number | undefined
     defaultAutoArchiveDuration?: number | undefined
     defaultThreadRateLimitPerUser?: number | undefined
     name?: string | undefined
     nsfw?: boolean | undefined
     rateLimitPerUser?: number | undefined
+    rtcRegion?: string | null | undefined
     topic?: string | null | undefined
+    userLimit?: number | undefined
+    videoQualityMode?: string | undefined
   },
   context: z.RefinementCtx,
 ): void {
   if ([
+    input.bitrate,
     input.defaultAutoArchiveDuration,
     input.defaultThreadRateLimitPerUser,
     input.name,
     input.nsfw,
     input.rateLimitPerUser,
+    input.rtcRegion,
     input.topic,
+    input.userLimit,
+    input.videoQualityMode,
   ].some((value) => value !== undefined)) return
   context.addIssue({
     code: "custom",
@@ -4915,7 +4954,7 @@ const channelMetadataConfirmationRequestSchema: {
 } = {
   properties: {
     approve: {
-      description: "Set true only after reviewing the exact application, bot, guild, channel, current and desired metadata, requested and changed fields, complete VIEW_CHANNEL and MANAGE_CHANNELS evidence, type-required CONNECT evidence, audit reason, risks, warnings, one-shot key hash, and plan digest",
+      description: "Set true only after reviewing the exact application, bot, guild, channel, current and desired metadata, requested and changed fields, complete VIEW_CHANNEL and MANAGE_CHANNELS evidence, type-required CONNECT evidence, voice-setting limits and region availability, audit reason, risks, warnings, one-shot key hash, and plan digest",
       title: "Approve channel metadata change",
       type: "boolean",
     },
@@ -5495,6 +5534,10 @@ const channelPermissionOverwriteRequestStateSchema = z.strictObject({
 })
 const channelMetadataRequestStateSchema = z.strictObject({
   auditReason: auditReasonSchema,
+  bitrate: z.number().int()
+    .min(DISCORD_LIMITS.channelBitrateMinimum)
+    .max(DISCORD_LIMITS.voiceChannelBitrateMaximum)
+    .optional(),
   channelId: positiveSnowflakeSchema,
   defaultAutoArchiveDuration: channelDefaultAutoArchiveDurationSchema.optional(),
   defaultThreadRateLimitPerUser: z.number().int()
@@ -5510,7 +5553,10 @@ const channelMetadataRequestStateSchema = z.strictObject({
     .min(0)
     .max(DISCORD_LIMITS.channelRateLimitSeconds)
     .optional(),
+  rtcRegion: channelMetadataRtcRegionSchema.nullable().optional(),
   topic: channelMetadataTopicSchema.nullable().optional(),
+  userLimit: z.number().int().min(0).max(DISCORD_LIMITS.stageChannelUserLimit).optional(),
+  videoQualityMode: z.enum(CHANNEL_METADATA_VIDEO_QUALITY_MODES).optional(),
 })
 const forumTagRequestStateBaseFields = {
   auditReason: auditReasonSchema,
@@ -6354,6 +6400,7 @@ export interface DiscordToolService {
   listGuildBans: ConnectorService["listGuildBans"]
   listGuildInvites: ConnectorService["listGuildInvites"]
   listGuildIntegrations: ConnectorService["listGuildIntegrations"]
+  listGuildVoiceRegions: ConnectorService["listGuildVoiceRegions"]
   listGuildTemplates: ConnectorService["listGuildTemplates"]
   listGuildMembers: ConnectorService["listGuildMembers"]
   listGuildExpressions: ConnectorService["listGuildExpressions"]
@@ -6369,6 +6416,7 @@ export interface DiscordToolService {
   listScheduledEvents: ConnectorService["listScheduledEvents"]
   listScheduledEventUsers: ConnectorService["listScheduledEventUsers"]
   listStageInstances: ConnectorService["listStageInstances"]
+  listVoiceRegions: ConnectorService["listVoiceRegions"]
   planMessageDeletion: ConnectorService["planMessageDeletion"]
   planApplicationEmojiChange: ConnectorService["planApplicationEmojiChange"]
   planAutoModerationChange: ConnectorService["planAutoModerationChange"]
@@ -10588,6 +10636,7 @@ function channelMetadataRequest(
   const record = input as Record<string, unknown>
   return {
     auditReason: input.auditReason,
+    ...(Object.hasOwn(record, "bitrate") ? { bitrate: input.bitrate } : {}),
     channelId: input.channelId,
     ...(Object.hasOwn(record, "defaultAutoArchiveDuration")
       ? { defaultAutoArchiveDuration: input.defaultAutoArchiveDuration }
@@ -10602,7 +10651,12 @@ function channelMetadataRequest(
     ...(Object.hasOwn(record, "rateLimitPerUser")
       ? { rateLimitPerUser: input.rateLimitPerUser }
       : {}),
+    ...(Object.hasOwn(record, "rtcRegion") ? { rtcRegion: input.rtcRegion } : {}),
     ...(Object.hasOwn(record, "topic") ? { topic: input.topic } : {}),
+    ...(Object.hasOwn(record, "userLimit") ? { userLimit: input.userLimit } : {}),
+    ...(Object.hasOwn(record, "videoQualityMode")
+      ? { videoQualityMode: input.videoQualityMode }
+      : {}),
   } as ChannelMetadataChangeRequest
 }
 
@@ -10629,6 +10683,7 @@ function channelMetadataConfirmationMessage(
     `Connector retains VIEW_CHANNEL: ${plan.access.viewChannel}`,
     `Connector retains MANAGE_CHANNELS: ${plan.access.manageChannels}`,
     `Connector retains type-required CONNECT: ${plan.access.connect ?? "not applicable"}`,
+    `Voice-setting evidence: ${reviewLiteral(plan.voiceSettings)}`,
     `Discord audit-log reason: ${reviewLiteral(plan.auditReason)}`,
     `One-shot operation key hash: ${plan.operationKeyHash}`,
     `Plan digest: ${plan.digest}`,
@@ -10648,6 +10703,7 @@ function channelMetadataRequestStatePayload(request: ChannelMetadataChangeReques
   const fieldSet = new Set(normalized.requestedFields)
   return {
     auditReason: normalized.auditReason,
+    ...(fieldSet.has("bitrate") ? { bitrate: normalized.bitrate } : {}),
     channelId: normalized.channelId,
     ...(fieldSet.has("defaultAutoArchiveDuration")
       ? { defaultAutoArchiveDuration: normalized.defaultAutoArchiveDuration }
@@ -10662,7 +10718,12 @@ function channelMetadataRequestStatePayload(request: ChannelMetadataChangeReques
     ...(fieldSet.has("rateLimitPerUser")
       ? { rateLimitPerUser: normalized.rateLimitPerUser }
       : {}),
+    ...(fieldSet.has("rtcRegion") ? { rtcRegion: normalized.rtcRegion } : {}),
     ...(fieldSet.has("topic") ? { topic: normalized.topic } : {}),
+    ...(fieldSet.has("userLimit") ? { userLimit: normalized.userLimit } : {}),
+    ...(fieldSet.has("videoQualityMode")
+      ? { videoQualityMode: normalized.videoQualityMode }
+      : {}),
   }
 }
 
@@ -13180,7 +13241,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "get_channel",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Fetch one exact readable non-thread Discord guild channel and return a strict metadata projection with type-applicable fields, parent and position evidence, overwrite count, transient name and topic text, and unknown fields represented only as a count. Persists nothing and omits raw payloads.",
+      description: "Fetch one exact readable non-thread Discord guild channel and return a strict metadata projection with type-applicable text, slowmode, voice settings, parent and position evidence, overwrite count, and unknown fields represented only as a count. Persists nothing and omits raw payloads.",
       inputSchema: channelMetadataGetInputSchema,
       outputSchema: toolOutputSchema,
       title: "Get exact Discord channel metadata",
@@ -13195,6 +13256,46 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord channel ${channelId} metadata was projected without persistence`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_voice_regions", server.registerTool(
+    "list_voice_regions",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "List the complete bounded global Discord voice-region inventory usable for voice and Stage channel RTC selection. Returns strict deterministic ID, transient name, optimal, deprecated, custom, and unknown-field-count projections without persistence or raw payloads.",
+      inputSchema: z.strictObject({}),
+      outputSchema: toolOutputSchema,
+      title: "List global Discord voice regions",
+    },
+    safeToolHandler("list_voice_regions", async (_input, context) => {
+      const result = await service.listVoiceRegions({
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(result, `Discord returned ${result.regions.length} global voice regions`)
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_guild_voice_regions", server.registerTool(
+    "list_guild_voice_regions",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "List the complete bounded voice-region inventory available to one exact permitted Discord guild, including guild-specific and VIP choices. Returns strict deterministic ID, transient name, optimal, deprecated, custom, and unknown-field-count projections without persistence or raw payloads.",
+      inputSchema: guildInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List Discord guild voice regions",
+    },
+    safeToolHandler("list_guild_voice_regions", async (
+      { guildId }: z.infer<typeof guildInputSchema>,
+      context,
+    ) => {
+      const result = await service.listGuildVoiceRegions(guildId, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord guild ${guildId} has ${result.regions.length} available voice regions`,
       )
     }, secrets, observability),
   ))
@@ -18316,7 +18417,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_channel_metadata_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan for a partial metadata update to one exact separately allowlisted non-thread guild channel. Verifies pinned application and bot identity, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, field applicability and bounds, omitted-field preservation, and current-to-desired changes without writing or persisting Discord text.",
+      description: "Prepare a process-bound keyed plan for a partial metadata update to one exact separately allowlisted non-thread guild channel. Verifies pinned application and bot identity, complete guild, member, role, overwrite, VIEW_CHANNEL, MANAGE_CHANNELS, and type-required CONNECT evidence, field applicability and bounds, boost-aware bitrate and user limits, explicit guild voice-region availability, omitted-field preservation, and current-to-desired changes without writing or persisting Discord text.",
       inputSchema: channelMetadataPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan Discord channel metadata change",
@@ -18340,7 +18441,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_channel_metadata_change",
     {
       annotations: EDIT_ANNOTATIONS,
-      description: "Apply one exact reviewed partial Discord channel metadata change only after a fresh matching keyed plan and signed interactive approval. Reserves a one-shot key, records pending content-free evidence, performs one non-retried PATCH, validates the complete response, and performs one fresh complete GET readback. Never deletes, moves, reorders, converts, replaces overwrites or forum tags, mutates threads, retries, or rolls back.",
+      description: "Apply one exact reviewed partial Discord channel metadata or voice-setting change only after a fresh matching keyed plan and signed interactive approval. Reserves a one-shot key, records pending content-free evidence, performs one non-retried PATCH, validates the complete response, and performs one fresh complete GET readback. Never deletes, moves, reorders, converts, replaces overwrites or forum tags, mutates threads, retries, or rolls back.",
       inputSchema: channelMetadataExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord channel metadata change",

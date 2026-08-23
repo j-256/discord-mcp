@@ -12,6 +12,7 @@ export const MCP_RESOURCE_NAMES = Object.freeze({
   observability: "connector_observability",
   policy: "connector_policy",
   safety: "connector_safety",
+  voiceRegions: "voice_regions",
 })
 
 export const MCP_RESOURCE_URIS = Object.freeze({
@@ -26,6 +27,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
   observability: "discord://connector/observability",
   policy: "discord://connector/policy",
   safety: "discord://connector/safety",
+  voiceRegions: "discord://voice/regions",
 })
 
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
@@ -60,6 +62,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   guildSoundboard: "guild_soundboard",
   guildStickers: "guild_stickers",
   guildTemplates: "guild_templates",
+  guildVoiceRegions: "guild_voice_regions",
   guildIntegrations: "guild_integrations",
   memberVoiceState: "member_voice_state",
   threadMembership: "thread_membership",
@@ -98,6 +101,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   guildSoundboard: "discord://guilds/{guildId}/soundboard",
   guildStickers: "discord://guilds/{guildId}/stickers",
   guildTemplates: "discord://guilds/{guildId}/templates",
+  guildVoiceRegions: "discord://guilds/{guildId}/voice-regions",
   guildIntegrations: "discord://guilds/{guildId}/integrations",
   memberVoiceState: "discord://guilds/{guildId}/members/{userId}/voice-state",
   threadMembership: "discord://guilds/{guildId}/threads/{threadId}/members/{userId}",
