@@ -2,6 +2,10 @@ import {
   Client,
   InMemoryTransport,
 } from "@modelcontextprotocol/client"
+import {
+  basename,
+  extname,
+} from "node:path"
 
 import type { ConnectorConfig } from "./config.js"
 import { loadConnectorConfig } from "./config.js"
@@ -9,7 +13,15 @@ import {
   CONFIG_DOCUMENT_SCHEMA_VERSION,
   configDocumentPolicyFromEnvironment,
   connectorConfigSecretEnvironmentNames,
+  createConnectorConfigDocument,
+  normalizeConfigName,
+  parseConnectorConfigDocument,
+  type ConnectorConfigDocument,
 } from "./config-document.js"
+import {
+  resolveConnectorConfigFile,
+  writeConnectorConfigDocumentFile,
+} from "./config-operator.js"
 import {
   CONNECTOR_LIMITS,
   CONNECTOR_NAME,
@@ -38,7 +50,6 @@ import {
 } from "./mcp-tool-catalog.js"
 import {
   activateCredentialEnvironment,
-  createConnectorProfile,
   normalizeCredentialEnvironmentName,
   normalizeProfileName,
   parseConnectorProfile,
@@ -53,7 +64,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 17
+export const OPERATOR_REPORT_SCHEMA_VERSION = 18
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -189,6 +200,9 @@ export interface DoctorReport {
 export interface SetupReport {
   applicationId: string
   botId: string
+  configBackupFile: string | null
+  configFile: string | null
+  credentialVariable: string
   guildsAccessibleOnFirstPage: number
   guildsInScopeOnFirstPage: number
   launch: StdioLaunchDescriptor
@@ -251,8 +265,10 @@ export interface DoctorOptions {
 export interface SetupOptions {
   args?: readonly string[]
   command?: string
+  configFile?: string
   credentialVariable?: string
   environment?: NodeJS.ProcessEnv
+  overwriteConfig?: boolean
   overwriteProfile?: boolean
   profileDirectory?: string
   profileName?: string
@@ -2499,6 +2515,10 @@ export function createStdioLaunchDescriptor(options: {
   args?: readonly string[]
   botId: string
   command?: string
+  config?: {
+    document: ConnectorConfigDocument
+    file: string
+  }
   profile?: ConnectorProfile
   profileEnvironmentForwarding?: ProfileEnvironmentForwarding
   serverName?: string
@@ -2514,6 +2534,17 @@ export function createStdioLaunchDescriptor(options: {
   const profile = options.profile === undefined
     ? undefined
     : parseConnectorProfile(options.profile)
+  const config = options.config === undefined
+    ? undefined
+    : {
+      document: parseConnectorConfigDocument(options.config.document),
+      file: resolveConnectorConfigFile(options.config.file),
+    }
+  if (config && profile) {
+    throw new ConfigurationError(
+      "Portable launch configuration and profile are mutually exclusive",
+    )
+  }
   const profileEnvironmentForwarding = options.profileEnvironmentForwarding
     ?? PROFILE_ENVIRONMENT_FORWARDING.includePolicy
   if (
@@ -2541,6 +2572,17 @@ export function createStdioLaunchDescriptor(options: {
       "Portable launch profile does not match the verified Discord identity",
     )
   }
+  if (
+    config
+    && (
+      config.document.identity.applicationId !== applicationId
+      || config.document.identity.botId !== botId
+    )
+  ) {
+    throw new ConfigurationError(
+      "Portable launch configuration does not match the verified Discord identity",
+    )
+  }
   const serverName = options.serverName === undefined
     ? DEFAULT_MCP_SERVER_NAME
     : options.serverName.trim()
@@ -2555,11 +2597,12 @@ export function createStdioLaunchDescriptor(options: {
   if (args.some((argument) => typeof argument !== "string" || !argument.trim())) {
     throw new ConfigurationError("MCP server arguments must be non-empty strings")
   }
-  if (profile) {
-    if (args.includes("--profile")) {
-      throw new ConfigurationError("MCP server arguments already select a profile")
+  if (profile || config) {
+    if (args.includes("--profile") || args.includes("--config")) {
+      throw new ConfigurationError("MCP server arguments already select a configuration")
     }
-    args.push("--profile", profile.name)
+    if (profile) args.push("--profile", profile.name)
+    if (config) args.push("--config", config.file)
   }
   let environmentVariables: string[] = [
     ENVIRONMENT_NAMES.token,
@@ -2750,12 +2793,15 @@ export function createStdioLaunchDescriptor(options: {
           ]
     }
   }
+  if (config) {
+    environmentVariables = [...connectorConfigSecretEnvironmentNames(config.document)]
+  }
   return {
     args,
     command,
     environment: {
       forward: environmentVariables,
-      set: profile
+      set: profile || config
         ? {}
         : {
           [ENVIRONMENT_NAMES.applicationId]: applicationId,
@@ -2780,26 +2826,49 @@ export async function prepareSetup(
   options: SetupOptions = {},
 ): Promise<SetupReport> {
   const environment = options.environment || process.env
+  if (options.configFile !== undefined && options.profileName !== undefined) {
+    throw new ConfigurationError(
+      "Setup configuration file and profile are mutually exclusive",
+    )
+  }
+  const hasPersistentConfig = options.configFile !== undefined
+    || options.profileName !== undefined
   if (
-    !options.profileName
+    !hasPersistentConfig
     && (
       options.credentialVariable !== undefined
+      || options.overwriteConfig
       || options.overwriteProfile
       || options.profileDirectory !== undefined
       || options.preset !== undefined
     )
   ) {
     throw new ConfigurationError(
-      "Credential aliases, profile replacement, and profile storage require a profile name",
+      "Credential aliases, replacement, presets, and scoped setup require a configuration file or profile",
     )
   }
+  if (options.configFile !== undefined && options.profileDirectory !== undefined) {
+    throw new ConfigurationError("Profile storage cannot be used with a configuration file")
+  }
+  if (options.configFile === undefined && options.overwriteConfig) {
+    throw new ConfigurationError("Configuration replacement requires a configuration file")
+  }
+  if (options.profileName === undefined && options.overwriteProfile) {
+    throw new ConfigurationError("Profile replacement requires a profile name")
+  }
+  const configFile = options.configFile === undefined
+    ? undefined
+    : resolveConnectorConfigFile(options.configFile)
   const profileName = options.profileName === undefined
     ? undefined
     : normalizeProfileName(options.profileName)
+  const configName = configFile
+    ? normalizeConfigName(basename(configFile, extname(configFile)))
+    : profileName
   const credentialVariable = normalizeCredentialEnvironmentName(
     options.credentialVariable ?? ENVIRONMENT_NAMES.token,
   )
-  const credentialEnvironment = profileName
+  const credentialEnvironment = hasPersistentConfig
     ? activateCredentialEnvironment(credentialVariable, environment)
     : environment
   const appliedPreset = options.preset
@@ -2814,9 +2883,9 @@ export async function prepareSetup(
     : null
   const runtimeEnvironment = appliedPreset?.environment ?? credentialEnvironment
   const config = loadConnectorConfig(runtimeEnvironment)
-  if (profileName && config.allowedGuildIds.size === 0) {
+  if (configName && config.allowedGuildIds.size === 0) {
     throw new ConfigurationError(
-      `Profile setup requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+      `Persistent setup requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
     )
   }
   const service = options.service || new ConnectorService({ config })
@@ -2832,8 +2901,8 @@ export async function prepareSetup(
       `Discord bot can access ${status.guildPage.inScope} of ${config.allowedGuildIds.size} exact preset guilds on the first membership page`,
     )
   }
-  const profile = profileName
-    ? createConnectorProfile({
+  const portableConfig = configName
+    ? createConnectorConfigDocument({
       applicationId: status.application.id,
       botId: status.bot.id,
       channelIds: [...config.allowedChannelIds],
@@ -2842,18 +2911,27 @@ export async function prepareSetup(
       gatewayEnabled: config.allowGateway,
       gatewayEventBufferSize: config.gatewayEventBufferSize,
       guildIds: [...config.allowedGuildIds],
-      name: profileName,
+      name: configName,
       toolsets: selectedMcpToolsets(config.mcpToolsets),
       toolSurface: config.mcpToolSurface,
     })
     : null
+  const profile = profileName ? portableConfig : null
   const launch = createStdioLaunchDescriptor({
     applicationId: status.application.id,
     botId: status.bot.id,
     ...(options.args ? { args: options.args } : {}),
     ...(options.command ? { command: options.command } : {}),
+    ...(configFile && portableConfig
+      ? {
+          config: {
+            document: portableConfig,
+            file: configFile,
+          },
+        }
+      : {}),
     ...(profile ? { profile } : {}),
-    ...(appliedPreset
+    ...(appliedPreset && profile
       ? {
           profileEnvironmentForwarding:
             PROFILE_ENVIRONMENT_FORWARDING.credentialOnly,
@@ -2868,6 +2946,11 @@ export async function prepareSetup(
       ...(options.profileDirectory ? { directory: options.profileDirectory } : {}),
     })
   }
+  const configWrite = configFile && portableConfig
+    ? await writeConnectorConfigDocumentFile(configFile, portableConfig, {
+      overwrite: options.overwriteConfig ?? false,
+    })
+    : null
   const contentDependentWrites = [
     ...(config.allowAnnouncementCrossposts
       && config.announcementCrosspostChannelIds.size > 0
@@ -2889,6 +2972,9 @@ export async function prepareSetup(
   return {
     applicationId: status.application.id,
     botId: status.bot.id,
+    configBackupFile: configWrite?.backupFile ?? null,
+    configFile: configWrite?.file ?? null,
+    credentialVariable,
     launch,
     preset: appliedPreset?.preset ?? null,
     profile,

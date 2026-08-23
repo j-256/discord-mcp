@@ -111,6 +111,7 @@ export interface ConnectorConfigDocumentPolicy {
 
 export interface ConfigDocumentField {
   defaultValue: boolean | number | string | readonly string[] | undefined
+  description: string
   environmentVariable: string | undefined
   kind: "boolean" | "integer" | "number" | "path" | "paths" | "secret-reference" | "snowflake" | "snowflakes" | "string" | "strings"
   path: string
@@ -178,6 +179,13 @@ const RUNTIME_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
 
 function lowerInitial(value: string): string {
   return `${value.slice(0, 1).toLowerCase()}${value.slice(1)}`
+}
+
+function humanizeConfigKey(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\bIds$/, "IDs")
+    .toLowerCase()
 }
 
 function sectionMappings(
@@ -271,30 +279,42 @@ const tokenReferenceSchema = z.strictObject({
   variable: z.string()
     .max(128)
     .regex(TOKEN_ENVIRONMENT_PATTERN, "must name an uppercase Discord token environment variable"),
-})
+}).describe("Environment reference for the Discord bot token")
 
 const headerReferenceSchema = z.strictObject({
   provider: z.literal("environment"),
   variable: z.string()
     .max(128)
     .regex(HEADER_ENVIRONMENT_PATTERN, "must name an uppercase header environment variable"),
-})
+}).describe("Environment reference for an OTLP header string")
 
 const capabilityShape = Object.fromEntries(
-  CONFIG_CAPABILITY_MAPPINGS.map((entry) => [entry.documentKey, z.boolean().optional()]),
+  CONFIG_CAPABILITY_MAPPINGS.map((entry) => [
+    entry.documentKey,
+    z.boolean()
+      .describe(`Enable ${humanizeConfigKey(entry.documentKey)} policy`)
+      .optional(),
+  ]),
 ) as Record<string, z.ZodOptional<z.ZodBoolean>>
 
 const scopeShape = Object.fromEntries(
   CONFIG_SCOPE_MAPPINGS.map((entry) => [
     entry.documentKey,
-    snowflakeArraySchema(0, CONFIG_SCOPE_ENTRIES).optional(),
+    snowflakeArraySchema(0, CONFIG_SCOPE_ENTRIES)
+      .describe(`Exact Discord ID allowlist for ${humanizeConfigKey(entry.documentKey)}`)
+      .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodType<string[]>>>
 
 const limitShape = Object.fromEntries(
   CONFIG_LIMIT_MAPPINGS.map((entry) => [
     entry.documentKey,
-    z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    z.number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .describe(`Numeric policy limit for ${humanizeConfigKey(entry.documentKey)}`)
+      .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodNumber>>
 
@@ -302,72 +322,119 @@ const storageShape = Object.fromEntries(
   CONFIG_STORAGE_MAPPINGS.map((entry) => [
     entry.documentKey,
     entry.environmentKey === "auditFile"
-      ? absolutePathSchema.optional()
-      : rootArraySchema.optional(),
+      ? absolutePathSchema
+        .describe("Absolute path for the content-free activity log")
+        .optional()
+      : rootArraySchema
+        .describe(`Owned local roots for ${humanizeConfigKey(entry.documentKey)}`)
+        .optional(),
   ]),
 ) as Record<string, z.ZodType>
 
 const runtimeShape = Object.fromEntries(
   CONFIG_RUNTIME_MAPPINGS.map((entry) => [
     entry.documentKey,
-    z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
+    z.string()
+      .min(1)
+      .max(CONFIG_STRING_CHARACTERS)
+      .describe(`Runtime setting for ${humanizeConfigKey(entry.documentKey)}`)
+      .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodString>>
 
 const observabilitySignalSchema = z.strictObject({
-  compression: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
-  endpoint: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
+  compression: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+    .describe("OTLP compression mode")
+    .optional(),
+  endpoint: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+    .describe("Credential-free absolute OTLP endpoint")
+    .optional(),
   headers: headerReferenceSchema.optional(),
-  protocol: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
-  timeoutMs: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+  protocol: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+    .describe("OTLP transport protocol")
+    .optional(),
+  timeoutMs: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
+    .describe("OTLP request timeout in milliseconds")
+    .optional(),
 })
 
 export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
-  $schema: z.literal(CONFIG_DOCUMENT_SCHEMA_ID).optional(),
-  capabilities: z.strictObject(capabilityShape).default({}),
+  $schema: z.literal(CONFIG_DOCUMENT_SCHEMA_ID)
+    .describe("Editor schema identifier for this configuration format")
+    .optional(),
+  capabilities: z.strictObject(capabilityShape)
+    .describe("Explicit capability gates; omitted gates remain disabled")
+    .default({}),
   credential: tokenReferenceSchema,
   gateway: z.strictObject({
-    enabled: z.boolean(),
-    eventBufferSize: z.number().int().min(1).max(CONNECTOR_LIMITS.gatewayEventBufferSize),
-  }),
+    enabled: z.boolean().describe("Enable the optional privacy-safe Discord Gateway client"),
+    eventBufferSize: z.number().int().min(1).max(CONNECTOR_LIMITS.gatewayEventBufferSize)
+      .describe("Maximum bounded Gateway event buffer size"),
+  }).describe("Optional Discord Gateway policy"),
   identity: z.strictObject({
-    applicationId: snowflakeSchema,
-    botId: snowflakeSchema,
-  }),
-  limits: z.strictObject(limitShape).default({}),
-  name: configNameSchema,
+    applicationId: snowflakeSchema.describe("Expected Discord application identity"),
+    botId: snowflakeSchema.describe("Expected Discord bot user identity"),
+  }).describe("Pinned Discord application and bot identity"),
+  limits: z.strictObject(limitShape)
+    .describe("Optional numeric policy limits")
+    .default({}),
+  name: configNameSchema.describe("Bounded lowercase identifier for this policy"),
   observability: z.strictObject({
-    compression: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
-    endpoint: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
-    exportEnabled: z.boolean().optional(),
+    compression: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+      .describe("Common OTLP compression mode")
+      .optional(),
+    endpoint: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+      .describe("Common credential-free absolute OTLP endpoint")
+      .optional(),
+    exportEnabled: z.boolean().describe("Enable OTLP export").optional(),
     headers: headerReferenceSchema.optional(),
-    jsonLogsEnabled: z.boolean().optional(),
+    jsonLogsEnabled: z.boolean().describe("Enable content-free JSON operational logs").optional(),
     metrics: observabilitySignalSchema.optional(),
-    protocol: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
-    serviceName: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
-    timeoutMs: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
-    traceSampleRatio: z.number().min(0).max(1).optional(),
-    traceSampler: z.string().min(1).max(CONFIG_STRING_CHARACTERS).optional(),
+    protocol: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+      .describe("Common OTLP transport protocol")
+      .optional(),
+    serviceName: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+      .describe("Bounded non-identifying telemetry service name")
+      .optional(),
+    timeoutMs: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
+      .describe("Common OTLP request timeout in milliseconds")
+      .optional(),
+    traceSampleRatio: z.number().min(0).max(1)
+      .describe("Trace sampling ratio")
+      .optional(),
+    traceSampler: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
+      .describe("Trace sampler name")
+      .optional(),
     traces: observabilitySignalSchema.optional(),
-  }).default({}),
+  }).describe("Optional content-free local and OTLP observability policy").default({}),
   readScope: z.strictObject({
-    channelIds: snowflakeArraySchema(0, DISCORD_LIMITS.searchChannelIds),
-    guildIds: snowflakeArraySchema(1, DISCORD_LIMITS.currentUserGuilds),
-  }),
-  runtime: z.strictObject(runtimeShape).default({}),
-  schemaVersion: z.literal(CONFIG_DOCUMENT_SCHEMA_VERSION),
-  scopes: z.strictObject(scopeShape).default({}),
-  storage: z.strictObject(storageShape).default({}),
+    channelIds: snowflakeArraySchema(0, DISCORD_LIMITS.searchChannelIds)
+      .describe("Optional exact channel allowlist inside the guild boundary"),
+    guildIds: snowflakeArraySchema(1, DISCORD_LIMITS.currentUserGuilds)
+      .describe("Exact guild allowlist forming the outer read boundary"),
+  }).describe("Required outer Discord read boundary"),
+  runtime: z.strictObject(runtimeShape)
+    .describe("Optional non-secret runtime settings")
+    .default({}),
+  schemaVersion: z.literal(CONFIG_DOCUMENT_SCHEMA_VERSION)
+    .describe("Configuration format version"),
+  scopes: z.strictObject(scopeShape)
+    .describe("Exact per-feature Discord ID allowlists")
+    .default({}),
+  storage: z.strictObject(storageShape)
+    .describe("Local content-free activity and owned-file paths")
+    .default({}),
   tools: z.strictObject({
-    surface: z.enum(MCP_TOOL_SURFACES),
+    surface: z.enum(MCP_TOOL_SURFACES).describe("MCP tool discovery surface"),
     toolsets: z.array(z.enum(MCP_TOOLSET_NAMES))
       .min(1)
       .max(MCP_TOOLSET_NAMES.length)
       .refine(
         (values) => canonicalArray(values, MCP_TOOLSET_NAMES),
         "must contain unique toolsets in canonical order",
-      ),
-  }),
+      )
+      .describe("Canonical MCP toolset selection"),
+  }).describe("Advertised MCP tool surface"),
 }).meta({
   description: "Strict non-secret configuration for discord-mcp",
   id: CONFIG_DOCUMENT_SCHEMA_ID,
@@ -1153,6 +1220,31 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
   return Object.freeze([
     {
       defaultValue: undefined,
+      description: "Editor schema identifier for this configuration format",
+      environmentVariable: undefined,
+      kind: "string",
+      path: "$.$schema",
+      required: false,
+    },
+    {
+      defaultValue: CONFIG_DOCUMENT_SCHEMA_VERSION,
+      description: "Configuration format version",
+      environmentVariable: undefined,
+      kind: "integer",
+      path: "$.schemaVersion",
+      required: true,
+    },
+    {
+      defaultValue: undefined,
+      description: "Bounded lowercase identifier for this policy",
+      environmentVariable: undefined,
+      kind: "string",
+      path: "$.name",
+      required: true,
+    },
+    {
+      defaultValue: undefined,
+      description: "Environment reference for the Discord bot token",
       environmentVariable: ENVIRONMENT_NAMES.token,
       kind: "secret-reference",
       path: "$.credential",
@@ -1163,23 +1255,30 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       ["$.identity.botId", ENVIRONMENT_NAMES.botId],
     ] as const).map(([path, environmentVariable]) => ({
       defaultValue: undefined,
+      description: path.endsWith("applicationId")
+        ? "Expected Discord application identity"
+        : "Expected Discord bot user identity",
       environmentVariable,
       kind: "snowflake" as const,
       path,
       required: true,
     })),
     ...([
-      ["$.readScope.guildIds", ENVIRONMENT_NAMES.allowedGuildIds, true],
-      ["$.readScope.channelIds", ENVIRONMENT_NAMES.allowedChannelIds, false],
-    ] as const).map(([path, environmentVariable, required]) => ({
-      defaultValue: required ? undefined : [],
+      ["$.readScope.guildIds", ENVIRONMENT_NAMES.allowedGuildIds, undefined],
+      ["$.readScope.channelIds", ENVIRONMENT_NAMES.allowedChannelIds, []],
+    ] as const).map(([path, environmentVariable, defaultValue]) => ({
+      defaultValue,
+      description: path.endsWith("guildIds")
+        ? "Exact guild allowlist forming the outer read boundary"
+        : "Optional exact channel allowlist inside the guild boundary",
       environmentVariable,
       kind: "snowflakes" as const,
       path,
-      required,
+      required: true,
     })),
     {
       defaultValue: "progressive",
+      description: "MCP tool discovery surface",
       environmentVariable: ENVIRONMENT_NAMES.toolSurface,
       kind: "string",
       path: "$.tools.surface",
@@ -1187,6 +1286,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     },
     {
       defaultValue: undefined,
+      description: "Canonical MCP toolset selection",
       environmentVariable: ENVIRONMENT_NAMES.toolsets,
       kind: "strings",
       path: "$.tools.toolsets",
@@ -1194,6 +1294,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     },
     {
       defaultValue: false,
+      description: "Enable the optional privacy-safe Discord Gateway client",
       environmentVariable: ENVIRONMENT_NAMES.allowGateway,
       kind: "boolean",
       path: "$.gateway.enabled",
@@ -1201,6 +1302,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     },
     {
       defaultValue: GATEWAY_DEFAULTS.eventBufferSize,
+      description: "Maximum bounded Gateway event buffer size",
       environmentVariable: ENVIRONMENT_NAMES.gatewayEventBufferSize,
       kind: "integer",
       path: "$.gateway.eventBufferSize",
@@ -1208,6 +1310,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     },
     ...CONFIG_CAPABILITY_MAPPINGS.map((entry) => ({
       defaultValue: false,
+      description: `Enable ${humanizeConfigKey(entry.documentKey)} policy`,
       environmentVariable: entry.environmentVariable,
       kind: "boolean" as const,
       path: `$.capabilities.${entry.documentKey}`,
@@ -1215,6 +1318,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...CONFIG_SCOPE_MAPPINGS.map((entry) => ({
       defaultValue: [],
+      description: `Exact Discord ID allowlist for ${humanizeConfigKey(entry.documentKey)}`,
       environmentVariable: entry.environmentVariable,
       kind: "snowflakes" as const,
       path: `$.scopes.${entry.documentKey}`,
@@ -1222,6 +1326,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...CONFIG_LIMIT_MAPPINGS.map((entry) => ({
       defaultValue: undefined,
+      description: `Numeric policy limit for ${humanizeConfigKey(entry.documentKey)}`,
       environmentVariable: entry.environmentVariable,
       kind: "integer" as const,
       path: `$.limits.${entry.documentKey}`,
@@ -1229,6 +1334,9 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...CONFIG_STORAGE_MAPPINGS.map((entry) => ({
       defaultValue: entry.environmentKey === "auditFile" ? undefined : [],
+      description: entry.environmentKey === "auditFile"
+        ? "Absolute path for the content-free activity log"
+        : `Owned local roots for ${humanizeConfigKey(entry.documentKey)}`,
       environmentVariable: entry.environmentVariable,
       kind: (entry.environmentKey === "auditFile" ? "path" : "paths") as "path" | "paths",
       path: `$.storage.${entry.documentKey}`,
@@ -1236,6 +1344,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...CONFIG_RUNTIME_MAPPINGS.map((entry) => ({
       defaultValue: undefined,
+      description: `Runtime setting for ${humanizeConfigKey(entry.documentKey)}`,
       environmentVariable: entry.environmentVariable,
       kind: "string" as const,
       path: `$.runtime.${entry.documentKey}`,
@@ -1243,6 +1352,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...[...OBSERVABILITY_ENVIRONMENT_PATHS].map(([environmentVariable, path]) => ({
       defaultValue: undefined,
+      description: `Observability setting for ${humanizeConfigKey(path.split(".").at(-1) || path)}`,
       environmentVariable,
       kind: environmentVariable.endsWith("_HEADERS")
         ? "secret-reference" as const

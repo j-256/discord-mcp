@@ -464,6 +464,16 @@ test("profile activation clones complete policy, consumes aliases, and rejects a
     }),
     new RegExp(`conflicts.*${ENVIRONMENT_NAMES.allowDeletions}`),
   )
+  await assert.rejects(
+    () => activateProfile(candidate.name, {
+      directory,
+      environment: {
+        [ALIAS]: TOKEN,
+        [ENVIRONMENT_NAMES.configFile]: "/configuration/discord-mcp.json",
+      },
+    }),
+    new RegExp(`conflicts.*${ENVIRONMENT_NAMES.configFile}`),
+  )
 })
 
 test("legacy profiles remain readable and retain their environment compatibility window", async (context) => {

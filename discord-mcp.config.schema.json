@@ -4,242 +4,320 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "const": "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json"
+      "const": "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json",
+      "description": "Editor schema identifier for this configuration format"
     },
     "capabilities": {
       "default": {},
       "type": "object",
       "properties": {
         "administration": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable administration policy"
         },
         "announcementCrossposts": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable announcement crossposts policy"
         },
         "announcementSubscriptionAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable announcement subscription audit policy"
         },
         "announcementSubscriptionChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable announcement subscription changes policy"
         },
         "attachments": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable attachments policy"
         },
         "automodAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable automod audit policy"
         },
         "automodChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable automod changes policy"
         },
         "banAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable ban audit policy"
         },
         "channelCreation": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable channel creation policy"
         },
         "channelCloneAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable channel clone audit policy"
         },
         "channelCloning": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable channel cloning policy"
         },
         "channelMetadataChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable channel metadata changes policy"
         },
         "channelOrderingAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable channel ordering audit policy"
         },
         "channelOrderingChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable channel ordering changes policy"
         },
         "deletions": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable deletions policy"
         },
         "forumPosts": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable forum posts policy"
         },
         "forumTagAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable forum tag audit policy"
         },
         "forumTagChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable forum tag changes policy"
         },
         "guildExpressionAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild expression audit policy"
         },
         "guildExpressionChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild expression changes policy"
         },
         "guildProfileAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild profile audit policy"
         },
         "guildProfileChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild profile changes policy"
         },
         "guildScaffolds": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild scaffolds policy"
         },
         "guildSettingsAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild settings audit policy"
         },
         "guildSettingsChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild settings changes policy"
         },
         "guildTemplateAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild template audit policy"
         },
         "guildTemplateChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable guild template changes policy"
         },
         "integrationAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable integration audit policy"
         },
         "integrationDeletions": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable integration deletions policy"
         },
         "interactions": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable interactions policy"
         },
         "inviteAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable invite audit policy"
         },
         "inviteDeletions": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable invite deletions policy"
         },
         "memberDirectory": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable member directory policy"
         },
         "nicknameChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable nickname changes policy"
         },
         "otherMemberNicknameChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable other member nickname changes policy"
         },
         "memberRoleChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable member role changes policy"
         },
         "memberVoiceAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable member voice audit policy"
         },
         "memberVoiceChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable member voice changes policy"
         },
         "messageForwarding": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable message forwarding policy"
         },
         "crossGuildMessageForwarding": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable cross guild message forwarding policy"
         },
         "nativeCommandChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable native command changes policy"
         },
         "nativeInteractions": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable native interactions policy"
         },
         "onboardingAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable onboarding audit policy"
         },
         "onboardingChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable onboarding changes policy"
         },
         "pinManagement": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable pin management policy"
         },
         "permissionOverwrites": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable permission overwrites policy"
         },
         "pollAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable poll audit policy"
         },
         "pollCreation": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable poll creation policy"
         },
         "pollEnding": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable poll ending policy"
         },
         "pollVoterAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable poll voter audit policy"
         },
         "reactionModeration": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable reaction moderation policy"
         },
         "reactionUserAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable reaction user audit policy"
         },
         "roleCreation": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable role creation policy"
         },
         "roleConfiguration": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable role configuration policy"
         },
         "roleOrderingAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable role ordering audit policy"
         },
         "roleOrderingChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable role ordering changes policy"
         },
         "scheduledEventAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable scheduled event audit policy"
         },
         "scheduledEventUserAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable scheduled event user audit policy"
         },
         "scheduledEventChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable scheduled event changes policy"
         },
         "soundboardAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable soundboard audit policy"
         },
         "soundboardChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable soundboard changes policy"
         },
         "stageInstanceAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable stage instance audit policy"
         },
         "stageInstanceChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable stage instance changes policy"
         },
         "stageStartNotifications": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable stage start notifications policy"
         },
         "threadCreation": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable thread creation policy"
         },
         "threadAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable thread audit policy"
         },
         "threadChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable thread changes policy"
         },
         "welcomeScreenAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable welcome screen audit policy"
         },
         "welcomeScreenChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable welcome screen changes policy"
         },
         "webhookAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable webhook audit policy"
         },
         "webhookChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable webhook changes policy"
         },
         "webhookCreation": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable webhook creation policy"
         },
         "webhookDeletions": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable webhook deletions policy"
         },
         "widgetPublicExposure": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable widget public exposure policy"
         },
         "widgetSettingsAudit": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable widget settings audit policy"
         },
         "widgetSettingsChanges": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable widget settings changes policy"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Explicit capability gates; omitted gates remain disabled"
     },
     "credential": {
       "type": "object",
@@ -258,43 +336,50 @@
         "provider",
         "variable"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Environment reference for the Discord bot token"
     },
     "gateway": {
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable the optional privacy-safe Discord Gateway client"
         },
         "eventBufferSize": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 1000
+          "maximum": 1000,
+          "description": "Maximum bounded Gateway event buffer size"
         }
       },
       "required": [
         "enabled",
         "eventBufferSize"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Optional Discord Gateway policy"
     },
     "identity": {
       "type": "object",
       "properties": {
         "applicationId": {
           "type": "string",
-          "pattern": "^[0-9]{1,20}$"
+          "pattern": "^[0-9]{1,20}$",
+          "description": "Expected Discord application identity"
         },
         "botId": {
           "type": "string",
-          "pattern": "^[0-9]{1,20}$"
+          "pattern": "^[0-9]{1,20}$",
+          "description": "Expected Discord bot user identity"
         }
       },
       "required": [
         "applicationId",
         "botId"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Pinned Discord application and bot identity"
     },
     "limits": {
       "default": {},
@@ -303,34 +388,41 @@
         "attachmentMaxBytes": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Numeric policy limit for attachment max bytes"
         },
         "interactionMaxWritesPerMinute": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Numeric policy limit for interaction max writes per minute"
         },
         "interactionMinWriteIntervalMs": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Numeric policy limit for interaction min write interval ms"
         },
         "nativeInteractionMaxPending": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Numeric policy limit for native interaction max pending"
         },
         "nativeInteractionTtlSeconds": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Numeric policy limit for native interaction ttl seconds"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Optional numeric policy limits"
     },
     "name": {
       "type": "string",
-      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+      "description": "Bounded lowercase identifier for this policy"
     },
     "observability": {
       "default": {},
@@ -339,15 +431,18 @@
         "compression": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Common OTLP compression mode"
         },
         "endpoint": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Common credential-free absolute OTLP endpoint"
         },
         "exportEnabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable OTLP export"
         },
         "headers": {
           "type": "object",
@@ -366,10 +461,12 @@
             "provider",
             "variable"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "Environment reference for an OTLP header string"
         },
         "jsonLogsEnabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Enable content-free JSON operational logs"
         },
         "metrics": {
           "type": "object",
@@ -377,12 +474,14 @@
             "compression": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "description": "OTLP compression mode"
             },
             "endpoint": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "description": "Credential-free absolute OTLP endpoint"
             },
             "headers": {
               "type": "object",
@@ -401,17 +500,20 @@
                 "provider",
                 "variable"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "Environment reference for an OTLP header string"
             },
             "protocol": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "description": "OTLP transport protocol"
             },
             "timeoutMs": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "OTLP request timeout in milliseconds"
             }
           },
           "additionalProperties": false
@@ -419,27 +521,32 @@
         "protocol": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Common OTLP transport protocol"
         },
         "serviceName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Bounded non-identifying telemetry service name"
         },
         "timeoutMs": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Common OTLP request timeout in milliseconds"
         },
         "traceSampleRatio": {
           "type": "number",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "description": "Trace sampling ratio"
         },
         "traceSampler": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Trace sampler name"
         },
         "traces": {
           "type": "object",
@@ -447,12 +554,14 @@
             "compression": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "description": "OTLP compression mode"
             },
             "endpoint": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "description": "Credential-free absolute OTLP endpoint"
             },
             "headers": {
               "type": "object",
@@ -471,23 +580,27 @@
                 "provider",
                 "variable"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "Environment reference for an OTLP header string"
             },
             "protocol": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 4096,
+              "description": "OTLP transport protocol"
             },
             "timeoutMs": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "OTLP request timeout in milliseconds"
             }
           },
           "additionalProperties": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Optional content-free local and OTLP observability policy"
     },
     "readScope": {
       "type": "object",
@@ -499,7 +612,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Optional exact channel allowlist inside the guild boundary"
         },
         "guildIds": {
           "minItems": 1,
@@ -508,14 +622,16 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact guild allowlist forming the outer read boundary"
         }
       },
       "required": [
         "channelIds",
         "guildIds"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Required outer Discord read boundary"
     },
     "runtime": {
       "default": {},
@@ -524,14 +640,17 @@
         "nativeCommandName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Runtime setting for native command name"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Optional non-secret runtime settings"
     },
     "schemaVersion": {
       "type": "number",
-      "const": 2
+      "const": 2,
+      "description": "Configuration format version"
     },
     "scopes": {
       "default": {},
@@ -544,7 +663,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for admin guild ids"
         },
         "announcementCrosspostChannelIds": {
           "minItems": 0,
@@ -553,7 +673,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for announcement crosspost channel ids"
         },
         "announcementSubscriptionSourceChannelIds": {
           "minItems": 0,
@@ -562,7 +683,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for announcement subscription source channel ids"
         },
         "announcementSubscriptionTargetChannelIds": {
           "minItems": 0,
@@ -571,7 +693,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for announcement subscription target channel ids"
         },
         "attachmentChannelIds": {
           "minItems": 0,
@@ -580,7 +703,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for attachment channel ids"
         },
         "automodAlertChannelIds": {
           "minItems": 0,
@@ -589,7 +713,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for automod alert channel ids"
         },
         "automodGuildIds": {
           "minItems": 0,
@@ -598,7 +723,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for automod guild ids"
         },
         "banAuditGuildIds": {
           "minItems": 0,
@@ -607,7 +733,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for ban audit guild ids"
         },
         "channelCreationGuildIds": {
           "minItems": 0,
@@ -616,7 +743,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for channel creation guild ids"
         },
         "channelCloneGuildIds": {
           "minItems": 0,
@@ -625,7 +753,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for channel clone guild ids"
         },
         "channelCloneSourceIds": {
           "minItems": 0,
@@ -634,7 +763,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for channel clone source ids"
         },
         "channelMetadataIds": {
           "minItems": 0,
@@ -643,7 +773,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for channel metadata ids"
         },
         "channelOrderingGuildIds": {
           "minItems": 0,
@@ -652,7 +783,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for channel ordering guild ids"
         },
         "deleteChannelIds": {
           "minItems": 0,
@@ -661,7 +793,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for delete channel ids"
         },
         "forumPostChannelIds": {
           "minItems": 0,
@@ -670,7 +803,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for forum post channel ids"
         },
         "forumTagChannelIds": {
           "minItems": 0,
@@ -679,7 +813,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for forum tag channel ids"
         },
         "guildScaffoldGuildIds": {
           "minItems": 0,
@@ -688,7 +823,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for guild scaffold guild ids"
         },
         "guildExpressionGuildIds": {
           "minItems": 0,
@@ -697,7 +833,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for guild expression guild ids"
         },
         "guildProfileGuildIds": {
           "minItems": 0,
@@ -706,7 +843,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for guild profile guild ids"
         },
         "guildSettingsGuildIds": {
           "minItems": 0,
@@ -715,7 +853,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for guild settings guild ids"
         },
         "guildTemplateGuildIds": {
           "minItems": 0,
@@ -724,7 +863,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for guild template guild ids"
         },
         "integrationGuildIds": {
           "minItems": 0,
@@ -733,7 +873,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for integration guild ids"
         },
         "integrationIds": {
           "minItems": 0,
@@ -742,7 +883,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for integration ids"
         },
         "interactionChannelIds": {
           "minItems": 0,
@@ -751,7 +893,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for interaction channel ids"
         },
         "inviteGuildIds": {
           "minItems": 0,
@@ -760,7 +903,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for invite guild ids"
         },
         "mentionUserIds": {
           "minItems": 0,
@@ -769,7 +913,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for mention user ids"
         },
         "memberDirectoryGuildIds": {
           "minItems": 0,
@@ -778,7 +923,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for member directory guild ids"
         },
         "nicknameGuildIds": {
           "minItems": 0,
@@ -787,7 +933,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for nickname guild ids"
         },
         "memberRoleGuildIds": {
           "minItems": 0,
@@ -796,7 +943,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for member role guild ids"
         },
         "memberRoleIds": {
           "minItems": 0,
@@ -805,7 +953,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for member role ids"
         },
         "memberVoiceChannelIds": {
           "minItems": 0,
@@ -814,7 +963,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for member voice channel ids"
         },
         "memberVoiceGuildIds": {
           "minItems": 0,
@@ -823,7 +973,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for member voice guild ids"
         },
         "messageForwardSourceChannelIds": {
           "minItems": 0,
@@ -832,7 +983,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for message forward source channel ids"
         },
         "messageForwardTargetChannelIds": {
           "minItems": 0,
@@ -841,7 +993,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for message forward target channel ids"
         },
         "nativeInteractionChannelIds": {
           "minItems": 0,
@@ -850,7 +1003,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for native interaction channel ids"
         },
         "nativeInteractionGuildIds": {
           "minItems": 0,
@@ -859,7 +1013,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for native interaction guild ids"
         },
         "nativeInteractionUserIds": {
           "minItems": 0,
@@ -868,7 +1023,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for native interaction user ids"
         },
         "onboardingGuildIds": {
           "minItems": 0,
@@ -877,7 +1033,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for onboarding guild ids"
         },
         "protectedUserIds": {
           "minItems": 0,
@@ -886,7 +1043,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for protected user ids"
         },
         "pinChannelIds": {
           "minItems": 0,
@@ -895,7 +1053,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for pin channel ids"
         },
         "pollChannelIds": {
           "minItems": 0,
@@ -904,7 +1063,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for poll channel ids"
         },
         "reactionChannelIds": {
           "minItems": 0,
@@ -913,7 +1073,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for reaction channel ids"
         },
         "permissionOverwriteChannelIds": {
           "minItems": 0,
@@ -922,7 +1083,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for permission overwrite channel ids"
         },
         "roleCreationGuildIds": {
           "minItems": 0,
@@ -931,7 +1093,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for role creation guild ids"
         },
         "roleConfigurationIds": {
           "minItems": 0,
@@ -940,7 +1103,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for role configuration ids"
         },
         "roleOrderingGuildIds": {
           "minItems": 0,
@@ -949,7 +1113,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for role ordering guild ids"
         },
         "scheduledEventGuildIds": {
           "minItems": 0,
@@ -958,7 +1123,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for scheduled event guild ids"
         },
         "soundboardGuildIds": {
           "minItems": 0,
@@ -967,7 +1133,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for soundboard guild ids"
         },
         "stageChannelIds": {
           "minItems": 0,
@@ -976,7 +1143,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for stage channel ids"
         },
         "threadParentIds": {
           "minItems": 0,
@@ -985,7 +1153,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for thread parent ids"
         },
         "threadGuildIds": {
           "minItems": 0,
@@ -994,7 +1163,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for thread guild ids"
         },
         "threadIds": {
           "minItems": 0,
@@ -1003,7 +1173,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for thread ids"
         },
         "threadMemberUserIds": {
           "minItems": 0,
@@ -1012,7 +1183,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for thread member user ids"
         },
         "welcomeScreenGuildIds": {
           "minItems": 0,
@@ -1021,7 +1193,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for welcome screen guild ids"
         },
         "webhookChannelIds": {
           "minItems": 0,
@@ -1030,7 +1203,8 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for webhook channel ids"
         },
         "widgetSettingsGuildIds": {
           "minItems": 0,
@@ -1039,10 +1213,12 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
-          }
+          },
+          "description": "Exact Discord ID allowlist for widget settings guild ids"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Exact per-feature Discord ID allowlists"
     },
     "storage": {
       "default": {},
@@ -1055,12 +1231,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4096
-          }
+          },
+          "description": "Owned local roots for attachment roots"
         },
         "auditFile": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Absolute path for the content-free activity log"
         },
         "guildExpressionRoots": {
           "maxItems": 32,
@@ -1069,7 +1247,8 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4096
-          }
+          },
+          "description": "Owned local roots for guild expression roots"
         },
         "scheduledEventRoots": {
           "maxItems": 32,
@@ -1078,7 +1257,8 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4096
-          }
+          },
+          "description": "Owned local roots for scheduled event roots"
         },
         "soundboardRoots": {
           "maxItems": 32,
@@ -1087,10 +1267,12 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4096
-          }
+          },
+          "description": "Owned local roots for soundboard roots"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Local content-free activity and owned-file paths"
     },
     "tools": {
       "type": "object",
@@ -1100,7 +1282,8 @@
           "enum": [
             "full",
             "progressive"
-          ]
+          ],
+          "description": "MCP tool discovery surface"
         },
         "toolsets": {
           "minItems": 1,
@@ -1161,14 +1344,16 @@
               "webhooks",
               "widget-settings"
             ]
-          }
+          },
+          "description": "Canonical MCP toolset selection"
         }
       },
       "required": [
         "surface",
         "toolsets"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Advertised MCP tool surface"
     }
   },
   "required": [

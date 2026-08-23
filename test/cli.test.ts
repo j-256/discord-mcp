@@ -10,6 +10,13 @@ import {
   type CliDependencies,
 } from "../src/cli.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
+import {
+  explainConnectorConfig,
+  summarizeConnectorConfigDocument,
+  type ConfigShowReport,
+  type ConfigValidationReport,
+  type ConfigWriteReport,
+} from "../src/config-operator.js"
 import { ENVIRONMENT_NAMES } from "../src/constants.js"
 import {
   ConfigurationError,
@@ -84,6 +91,9 @@ function setupReport(): SetupReport {
   return {
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
+    configBackupFile: null,
+    configFile: null,
+    credentialVariable: ENVIRONMENT_NAMES.token,
     guildsAccessibleOnFirstPage: 1,
     guildsInScopeOnFirstPage: 1,
     launch: {
@@ -193,6 +203,40 @@ function connectorProfile(): ConnectorProfile {
   })
 }
 
+function configValidationReport(): ConfigValidationReport {
+  const profile = connectorProfile()
+  if (profile.schemaVersion !== 2) throw new Error("Expected schema-v2 profile")
+  return {
+    file: "/configuration/discord-mcp.json",
+    schemaVersion: 1,
+    status: "ok",
+    summary: summarizeConnectorConfigDocument(profile),
+    validation: {
+      crossFieldPolicy: true,
+      discordContacted: false,
+      secretValuesRead: false,
+    },
+  }
+}
+
+function configShowReport(): ConfigShowReport {
+  const profile = connectorProfile()
+  if (profile.schemaVersion !== 2) throw new Error("Expected schema-v2 profile")
+  return {
+    ...configValidationReport(),
+    document: profile,
+  }
+}
+
+function configWriteReport(action: "init" | "migrate"): ConfigWriteReport {
+  return {
+    ...configShowReport(),
+    action,
+    created: true,
+    source: action === "init" ? "new" : "environment",
+  }
+}
+
 function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies {
   const profile = connectorProfile()
   return {
@@ -212,6 +256,12 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async diagnose() {
       return doctorReport()
     },
+    explainConfig(path) {
+      return explainConnectorConfig(path)
+    },
+    async initializeConfig() {
+      return configWriteReport("init")
+    },
     async listCoordination() {
       return { claims: [], schemaVersion: 1, status: "ok" }
     },
@@ -220,6 +270,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async loadProfile() {
       return profile
+    },
+    async migrateConfig() {
+      return configWriteReport("migrate")
     },
     async prepareSetup() {
       return setupReport()
@@ -239,8 +292,14 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async smoke() {
       return smokeReport()
     },
+    showConfig() {
+      return configShowReport()
+    },
     async trashProfile(name) {
       return { name, trashId: "0000000000000-removed" }
+    },
+    validateConfig() {
+      return configValidationReport()
     },
     ...overrides,
   }
@@ -296,6 +355,75 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     configFile: "/configuration/discord.json",
   })
   assert.deepEqual(parseCliArguments([
+    "config",
+    "init",
+    "/configuration/discord.json",
+    "--name",
+    "support-bot",
+    "--application-id",
+    APPLICATION_ID,
+    "--bot-id",
+    BOT_ID,
+    "--guild-id",
+    GUILD_ID,
+    "--channel-id",
+    CHANNEL_ID,
+    "--preset",
+    "channel-reader",
+    "--token-env",
+    TOKEN_ALIAS,
+    "--json",
+  ]), {
+    action: "init",
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    command: "config",
+    credentialVariable: TOKEN_ALIAS,
+    file: "/configuration/discord.json",
+    guildIds: [GUILD_ID],
+    json: true,
+    name: "support-bot",
+    overwrite: false,
+    preset: "channel-reader",
+  })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "migrate",
+    "/configuration/discord.json",
+    "--profile",
+    "support-bot",
+    "--force",
+  ]), {
+    action: "migrate",
+    command: "config",
+    file: "/configuration/discord.json",
+    json: false,
+    overwrite: true,
+    profileName: "support-bot",
+  })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "validate",
+    "/configuration/discord.json",
+  ]), {
+    action: "validate",
+    command: "config",
+    file: "/configuration/discord.json",
+    json: false,
+  })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "explain",
+    "capabilities.deletions",
+    "--json",
+  ]), {
+    action: "explain",
+    command: "config",
+    json: true,
+    path: "capabilities.deletions",
+  })
+  assert.deepEqual(parseCliArguments([
     "setup",
     "--name",
     "team-discord",
@@ -305,7 +433,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "setup",
     json: false,
     launcherCommand: "/usr/local/bin/discord-mcp",
-    overwriteProfile: false,
+    overwrite: false,
     serverName: "team-discord",
   })
   assert.deepEqual(parseCliArguments([
@@ -321,8 +449,24 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     credentialVariable: TOKEN_ALIAS,
     json: true,
     launcherCommand: undefined,
-    overwriteProfile: true,
+    overwrite: true,
     profileName: "support-bot",
+    serverName: undefined,
+  })
+  assert.deepEqual(parseCliArguments([
+    "setup",
+    "--config",
+    "/configuration/discord.json",
+    "--token-env",
+    TOKEN_ALIAS,
+    "--force",
+  ]), {
+    command: "setup",
+    configFile: "/configuration/discord.json",
+    credentialVariable: TOKEN_ALIAS,
+    json: false,
+    launcherCommand: undefined,
+    overwrite: true,
     serverName: undefined,
   })
   assert.deepEqual(parseCliArguments([
@@ -343,7 +487,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "setup",
     json: false,
     launcherCommand: undefined,
-    overwriteProfile: false,
+    overwrite: false,
     preset: {
       channelIds: [CHANNEL_ID, "400000000000000002"],
       guildIds: [GUILD_ID, "300000000000000002"],
@@ -404,13 +548,35 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     /mutually exclusive/,
   )
   assert.throws(
+    () => parseCliArguments([
+      "config",
+      "migrate",
+      "/configuration/discord.json",
+      "--profile",
+      "support-bot",
+      "--name",
+      "other",
+    ]),
+    /mutually exclusive/,
+  )
+  assert.throws(
     () => parseCliArguments(["setup", "--client", "legacy"]),
     /Unknown option --client/,
   )
   assert.throws(() => parseCliArguments(["setup", "--name"]), /requires a value/)
   assert.throws(
     () => parseCliArguments(["setup", "--token-env", TOKEN_ALIAS]),
-    /require --profile/,
+    /require --config or --profile/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--config",
+      "/configuration/discord.json",
+      "--profile",
+      "support-bot",
+    ]),
+    /mutually exclusive/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -901,6 +1067,59 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
   assert.match(stdout.value(), /\[redacted\]/)
 })
 
+test("CLI forwards standalone configuration setup and renders recoverable replacement", async () => {
+  let received: unknown
+  const stdout = outputStream()
+  const source = { [TOKEN_ALIAS]: TOKEN }
+  const exitCode = await runCli({
+    args: [
+      "setup",
+      "--config",
+      "/configuration/discord.json",
+      "--token-env",
+      TOKEN_ALIAS,
+      "--force",
+    ],
+    dependencies: dependencies({
+      async prepareSetup(options) {
+        received = options
+        return {
+          ...setupReport(),
+          configBackupFile: "/configuration/.discord.json.backup",
+          configFile: "/configuration/discord.json",
+          credentialVariable: TOKEN_ALIAS,
+          launch: {
+            ...setupReport().launch,
+            args: ["serve", "--config", "/configuration/discord.json"],
+            environment: {
+              forward: [TOKEN_ALIAS],
+              set: {},
+            },
+          },
+        }
+      },
+    }),
+    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    environment: source,
+    executablePath: "/usr/bin/node",
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.deepEqual(received, {
+    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    command: "/usr/bin/node",
+    configFile: "/configuration/discord.json",
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    overwriteConfig: true,
+  })
+  assert.match(stdout.value(), /Saved configuration: \/configuration\/discord\.json/)
+  assert.match(stdout.value(), /Previous configuration backup:/)
+  assert.match(stdout.value(), new RegExp(`Credential variable: ${TOKEN_ALIAS}`))
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
 test("CLI forwards exact preset setup intent and renders its read-only boundary", async () => {
   let received: unknown
   const stdout = outputStream()
@@ -1098,6 +1317,96 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
   assert.deepEqual(events, ["serve", "doctor", "smoke"])
 })
 
+test("CLI routes config lifecycle commands without exposing credential values", async () => {
+  const events: string[] = []
+  const environment = { [TOKEN_ALIAS]: TOKEN }
+  const output = outputStream()
+  const configDependencies = dependencies({
+    explainConfig(path) {
+      events.push(`explain:${path}`)
+      return explainConnectorConfig(path)
+    },
+    async initializeConfig(options) {
+      events.push(`init:${options.file}:${options.name}`)
+      return configWriteReport("init")
+    },
+    async migrateConfig(options) {
+      events.push(`migrate:${options.file}:${options.name}`)
+      assert.equal(options.environment, environment)
+      return configWriteReport("migrate")
+    },
+    showConfig(file) {
+      events.push(`show:${file}`)
+      return configShowReport()
+    },
+    validateConfig(file) {
+      events.push(`validate:${file}`)
+      return configValidationReport()
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["config", "validate", "/configuration/discord-mcp.json"],
+    dependencies: configDependencies,
+    environment,
+    stdout: output.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["config", "show", "/configuration/discord-mcp.json", "--json"],
+    dependencies: configDependencies,
+    environment,
+    stdout: output.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["config", "explain", "capabilities.deletions"],
+    dependencies: configDependencies,
+    environment,
+    stdout: output.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [
+      "config",
+      "init",
+      "/configuration/new.json",
+      "--name",
+      "new",
+      "--application-id",
+      APPLICATION_ID,
+      "--bot-id",
+      BOT_ID,
+      "--guild-id",
+      GUILD_ID,
+    ],
+    dependencies: configDependencies,
+    environment,
+    stdout: output.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [
+      "config",
+      "migrate",
+      "/configuration/migrated.json",
+      "--name",
+      "migrated",
+      "--token-env",
+      TOKEN_ALIAS,
+    ],
+    dependencies: configDependencies,
+    environment,
+    stdout: output.stream,
+  }), 0)
+
+  assert.deepEqual(events, [
+    "validate:/configuration/discord-mcp.json",
+    "show:/configuration/discord-mcp.json",
+    "explain:capabilities.deletions",
+    "init:/configuration/new.json:new",
+    "migrate:/configuration/migrated.json:migrated",
+  ])
+  assert.equal(output.value().includes(TOKEN), false)
+  assert.match(output.value(), /secret values, and did not contact Discord/)
+})
+
 test("CLI profile lifecycle is credential-free, recoverable, and exactly confirmed", async () => {
   const events: string[] = []
   let activations = 0
@@ -1213,6 +1522,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const smokeOutput = outputStream()
   const helpOutput = outputStream()
   const catalogHelpOutput = outputStream()
+  const configHelpOutput = outputStream()
   const versionOutput = outputStream()
 
   assert.equal(await runCli({
@@ -1231,6 +1541,11 @@ test("CLI renders smoke, help, and version output", async () => {
     stdout: catalogHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
+    args: ["config", "--help"],
+    dependencies: dependencies(),
+    stdout: configHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
     args: ["--version"],
     dependencies: dependencies(),
     stdout: versionOutput.stream,
@@ -1241,6 +1556,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \[--config FILE \| --profile NAME\]/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\]/)
+  assert.match(configHelpOutput.value(), /migrate FILE/)
   assert.match(versionOutput.value(), /0\.1\.0/)
 })
 

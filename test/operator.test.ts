@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -8,6 +8,10 @@ import {
   ENVIRONMENT_NAMES,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
+import {
+  createConnectorConfigDocument,
+  loadConnectorConfigDocumentFile,
+} from "../src/config-document.js"
 import type { DiscordToolService } from "../src/mcp.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import {
@@ -3339,7 +3343,59 @@ test("stdio launch descriptor makes a saved profile the non-overridable read bou
       botId: BOT_ID,
       profile,
     }),
-    /already select a profile/,
+    /already select a configuration/,
+  )
+})
+
+test("stdio launch descriptor makes a standalone configuration the only policy input", () => {
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "support-bot",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+  const file = "/configuration/discord.json"
+  const result = createStdioLaunchDescriptor({
+    applicationId: APPLICATION_ID,
+    args: ["serve"],
+    botId: BOT_ID,
+    config: { document, file },
+  })
+
+  assert.deepEqual(result.args, ["serve", "--config", file])
+  assert.deepEqual(result.environment, {
+    forward: [TOKEN_ALIAS],
+    set: {},
+  })
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      config: { document, file },
+      profile: document,
+    }),
+    /mutually exclusive/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: "999999999999999999",
+      botId: BOT_ID,
+      config: { document, file },
+    }),
+    /does not match the verified Discord identity/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      args: ["serve", "--config", file],
+      botId: BOT_ID,
+      config: { document, file },
+    }),
+    /already select a configuration/,
   )
 })
 
@@ -3557,7 +3613,98 @@ test("setup verifies and saves a profile without persisting or reporting its cre
   })
 })
 
-test("profile setup rejects ambient scope and profile-only options fail closed", async () => {
+test("setup verifies and saves a standalone configuration with recoverable replacement", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-config-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const configFile = join(await realpath(temporary), "discord.json")
+  const source = environment({
+    [ENVIRONMENT_NAMES.token]: undefined,
+    [TOKEN_ALIAS]: TOKEN,
+    [ENVIRONMENT_NAMES.allowGateway]: "true",
+    [ENVIRONMENT_NAMES.gatewayEventBufferSize]: "250",
+    [ENVIRONMENT_NAMES.toolSurface]: "progressive",
+    [ENVIRONMENT_NAMES.toolsets]: "connector,messages",
+  })
+  const before = { ...source }
+
+  const report = await prepareSetup({
+    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    command: "/usr/bin/node",
+    configFile,
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    service: statusProvider(),
+  })
+
+  assert.deepEqual(source, before)
+  assert.equal(report.configBackupFile, null)
+  assert.equal(report.configFile, configFile)
+  assert.equal(report.credentialVariable, TOKEN_ALIAS)
+  assert.equal(report.profile, null)
+  assert.deepEqual(report.launch.args, [
+    "/srv/discord-mcp/dist/cli.js",
+    "serve",
+    "--config",
+    configFile,
+  ])
+  assert.deepEqual(report.launch.environment, {
+    forward: [TOKEN_ALIAS],
+    set: {},
+  })
+  const initial = loadConnectorConfigDocumentFile(configFile)
+  assert.equal(initial.name, "discord")
+  assert.equal(initial.credential.variable, TOKEN_ALIAS)
+  assert.equal(initial.gateway.enabled, true)
+  assert.doesNotMatch(await readFile(configFile, "utf8"), new RegExp(TOKEN))
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
+
+  await assert.rejects(
+    () => prepareSetup({
+      configFile,
+      credentialVariable: TOKEN_ALIAS,
+      environment: source,
+      service: statusProvider(),
+    }),
+    /already exists/,
+  )
+
+  const replacement = await prepareSetup({
+    configFile,
+    credentialVariable: TOKEN_ALIAS,
+    environment: environment({
+      [ENVIRONMENT_NAMES.token]: undefined,
+      [TOKEN_ALIAS]: TOKEN,
+      [ENVIRONMENT_NAMES.toolSurface]: "full",
+    }),
+    overwriteConfig: true,
+    service: statusProvider(),
+  })
+  assert.ok(replacement.configBackupFile)
+  assert.deepEqual(
+    loadConnectorConfigDocumentFile(replacement.configBackupFile),
+    initial,
+  )
+  assert.equal(loadConnectorConfigDocumentFile(configFile).tools.surface, "full")
+
+  const changedIdentity = status()
+  changedIdentity.application.id = "100000000000000002"
+  await assert.rejects(
+    () => prepareSetup({
+      configFile,
+      credentialVariable: TOKEN_ALIAS,
+      environment: source,
+      overwriteConfig: true,
+      service: {
+        async getStatus() {
+          return changedIdentity
+        },
+      },
+    }),
+    /locked to its existing Discord identity/,
+  )
+})
+
+test("persistent setup rejects ambient scope and persistence-only options fail closed", async () => {
   await assert.rejects(
     () => prepareSetup({
       environment: environment({
@@ -3574,7 +3721,7 @@ test("profile setup rejects ambient scope and profile-only options fail closed",
       environment: environment(),
       service: statusProvider(),
     }),
-    /require a profile name/,
+    /require a configuration file or profile/,
   )
   await assert.rejects(
     () => prepareSetup({
@@ -3585,7 +3732,7 @@ test("profile setup rejects ambient scope and profile-only options fail closed",
       },
       service: statusProvider(),
     }),
-    /require a profile name/,
+    /require a configuration file or profile/,
   )
   await assert.rejects(
     () => prepareSetup({

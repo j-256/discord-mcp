@@ -871,6 +871,11 @@ export async function activateProfile(
   const profile = await loadProfile(name, options)
   const source = options.environment || process.env
   if (profile.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
+    if (source[ENVIRONMENT_NAMES.configFile]?.trim()) {
+      throw new ProfileError(
+        `Profile ${profile.name} conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+      )
+    }
     return {
       environment: activateConnectorConfigDocument(profile, source),
       profile,

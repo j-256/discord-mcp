@@ -243,7 +243,11 @@ test("configuration metadata covers every runtime field and emits a strict schem
   const expected = Object.values(ENVIRONMENT_NAMES)
     .filter((name) => name !== ENVIRONMENT_NAMES.configFile)
   assert.deepEqual([...mapped].sort(), [...expected].sort())
-  assert.equal(connectorConfigFields().length, expected.length)
+  assert.equal(connectorConfigFields().length, expected.length + 3)
+  assert.equal(
+    connectorConfigFields().every((field) => field.description.length > 0),
+    true,
+  )
   assert.equal(CONFIG_CAPABILITY_MAPPINGS.length > 0, true)
   assert.equal(CONFIG_SCOPE_MAPPINGS.length > 0, true)
   assert.equal(CONFIG_LIMIT_MAPPINGS.length > 0, true)
@@ -254,8 +258,10 @@ test("configuration metadata covers every runtime field and emits a strict schem
   assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema")
   assert.equal(schema.$id, CONFIG_DOCUMENT_SCHEMA_ID)
   assert.equal(schema.additionalProperties, false)
-  assert.deepEqual(
-    (schema.properties as Record<string, Record<string, unknown>>).schemaVersion,
-    { const: 2, type: "number" },
-  )
+  const schemaVersion = (
+    schema.properties as Record<string, Record<string, unknown>>
+  ).schemaVersion
+  assert.equal(schemaVersion?.const, 2)
+  assert.equal(schemaVersion?.type, "number")
+  assert.equal(schemaVersion?.description, "Configuration format version")
 })
