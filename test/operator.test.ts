@@ -155,6 +155,10 @@ function status(
       memberVoiceChangesEnabled: false,
       memberVoiceChannelIds: [],
       memberVoiceGuildIds: [],
+      crossGuildMessageForwardingEnabled: false,
+      messageForwardingEnabled: false,
+      messageForwardSourceChannelIds: [],
+      messageForwardTargetChannelIds: [],
       nativeCommandChangesEnabled: false,
       nativeCommandName: "discord-mcp",
       nativeInteractionChannelIds: [],
@@ -246,6 +250,7 @@ function toolService(): DiscordToolService {
     auditRoleOrder: unexpected,
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
+    executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeRoleOrder: unexpected,
     executeMemberRoleChange: unexpected,
@@ -272,6 +277,7 @@ function toolService(): DiscordToolService {
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planAnnouncementSubscription: unexpected,
+    planMessageForward: unexpected,
     planNativeInteractionCommand: unexpected,
     getThreadMembership: unexpected,
     getThreadState: unexpected,
@@ -1049,6 +1055,72 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
   for (const name of [
     "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
     "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
+test("doctor and setup explain reviewed message-forward scope and intent gates", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${SOURCE_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
+    DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: SOURCE_CHANNEL_ID,
+    DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+  const missingIntent = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
+  const missingIntentSetup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
+
+  const policy = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.messageForwardPolicy,
+  )
+  assert.equal(policy?.status, "pass")
+  assert.match(policy?.summary || "", /forced empty mentions/)
+  assert.match(policy?.summary || "", /age-restriction downgrade prevention/)
+  assert.match(policy?.summary || "", /immutable-snapshot validation/)
+  assert.match(omitted.warnings.join("\n"), /message-forwarding toolset/)
+  assert.equal(
+    missingIntent.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.messageContentIntent,
+    )?.status,
+    "fail",
+  )
+  assert.match(missingIntentSetup.warnings.join("\n"), /message forwarding.*blocked/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_MESSAGE_FORWARDING",
+    "DISCORD_MCP_ALLOW_CROSS_GUILD_MESSAGE_FORWARDING",
+    "DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS",
+    "DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS",
   ]) {
     assert.equal(setup.launch.environment.forward.includes(name), true)
   }
@@ -3216,6 +3288,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_member_role_change",
     "review_member_voice_change",
     "review_message_deletion",
+    "review_message_forward",
     "review_message_pin",
     "review_onboarding_change",
     "review_pending_native_interactions",
@@ -3304,6 +3377,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_member_moderation",
     "execute_member_role_change",
     "execute_member_voice_change",
+    "execute_message_forward",
     "execute_message_pin",
     "execute_native_interaction_command",
     "execute_onboarding_change",
@@ -3338,6 +3412,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("get_thread_state"), true)
   assert.equal(report.readOnlyTools.includes("get_thread_membership"), true)
   assert.equal(report.readOnlyTools.includes("plan_thread_change"), true)
+  assert.equal(report.readOnlyTools.includes("plan_message_forward"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_creation"), true)
   assert.equal(report.readOnlyTools.includes("plan_role_configuration"), true)
   assert.equal(report.readOnlyTools.includes("plan_poll_creation"), true)

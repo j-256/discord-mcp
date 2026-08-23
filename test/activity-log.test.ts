@@ -35,6 +35,7 @@ import {
   type MemberRoleActivity,
   type MemberVoiceActivity,
   type MessagePinActivity,
+  type MessageForwardActivity,
   type NativeInteractionActivity,
   type NativeInteractionCommandActivity,
   type OnboardingActivity,
@@ -604,6 +605,32 @@ function announcementCrosspost(
     verification: status === "completed"
       ? "match"
       : null,
+  }
+}
+
+function messageForward(
+  id: string,
+  status: MessageForwardActivity["status"],
+): MessageForwardActivity {
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    id,
+    kind: "message-forward",
+    nonce: "forward_nonce_0001",
+    operationKeyHash: `sha256:${"a".repeat(64)}`,
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
+    schemaVersion: 1,
+    sourceChannelId: "200",
+    sourceGuildId: "100",
+    sourceMessageId: "300",
+    status,
+    targetChannelId: "201",
+    targetGuildId: "101",
+    targetMessageId: status === "completed" ? "301" : null,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -2124,6 +2151,52 @@ test("JSONL activity log keeps announcement-crosspost evidence content-free", as
   assert.doesNotMatch(
     JSON.stringify(result),
     /private author|private channel|private announcement|private-operation/,
+  )
+})
+
+test("JSONL activity log keeps message-forward evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await assert.rejects(
+    () => store.append({
+      ...messageForward("1", "pending"),
+      attachmentUrl: "https://private.invalid/attachment",
+      content: "must-not-persist",
+      snapshot: { content: "must-never-reach-disk" },
+    } as MessageForwardActivity),
+    /invalid content-free shape/,
+  )
+  await store.append(messageForward("1", "pending"))
+  await store.append(messageForward("2", "completed"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...messageForward("3", "completed"),
+      attachmentFilename: "private.txt",
+      content: "private forwarded content",
+      operationKey: "private-operation-key",
+    })}\n${JSON.stringify({
+      ...messageForward("4", "completed"),
+      targetMessageId: null,
+    })}\n${JSON.stringify({
+      ...messageForward("5", "failed"),
+      targetMessageId: "301",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must-not-persist|must-never-reach-disk|private.invalid/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 3)
+  assert.equal(result.entries[0]?.kind, "message-forward")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private\.txt|private forwarded|private-operation/,
   )
 })
 

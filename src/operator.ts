@@ -43,7 +43,7 @@ import {
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 14
+export const OPERATOR_REPORT_SCHEMA_VERSION = 15
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -86,6 +86,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   memberVoiceAuditPolicy: "member-voice-audit-policy",
   memberVoiceChangePolicy: "member-voice-change-policy",
   messageContentIntent: "message-content-intent",
+  messageForwardPolicy: "message-forward-policy",
   messagePinPolicy: "message-pin-policy",
   nativeInteractionCommandPolicy: "native-interaction-command-policy",
   nativeInteractionIngressPolicy: "native-interaction-ingress-policy",
@@ -616,6 +617,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Member voice audit and reviewed changes",
     ],
     [config.allowPinManagement, "pins", "Message pin management"],
+    [config.allowMessageForwarding, "message-forwarding", "Reviewed message forwarding"],
     [
       config.allowAnnouncementCrossposts,
       "announcement-crossposts",
@@ -1126,6 +1128,28 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.announcementCrosspostPolicy,
         "pass",
         `Reviewed announcement crossposts are constrained to ${config.announcementCrosspostChannelIds.size} exact channels with authorship-sensitive permission proof, one-shot execution, and strict response plus readback verification`,
+      ))
+    }
+    if (!config.allowMessageForwarding) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.messageForwardPolicy,
+        "pass",
+        "Reviewed message forwarding is disabled",
+      ))
+    } else if (
+      config.messageForwardSourceChannelIds.size === 0
+      || config.messageForwardTargetChannelIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.messageForwardPolicy,
+        "warn",
+        "Message forwarding is enabled, but exact source and target channel allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.messageForwardPolicy,
+        "pass",
+        `Reviewed message forwarding is constrained to ${config.messageForwardSourceChannelIds.size} exact source channels and ${config.messageForwardTargetChannelIds.size} exact target channels with ${config.allowCrossGuildMessageForwarding ? "explicit cross-guild authorization" : "same-guild enforcement"}, age-restriction downgrade prevention, complete permission evidence including unknown bits, forced empty mentions, suppressed notifications, one-shot execution, immutable-snapshot validation, and exact readback`,
       ))
     }
     if (!config.allowAnnouncementSubscriptionAudit) {
@@ -2189,15 +2213,19 @@ export async function diagnoseConnector(
           && config.announcementCrosspostChannelIds.size > 0
         const componentMessagesConfigured = config.allowInteractions
           && config.interactionChannelIds.size > 0
+        const messageForwardingConfigured = config.allowMessageForwarding
+          && config.messageForwardSourceChannelIds.size > 0
+          && config.messageForwardTargetChannelIds.size > 0
         const contentDependentWrites = [
           ...(announcementCrosspostsConfigured ? ["announcement crossposts"] : []),
           ...(componentMessagesConfigured ? ["static component messages"] : []),
+          ...(messageForwardingConfigured ? ["message forwarding"] : []),
         ]
         checks.push(status.application.messageContentIntent === "enabled"
           ? check(
             DOCTOR_CHECK_IDS.messageContentIntent,
             "pass",
-            "Discord application advertises Message Content intent for native search, reviewed announcement crossposts, and reviewed static component messages",
+            "Discord application advertises Message Content intent for native search and configured content-dependent reviewed writes",
           )
           : check(
             DOCTOR_CHECK_IDS.messageContentIntent,
@@ -2358,6 +2386,10 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.pinChannelIds,
     ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
     ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
+    ENVIRONMENT_NAMES.allowMessageForwarding,
+    ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding,
+    ENVIRONMENT_NAMES.messageForwardSourceChannelIds,
+    ENVIRONMENT_NAMES.messageForwardTargetChannelIds,
     ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit,
     ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges,
     ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
@@ -2564,6 +2596,11 @@ export async function prepareSetup(
     ...(config.allowAnnouncementCrossposts
       && config.announcementCrosspostChannelIds.size > 0
       ? ["announcement crossposts"]
+      : []),
+    ...(config.allowMessageForwarding
+      && config.messageForwardSourceChannelIds.size > 0
+      && config.messageForwardTargetChannelIds.size > 0
+      ? ["message forwarding"]
       : []),
     ...(config.allowInteractions && config.interactionChannelIds.size > 0
       ? ["static component messages"]

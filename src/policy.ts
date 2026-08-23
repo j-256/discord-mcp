@@ -83,6 +83,10 @@ export interface PolicyDescription {
   memberVoiceChangesEnabled: boolean
   memberVoiceChannelIds: string[]
   memberVoiceGuildIds: string[]
+  crossGuildMessageForwardingEnabled: boolean
+  messageForwardingEnabled: boolean
+  messageForwardSourceChannelIds: string[]
+  messageForwardTargetChannelIds: string[]
   nativeCommandChangesEnabled: boolean
   nativeCommandName: string
   nativeInteractionChannelIds: string[]
@@ -189,6 +193,8 @@ export class ScopePolicy {
   readonly #allowMemberRoleChanges: boolean
   readonly #allowMemberVoiceAudit: boolean
   readonly #allowMemberVoiceChanges: boolean
+  readonly #allowCrossGuildMessageForwarding: boolean
+  readonly #allowMessageForwarding: boolean
   readonly #allowNativeCommandChanges: boolean
   readonly #allowNativeInteractions: boolean
   readonly #allowOnboardingAudit: boolean
@@ -272,6 +278,8 @@ export class ScopePolicy {
   readonly #memberRoleIds: ReadonlySet<string>
   readonly #memberVoiceChannelIds: ReadonlySet<string>
   readonly #memberVoiceGuildIds: ReadonlySet<string>
+  readonly #messageForwardSourceChannelIds: ReadonlySet<string>
+  readonly #messageForwardTargetChannelIds: ReadonlySet<string>
   readonly #nativeCommandName: string
   readonly #nativeInteractionChannelIds: ReadonlySet<string>
   readonly #nativeInteractionGuildIds: ReadonlySet<string>
@@ -345,6 +353,8 @@ export class ScopePolicy {
     | "allowMemberRoleChanges"
     | "allowMemberVoiceAudit"
     | "allowMemberVoiceChanges"
+    | "allowCrossGuildMessageForwarding"
+    | "allowMessageForwarding"
     | "allowNativeCommandChanges"
     | "allowNativeInteractions"
     | "allowOnboardingAudit"
@@ -413,6 +423,8 @@ export class ScopePolicy {
     | "memberRoleIds"
     | "memberVoiceChannelIds"
     | "memberVoiceGuildIds"
+    | "messageForwardSourceChannelIds"
+    | "messageForwardTargetChannelIds"
     | "nativeCommandName"
     | "nativeInteractionChannelIds"
     | "nativeInteractionGuildIds"
@@ -471,6 +483,8 @@ export class ScopePolicy {
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
     this.#allowMemberVoiceAudit = config.allowMemberVoiceAudit ?? false
     this.#allowMemberVoiceChanges = config.allowMemberVoiceChanges ?? false
+    this.#allowCrossGuildMessageForwarding = config.allowCrossGuildMessageForwarding ?? false
+    this.#allowMessageForwarding = config.allowMessageForwarding ?? false
     this.#allowNativeCommandChanges = config.allowNativeCommandChanges ?? false
     this.#allowNativeInteractions = config.allowNativeInteractions ?? false
     this.#allowOnboardingAudit = config.allowOnboardingAudit ?? false
@@ -557,6 +571,8 @@ export class ScopePolicy {
     this.#memberRoleIds = config.memberRoleIds ?? new Set()
     this.#memberVoiceChannelIds = config.memberVoiceChannelIds ?? new Set()
     this.#memberVoiceGuildIds = config.memberVoiceGuildIds ?? new Set()
+    this.#messageForwardSourceChannelIds = config.messageForwardSourceChannelIds ?? new Set()
+    this.#messageForwardTargetChannelIds = config.messageForwardTargetChannelIds ?? new Set()
     this.#nativeCommandName = config.nativeCommandName ?? "discord-mcp"
     this.#nativeInteractionChannelIds = config.nativeInteractionChannelIds ?? new Set()
     this.#nativeInteractionGuildIds = config.nativeInteractionGuildIds ?? new Set()
@@ -715,6 +731,15 @@ export class ScopePolicy {
         && this.#memberVoiceChannelIds.size > 0,
       memberVoiceChannelIds: [...this.#memberVoiceChannelIds].sort(),
       memberVoiceGuildIds: [...this.#memberVoiceGuildIds].sort(),
+      crossGuildMessageForwardingEnabled: this.#allowMessageForwarding
+        && this.#allowCrossGuildMessageForwarding
+        && this.#messageForwardSourceChannelIds.size > 0
+        && this.#messageForwardTargetChannelIds.size > 0,
+      messageForwardingEnabled: this.#allowMessageForwarding
+        && this.#messageForwardSourceChannelIds.size > 0
+        && this.#messageForwardTargetChannelIds.size > 0,
+      messageForwardSourceChannelIds: [...this.#messageForwardSourceChannelIds].sort(),
+      messageForwardTargetChannelIds: [...this.#messageForwardTargetChannelIds].sort(),
       nativeCommandChangesEnabled: this.#allowNativeCommandChanges
         && this.#nativeInteractionGuildIds.size > 0,
       nativeCommandName: this.#nativeCommandName,
@@ -1592,6 +1617,62 @@ export class ScopePolicy {
       )
     }
     return guildId
+  }
+
+  assertMessageForwardSource(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    this.assertMessageForwardSourceConfigured(channel.id)
+    if (
+      channel.type !== DISCORD_CHANNEL_TYPES.text
+      && channel.type !== DISCORD_CHANNEL_TYPES.announcement
+    ) {
+      throw new PolicyError("Discord message forwarding supports direct text and announcement sources only")
+    }
+    return guildId
+  }
+
+  assertMessageForwardSourceConfigured(channelId: string): void {
+    if (!this.#allowMessageForwarding) {
+      throw new PolicyError("Discord message forwarding is disabled by connector configuration")
+    }
+    if (this.#messageForwardSourceChannelIds.size === 0) {
+      throw new PolicyError("Discord message forwarding requires an exact source-channel allowlist")
+    }
+    if (!this.#messageForwardSourceChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the message-forward source scope`)
+    }
+  }
+
+  assertMessageForwardTarget(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    this.assertMessageForwardTargetConfigured(channel.id)
+    if (
+      channel.type !== DISCORD_CHANNEL_TYPES.text
+      && channel.type !== DISCORD_CHANNEL_TYPES.announcement
+    ) {
+      throw new PolicyError("Discord message forwarding supports direct text and announcement targets only")
+    }
+    return guildId
+  }
+
+  assertMessageForwardTargetConfigured(channelId: string): void {
+    if (!this.#allowMessageForwarding) {
+      throw new PolicyError("Discord message forwarding is disabled by connector configuration")
+    }
+    if (this.#messageForwardTargetChannelIds.size === 0) {
+      throw new PolicyError("Discord message forwarding requires an exact target-channel allowlist")
+    }
+    if (!this.#messageForwardTargetChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the message-forward target scope`)
+    }
+  }
+
+  assertMessageForwardGuildBoundary(sourceGuildId: string, targetGuildId: string): void {
+    if (sourceGuildId !== targetGuildId && !this.#allowCrossGuildMessageForwarding) {
+      throw new PolicyError(
+        "Cross-guild Discord message forwarding is disabled by connector configuration",
+      )
+    }
   }
 
   assertAnnouncementSubscriptionTargetIdAuditable(channelId: string): void {

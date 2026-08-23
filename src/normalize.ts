@@ -1,6 +1,7 @@
 import {
   CHANNEL_TYPE_NAMES,
   CONNECTOR_LIMITS,
+  DISCORD_MESSAGE_FLAGS,
   DISCORD_WEB_BASE_URL,
 } from "./constants.js"
 import type {
@@ -115,6 +116,22 @@ export function normalizeChannel(channel: DiscordChannel) {
 
 export function normalizeMessage(message: DiscordMessage, fallbackGuildId?: string) {
   const guildId = message.guild_id ?? fallbackGuildId ?? null
+  if (
+    message.message_snapshots !== undefined
+    && (
+      !Array.isArray(message.message_snapshots)
+      || message.message_snapshots.length > 1
+    )
+  ) {
+    throw new TypeError("Discord message snapshots are malformed")
+  }
+  const forwardedSnapshotCount = message.message_snapshots?.length ?? 0
+  const hasSnapshotFlag = (
+    (message.flags ?? 0) & DISCORD_MESSAGE_FLAGS.hasSnapshot
+  ) !== 0
+  if (forwardedSnapshotCount > 0 && !hasSnapshotFlag) {
+    throw new TypeError("Discord message snapshot flags are inconsistent")
+  }
   return {
     attachments: (message.attachments || []).map(normalizeAttachment),
     author: normalizeUser(message.author),
@@ -124,6 +141,8 @@ export function normalizeMessage(message: DiscordMessage, fallbackGuildId?: stri
     editedTimestamp: message.edited_timestamp ?? null,
     embeds: message.embeds || [],
     flags: message.flags ?? 0,
+    forwardedSnapshotCount,
+    forwardedSnapshotRedacted: hasSnapshotFlag || forwardedSnapshotCount > 0,
     guildId,
     id: message.id,
     jumpUrl: guildId

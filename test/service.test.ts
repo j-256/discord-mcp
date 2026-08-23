@@ -423,6 +423,9 @@ function serviceFixture(overrides: {
         nonce: input.nonce,
       })
     },
+    async createMessageForward() {
+      throw new Error("Unexpected message-forward creation")
+    },
     async createPoll() {
       throw new Error("Unexpected poll creation")
     },
@@ -1037,6 +1040,34 @@ test("service rejects integration and webhook scope before identity access", asy
   assert.equal(calls.user, 0)
 })
 
+test("service rejects message-forward input and scope before identity access", async () => {
+  const { calls, service } = serviceFixture()
+  const request = {
+    operationKey: "message-forward-preflight-0001",
+    sourceChannelId: CHANNEL_ID,
+    sourceMessageId: MESSAGE_ID,
+    targetChannelId: OTHER_CHANNEL_ID,
+  }
+
+  await assert.rejects(
+    () => service.planMessageForward(request),
+    /message forwarding is disabled/,
+  )
+  await assert.rejects(
+    () => service.executeMessageForward(
+      request,
+      `hmac-sha256:${"a".repeat(64)}`,
+    ),
+    /message forwarding is disabled/,
+  )
+  await assert.rejects(
+    () => service.planMessageForward({ ...request, sourceMessageId: "bad" }),
+    /source message ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+})
+
 test("service rejects reaction identity and moderation scope before identity access", async () => {
   const { calls, service } = serviceFixture()
   const request = {
@@ -1317,11 +1348,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
       DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
       DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ALLOW_DELETIONS: "true",
       DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
       DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
+      DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
       DISCORD_MCP_ALLOW_INTERACTIONS: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
       DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
@@ -1339,6 +1371,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: OTHER_CHANNEL_ID,
       DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
       DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
@@ -1521,6 +1555,12 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     messageId: MESSAGE_ID,
     operationKey,
   }, digest))
+  await captured(() => service.executeMessageForward({
+    operationKey,
+    sourceChannelId: CHANNEL_ID,
+    sourceMessageId: MESSAGE_ID,
+    targetChannelId: OTHER_CHANNEL_ID,
+  }, digest))
   const announcementSubscriptionRequest = {
     action: "unsubscribe" as const,
     auditReason: "reviewed",
@@ -1672,7 +1712,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 36)
+  assert.equal(byKind.size, 37)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1750,6 +1790,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       ],
       "member-voice-change": [{ id: MEMBER_USER_ID, kind: "member" }],
       "message-deletion": [{ id: MESSAGE_ID, kind: "message" }],
+      "message-forward": [
+        { id: MESSAGE_ID, kind: "message" },
+        { id: OTHER_CHANNEL_ID, kind: "channel" },
+      ],
       "message-pin": [
         { id: CHANNEL_ID, kind: "channel" },
         { id: MESSAGE_ID, kind: "message" },
@@ -1850,7 +1894,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 36)
+  assert.equal(writeCoordinator.intents.length, 37)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

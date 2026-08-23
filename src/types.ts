@@ -167,12 +167,14 @@ export interface DiscordGuildMember {
 }
 
 export interface DiscordMessage {
+  activity?: unknown
   application_id?: string
   attachments?: DiscordAttachment[]
   author: DiscordUser
   channel_id: string
   components?: unknown[]
   content: string
+  call?: unknown
   edited_timestamp?: string | null
   embeds?: unknown[]
   flags?: number
@@ -193,6 +195,7 @@ export interface DiscordMessage {
     message_id?: string
     type?: number
   }
+  message_snapshots?: DiscordMessageSnapshot[]
   nonce?: number | string | null
   pinned?: boolean
   poll?: DiscordPoll
@@ -204,6 +207,23 @@ export interface DiscordMessage {
   tts?: boolean
   type: number
   webhook_id?: string
+}
+
+export interface DiscordMessageSnapshot {
+  message: {
+    attachments?: DiscordAttachment[]
+    components?: unknown[]
+    content?: string
+    edited_timestamp?: string | null
+    embeds?: unknown[]
+    flags?: number
+    mention_roles?: string[]
+    mentions?: DiscordUser[]
+    sticker_items?: unknown[]
+    stickers?: unknown[]
+    timestamp?: string
+    type?: number
+  }
 }
 
 export interface DiscordPartialEmoji {

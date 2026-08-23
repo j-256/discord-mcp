@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { DISCORD_MESSAGE_FLAGS } from "../src/constants.js"
+import {
+  DISCORD_MESSAGE_FLAGS,
+  DISCORD_MESSAGE_REFERENCE_TYPES,
+} from "../src/constants.js"
 import {
   type CreateForumPostInput,
   type CreateThreadFromMessageInput,
@@ -920,6 +923,74 @@ test("Discord client crossposts one exact message without a body or automatic re
   assert.equal(sleeps, 0)
   assert.throws(() => client.crosspostMessage("bad", "300"), /channel ID/)
   assert.throws(() => client.crosspostMessage("200", "bad"), /message ID/)
+})
+
+test("Discord client sends one exact message-forward contract without automatic retry", async () => {
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      return jsonResponse({ message: "rate limited", retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createMessageForward("200", {
+      nonce: "forward-nonce",
+      sourceChannelId: "201",
+      sourceGuildId: "100",
+      sourceMessageId: "300",
+    }),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+
+  assert.deepEqual(requests, [{
+    body: {
+      allowed_mentions: { parse: [], replied_user: false },
+      enforce_nonce: true,
+      flags: DISCORD_MESSAGE_FLAGS.suppressNotifications,
+      message_reference: {
+        channel_id: "201",
+        fail_if_not_exists: true,
+        guild_id: "100",
+        message_id: "300",
+        type: DISCORD_MESSAGE_REFERENCE_TYPES.forward,
+      },
+      nonce: "forward-nonce",
+    },
+    method: "POST",
+    url: `${API_BASE_URL}/channels/200/messages`,
+  }])
+  assert.equal(sleeps, 0)
+  assert.throws(
+    () => client.createMessageForward("bad", {
+      nonce: "forward-nonce",
+      sourceChannelId: "201",
+      sourceGuildId: "100",
+      sourceMessageId: "300",
+    }),
+    /target channel ID/,
+  )
+  assert.throws(
+    () => client.createMessageForward("200", {
+      nonce: "forward-nonce",
+      sourceChannelId: "200",
+      sourceGuildId: "100",
+      sourceMessageId: "300",
+    }),
+    /must differ/,
+  )
 })
 
 test("Discord client sends exact managed-command and unauthenticated Interaction contracts", async () => {

@@ -64,6 +64,7 @@ type McpToolWorkflow =
   | "member-role-change"
   | "member-voice-change"
   | "message-deletion"
+  | "message-forward"
   | "message-pin"
   | "native-interaction-command"
   | "role-creation"
@@ -146,6 +147,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["announcement", "execute", "follow", "subscribe", "unsubscribe", "webhook"],
     toolset: "announcement-subscriptions",
     workflow: "announcement-subscription",
+  },
+  execute_message_forward: {
+    keywords: ["copy", "execute", "forward", "message", "snapshot"],
+    toolset: "message-forwarding",
+    workflow: "message-forward",
   },
   execute_channel_creation: {
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
@@ -571,6 +577,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["announcement", "follow", "plan", "review", "subscribe", "unsubscribe", "webhook"],
     toolset: "announcement-subscriptions",
     workflow: "announcement-subscription",
+  },
+  plan_message_forward: {
+    keywords: ["copy", "forward", "message", "plan", "review", "snapshot"],
+    toolset: "message-forwarding",
+    workflow: "message-forward",
   },
   plan_attachment_message: {
     keywords: ["attachment", "file", "message", "plan", "review", "upload"],

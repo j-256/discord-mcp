@@ -963,6 +963,13 @@ export interface CreateMessageInput {
   }
 }
 
+export interface CreateMessageForwardInput {
+  nonce: string
+  sourceChannelId: string
+  sourceGuildId: string
+  sourceMessageId: string
+}
+
 export interface CreateComponentMessageInput {
   allowedMentions: DiscordAllowedMentions
   components: readonly DiscordStaticComponent[]
@@ -9971,6 +9978,46 @@ export class DiscordClient {
         nonce: input.nonce,
       },
     })
+  }
+
+  createMessageForward(
+    targetChannelId: string,
+    input: CreateMessageForwardInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(targetChannelId, "Discord message-forward target channel ID")
+    assertSearchSnowflake(input.sourceChannelId, "Discord message-forward source channel ID")
+    assertSearchSnowflake(input.sourceGuildId, "Discord message-forward source guild ID")
+    assertSearchSnowflake(input.sourceMessageId, "Discord message-forward source message ID")
+    if (input.sourceChannelId === targetChannelId) {
+      throw new RangeError("Discord message-forward source and target channels must differ")
+    }
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord message-forward nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    return this.#request(
+      "create_message_forward",
+      `/channels/${targetChannelId}/messages`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: { parse: [], replied_user: false },
+          enforce_nonce: true,
+          flags: DISCORD_MESSAGE_FLAGS.suppressNotifications,
+          message_reference: {
+            channel_id: input.sourceChannelId,
+            fail_if_not_exists: true,
+            guild_id: input.sourceGuildId,
+            message_id: input.sourceMessageId,
+            type: DISCORD_MESSAGE_REFERENCE_TYPES.forward,
+          },
+          nonce: input.nonce,
+        },
+      },
+    )
   }
 
   createComponentMessage(

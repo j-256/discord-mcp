@@ -473,6 +473,7 @@ function guidanceService(options: {
     },
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
+    executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
@@ -499,6 +500,7 @@ function guidanceService(options: {
     executeWebhookDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planAnnouncementSubscription: unexpected,
+    planMessageForward: unexpected,
     planChannelClone: unexpected,
     planNativeInteractionCommand: unexpected,
     planGuildTemplateChange: unexpected,
@@ -1544,6 +1546,10 @@ function guidanceService(options: {
         memberVoiceChangesEnabled: false,
         memberVoiceChannelIds: [],
         memberVoiceGuildIds: [],
+        crossGuildMessageForwardingEnabled: false,
+        messageForwardingEnabled: false,
+        messageForwardSourceChannelIds: [],
+        messageForwardTargetChannelIds: [],
         nativeCommandChangesEnabled: false,
         nativeCommandName: "discord-mcp",
         nativeInteractionChannelIds: [],
@@ -3396,6 +3402,29 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   )
   assert.match(announcementCrosspost, /Message Content intent/)
   assert.match(announcementCrosspost, /unknown follower fanout/)
+
+  const messageForward = promptText(await client.getPrompt({
+    arguments: {
+      operationKey: OPERATION_KEY,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: SECOND_CHANNEL_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewMessageForward,
+  }))
+  assert.deepEqual(JSON.parse(messageForward.split("\n")[1] || ""), {
+    operationKey: OPERATION_KEY,
+    sourceChannelId: CHANNEL_ID,
+    sourceMessageId: MESSAGE_ID,
+    targetChannelId: SECOND_CHANNEL_ID,
+  })
+  assert.match(messageForward, /Call only plan_message_forward/)
+  assert.match(messageForward, /Do not call execute_message_forward/)
+  assert.match(messageForward, /both complete permission decisions/)
+  assert.match(messageForward, /age-restriction downgrade/)
+  assert.match(messageForward, /immutable snapshot exposes source content/)
+  assert.match(messageForward, /one non-retried create request/)
+  assert.match(messageForward, /no automatic rollback/)
 
   const announcementSubscription = promptText(await client.getPrompt({
     arguments: {

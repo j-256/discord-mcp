@@ -256,6 +256,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    crossGuildMessageForwardingEnabled: false,
+    messageForwardingEnabled: false,
+    messageForwardSourceChannelIds: [],
+    messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
     nativeCommandName: "discord-mcp",
     nativeInteractionChannelIds: [],
@@ -820,6 +824,10 @@ test("configuration and policy require an exact administration guild and protect
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    crossGuildMessageForwardingEnabled: false,
+    messageForwardingEnabled: false,
+    messageForwardSourceChannelIds: [],
+    messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
     nativeCommandName: "discord-mcp",
     nativeInteractionChannelIds: [],
@@ -2416,6 +2424,100 @@ test("configuration and policy isolate announcement crossposts to exact readable
   )
 })
 
+test("configuration and policy require exact dual scopes and separate cross-guild message-forward authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires exact source and target channel allowlists/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
+      DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: OTHER_CHANNEL_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_CROSS_GUILD_MESSAGE_FORWARDING: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_MESSAGE_FORWARDING/,
+  )
+
+  const environment = {
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: OTHER_CHANNEL_ID,
+  }
+  const sameGuildConfig = loadConnectorConfig(environment, {
+    homeDirectory: "/test/home",
+  })
+  const sameGuild = new ScopePolicy(sameGuildConfig)
+  assert.equal(sameGuildConfig.allowMessageForwarding, true)
+  assert.equal(sameGuildConfig.allowCrossGuildMessageForwarding, false)
+  assert.deepEqual([...sameGuildConfig.messageForwardSourceChannelIds], [CHANNEL_ID])
+  assert.deepEqual([...sameGuildConfig.messageForwardTargetChannelIds], [OTHER_CHANNEL_ID])
+  assert.equal(sameGuild.assertMessageForwardSource(channel()), GUILD_ID)
+  assert.equal(
+    sameGuild.assertMessageForwardTarget(channel({ id: OTHER_CHANNEL_ID })),
+    GUILD_ID,
+  )
+  assert.throws(
+    () => sameGuild.assertMessageForwardSource(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the message-forward source scope/,
+  )
+  assert.throws(
+    () => sameGuild.assertMessageForwardTarget(channel({
+      id: OTHER_CHANNEL_ID,
+      type: DISCORD_CHANNEL_TYPES.publicThread,
+    })),
+    /direct text and announcement targets only/,
+  )
+  assert.throws(
+    () => sameGuild.assertMessageForwardGuildBoundary(GUILD_ID, OTHER_GUILD_ID),
+    /Cross-guild Discord message forwarding is disabled/,
+  )
+  assert.deepEqual(
+    {
+      crossGuild: sameGuild.describe().crossGuildMessageForwardingEnabled,
+      enabled: sameGuild.describe().messageForwardingEnabled,
+      sources: sameGuild.describe().messageForwardSourceChannelIds,
+      targets: sameGuild.describe().messageForwardTargetChannelIds,
+    },
+    {
+      crossGuild: false,
+      enabled: true,
+      sources: [CHANNEL_ID],
+      targets: [OTHER_CHANNEL_ID],
+    },
+  )
+
+  const crossGuild = new ScopePolicy(loadConnectorConfig({
+    ...environment,
+    DISCORD_MCP_ALLOW_CROSS_GUILD_MESSAGE_FORWARDING: "true",
+  }, { homeDirectory: "/test/home" }))
+  crossGuild.assertMessageForwardGuildBoundary(GUILD_ID, OTHER_GUILD_ID)
+  assert.equal(crossGuild.describe().crossGuildMessageForwardingEnabled, true)
+})
+
 test("configuration and policy independently scope announcement subscription audit and changes", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -2820,6 +2922,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    crossGuildMessageForwardingEnabled: false,
+    messageForwardingEnabled: false,
+    messageForwardSourceChannelIds: [],
+    messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
     nativeCommandName: "discord-mcp",
     nativeInteractionChannelIds: [],

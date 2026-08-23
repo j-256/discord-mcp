@@ -587,6 +587,42 @@ export class AnnouncementCrosspostExecutionError extends Error {
   }
 }
 
+export class MessageForwardPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord source or target snapshot does not match the reviewed message-forward plan")
+    this.name = "MessageForwardPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class MessageForwardOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord message-forward operation key has already been reserved")
+    this.name = "MessageForwardOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class MessageForwardExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "MessageForwardExecutionError"
+    this.result = result
+  }
+}
+
+export class MessageForwardEvidenceError extends Error {
+  override name = "MessageForwardEvidenceError"
+}
+
 export class NativeInteractionCommandPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

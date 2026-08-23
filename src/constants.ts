@@ -49,6 +49,7 @@ export const MCP_TOOLSET_NAMES = [
   "invites",
   "member-roles",
   "members",
+  "message-forwarding",
   "messages",
   "moderation",
   "native-interactions",
@@ -188,6 +189,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowMemberRoleChanges: "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
   allowMemberVoiceAudit: "DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT",
   allowMemberVoiceChanges: "DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES",
+  allowMessageForwarding: "DISCORD_MCP_ALLOW_MESSAGE_FORWARDING",
+  allowCrossGuildMessageForwarding: "DISCORD_MCP_ALLOW_CROSS_GUILD_MESSAGE_FORWARDING",
   allowNativeCommandChanges: "DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES",
   allowNativeInteractions: "DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS",
   allowOnboardingAudit: "DISCORD_MCP_ALLOW_ONBOARDING_AUDIT",
@@ -259,6 +262,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   memberRoleIds: "DISCORD_MCP_MEMBER_ROLE_IDS",
   memberVoiceChannelIds: "DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS",
   memberVoiceGuildIds: "DISCORD_MCP_MEMBER_VOICE_GUILD_IDS",
+  messageForwardSourceChannelIds: "DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS",
+  messageForwardTargetChannelIds: "DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS",
   nativeCommandName: "DISCORD_MCP_NATIVE_COMMAND_NAME",
   nativeInteractionChannelIds: "DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS",
   nativeInteractionGuildIds: "DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS",
@@ -538,6 +543,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   memberRoleImpactChannels: 50,
   memberVoiceChannelAllowlist: 100,
   memberVoiceGuildAllowlist: 100,
+  messageForwardChannelAllowlist: 100,
   mentionUserAllowlist: 100,
   messagePageDefault: 50,
   toolDiscoveryMatches: 8,
@@ -773,13 +779,18 @@ export const DISCORD_MESSAGE_REFERENCE_TYPES = Object.freeze({
 export const DISCORD_MESSAGE_FLAGS = Object.freeze({
   crossposted: 1 << 0,
   ephemeral: 1 << 6,
+  hasSnapshot: 1 << 14,
   isComponentsV2: 1 << 15,
   isCrosspost: 1 << 1,
   suppressEmbeds: 1 << 2,
+  suppressNotifications: 1 << 12,
 })
 
 export const DISCORD_MESSAGE_TYPES = Object.freeze({
+  chatInputCommand: 20,
+  contextMenuCommand: 23,
   default: 0,
+  reply: 19,
 })
 
 export const CHANNEL_TYPE_NAMES = Object.freeze({

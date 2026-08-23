@@ -11,6 +11,16 @@ import type {
 } from "./announcement-crosspost-service.js"
 import { AnnouncementCrosspostService } from "./announcement-crosspost-service.js"
 import type {
+  MessageForwardPlan,
+  MessageForwardRequest,
+  MessageForwardResult,
+  MessageForwardServiceOptions,
+} from "./message-forwarding-service.js"
+import {
+  MessageForwardingService,
+  normalizeMessageForwardRequest,
+} from "./message-forwarding-service.js"
+import type {
   AnnouncementSubscriptionInventoryResult,
   AnnouncementSubscriptionPlan,
   AnnouncementSubscriptionRequest,
@@ -542,6 +552,7 @@ export interface DiscordServiceClient {
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createComponentMessage: DiscordClient["createComponentMessage"]
   createMessage: DiscordClient["createMessage"]
+  createMessageForward: DiscordClient["createMessageForward"]
   createPoll: DiscordClient["createPoll"]
   createThreadFromMessage: DiscordClient["createThreadFromMessage"]
   createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
@@ -750,6 +761,10 @@ export interface ConnectorServiceOptions {
     MessagePinServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  messageForwardOptions?: Pick<
+    MessageForwardServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   memberRoleOptions?: Pick<
     MemberRoleServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -951,6 +966,7 @@ export class ConnectorService {
   readonly #inviteService: InviteService
   readonly #onboardingService: OnboardingService
   readonly #messagePinService: MessagePinService
+  readonly #messageForwardingService: MessageForwardingService
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberRoleService: MemberRoleService
   readonly #memberVoiceService: MemberVoiceService
@@ -1174,6 +1190,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.messagePinOptions,
+    })
+    this.#messageForwardingService = new MessageForwardingService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.messageForwardOptions,
     })
     this.#webhookService = new WebhookService({
       activityStore: this.#activityStore,
@@ -2163,6 +2186,23 @@ export class ConnectorService {
     return this.#messagePinService.plan(
       identity.application.id,
       identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planMessageForward(
+    request: MessageForwardRequest,
+    options: RequestOptions = {},
+  ): Promise<MessageForwardPlan> {
+    const normalized = normalizeMessageForwardRequest(request)
+    this.#policy.assertMessageForwardSourceConfigured(normalized.sourceChannelId)
+    this.#policy.assertMessageForwardTargetConfigured(normalized.targetChannelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#messageForwardingService.plan(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
       request,
       options,
     )
@@ -3625,6 +3665,37 @@ export class ConnectorService {
         writeResourceTarget("message", request.messageId),
       ],
       () => this.#announcementCrosspostService.execute(
+        identity.application.id,
+        identity.bot.id,
+        applicationMessageContentIntent(identity.application),
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeMessageForward(
+    request: MessageForwardRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MessageForwardResult> {
+    const normalized = normalizeMessageForwardRequest(request)
+    this.#policy.assertMessageForwardSourceConfigured(normalized.sourceChannelId)
+    this.#policy.assertMessageForwardTargetConfigured(normalized.targetChannelId)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord message-forward plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "message-forward",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("message", request.sourceMessageId),
+        writeResourceTarget("channel", request.targetChannelId),
+      ],
+      () => this.#messageForwardingService.execute(
         identity.application.id,
         identity.bot.id,
         applicationMessageContentIntent(identity.application),

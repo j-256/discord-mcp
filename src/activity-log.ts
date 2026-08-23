@@ -508,6 +508,31 @@ export interface AnnouncementCrosspostActivity {
   verification: "drift" | "match" | null
 }
 
+export type MessageForwardActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface MessageForwardActivity {
+  error: string | null
+  id: string
+  kind: "message-forward"
+  nonce: string
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  sourceChannelId: string
+  sourceGuildId: string
+  sourceMessageId: string
+  status: MessageForwardActivityStatus
+  targetChannelId: string
+  targetGuildId: string
+  targetMessageId: string | null
+  timestamp: string
+  verification: "match" | null
+}
+
 export type NativeInteractionCommandActivityStatus =
   | "completed"
   | "failed"
@@ -1013,6 +1038,7 @@ export type ActivityEntry =
   | MemberRoleActivity
   | MemberVoiceActivity
   | MessagePinActivity
+  | MessageForwardActivity
   | NativeInteractionCommandActivity
   | NativeInteractionActivity
   | OnboardingActivity
@@ -1982,6 +2008,101 @@ function parseAnnouncementCrosspostActivity(
     status: record.status as AnnouncementCrosspostActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseMessageForwardActivity(
+  value: unknown,
+): MessageForwardActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const keys = [
+    "error",
+    "id",
+    "kind",
+    "nonce",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "sourceChannelId",
+    "sourceGuildId",
+    "sourceMessageId",
+    "status",
+    "targetChannelId",
+    "targetGuildId",
+    "targetMessageId",
+    "timestamp",
+    "verification",
+  ].sort()
+  if (
+    Object.keys(record).sort().join("\0") !== keys.join("\0")
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "message-forward"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.sourceGuildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.sourceGuildId)
+    || typeof record.sourceChannelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.sourceChannelId)
+    || typeof record.sourceMessageId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.sourceMessageId)
+    || typeof record.targetGuildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.targetGuildId)
+    || typeof record.targetChannelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.targetChannelId)
+    || !(record.targetMessageId === null || (
+      typeof record.targetMessageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.targetMessageId)
+    ))
+    || typeof record.nonce !== "string"
+    || !/^[A-Za-z0-9_-]{1,25}$/.test(record.nonce)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.targetMessageId !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.targetMessageId === null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+    || (record.status === "failed" && record.targetMessageId !== null)
+  ) {
+    return undefined
+  }
+  return {
+    error: record.error,
+    id: record.id,
+    kind: "message-forward",
+    nonce: record.nonce,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    sourceChannelId: record.sourceChannelId,
+    sourceGuildId: record.sourceGuildId,
+    sourceMessageId: record.sourceMessageId,
+    status: record.status as MessageForwardActivityStatus,
+    targetChannelId: record.targetChannelId,
+    targetGuildId: record.targetGuildId,
+    targetMessageId: record.targetMessageId as string | null,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
   }
 }
 
@@ -4008,6 +4129,7 @@ function parseStageInstanceActivity(
 
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAnnouncementCrosspostActivity(value)
+    || parseMessageForwardActivity(value)
     || parseAnnouncementSubscriptionActivity(value)
     || parseNativeInteractionCommandActivity(value)
     || parseGuildTemplateActivity(value)

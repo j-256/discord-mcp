@@ -75,6 +75,8 @@ export interface ConnectorConfig {
   allowMemberRoleChanges: boolean
   allowMemberVoiceAudit: boolean
   allowMemberVoiceChanges: boolean
+  allowCrossGuildMessageForwarding: boolean
+  allowMessageForwarding: boolean
   allowNativeCommandChanges: boolean
   allowNativeInteractions: boolean
   allowOnboardingAudit: boolean
@@ -145,6 +147,8 @@ export interface ConnectorConfig {
   memberRoleIds: ReadonlySet<string>
   memberVoiceChannelIds: ReadonlySet<string>
   memberVoiceGuildIds: ReadonlySet<string>
+  messageForwardSourceChannelIds: ReadonlySet<string>
+  messageForwardTargetChannelIds: ReadonlySet<string>
   nativeCommandName: string
   nativeInteractionChannelIds: ReadonlySet<string>
   nativeInteractionGuildIds: ReadonlySet<string>
@@ -390,6 +394,16 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.announcementCrosspostChannelIds],
     ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
   )
+  const messageForwardSourceChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.messageForwardSourceChannelIds],
+    ENVIRONMENT_NAMES.messageForwardSourceChannelIds,
+    CONNECTOR_LIMITS.messageForwardChannelAllowlist,
+  )
+  const messageForwardTargetChannelIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.messageForwardTargetChannelIds],
+    ENVIRONMENT_NAMES.messageForwardTargetChannelIds,
+    CONNECTOR_LIMITS.messageForwardChannelAllowlist,
+  )
   const announcementSubscriptionSourceChannelIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds],
     ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
@@ -624,6 +638,8 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
     [ENVIRONMENT_NAMES.forumTagChannelIds, forumTagChannelIds],
     [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
+    [ENVIRONMENT_NAMES.messageForwardSourceChannelIds, messageForwardSourceChannelIds],
+    [ENVIRONMENT_NAMES.messageForwardTargetChannelIds, messageForwardTargetChannelIds],
     [ENVIRONMENT_NAMES.memberVoiceChannelIds, memberVoiceChannelIds],
     [ENVIRONMENT_NAMES.nativeInteractionChannelIds, nativeInteractionChannelIds],
     [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
@@ -659,6 +675,35 @@ export function loadConnectorConfig(
   const expectedBotId = botIdValue?.trim()
     ? parseId(botIdValue, ENVIRONMENT_NAMES.botId)
     : undefined
+  const allowMessageForwarding = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowMessageForwarding],
+    ENVIRONMENT_NAMES.allowMessageForwarding,
+  )
+  const allowCrossGuildMessageForwarding = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding],
+    ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding,
+  )
+  if (allowCrossGuildMessageForwarding && !allowMessageForwarding) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding} requires ${ENVIRONMENT_NAMES.allowMessageForwarding}`,
+    )
+  }
+  if (
+    allowMessageForwarding
+    && (
+      messageForwardSourceChannelIds.size === 0
+      || messageForwardTargetChannelIds.size === 0
+    )
+  ) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowMessageForwarding} requires exact source and target channel allowlists`,
+    )
+  }
+  if (allowMessageForwarding && (!expectedApplicationId || !expectedBotId)) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowMessageForwarding} requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+    )
+  }
   const allowReactionModeration = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowReactionModeration],
     ENVIRONMENT_NAMES.allowReactionModeration,
@@ -1089,6 +1134,7 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowAdministration],
       ENVIRONMENT_NAMES.allowAdministration,
     ),
+    allowCrossGuildMessageForwarding,
     allowAnnouncementCrossposts: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowAnnouncementCrossposts],
       ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
@@ -1155,6 +1201,7 @@ export function loadConnectorConfig(
     allowNativeInteractions,
     allowMemberVoiceAudit,
     allowMemberVoiceChanges,
+    allowMessageForwarding,
     allowOnboardingAudit,
     allowOnboardingChanges,
     allowPermissionOverwrites: parseBoolean(
@@ -1268,6 +1315,8 @@ export function loadConnectorConfig(
     memberRoleIds,
     memberVoiceChannelIds,
     memberVoiceGuildIds,
+    messageForwardSourceChannelIds,
+    messageForwardTargetChannelIds,
     nativeCommandName,
     nativeInteractionChannelIds,
     nativeInteractionGuildIds,

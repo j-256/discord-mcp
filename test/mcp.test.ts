@@ -125,6 +125,11 @@ import type {
   MessagePinRequest,
 } from "../src/message-pin-service.js"
 import type {
+  MessageForwardChannelPlan,
+  MessageForwardPlan,
+  MessageForwardRequest,
+} from "../src/message-forwarding-service.js"
+import type {
   OnboardingAccessEvidence,
   OnboardingAuditResult,
   OnboardingChangePlan,
@@ -252,6 +257,8 @@ import {
   InviteDeletionOperationConflictError,
   MessagePinExecutionError,
   MessagePinOperationConflictError,
+  MessageForwardExecutionError,
+  MessageForwardOperationConflictError,
   MemberRoleExecutionError,
   MemberRoleOperationConflictError,
   MemberRolePlanChangedError,
@@ -388,6 +395,8 @@ const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const REACTION_MODERATION_OPERATION_KEY = "reaction-moderation-attempt-0001"
 const ANNOUNCEMENT_CROSSPOST_OPERATION_KEY = "announcement-crosspost-attempt-0001"
+const MESSAGE_FORWARD_OPERATION_KEY = "message-forward-attempt-0001"
+const MESSAGE_FORWARD_TARGET_MESSAGE_ID = "300000000000000002"
 const ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY = "announcement-subscription-attempt-0001"
 const ANNOUNCEMENT_SOURCE_CHANNEL_ID = "200000000000000003"
 const ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID = "370000000000000002"
@@ -477,6 +486,20 @@ function webhookChannel(channelId = CHANNEL_ID) {
     parentId: null,
     type: 0,
     typeName: "guild-text",
+  }
+}
+
+function messageForwardChannel(channelId: string): MessageForwardChannelPlan {
+  return {
+    guildId: GUILD_ID,
+    id: channelId,
+    name: "general",
+    nsfw: false,
+    parentId: null,
+    permissionOverwriteCount: 0,
+    type: 0,
+    typeName: "guild-text",
+    url: `https://discord.com/channels/${GUILD_ID}/${channelId}`,
   }
 }
 
@@ -702,6 +725,96 @@ function announcementCrosspostPlan(
     status: action === "none" ? "already-crossposted" : "planned",
     target: { crossposted: true },
     warnings: ["Follower destinations are unavailable"],
+  }
+}
+
+function messageForwardPlan(
+  request: MessageForwardRequest,
+  digest = DIGEST,
+): MessageForwardPlan {
+  const effectivePermissions = (
+    DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  ).toString()
+  return {
+    action: "forward",
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    crossGuild: false,
+    delivery: {
+      allowedMentions: "none",
+      enforceNonce: true,
+      nonce: "forward_nonce_attempt_01",
+      notifications: "suppressed",
+      snapshotCount: 1,
+    },
+    digest,
+    messageContentIntent: "enabled",
+    operationKeyHash: OPERATION_KEY_HASH,
+    schemaVersion: 1,
+    source: {
+      channel: messageForwardChannel(request.sourceChannelId),
+      guild: { id: GUILD_ID, name: "Private source guild" },
+      message: {
+        attachmentCount: 1,
+        attachmentFilenames: ["private-forward.txt"],
+        author: {
+          bot: false,
+          globalName: null,
+          id: USER_ID,
+          username: "private-member",
+        },
+        componentCount: 1,
+        contentLength: 23,
+        contentPreview: "private forwarded detail",
+        editedTimestamp: null,
+        embedCount: 1,
+        flags: 0,
+        id: request.sourceMessageId,
+        jumpUrl: `https://discord.com/channels/${GUILD_ID}/${request.sourceChannelId}/${request.sourceMessageId}`,
+        mentionCount: 1,
+        mentionRoleCount: 0,
+        stickerCount: 0,
+        timestamp: "2026-08-23T00:00:00.000Z",
+        truncated: false,
+        type: 0,
+      },
+      permission: {
+        administrator: false,
+        canReadMessages: true,
+        confidence: "complete",
+        effectivePermissions,
+        permissionSourceChannelId: request.sourceChannelId,
+        readMessageHistory: true,
+        sendMessages: true,
+        unknownPermissionBits: "0",
+        viewChannel: true,
+        warnings: [],
+      },
+    },
+    status: "planned",
+    target: {
+      channel: messageForwardChannel(request.targetChannelId),
+      guild: { id: GUILD_ID, name: "Private target guild" },
+      permission: {
+        administrator: false,
+        canReadMessages: true,
+        confidence: "complete",
+        effectivePermissions,
+        permissionSourceChannelId: request.targetChannelId,
+        readMessageHistory: true,
+        sendMessages: true,
+        unknownPermissionBits: "0",
+        viewChannel: true,
+        warnings: [],
+      },
+    },
+    warnings: [
+      "The immutable snapshot exposes source content to target readers",
+      "The write is non-retried and has no automatic rollback",
+    ],
   }
 }
 
@@ -4990,6 +5103,10 @@ function fixturePolicy(): PolicyDescription {
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
     memberVoiceGuildIds: [],
+    crossGuildMessageForwardingEnabled: false,
+    messageForwardingEnabled: false,
+    messageForwardSourceChannelIds: [],
+    messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
     nativeCommandName: "discord-mcp",
     nativeInteractionChannelIds: [],
@@ -5096,6 +5213,8 @@ function serviceFixture(overrides: {
   inviteDeletionError?: Error
   inviteDeletionPlanDigest?: string
   messageContent?: string
+  messageForwardError?: Error
+  messageForwardPlanDigest?: string
   messagePinAction?: "change" | "none"
   messagePinError?: Error
   messagePinPlanDigest?: string
@@ -5250,6 +5369,8 @@ function serviceFixture(overrides: {
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    messageForwardExecute: 0,
+    messageForwardPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
     memberVoiceExecute: 0,
@@ -6851,6 +6972,29 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId}`,
       }
     },
+    async executeMessageForward(request, planDigest) {
+      if (overrides.messageForwardError) throw overrides.messageForwardError
+      calls.messageForwardExecute += 1
+      const planned = messageForwardPlan(request, planDigest)
+      return {
+        activityId: "activity-message-forward",
+        crossGuild: planned.crossGuild,
+        nonce: planned.delivery.nonce,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackSnapshotMatched: true,
+        responseSnapshotMatched: true,
+        schemaVersion: 1,
+        sourceChannelId: request.sourceChannelId,
+        sourceGuildId: planned.source.guild.id,
+        sourceMessageId: request.sourceMessageId,
+        status: "completed",
+        targetChannelId: request.targetChannelId,
+        targetGuildId: planned.target.guild.id,
+        targetMessageId: MESSAGE_FORWARD_TARGET_MESSAGE_ID,
+        targetUrl: `https://discord.com/channels/${planned.target.guild.id}/${request.targetChannelId}/${MESSAGE_FORWARD_TARGET_MESSAGE_ID}`,
+      }
+    },
     async executeAnnouncementSubscription(request, planDigest) {
       if (overrides.announcementSubscriptionError) {
         throw overrides.announcementSubscriptionError
@@ -7789,6 +7933,13 @@ function serviceFixture(overrides: {
         overrides.announcementCrosspostAction,
       )
     },
+    async planMessageForward(request) {
+      calls.messageForwardPlan += 1
+      return messageForwardPlan(
+        request,
+        overrides.messageForwardPlanDigest || DIGEST,
+      )
+    },
     async planAnnouncementSubscription(request) {
       calls.announcementSubscriptionPlan += 1
       return announcementSubscriptionPlan(
@@ -8200,6 +8351,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_message_pin",
       "plan_announcement_crosspost",
       "execute_announcement_crosspost",
+      "plan_message_forward",
+      "execute_message_forward",
       "list_announcement_subscriptions",
       "plan_announcement_subscription",
       "execute_announcement_subscription",
@@ -8287,6 +8440,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const announcementCrosspost = result.tools.find((tool) => (
     tool.name === "execute_announcement_crosspost"
+  ))
+  const messageForward = result.tools.find((tool) => (
+    tool.name === "execute_message_forward"
   ))
   const announcementSubscription = result.tools.find((tool) => (
     tool.name === "execute_announcement_subscription"
@@ -8397,6 +8553,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(messageForward?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
   assert.deepEqual(announcementSubscription?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
@@ -8495,6 +8657,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_channel_permission_overwrite",
     "plan_message_pin",
     "plan_announcement_crosspost",
+    "plan_message_forward",
     "plan_native_interaction_command",
     "plan_poll_creation",
     "plan_poll_end",
@@ -9299,6 +9462,30 @@ test("progressive discovery enables the complete reviewed announcement-crosspost
   )
 })
 
+test("progressive discovery enables the complete reviewed message-forward workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_message_forward" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_message_forward",
+    "plan_message_forward",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_message_forward",
+      "execute_message_forward",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery keeps announcement audit separate from the reviewed change pair", async (context) => {
   const audit = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -9886,6 +10073,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    messageForwardExecute: 0,
+    messageForwardPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
     memberVoiceExecute: 0,
@@ -11969,6 +12158,288 @@ test("MCP message pins expose uncertain and one-shot conflict outcomes safely", 
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(MESSAGE_PIN_OPERATION_KEY),
+  )
+})
+
+test("MCP message forwards validate exact reviewed plan inputs", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "plan_message_forward",
+  })
+  const invalidSource = await client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      sourceChannelId: "bad",
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "plan_message_forward",
+  })
+  const shortKey = await client.callTool({
+    arguments: {
+      operationKey: "short",
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "plan_message_forward",
+  })
+  const extraField = await client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+      unsafeContent: "do not accept this",
+    },
+    name: "plan_message_forward",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(invalidSource.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(extraField.isError, true)
+  assert.equal(calls.messageForwardPlan, 1)
+})
+
+test("MCP message forwards bind signed approval to exact endpoints and delivery controls", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "execute_message_forward",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.messageForwardPlan, 1)
+  assert.equal(calls.messageForwardExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, new RegExp(ANNOUNCEMENT_SOURCE_CHANNEL_ID))
+  assert.match(confirmationMessage, /Source bot VIEW_CHANNEL: true/)
+  assert.match(confirmationMessage, /Source bot READ_MESSAGE_HISTORY: true/)
+  assert.match(confirmationMessage, /Source channel age-restricted: false/)
+  assert.match(confirmationMessage, /Source unknown permission bits: 0/)
+  assert.match(confirmationMessage, /Target bot VIEW_CHANNEL: true/)
+  assert.match(confirmationMessage, /Target bot READ_MESSAGE_HISTORY: true/)
+  assert.match(confirmationMessage, /Target bot SEND_MESSAGES: true/)
+  assert.match(confirmationMessage, /Target channel age-restricted: false/)
+  assert.match(confirmationMessage, /Target unknown permission bits: 0/)
+  assert.match(confirmationMessage, /Cross-guild boundary: false/)
+  assert.match(confirmationMessage, /Allowed mentions: none/)
+  assert.match(confirmationMessage, /Notifications: suppressed/)
+  assert.match(confirmationMessage, /Nonce enforcement: true/)
+  assert.match(confirmationMessage, /Immutable snapshot count: 1/)
+  assert.match(confirmationMessage, /immutable snapshot exposes the reviewed source content/)
+  assert.match(confirmationMessage, /one non-retried create request and has no automatic rollback/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(MESSAGE_FORWARD_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MESSAGE_FORWARD_OPERATION_KEY),
+  )
+})
+
+test("MCP message-forward signed state rejects every changed intent field", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+    planDigest: DIGEST,
+    sourceChannelId: CHANNEL_ID,
+    sourceMessageId: MESSAGE_ID,
+    targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_message_forward",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, operationKey: "message-forward-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, sourceChannelId: PARENT_ID },
+    { ...request, sourceMessageId: USER_ID },
+    { ...request, targetChannelId: PARENT_ID },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_message_forward: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_message_forward",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.messageForwardExecute, 0)
+})
+
+test("MCP message forwards stop on refusal or fresh-plan drift", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "execute_message_forward",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.messageForwardExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { messageForwardPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "execute_message_forward",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.messageForwardExecute, 0)
+})
+
+test("MCP message forwards expose uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      messageForwardError: new MessageForwardExecutionError(
+        "Discord message-forward outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "execute_message_forward",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-message-forward",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    targetMessageId: MESSAGE_FORWARD_TARGET_MESSAGE_ID,
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      messageForwardError: new MessageForwardOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "execute_message_forward",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(MESSAGE_FORWARD_OPERATION_KEY),
+  )
+
+  const invalidConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      messageForwardError: new MessageForwardOperationConflictError({
+        ...receipt,
+        targetMessageId: null,
+      }),
+    },
+  })
+  const invalidConflictResult = await invalidConflict.client.callTool({
+    arguments: {
+      operationKey: MESSAGE_FORWARD_OPERATION_KEY,
+      planDigest: DIGEST,
+      sourceChannelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+      targetChannelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID,
+    },
+    name: "execute_message_forward",
+  })
+  assert.deepEqual(
+    (structuredContent(invalidConflictResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
   )
 })
 
