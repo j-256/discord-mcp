@@ -52,6 +52,7 @@ type McpToolWorkflow =
   | "guild-scaffold"
   | "guild-expression-change"
   | "guild-soundboard-change"
+  | "guild-settings-change"
   | "guild-template-change"
   | "integration-deletion"
   | "invite-deletion"
@@ -236,6 +237,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "widget-settings",
     workflow: "widget-settings-change",
   },
+  execute_guild_settings_change: {
+    keywords: ["afk", "configure", "execute", "guild", "notifications", "safety", "settings"],
+    toolset: "guild-settings",
+    workflow: "guild-settings-change",
+  },
   execute_poll_creation: {
     keywords: ["create", "execute", "poll", "question", "vote"],
     toolset: "polls",
@@ -347,6 +353,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_widget_settings: {
     keywords: ["audit", "channel", "exposure", "guild", "invite", "profile", "widget"],
     toolset: "widget-settings",
+  },
+  get_guild_settings: {
+    keywords: ["afk", "audit", "content filter", "guild", "notifications", "safety", "settings"],
+    toolset: "guild-settings",
   },
   get_automod_rule: {
     keywords: ["automod", "exact", "moderation", "policy", "rule"],
@@ -666,6 +676,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "configure", "exposure", "invite", "plan", "profile", "review", "widget"],
     toolset: "widget-settings",
     workflow: "widget-settings-change",
+  },
+  plan_guild_settings_change: {
+    keywords: ["afk", "configure", "guild", "notifications", "plan", "review", "safety", "settings"],
+    toolset: "guild-settings",
+    workflow: "guild-settings-change",
   },
   plan_poll_creation: {
     keywords: ["create", "plan", "poll", "question", "vote"],

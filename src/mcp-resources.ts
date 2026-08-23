@@ -212,6 +212,8 @@ export function registerDiscordResources(
           "",
           "Welcome Screen audit requires a separate exact guild allowlist, verified connector identity, complete bounded guild-feature, role, emoji, membership, and Welcome Screen evidence, plus visible channels and their overwrites. Descriptions and Unicode emoji text are omitted by default and returned only transiently through explicit tool opt-in; unknown fields are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD evidence, the COMMUNITY guild feature, directly supported channels visible to @everyone and resolved by exact ID, exact available public custom emoji or one validated Unicode grapheme, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PATCH with an audit-log reason, authoritative response validation, and a fresh full readback. A configured or desired channel omitted by Discord fails closed. Omitted ordered channel entries are deletions. Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed, same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client experience. Descriptions, Unicode emoji text, names, audit reasons, channel IDs, raw operation keys, and raw payloads are never persisted.",
           "",
+          "Guild-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD or exact-owner evidence, complete bounded roles, and continuity-safe channel evidence. It returns only finite named verification, notification, explicit-media, AFK, system-routing, suppression, and presentation settings with names, members, raw payloads, raw numeric enums, raw bitfields, and unknown values omitted. Unknown system bits are presence-only. Reviewed sparse changes require an additional toggle, at least one named field, eligible trusted requested channel references, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried sparse PATCH with an audit-log reason, strict authoritative response validation, and a fresh complete readback. Omitted fields are preserved, an explicit null clears a channel reference, and unknown system bits block only suppression changes. Same-guild uncertain outcomes fail closed, and setting values, channel IDs, names, audit reasons, raw operation keys, and raw payloads are never persisted.",
+          "",
           "Authenticated widget-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD evidence, complete bounded roles, visible channels and their overwrites, and complete authenticated settings evidence. It returns exact enabled and nullable channel state, @everyone visibility and invite-generation capability for the exact selected channel, optional guild-object cross-checks, explicit privacy and public-exposure projections, and unknown-field counts without channel names, invite codes or URLs, member or presence data, or raw payloads. It never calls anonymous widget JSON or image endpoints. Reviewed complete-state replacement requires an additional change toggle, an exact supported direct channel visible to @everyone when one is selected, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried complete PATCH with an audit-log reason, authoritative response validation, and a fresh authenticated readback. A selected channel omitted by Discord fails closed. Enabling the widget or selecting a different non-null channel also requires a separate public-exposure toggle because the Server Profile, widget data, presence-bearing member summaries, and invite generation may become public. Disabling does not prove that the Server Profile returned to Private Profile, so manual restoration may be required. Same-guild uncertain outcomes fail closed, and channel names, audit reasons, channel IDs, raw operation keys, settings payloads, and raw evidence are never persisted.",
           "",
           "Reaction aggregate reads use ordinary readable-channel scope and return strict normal and burst counts plus only the connector's own reaction flags, with message content, authors, profiles, burst colors, unknown fields, and raw payloads omitted. User enumeration requires a separate feature gate and exact reaction-channel allowlist, returns only bounded user IDs and bot flags, and persists nothing. Adding or removing the connector's own normal reaction uses the ordinary interaction scope, checks the precondition, skips an already-satisfied state without consuming the write limiter, journals before mutation, and verifies fresh aggregate state. Removing another user's normal reaction, all normal and burst reactions for one emoji, or every reaction requires a separate moderation gate and exact channel allowlist, complete VIEW_CHANNEL, READ_MESSAGE_HISTORY, MANAGE_MESSAGES, conditional CONNECT, and private-thread evidence, a fresh matching keyed plan, signed approval, durable exact-message coordination, a one-shot reservation, pending content-free records, one non-retried deletion, and target-absence plus exact aggregate readback. Emoji and all scopes are identity-blind and can remove reactions from locally protected users; protected-user IDs guard only exact user scope. The reason is local-only transient review context and is neither sent nor persisted because Discord does not document audit-log reason support for reaction endpoints; emoji text is never persisted, same-message uncertain outcomes remain quarantined, and removed reactions cannot be restored by the connector.",
@@ -647,6 +649,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.getGuildWidgetSettings(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildSettings,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildSettings, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Bounded privacy-minimized guild-settings audit for one exact separately allowlisted Discord guild. Returns named safety, notification, AFK, system-routing, and presentation settings with complete MANAGE_GUILD and channel-inventory evidence. Guild and channel names, member data, raw payloads, raw bitfields, and unknown values are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Privacy-minimized Discord guild settings",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildSettings(
         templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),

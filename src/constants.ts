@@ -41,6 +41,7 @@ export const MCP_TOOLSET_NAMES = [
   "gateway",
   "guild-expressions",
   "guild-scaffolds",
+  "guild-settings",
   "guild-templates",
   "guilds",
   "integrations",
@@ -73,6 +74,69 @@ export const MCP_TOOLSET_NAMES = [
 ] as const
 
 export type McpToolsetName = typeof MCP_TOOLSET_NAMES[number]
+
+export const GUILD_SETTINGS_FIELDS = [
+  "afkChannelId",
+  "afkTimeoutSeconds",
+  "defaultMessageNotifications",
+  "explicitContentFilter",
+  "premiumProgressBarEnabled",
+  "suppressedSystemNotifications",
+  "systemChannelId",
+  "verificationLevel",
+] as const
+
+export type GuildSettingsField = typeof GUILD_SETTINGS_FIELDS[number]
+
+export const GUILD_VERIFICATION_LEVELS = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "very-high",
+] as const
+
+export type GuildVerificationLevel = typeof GUILD_VERIFICATION_LEVELS[number]
+
+export const GUILD_DEFAULT_MESSAGE_NOTIFICATIONS = [
+  "all-messages",
+  "only-mentions",
+] as const
+
+export type GuildDefaultMessageNotifications =
+  typeof GUILD_DEFAULT_MESSAGE_NOTIFICATIONS[number]
+
+export const GUILD_EXPLICIT_CONTENT_FILTERS = [
+  "disabled",
+  "members-without-roles",
+  "all-members",
+] as const
+
+export type GuildExplicitContentFilter = typeof GUILD_EXPLICIT_CONTENT_FILTERS[number]
+
+export const GUILD_AFK_TIMEOUT_SECONDS = [
+  60,
+  300,
+  900,
+  1_800,
+  3_600,
+] as const
+
+export type GuildAfkTimeoutSeconds = typeof GUILD_AFK_TIMEOUT_SECONDS[number]
+
+export const GUILD_SYSTEM_NOTIFICATION_SUPPRESSIONS = [
+  "guild-reminders",
+  "join-notification-replies",
+  "join-notifications",
+  "premium-subscriptions",
+  "role-subscription-purchase-notification-replies",
+  "role-subscription-purchase-notifications",
+] as const
+
+export type GuildSystemNotificationSuppression =
+  typeof GUILD_SYSTEM_NOTIFICATION_SUPPRESSIONS[number]
+
+export const GUILD_SYSTEM_CHANNEL_KNOWN_FLAG_MASK = 0b11_1111
 
 export const FORUM_TAG_ACTIONS = [
   "create",
@@ -111,6 +175,8 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   allowGuildExpressionAudit: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
   allowGuildExpressionChanges: "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
   allowGuildScaffolds: "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
+  allowGuildSettingsAudit: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT",
+  allowGuildSettingsChanges: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES",
   allowGuildTemplateAudit: "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT",
   allowGuildTemplateChanges: "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES",
   allowIntegrationAudit: "DISCORD_MCP_ALLOW_INTEGRATION_AUDIT",
@@ -179,6 +245,7 @@ export const ENVIRONMENT_NAMES = Object.freeze({
   guildScaffoldGuildIds: "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
   guildExpressionGuildIds: "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
   guildExpressionRoots: "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
+  guildSettingsGuildIds: "DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS",
   guildTemplateGuildIds: "DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS",
   integrationGuildIds: "DISCORD_MCP_INTEGRATION_GUILD_IDS",
   integrationIds: "DISCORD_MCP_INTEGRATION_IDS",
@@ -450,6 +517,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   gatewayCursorCharacters: 128,
   gatewayEventBufferSize: 1_000,
   gatewayEventPage: 100,
+  guildSettingsGuildAllowlist: 100,
   idempotencyKeyCharacters: 128,
   idempotencyKeyMinimumCharacters: 16,
   interactionEmojiCharacters: 100,

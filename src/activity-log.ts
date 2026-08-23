@@ -16,6 +16,7 @@ import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   FORUM_TAG_ACTIONS,
+  GUILD_SETTINGS_FIELDS,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
   INVITE_REFERENCE_PATTERN,
   MEMBER_ROLE_ACTIONS,
@@ -28,6 +29,7 @@ import {
   THREAD_CREATION_MODES,
   type ChannelCreationKind,
   type ForumTagAction,
+  type GuildSettingsField,
   type MemberModerationAction,
   type MemberRoleAction,
   type MemberVoiceAction,
@@ -58,6 +60,19 @@ const ROLE_CONFIGURATION_ACTIVITY_FIELDS: ReadonlySet<string> = new Set([
   "revokePermissions",
   "secondaryColor",
   "tertiaryColor",
+])
+const GUILD_SETTINGS_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "requestedFields",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
 ])
 
 export type DeletionActivityStatus =
@@ -785,6 +800,27 @@ export interface WidgetSettingsActivity {
   verification: "drift" | "match" | null
 }
 
+export type GuildSettingsActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildSettingsActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "guild-settings-change"
+  operationKeyHash: string
+  planDigest: string
+  requestedFields: GuildSettingsField[]
+  schemaVersion: number
+  status: GuildSettingsActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ScheduledEventActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -968,6 +1004,7 @@ export type ActivityEntry =
   | ForumPostActivity
   | ForumTagActivity
   | GuildExpressionActivity
+  | GuildSettingsActivity
   | GuildTemplateActivity
   | InteractionActivity
   | IntegrationDeletionActivity
@@ -3412,6 +3449,78 @@ function parseWidgetSettingsActivity(
   }
 }
 
+function parseGuildSettingsActivity(
+  value: unknown,
+): GuildSettingsActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const fields = Array.isArray(record.requestedFields)
+    ? record.requestedFields
+    : []
+  const status = String(record.status)
+  if (
+    Object.keys(record).length !== GUILD_SETTINGS_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !GUILD_SETTINGS_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-settings-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || fields.length < 1
+    || fields.length > GUILD_SETTINGS_FIELDS.length
+    || fields.some((field) => (
+      typeof field !== "string"
+      || !(GUILD_SETTINGS_FIELDS as readonly string[]).includes(field)
+    ))
+    || new Set(fields).size !== fields.length
+    || JSON.stringify(fields) !== JSON.stringify([...fields].sort())
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (status === "completed-with-drift" && (
+      record.error !== null || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "guild-settings-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    requestedFields: fields as GuildSettingsField[],
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GuildSettingsActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseAutoModerationActivity(
   value: unknown,
 ): AutoModerationActivity | undefined {
@@ -3920,6 +4029,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)
     || parseWelcomeScreenActivity(value)
+    || parseGuildSettingsActivity(value)
     || parseWidgetSettingsActivity(value)
     || parseWebhookCreationActivity(value)
     || parseWebhookChangeActivity(value)

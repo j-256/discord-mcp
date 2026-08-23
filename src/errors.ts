@@ -909,6 +909,42 @@ export class WelcomeScreenEvidenceError extends Error {
   override name = "WelcomeScreenEvidenceError"
 }
 
+export class GuildSettingsPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild-settings snapshot does not match the reviewed plan")
+    this.name = "GuildSettingsPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildSettingsOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild-settings operation key has already been reserved")
+    this.name = "GuildSettingsOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildSettingsExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildSettingsExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildSettingsEvidenceError extends Error {
+  override name = "GuildSettingsEvidenceError"
+}
+
 export class WidgetSettingsPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

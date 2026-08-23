@@ -213,6 +213,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildSettingsAuditEnabled: false,
+    guildSettingsChangesEnabled: false,
+    guildSettingsGuildIds: [],
     scheduledEventAuditEnabled: false,
     scheduledEventChangesEnabled: false,
     scheduledEventCoverChangesEnabled: false,
@@ -774,6 +777,9 @@ test("configuration and policy require an exact administration guild and protect
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildSettingsAuditEnabled: false,
+    guildSettingsChangesEnabled: false,
+    guildSettingsGuildIds: [],
     scheduledEventAuditEnabled: false,
     scheduledEventChangesEnabled: false,
     scheduledEventCoverChangesEnabled: false,
@@ -1289,6 +1295,96 @@ test("configuration and policy isolate reviewed authenticated widget settings", 
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: Array.from(
+        { length: 101 },
+        (_, index) => String(index + 1),
+      ).join(","),
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/,
+  )
+})
+
+test("configuration and policy isolate reviewed guild settings", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowGuildSettingsAudit, true)
+  assert.equal(config.allowGuildSettingsChanges, true)
+  assert.deepEqual([...config.guildSettingsGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().guildSettingsAuditEnabled, true)
+  assert.equal(policy.describe().guildSettingsChangesEnabled, true)
+  assert.deepEqual(policy.describe().guildSettingsGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildSettingsAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildSettingsChangeable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildSettingsAuditable(OTHER_GUILD_ID),
+    /outside the guild-settings scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildSettingsAuditable(GUILD_ID),
+    /guild-settings audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildSettingsAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildSettingsChangeable(GUILD_ID),
+    /guild-settings changes are disabled/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
+      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+      DISCORD_MCP_BOT_ID: BOT_ID,
+    }, { homeDirectory: "/test/home" }),
+    /requires DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
+      DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /Channel-completeness features require/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: Array.from(
         { length: 101 },
         (_, index) => String(index + 1),
       ).join(","),
@@ -2681,6 +2777,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildSettingsAuditEnabled: false,
+    guildSettingsChangesEnabled: false,
+    guildSettingsGuildIds: [],
     scheduledEventAuditEnabled: false,
     scheduledEventChangesEnabled: false,
     scheduledEventCoverChangesEnabled: false,

@@ -42,6 +42,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "automod",
   "channels",
   "emojis",
+  "guild-settings",
   "invites",
   "integrations",
   "onboarding",

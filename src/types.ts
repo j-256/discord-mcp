@@ -135,6 +135,10 @@ export interface DiscordForumTag {
 }
 
 export interface DiscordGuild {
+  afk_channel_id?: string | null
+  afk_timeout?: number
+  default_message_notifications?: number
+  explicit_content_filter?: number
   features?: string[]
   icon?: string | null
   id: string
@@ -142,7 +146,11 @@ export interface DiscordGuild {
   owner?: boolean
   owner_id?: string
   premium_tier?: number
+  premium_progress_bar_enabled?: boolean
   permissions?: string
+  system_channel_flags?: number
+  system_channel_id?: string | null
+  verification_level?: number
   widget_channel_id?: string | null
   widget_enabled?: boolean
 }

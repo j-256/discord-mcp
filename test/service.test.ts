@@ -265,6 +265,7 @@ function serviceFixture(overrides: {
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
+  guildSettingsOptions?: ConnectorServiceOptions["guildSettingsOptions"]
   guildTemplateOptions?: ConnectorServiceOptions["guildTemplateOptions"]
   gateway?: ConnectorServiceOptions["gateway"]
   integrationOptions?: ConnectorServiceOptions["integrationOptions"]
@@ -648,6 +649,9 @@ function serviceFixture(overrides: {
     async modifyGuildWidgetSettings() {
       throw new Error("Unexpected widget-settings change")
     },
+    async modifyGuildSettings() {
+      throw new Error("Unexpected guild-settings change")
+    },
     async modifyWebhook() {
       throw new Error("Unexpected webhook modification")
     },
@@ -863,6 +867,9 @@ function serviceFixture(overrides: {
       ...(overrides.gateway ? { gateway: overrides.gateway } : {}),
       ...(overrides.guildScaffoldOptions
         ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
+        : {}),
+      ...(overrides.guildSettingsOptions
+        ? { guildSettingsOptions: overrides.guildSettingsOptions }
         : {}),
       ...(overrides.guildTemplateOptions
         ? { guildTemplateOptions: overrides.guildTemplateOptions }
@@ -2845,6 +2852,99 @@ test("service pins identity through authenticated reviewed widget settings", asy
   assert.equal(result.verification, "not-required")
   assert.equal(widgetSettingsReads, 3)
   assert.equal(widgetSettingsWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through reviewed guild settings", async () => {
+  const operationStore = new MemoryOperationStore()
+  let guildSettingsReads = 0
+  let guildSettingsWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        guildSettingsReads += 1
+        return {
+          afk_channel_id: null,
+          afk_timeout: 300,
+          default_message_notifications: 1,
+          explicit_content_filter: 2,
+          features: [],
+          id: GUILD_ID,
+          name: "Private Guild",
+          owner_id: "700000000000000001",
+          premium_progress_bar_enabled: false,
+          system_channel_flags: 0,
+          system_channel_id: CHANNEL_ID,
+          verification_level: 3,
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildChannels() {
+        return [channel({ parent_id: null })]
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD,
+          "@everyone",
+        )]
+      },
+      async modifyGuildSettings() {
+        guildSettingsWrites += 1
+        throw new Error("Unexpected guild-settings change")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES: "true",
+      DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
+    },
+    gateway: completeChannelGateway([channel({ parent_id: null })]),
+    guildSettingsOptions: {
+      clock: () => new Date("2026-08-23T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(53),
+      randomId: () => "activity-guild-settings",
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed guild defaults",
+    defaultMessageNotifications: "only-mentions" as const,
+    explicitContentFilter: "all-members" as const,
+    guildId: GUILD_ID,
+    operationKey: "guild-settings-service-attempt-0001",
+    verificationLevel: "high" as const,
+  }
+
+  await assert.rejects(
+    () => service.getGuildSettings("bad"),
+    /guild-settings guild ID/,
+  )
+  await assert.rejects(
+    () => service.planGuildSettingsChange({ ...request, guildId: "bad" }),
+    /guild-settings guild ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildSettings(GUILD_ID)
+  const plan = await service.planGuildSettingsChange(request)
+  const result = await service.executeGuildSettingsChange(request, plan.digest)
+
+  assert.equal(audit.privacy.guildPresentation, "omitted")
+  assert.equal(audit.configuration.verificationLevel, "high")
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(guildSettingsReads, 3)
+  assert.equal(guildSettingsWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

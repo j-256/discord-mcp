@@ -225,14 +225,21 @@ test("guildChannelLayoutGuildIds unions only enabled exact scopes", () => {
     allowChannelOrderingAudit: true,
     allowGateway: false,
     allowGuildTemplateAudit: true,
+    allowGuildSettingsAudit: true,
     allowMemberRoleChanges: false,
     allowOnboardingAudit: true,
     channelCloneGuildIds: new Set([CLONE_GUILD_ID]),
     channelOrderingGuildIds: new Set([GUILD_ID]),
     guildTemplateGuildIds: new Set([SECOND_GUILD_ID]),
+    guildSettingsGuildIds: new Set(["100000000000000004"]),
     memberRoleGuildIds: new Set(["100000000000000003"]),
     onboardingGuildIds: new Set([SECOND_GUILD_ID]),
   })
 
-  assert.deepEqual([...ids], [CLONE_GUILD_ID, GUILD_ID, SECOND_GUILD_ID])
+  assert.deepEqual([...ids], [
+    CLONE_GUILD_ID,
+    GUILD_ID,
+    SECOND_GUILD_ID,
+    "100000000000000004",
+  ])
 })

@@ -40,6 +40,7 @@ export const OPERATION_KINDS = [
   "forum-tag-change",
   "guild-expression-change",
   "guild-scaffold",
+  "guild-settings-change",
   "guild-template-change",
   "integration-deletion",
   "invite-deletion",

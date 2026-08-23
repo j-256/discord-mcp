@@ -167,6 +167,7 @@ interface GuidanceCalls {
   forumTags: number
   guilds: number
   guildExpressions: number
+  guildSettings: number
   integrations: number
   invites: number
   lastChannelId: string | null
@@ -215,6 +216,7 @@ function guidanceService(options: {
     forumTags: 0,
     guilds: 0,
     guildExpressions: 0,
+    guildSettings: 0,
     integrations: 0,
     invites: 0,
     lastChannelId: null,
@@ -486,6 +488,7 @@ function guidanceService(options: {
     executeOnboardingChange: unexpected,
     executeWelcomeScreenChange: unexpected,
     executeWidgetSettingsChange: unexpected,
+    executeGuildSettingsChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
     executeReactionModeration: unexpected,
@@ -954,6 +957,104 @@ function guidanceService(options: {
         },
       }
     },
+    async getGuildSettings(guildId) {
+      calls.guildSettings += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        configuration: {
+          afkChannel: null,
+          afkChannelId: null,
+          afkTimeoutSeconds: 300 as const,
+          defaultMessageNotifications: "only-mentions" as const,
+          explicitContentFilter: "all-members" as const,
+          issues: [],
+          premiumProgressBarEnabled: false,
+          suppressedSystemNotifications: ["guild-reminders" as const],
+          systemChannel: {
+            channelId: CHANNEL_ID,
+            eligible: true,
+            exists: true,
+            metadata: "trusted" as const,
+            parentId: null,
+            type: 0,
+          },
+          systemChannelId: CHANNEL_ID,
+          unknownSystemChannelFlagsPresent: false,
+          verificationLevel: "high" as const,
+        },
+        guildId,
+        inventory: {
+          gatewayChannelCount: 1,
+          httpChannelCount: 1,
+          httpMode: "complete" as const,
+          layoutRevision: 7,
+          layoutUpdatedAt: "2026-08-23T00:00:00.000Z",
+          metadataCoverage: "complete" as const,
+          obfuscatedChannelCount: 0,
+          trustedMetadataCount: 1,
+        },
+        localConstraints: {
+          afkChannelTypes: [2],
+          afkTimeoutSeconds: [60, 300, 900, 1_800, 3_600] as Array<60 | 300 | 900 | 1_800 | 3_600>,
+          defaultMessageNotifications: ["all-messages", "only-mentions"] as Array<"all-messages" | "only-mentions">,
+          explicitContentFilters: ["disabled", "members-without-roles", "all-members"] as Array<"disabled" | "members-without-roles" | "all-members">,
+          guildAllowlist: 100,
+          supportedFields: [
+            "afkChannelId",
+            "afkTimeoutSeconds",
+            "defaultMessageNotifications",
+            "explicitContentFilter",
+            "premiumProgressBarEnabled",
+            "suppressedSystemNotifications",
+            "systemChannelId",
+            "verificationLevel",
+          ] as Array<"afkChannelId" | "afkTimeoutSeconds" | "defaultMessageNotifications" | "explicitContentFilter" | "premiumProgressBarEnabled" | "suppressedSystemNotifications" | "systemChannelId" | "verificationLevel">,
+          systemChannelTypes: [0, 5],
+          systemNotificationSuppressions: [
+            "guild-reminders",
+            "join-notification-replies",
+            "join-notifications",
+            "premium-subscriptions",
+            "role-subscription-purchase-notification-replies",
+            "role-subscription-purchase-notifications",
+          ] as Array<"guild-reminders" | "join-notification-replies" | "join-notifications" | "premium-subscriptions" | "role-subscription-purchase-notification-replies" | "role-subscription-purchase-notifications">,
+          verificationLevels: ["none", "low", "medium", "high", "very-high"] as Array<"none" | "low" | "medium" | "high" | "very-high">,
+        },
+        privacy: {
+          channelNames: "omitted" as const,
+          guildPresentation: "omitted" as const,
+          memberData: "omitted" as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          roleNames: "omitted" as const,
+          unknownValues: "bit-presence-only" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        verificationBoundary: {
+          automaticRetry: false as const,
+          freshApiReadback: true as const,
+          gatewayLayoutContinuity: true as const,
+          mutationResponse: true as const,
+          rollback: "not-automatic" as const,
+        },
+      }
+    },
     planWebhookChange: unexpected,
     planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
@@ -1351,6 +1452,7 @@ function guidanceService(options: {
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
+    planGuildSettingsChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -1402,6 +1504,9 @@ function guidanceService(options: {
         guildExpressionCreationEnabled: false,
         guildExpressionGuildIds: [],
         guildExpressionRootCount: 0,
+        guildSettingsAuditEnabled: false,
+        guildSettingsChangesEnabled: false,
+        guildSettingsGuildIds: [],
         guildTemplateAuditEnabled: false,
         guildTemplateChangesEnabled: false,
         guildTemplateGuildIds: [],
@@ -2066,6 +2171,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.forumTags
     + calls.guilds
     + calls.guildExpressions
+    + calls.guildSettings
     + calls.integrations
     + calls.invites
     + calls.messages
@@ -2243,6 +2349,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildWidgetSettings,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWidgetSettings,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildSettings,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildSettings,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildRoles,
@@ -2880,6 +2990,23 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(widgetSettingsExposure.anonymousWidgetImageFetched, false)
   assert.doesNotMatch(widgetSettings.text, /widget\.json|widget-image/u)
 
+  const guildSettings = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/settings`,
+  )
+  const guildSettingsData = guildSettings.value.data as Record<string, unknown>
+  const guildSettingsPrivacy = guildSettingsData.privacy as Record<string, unknown>
+  const guildSettingsConfiguration = guildSettingsData.configuration as Record<string, unknown>
+  assert.equal(guildSettingsPrivacy.guildPresentation, "omitted")
+  assert.equal(guildSettingsPrivacy.channelNames, "omitted")
+  assert.equal(guildSettingsPrivacy.rawPayloads, "omitted")
+  assert.equal(guildSettingsConfiguration.verificationLevel, "high")
+  assert.deepEqual(
+    guildSettingsConfiguration.suppressedSystemNotifications,
+    ["guild-reminders"],
+  )
+  assert.doesNotMatch(guildSettings.text, /system_channel_flags|Private guild/u)
+
   const channelMetadata = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}`,
@@ -2951,6 +3078,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.onboarding, 1)
   assert.equal(calls.welcomeScreens, 1)
   assert.equal(calls.widgetSettings, 1)
+  assert.equal(calls.guildSettings, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
@@ -3528,6 +3656,29 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(widgetSettings, /public-exposure consequences and authorization/)
   assert.match(widgetSettings, /Private Profile restoration boundary/)
   assert.match(widgetSettings, /Anonymous widget JSON and image endpoints must remain uncalled/)
+
+  const guildSettingsRequest = {
+    auditReason: "Reviewed guild defaults",
+    defaultMessageNotifications: "only-mentions",
+    explicitContentFilter: "all-members",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    suppressedSystemNotifications: ["guild-reminders"],
+    verificationLevel: "high",
+  }
+  const guildSettings = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(guildSettingsRequest) },
+    name: MCP_PROMPT_NAMES.reviewGuildSettingsChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(guildSettings.split("\n")[1] || ""),
+    guildSettingsRequest,
+  )
+  assert.match(guildSettings, /Call only plan_guild_settings_change/)
+  assert.match(guildSettings, /Do not call execute_guild_settings_change/)
+  assert.match(guildSettings, /requested and changed fields/)
+  assert.match(guildSettings, /unknown-bit boundary/)
+  assert.match(guildSettings, /uncertain same-guild predecessor/)
 
   const channelMetadataRequest = {
     auditReason: "Reviewed channel metadata",

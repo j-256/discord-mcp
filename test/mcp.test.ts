@@ -21,6 +21,7 @@ import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   DISCORD_CHANNEL_TYPES,
+  GUILD_SETTINGS_FIELDS,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
@@ -147,6 +148,14 @@ import type {
   WidgetSettingsConfigurationView,
   WidgetSettingsPrivacyProjection,
 } from "../src/widget-settings-service.js"
+import type {
+  GuildSettingsAccessEvidence,
+  GuildSettingsAuditResult,
+  GuildSettingsChangePlan,
+  GuildSettingsChangeRequest,
+  GuildSettingsConfigurationView,
+  GuildSettingsPrivacyProjection,
+} from "../src/guild-settings-service.js"
 import type {
   PollCreationPlan,
   PollCreationRequest,
@@ -281,6 +290,8 @@ import {
   WelcomeScreenOperationConflictError,
   WidgetSettingsExecutionError,
   WidgetSettingsOperationConflictError,
+  GuildSettingsExecutionError,
+  GuildSettingsOperationConflictError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
   WriteCoordinationStateError,
@@ -407,6 +418,7 @@ const PRIVATE_GUILD_TEMPLATE_CODE = "private-template-capability"
 const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
 const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
 const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
+const GUILD_SETTINGS_OPERATION_KEY = "guild-settings-change-attempt-0001"
 const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
 const ONBOARDING_PROMPT_TITLE = "Choose your community path"
 const ONBOARDING_OPTION_TITLE = "Community member"
@@ -1841,6 +1853,231 @@ function widgetSettingsPlan(
     warnings: changed
       ? ["Manual Private Profile restoration may be required after disabling"]
       : ["The complete desired authenticated widget settings already match Discord"],
+    writeRequired: changed,
+  }
+}
+
+function guildSettingsRequest(
+  overrides: Partial<GuildSettingsChangeRequest> = {},
+): GuildSettingsChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    defaultMessageNotifications: "only-mentions",
+    explicitContentFilter: "all-members",
+    guildId: GUILD_ID,
+    operationKey: GUILD_SETTINGS_OPERATION_KEY,
+    verificationLevel: "high",
+    ...overrides,
+  }
+}
+
+function guildSettingsAccess(): GuildSettingsAccessEvidence {
+  return {
+    appliedRoleIds: [GUILD_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD"],
+    effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+    manageGuild: true,
+    requiredPermission: "MANAGE_GUILD",
+    unknownPermissionBits: "0",
+    warnings: [],
+  }
+}
+
+function guildSettingsPrivacy(): GuildSettingsPrivacyProjection {
+  return {
+    channelNames: "omitted",
+    guildPresentation: "omitted",
+    memberData: "omitted",
+    persistence: "none",
+    rawPayloads: "omitted",
+    roleNames: "omitted",
+    unknownValues: "bit-presence-only",
+  }
+}
+
+function guildSettingsConfiguration(
+  request: GuildSettingsChangeRequest | null,
+): GuildSettingsConfigurationView {
+  const base: GuildSettingsConfigurationView = {
+    afkChannel: null,
+    afkChannelId: null,
+    afkTimeoutSeconds: 300,
+    defaultMessageNotifications: "all-messages",
+    explicitContentFilter: "members-without-roles",
+    issues: [],
+    premiumProgressBarEnabled: false,
+    suppressedSystemNotifications: [],
+    systemChannel: {
+      channelId: CHANNEL_ID,
+      eligible: true,
+      exists: true,
+      metadata: "trusted",
+      parentId: null,
+      type: DISCORD_CHANNEL_TYPES.text,
+    },
+    systemChannelId: CHANNEL_ID,
+    unknownSystemChannelFlagsPresent: false,
+    verificationLevel: "medium",
+  }
+  if (!request) return base
+  const afkChannelId = request.afkChannelId === undefined
+    ? base.afkChannelId
+    : request.afkChannelId
+  const systemChannelId = request.systemChannelId === undefined
+    ? base.systemChannelId
+    : request.systemChannelId
+  return {
+    ...base,
+    afkChannel: afkChannelId === null
+      ? null
+      : {
+          channelId: afkChannelId,
+          eligible: true,
+          exists: true,
+          metadata: "trusted",
+          parentId: null,
+          type: DISCORD_CHANNEL_TYPES.voice,
+        },
+    afkChannelId,
+    afkTimeoutSeconds: request.afkTimeoutSeconds ?? base.afkTimeoutSeconds,
+    defaultMessageNotifications: request.defaultMessageNotifications
+      ?? base.defaultMessageNotifications,
+    explicitContentFilter: request.explicitContentFilter
+      ?? base.explicitContentFilter,
+    premiumProgressBarEnabled: request.premiumProgressBarEnabled
+      ?? base.premiumProgressBarEnabled,
+    suppressedSystemNotifications: request.suppressedSystemNotifications === undefined
+      ? base.suppressedSystemNotifications
+      : [...request.suppressedSystemNotifications].sort(),
+    systemChannel: systemChannelId === null
+      ? null
+      : {
+          channelId: systemChannelId,
+          eligible: true,
+          exists: true,
+          metadata: "trusted",
+          parentId: null,
+          type: DISCORD_CHANNEL_TYPES.text,
+        },
+    systemChannelId,
+    verificationLevel: request.verificationLevel ?? base.verificationLevel,
+  }
+}
+
+function guildSettingsInventory() {
+  return {
+    gatewayChannelCount: 1,
+    httpChannelCount: 1,
+    httpMode: "complete" as const,
+    layoutRevision: 7,
+    layoutUpdatedAt: "2026-08-23T00:00:00.000Z",
+    metadataCoverage: "complete" as const,
+    obfuscatedChannelCount: 0,
+    trustedMetadataCount: 1,
+  }
+}
+
+function guildSettingsLocalConstraints(): GuildSettingsAuditResult["localConstraints"] {
+  return {
+    afkChannelTypes: [DISCORD_CHANNEL_TYPES.voice],
+    afkTimeoutSeconds: [60, 300, 900, 1_800, 3_600],
+    defaultMessageNotifications: ["all-messages", "only-mentions"],
+    explicitContentFilters: [
+      "disabled",
+      "members-without-roles",
+      "all-members",
+    ],
+    guildAllowlist: 100,
+    supportedFields: [...GUILD_SETTINGS_FIELDS],
+    systemChannelTypes: [
+      DISCORD_CHANNEL_TYPES.text,
+      DISCORD_CHANNEL_TYPES.announcement,
+    ],
+    systemNotificationSuppressions: [
+      "guild-reminders",
+      "join-notification-replies",
+      "join-notifications",
+      "premium-subscriptions",
+      "role-subscription-purchase-notification-replies",
+      "role-subscription-purchase-notifications",
+    ],
+    verificationLevels: ["none", "low", "medium", "high", "very-high"],
+  }
+}
+
+function guildSettingsAudit(): GuildSettingsAuditResult {
+  return {
+    access: guildSettingsAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: guildSettingsConfiguration(null),
+    guildId: GUILD_ID,
+    inventory: guildSettingsInventory(),
+    localConstraints: guildSettingsLocalConstraints(),
+    privacy: guildSettingsPrivacy(),
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      automaticRetry: false,
+      freshApiReadback: true,
+      gatewayLayoutContinuity: true,
+      mutationResponse: true,
+      rollback: "not-automatic",
+    },
+  }
+}
+
+function guildSettingsPlan(
+  request: GuildSettingsChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): GuildSettingsChangePlan {
+  const requestedFields = GUILD_SETTINGS_FIELDS
+    .filter((field) => Object.hasOwn(request, field))
+    .sort()
+  const desired = guildSettingsConfiguration(request)
+  const changed = effect === "change"
+  const current = changed ? guildSettingsConfiguration(null) : desired
+  const effectByField = {
+    afkChannelId: "routing-change",
+    afkTimeoutSeconds: "timeout-change",
+    defaultMessageNotifications: "noise-reducing",
+    explicitContentFilter: "strengthening",
+    premiumProgressBarEnabled: "presentation-change",
+    suppressedSystemNotifications: "suppression-increase",
+    systemChannelId: "routing-change",
+    verificationLevel: "strengthening",
+  } as const
+  return {
+    access: guildSettingsAccess(),
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields: changed ? requestedFields : [],
+    createdAt: "2026-08-23T00:00:00.000Z",
+    current,
+    desired,
+    digest,
+    effects: changed
+      ? requestedFields.map((field) => ({ effect: effectByField[field], field }))
+      : [],
+    guildId: request.guildId,
+    inventory: guildSettingsInventory(),
+    localConstraints: guildSettingsLocalConstraints(),
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: guildSettingsPrivacy(),
+    requestedFields,
+    risks: changed ? ["verification-strengthened", "notification-default-changed"] : [],
+    schemaVersion: 1,
+    status: changed ? "planned" : "already-current",
+    verificationBoundary: guildSettingsAudit().verificationBoundary,
+    warnings: changed
+      ? ["Only the reviewed named fields will be patched"]
+      : ["The requested guild settings already match Discord"],
     writeRequired: changed,
   }
 }
@@ -4713,6 +4950,9 @@ function fixturePolicy(): PolicyDescription {
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildSettingsAuditEnabled: false,
+    guildSettingsChangesEnabled: false,
+    guildSettingsGuildIds: [],
     guildTemplateAuditEnabled: false,
     guildTemplateChangesEnabled: false,
     guildTemplateGuildIds: [],
@@ -4877,6 +5117,9 @@ function serviceFixture(overrides: {
   widgetSettingsEffect?: "change" | "none"
   widgetSettingsError?: Error
   widgetSettingsPlanDigest?: string
+  guildSettingsEffect?: "change" | "none"
+  guildSettingsError?: Error
+  guildSettingsPlanDigest?: string
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
@@ -4927,6 +5170,11 @@ function serviceFixture(overrides: {
     plan: 0,
   }
   const widgetSettingsCalls = {
+    execute: 0,
+    get: 0,
+    plan: 0,
+  }
+  const guildSettingsCalls = {
     execute: 0,
     get: 0,
     plan: 0,
@@ -5485,6 +5733,27 @@ function serviceFixture(overrides: {
         warnings: planned.warnings,
       }
     },
+    async executeGuildSettingsChange(request, planDigest) {
+      if (overrides.guildSettingsError) throw overrides.guildSettingsError
+      guildSettingsCalls.execute += 1
+      const planned = guildSettingsPlan(
+        request,
+        planDigest,
+        overrides.guildSettingsEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-guild-settings" : null,
+        driftFields: [],
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        requestedFields: planned.requestedFields,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+        warnings: planned.warnings,
+      }
+    },
     async getGuildOnboarding(_guildId, includeText = false) {
       calls.onboardingGet += 1
       return onboardingAudit(includeText)
@@ -5496,6 +5765,10 @@ function serviceFixture(overrides: {
     async getGuildWidgetSettings() {
       widgetSettingsCalls.get += 1
       return widgetSettingsAudit()
+    },
+    async getGuildSettings() {
+      guildSettingsCalls.get += 1
+      return guildSettingsAudit()
     },
     async planOnboardingChange(request) {
       calls.onboardingPlan += 1
@@ -5519,6 +5792,14 @@ function serviceFixture(overrides: {
         request,
         overrides.widgetSettingsPlanDigest || DIGEST,
         overrides.widgetSettingsEffect,
+      )
+    },
+    async planGuildSettingsChange(request) {
+      guildSettingsCalls.plan += 1
+      return guildSettingsPlan(
+        request,
+        overrides.guildSettingsPlanDigest || DIGEST,
+        overrides.guildSettingsEffect,
       )
     },
     async executeInviteDeletion(request, planDigest) {
@@ -7649,6 +7930,7 @@ function serviceFixture(overrides: {
     service,
     welcomeScreenCalls,
     widgetSettingsCalls,
+    guildSettingsCalls,
   }
 }
 
@@ -7869,6 +8151,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_onboarding",
       "get_guild_welcome_screen",
       "get_guild_widget_settings",
+      "get_guild_settings",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
       "list_active_threads",
@@ -7940,6 +8223,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_welcome_screen_change",
       "plan_guild_widget_settings_change",
       "execute_guild_widget_settings_change",
+      "plan_guild_settings_change",
+      "execute_guild_settings_change",
       "plan_guild_expression_change",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
@@ -8027,6 +8312,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const widgetSettings = result.tools.find((tool) => (
     tool.name === "execute_guild_widget_settings_change"
   ))
+  const guildSettings = result.tools.find((tool) => (
+    tool.name === "execute_guild_settings_change"
+  ))
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
@@ -8081,6 +8369,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     inviteDeletion,
     onboarding,
     widgetSettings,
+    guildSettings,
     guildExpression,
     soundboard,
     scheduledEvent,
@@ -8186,6 +8475,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_guild_templates",
     "get_guild_onboarding",
     "get_guild_widget_settings",
+    "get_guild_settings",
     "list_guild_emojis",
     "get_guild_emoji",
     "list_guild_stickers",
@@ -8219,6 +8509,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_guild_template_change",
     "plan_onboarding_change",
     "plan_guild_widget_settings_change",
+    "plan_guild_settings_change",
     "plan_guild_expression_change",
     "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
@@ -14722,6 +15013,268 @@ test("MCP widget-settings execution exposes uncertainty and content-free conflic
     new RegExp(WIDGET_SETTINGS_OPERATION_KEY),
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), /private-channel/u)
+})
+
+test("MCP guild-settings audit exposes only named privacy-minimized state", async (context) => {
+  const { client, guildSettingsCalls } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_settings",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "get_guild_settings",
+  })
+
+  const content = structuredContent(audited)
+  const configuration = content.configuration as Record<string, unknown>
+  const privacy = content.privacy as Record<string, unknown>
+  assert.equal(configuration.verificationLevel, "medium")
+  assert.equal(configuration.defaultMessageNotifications, "all-messages")
+  assert.deepEqual(configuration.suppressedSystemNotifications, [])
+  assert.equal(configuration.unknownSystemChannelFlagsPresent, false)
+  assert.equal(privacy.guildPresentation, "omitted")
+  assert.equal(privacy.channelNames, "omitted")
+  assert.equal(privacy.rawPayloads, "omitted")
+  assert.equal("name" in content, false)
+  assert.doesNotMatch(JSON.stringify(audited), /system_channel_flags|permissions/u)
+  assert.equal(invalid.isError, true)
+  assert.equal(guildSettingsCalls.get, 1)
+})
+
+test("MCP guild-settings plans preserve sparse named intent", async (context) => {
+  const { client, guildSettingsCalls } = await connectedFixture(context)
+  const request = guildSettingsRequest()
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_guild_settings_change",
+  })
+  const suppressions = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: "guild-settings-suppressions-attempt-0001",
+      suppressedSystemNotifications: [
+        "join-notifications",
+        "guild-reminders",
+      ],
+    },
+    name: "plan_guild_settings_change",
+  })
+  const empty = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: GUILD_SETTINGS_OPERATION_KEY,
+    },
+    name: "plan_guild_settings_change",
+  })
+  const rawBitfield = await client.callTool({
+    arguments: { ...request, systemChannelFlags: 3 },
+    name: "plan_guild_settings_change",
+  })
+  const duplicate = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: GUILD_SETTINGS_OPERATION_KEY,
+      suppressedSystemNotifications: [
+        "join-notifications",
+        "join-notifications",
+      ],
+    },
+    name: "plan_guild_settings_change",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal(content.operationKeyHash, OPERATION_KEY_HASH)
+  assert.deepEqual(content.requestedFields, [
+    "defaultMessageNotifications",
+    "explicitContentFilter",
+    "verificationLevel",
+  ])
+  assert.deepEqual(content.changedFields, content.requestedFields)
+  assert.deepEqual(
+    (structuredContent(suppressions).desired as Record<string, unknown>)
+      .suppressedSystemNotifications,
+    ["guild-reminders", "join-notifications"],
+  )
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(GUILD_SETTINGS_OPERATION_KEY))
+  assert.equal(empty.isError, true)
+  assert.equal(rawBitfield.isError, true)
+  assert.equal(duplicate.isError, true)
+  assert.equal(guildSettingsCalls.plan, 2)
+})
+
+test("MCP guild-settings execution binds approval to exact sparse intent", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client, guildSettingsCalls } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const request = guildSettingsRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_guild_settings_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(guildSettingsCalls.plan, 1)
+  assert.equal(guildSettingsCalls.execute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Requested fields/)
+  assert.match(confirmationMessage, /Current complete named settings/)
+  assert.match(confirmationMessage, /Only requested fields are patched/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_SETTINGS_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(GUILD_SETTINGS_OPERATION_KEY))
+})
+
+test("MCP guild-settings execution stops on no-op, refusal, drift, or changed signed intent", async (context) => {
+  const argumentsValue = {
+    ...guildSettingsRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildSettingsEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_settings_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.guildSettingsCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_settings_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.guildSettingsCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildSettingsPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_settings_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.guildSettingsCalls.execute, 0)
+
+  const signed = await connectedModernStdioFixture(context)
+  const initial = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: argumentsValue,
+      name: "execute_guild_settings_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  const changed = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...argumentsValue,
+        verificationLevel: "very-high",
+      },
+      inputResponses: {
+        confirm_guild_settings_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_settings_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changed).status, "confirmation-invalid")
+  assert.equal(changed.isError, true)
+  assert.equal(signed.guildSettingsCalls.execute, 0)
+})
+
+test("MCP guild-settings execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...guildSettingsRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildSettingsError: new GuildSettingsExecutionError(
+        "Discord guild-settings outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_settings_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-settings",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    planDigest: DIGEST,
+    status: "completed" as const,
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildSettingsError: new GuildSettingsOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_settings_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(GUILD_SETTINGS_OPERATION_KEY))
 })
 
 test("MCP channel metadata reads and plans preserve exact bounded intent", async (context) => {

@@ -3013,6 +3013,131 @@ test("Discord client rejects malformed widget-settings evidence and inputs", asy
   assert.equal(requests, 1)
 })
 
+test("Discord client sends one sparse non-retried guild-settings PATCH", async () => {
+  let requests = 0
+  let requestUrl = ""
+  let requestBody: unknown
+  let auditReason = ""
+  let method = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests += 1
+      requestUrl = String(input)
+      method = init?.method || "GET"
+      auditReason = new Headers(init?.headers).get("X-Audit-Log-Reason") || ""
+      requestBody = JSON.parse(String(init?.body))
+      return jsonResponse({
+        afk_channel_id: "300",
+        afk_timeout: 300,
+        default_message_notifications: 1,
+        explicit_content_filter: 2,
+        features: [],
+        id: "100",
+        name: "Private Guild",
+        owner_id: "200",
+        premium_progress_bar_enabled: true,
+        system_channel_flags: 3,
+        system_channel_id: null,
+        verification_level: 4,
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildSettings("100", {
+    defaultMessageNotifications: 1,
+    explicitContentFilter: 2,
+    premiumProgressBarEnabled: true,
+    suppressedSystemNotifications: 3,
+    systemChannelId: null,
+    verificationLevel: 4,
+  }, "Reviewed guild / defaults")
+
+  assert.equal(requests, 1)
+  assert.equal(requestUrl, `${API_BASE_URL}/guilds/100`)
+  assert.equal(method, "PATCH")
+  assert.equal(auditReason, "Reviewed%20guild%20%2F%20defaults")
+  assert.deepEqual(requestBody, {
+    default_message_notifications: 1,
+    explicit_content_filter: 2,
+    premium_progress_bar_enabled: true,
+    system_channel_flags: 3,
+    system_channel_id: null,
+    verification_level: 4,
+  })
+  assert.equal(result.id, "100")
+  assert.equal(records[0]?.operation, "modify_guild_settings")
+
+  let sleeps = 0
+  requests = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        code: 20_016,
+        message: "rate limited",
+        retry_after: 0,
+      }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.modifyGuildSettings("100", { verificationLevel: 2 }, "Reviewed"),
+    DiscordApiError,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client rejects invalid guild-settings inputs before fetching", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    client.modifyGuildSettings("bad", { verificationLevel: 2 }, "Reviewed"),
+    /guild ID/,
+  )
+  await assert.rejects(
+    client.modifyGuildSettings("100", {}, "Reviewed"),
+    /supported fields/,
+  )
+  await assert.rejects(
+    client.modifyGuildSettings("100", { afkChannelId: "bad" }, "Reviewed"),
+    /afkChannelId/,
+  )
+  await assert.rejects(
+    client.modifyGuildSettings("100", { afkTimeoutSeconds: 120 as 60 }, "Reviewed"),
+    /AFK timeout/,
+  )
+  await assert.rejects(
+    client.modifyGuildSettings("100", { suppressedSystemNotifications: 64 }, "Reviewed"),
+    /notification mask/,
+  )
+  await assert.rejects(
+    client.modifyGuildSettings("100", {
+      verificationLevel: 2,
+      future: true,
+    } as never, "Reviewed"),
+    /supported fields/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client never retries a rate-limited role configuration", async () => {
   let requests = 0
   let sleeps = 0

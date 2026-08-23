@@ -24,6 +24,8 @@ import {
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_USER_AGENT,
   DISCORD_VIDEO_QUALITY_MODES,
+  GUILD_AFK_TIMEOUT_SECONDS,
+  GUILD_SYSTEM_CHANNEL_KNOWN_FLAG_MASK,
 } from "./constants.js"
 import {
   assertCompiledComponentLayout,
@@ -485,6 +487,17 @@ export interface DiscordGuildWidgetSettings {
 export interface ModifyGuildWidgetSettingsInput {
   channelId: string | null
   enabled: boolean
+}
+
+export interface ModifyGuildSettingsInput {
+  afkChannelId?: string | null
+  afkTimeoutSeconds?: 60 | 300 | 900 | 1_800 | 3_600
+  defaultMessageNotifications?: 0 | 1
+  explicitContentFilter?: 0 | 1 | 2
+  premiumProgressBarEnabled?: boolean
+  suppressedSystemNotifications?: number
+  systemChannelId?: string | null
+  verificationLevel?: 0 | 1 | 2 | 3 | 4
 }
 
 export interface ModifyGuildOnboardingInput {
@@ -2205,6 +2218,16 @@ const WELCOME_SCREEN_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 
 const WIDGET_SETTINGS_KEYS = ["channel_id", "enabled"] as const
 const WIDGET_SETTINGS_INPUT_KEYS = ["channelId", "enabled"] as const
+const GUILD_SETTINGS_INPUT_KEYS = [
+  "afkChannelId",
+  "afkTimeoutSeconds",
+  "defaultMessageNotifications",
+  "explicitContentFilter",
+  "premiumProgressBarEnabled",
+  "suppressedSystemNotifications",
+  "systemChannelId",
+  "verificationLevel",
+] as const
 
 const VOICE_STATE_KEYS = [
   "channel_id",
@@ -2399,6 +2422,98 @@ function assertModifyGuildWidgetSettingsInput(
   }
   if (typeof input.channelId === "string") {
     assertPositiveSnowflake(input.channelId, "Discord widget channel ID")
+  }
+}
+
+function assertModifyGuildSettingsInput(
+  value: unknown,
+): asserts value is ModifyGuildSettingsInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord guild-settings input must be an exact object")
+  }
+  const input = value as Record<string, unknown>
+  const keys = Object.keys(input)
+  if (keys.length < 1 || !hasOnlyKeys(input, GUILD_SETTINGS_INPUT_KEYS)) {
+    throw new RangeError("Discord guild-settings input must contain supported fields only")
+  }
+  for (const key of ["afkChannelId", "systemChannelId"] as const) {
+    if (!Object.hasOwn(input, key)) continue
+    if (!(input[key] === null || typeof input[key] === "string")) {
+      throw new RangeError(`Discord guild-settings ${key} is invalid`)
+    }
+    if (typeof input[key] === "string") {
+      assertPositiveSnowflake(input[key], `Discord guild-settings ${key}`)
+    }
+  }
+  if (
+    Object.hasOwn(input, "afkTimeoutSeconds")
+    && !GUILD_AFK_TIMEOUT_SECONDS.includes(input.afkTimeoutSeconds as never)
+  ) {
+    throw new RangeError("Discord guild-settings AFK timeout is invalid")
+  }
+  if (
+    Object.hasOwn(input, "defaultMessageNotifications")
+    && ![0, 1].includes(input.defaultMessageNotifications as number)
+  ) {
+    throw new RangeError("Discord guild-settings notification default is invalid")
+  }
+  if (
+    Object.hasOwn(input, "explicitContentFilter")
+    && ![0, 1, 2].includes(input.explicitContentFilter as number)
+  ) {
+    throw new RangeError("Discord guild-settings content filter is invalid")
+  }
+  if (
+    Object.hasOwn(input, "premiumProgressBarEnabled")
+    && typeof input.premiumProgressBarEnabled !== "boolean"
+  ) {
+    throw new RangeError("Discord guild-settings premium progress bar value is invalid")
+  }
+  if (
+    Object.hasOwn(input, "suppressedSystemNotifications")
+    && (
+      !Number.isSafeInteger(input.suppressedSystemNotifications)
+      || (input.suppressedSystemNotifications as number) < 0
+      || (input.suppressedSystemNotifications as number)
+        > GUILD_SYSTEM_CHANNEL_KNOWN_FLAG_MASK
+    )
+  ) {
+    throw new RangeError("Discord guild-settings system notification mask is invalid")
+  }
+  if (
+    Object.hasOwn(input, "verificationLevel")
+    && ![0, 1, 2, 3, 4].includes(input.verificationLevel as number)
+  ) {
+    throw new RangeError("Discord guild-settings verification level is invalid")
+  }
+}
+
+function guildSettingsBody(input: ModifyGuildSettingsInput): Record<string, unknown> {
+  return {
+    ...(Object.hasOwn(input, "afkChannelId")
+      ? { afk_channel_id: input.afkChannelId }
+      : {}),
+    ...(Object.hasOwn(input, "afkTimeoutSeconds")
+      ? { afk_timeout: input.afkTimeoutSeconds }
+      : {}),
+    ...(Object.hasOwn(input, "defaultMessageNotifications")
+      ? { default_message_notifications: input.defaultMessageNotifications }
+      : {}),
+    ...(Object.hasOwn(input, "explicitContentFilter")
+      ? { explicit_content_filter: input.explicitContentFilter }
+      : {}),
+    ...(Object.hasOwn(input, "premiumProgressBarEnabled")
+      ? { premium_progress_bar_enabled: input.premiumProgressBarEnabled }
+      : {}),
+    ...(Object.hasOwn(input, "suppressedSystemNotifications")
+      ? { system_channel_flags: input.suppressedSystemNotifications }
+      : {}),
+    ...(Object.hasOwn(input, "systemChannelId")
+      ? { system_channel_id: input.systemChannelId }
+      : {}),
+    ...(Object.hasOwn(input, "verificationLevel")
+      ? { verification_level: input.verificationLevel }
+      : {}),
   }
 }
 
@@ -7623,7 +7738,29 @@ export class DiscordClient {
   }
 
   getGuild(guildId: string, options: RequestOptions = {}): Promise<DiscordGuild> {
+    assertPositiveSnowflake(guildId, "Discord guild ID")
     return this.#request("get_guild", `/guilds/${guildId}`, options)
+  }
+
+  async modifyGuildSettings(
+    guildId: string,
+    input: ModifyGuildSettingsInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuild> {
+    assertPositiveSnowflake(guildId, "Discord guild-settings guild ID")
+    assertModifyGuildSettingsInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord guild-settings audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("modify_guild_settings", `/guilds/${guildId}`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      body: guildSettingsBody(input),
+      suppressFailureCause: true,
+    })
   }
 
   async getGuildOnboarding(

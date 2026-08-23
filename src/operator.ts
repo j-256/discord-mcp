@@ -97,6 +97,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   widgetPublicExposurePolicy: "widget-public-exposure-policy",
   widgetSettingsAuditPolicy: "widget-settings-audit-policy",
   widgetSettingsChangePolicy: "widget-settings-change-policy",
+  guildSettingsAuditPolicy: "guild-settings-audit-policy",
+  guildSettingsChangePolicy: "guild-settings-change-policy",
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
   pollAuditPolicy: "poll-audit-policy",
@@ -436,6 +438,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowWidgetSettingsChanges && config.widgetSettingsGuildIds.size === 0) {
     warnings.push("The authenticated widget-settings change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
   }
+  if (config.allowGuildSettingsAudit && config.guildSettingsGuildIds.size === 0) {
+    warnings.push("The guild-settings audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowGuildSettingsChanges && config.guildSettingsGuildIds.size === 0) {
+    warnings.push("The guild-settings change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
   if (config.allowWidgetPublicExposure && config.widgetSettingsGuildIds.size === 0) {
     warnings.push("The widget public-exposure toggle is enabled but exposure-changing writes remain blocked because an exact guild allowlist is required")
   }
@@ -593,6 +601,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
         || config.allowWidgetPublicExposure,
       "widget-settings",
       "Authenticated widget-settings audit and reviewed changes",
+    ],
+    [
+      config.allowGuildSettingsAudit || config.allowGuildSettingsChanges,
+      "guild-settings",
+      "Guild-settings audit and reviewed changes",
     ],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
@@ -1653,6 +1666,44 @@ export async function diagnoseConnector(
         `Widget public-exposure authorization is constrained to ${config.widgetSettingsGuildIds.size} exact guilds and is required only for enabling the widget or selecting a different non-null channel`,
       ))
     }
+    if (!config.allowGuildSettingsAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildSettingsAuditPolicy,
+        "pass",
+        "Guild-settings audit is disabled",
+      ))
+    } else if (config.guildSettingsGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildSettingsAuditPolicy,
+        "warn",
+        "Guild-settings audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildSettingsAuditPolicy,
+        "pass",
+        `Guild-settings audit is constrained to ${config.guildSettingsGuildIds.size} exact guilds with complete permission and continuity-safe channel evidence plus named privacy-minimized state`,
+      ))
+    }
+    if (!config.allowGuildSettingsChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildSettingsChangePolicy,
+        "pass",
+        "Reviewed guild-settings changes are disabled",
+      ))
+    } else if (config.guildSettingsGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildSettingsChangePolicy,
+        "warn",
+        "Guild-settings changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildSettingsChangePolicy,
+        "pass",
+        `Reviewed guild-settings changes are constrained to ${config.guildSettingsGuildIds.size} exact guilds with sparse named-field review, signed approval, one-shot execution, and authoritative response plus API readback`,
+      ))
+    }
     if (!config.allowMemberRoleChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberRolePolicy,
@@ -2351,6 +2402,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
     ENVIRONMENT_NAMES.allowWidgetPublicExposure,
     ENVIRONMENT_NAMES.widgetSettingsGuildIds,
+    ENVIRONMENT_NAMES.allowGuildSettingsAudit,
+    ENVIRONMENT_NAMES.allowGuildSettingsChanges,
+    ENVIRONMENT_NAMES.guildSettingsGuildIds,
     ENVIRONMENT_NAMES.allowMemberDirectory,
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowBanAudit,

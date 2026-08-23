@@ -438,6 +438,18 @@ import {
   WidgetSettingsService,
 } from "./widget-settings-service.js"
 import type {
+  GuildSettingsAuditResult,
+  GuildSettingsChangePlan,
+  GuildSettingsChangeRequest,
+  GuildSettingsChangeResult,
+  GuildSettingsServiceOptions,
+} from "./guild-settings-service.js"
+import {
+  assertGuildSettingsGetInput,
+  GuildSettingsService,
+  normalizeGuildSettingsChangeRequest,
+} from "./guild-settings-service.js"
+import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
   ThreadCreationResult,
@@ -613,6 +625,7 @@ export interface DiscordServiceClient {
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
   modifyGuildWidgetSettings: DiscordClient["modifyGuildWidgetSettings"]
+  modifyGuildSettings: DiscordClient["modifyGuildSettings"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
   modifyGuildScheduledEvent: DiscordClient["modifyGuildScheduledEvent"]
@@ -709,6 +722,10 @@ export interface ConnectorServiceOptions {
   >
   guildExpressionOptions?: Pick<
     GuildExpressionServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildSettingsOptions?: Pick<
+    GuildSettingsServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   interactionOptions?: Pick<
@@ -944,6 +961,7 @@ export class ConnectorService {
   readonly #forumTagService: ForumTagService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
+  readonly #guildSettingsService: GuildSettingsService
   readonly #guildTemplateService: GuildTemplateService
   readonly #integrationService: IntegrationService
   readonly #permissionService: PermissionService
@@ -1112,6 +1130,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildTemplateOptions,
+    })
+    this.#guildSettingsService = new GuildSettingsService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      layoutSource: gateway,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildSettingsOptions,
     })
     this.#integrationService = new IntegrationService({
       activityStore: this.#activityStore,
@@ -1671,6 +1697,20 @@ export class ConnectorService {
     assertWidgetSettingsGetInput(guildId)
     const identity = await this.#verifyIdentity(options)
     return this.#widgetSettingsService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async getGuildSettings(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildSettingsAuditResult> {
+    assertGuildSettingsGetInput(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildSettingsService.get(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -2492,6 +2532,20 @@ export class ConnectorService {
     normalizeWidgetSettingsChangeRequest(request)
     const identity = await this.#verifyIdentity(options)
     return this.#widgetSettingsService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildSettingsChange(
+    request: GuildSettingsChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildSettingsChangePlan> {
+    normalizeGuildSettingsChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildSettingsService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -3977,6 +4031,31 @@ export class ConnectorService {
       planDigest,
       [writeGuildCollectionTarget("widget-settings", request.guildId)],
       () => this.#widgetSettingsService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildSettingsChange(
+    request: GuildSettingsChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildSettingsChangeResult> {
+    normalizeGuildSettingsChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild-settings plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "guild-settings-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("guild-settings", request.guildId)],
+      () => this.#guildSettingsService.execute(
         identity.application.id,
         identity.bot.id,
         request,
