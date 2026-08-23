@@ -35,6 +35,8 @@
   },
   "files": [
     "dist",
+    "docs/reference.md",
+    "docs/releasing.md",
     "LICENSE",
     "README.md",
     "SECURITY.md",

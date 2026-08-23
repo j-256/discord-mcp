@@ -24,6 +24,29 @@ const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2c
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
+const README_MAX_BYTES = 32 * 1024
+const README_REQUIRED_HEADINGS = Object.freeze([
+  "## Why this connector",
+  "## Quick start",
+  "## Capability map",
+  "## Safety model",
+  "## Trust and verification",
+  "## Architecture",
+  "## Documentation",
+  "## Development",
+  "## License",
+])
+const REFERENCE_REQUIRED_HEADINGS = Object.freeze([
+  "## Safety model",
+  "## Requirements",
+  "## Operator CLI",
+  "## Configuration",
+  "## Tools",
+  "## Resources",
+  "## Deletion workflow",
+  "## Verification",
+  "## Release integrity",
+])
 const STABLE_SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
 // Keep blocked names out of the repository bytes that this gate scans
@@ -92,6 +115,8 @@ const EXPECTED_PACKAGE_FILES = [
   "README.md",
   "SECURITY.md",
   "dist",
+  "docs/reference.md",
+  "docs/releasing.md",
   "server.json",
 ]
 
@@ -399,11 +424,40 @@ async function checkSourceIdentity(packageJson) {
 
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
-  const documentedVersions = [...readme.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
+  const reference = await readFile(
+    join(REPOSITORY_ROOT, "docs/reference.md"),
+    "utf8",
+  )
+  const documentation = `${readme}\n${reference}`
+  const documentedVersions = [...documentation.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
-  invariant(documentedVersions.every((version) => version === packageJson.version), "README npm versions are out of sync")
+  invariant(documentedVersions.every((version) => version === packageJson.version), "documentation npm versions are out of sync")
   invariant(readme.includes(`https://raw.githubusercontent.com/j-256/discord-mcp/v${packageJson.version}/assets/discord-mcp-icon.png`), "README icon URL is out of sync")
+  invariant(Buffer.byteLength(readme) <= README_MAX_BYTES, "README must remain a concise landing page")
+  invariant((readme.match(/^# /gm) || []).length === 1, "README must contain one top-level heading")
+  let previousHeading = -1
+  for (const heading of README_REQUIRED_HEADINGS) {
+    const position = readme.indexOf(heading)
+    invariant(position > previousHeading, `README is missing or misorders ${heading}`)
+    previousHeading = position
+  }
+  for (const required of [
+    "[Complete reference](docs/reference.md)",
+    "--preset server-observer",
+    "catalog --check --json",
+    "doctor --profile observer --online",
+    "smoke --profile observer",
+  ]) {
+    invariant(readme.includes(required), `README is missing ${required}`)
+  }
+  invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
+  invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
+  invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
+  invariant(reference.length > readme.length, "complete reference must retain the detailed contract")
+  for (const heading of REFERENCE_REQUIRED_HEADINGS) {
+    invariant(reference.includes(heading), `complete reference is missing ${heading}`)
+  }
 }
 
 async function checkRegistryManifest(packageJson) {
@@ -803,7 +857,7 @@ async function checkAutomation() {
     "/.github/",
     "/.npmrc",
     "/assets/",
-    "/docs/releasing.md",
+    "/docs/",
     "/package.json",
     "/package-lock.json",
     "/server.json",

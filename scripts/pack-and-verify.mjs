@@ -45,6 +45,8 @@ const REQUIRED_FILES = [
   "dist/cli.js",
   "dist/index.d.ts",
   "dist/index.js",
+  "docs/reference.md",
+  "docs/releasing.md",
   "package.json",
   "server.json",
 ]
@@ -52,6 +54,8 @@ const STATIC_FILES = new Set([
   "LICENSE",
   "README.md",
   "SECURITY.md",
+  "docs/reference.md",
+  "docs/releasing.md",
   "package.json",
   "server.json",
 ])

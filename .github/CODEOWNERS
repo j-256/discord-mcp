@@ -1,7 +1,7 @@
 /.github/ @j-256
 /.npmrc @j-256
 /assets/ @j-256
-/docs/releasing.md @j-256
+/docs/ @j-256
 /package.json @j-256
 /package-lock.json @j-256
 /server.json @j-256
