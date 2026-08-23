@@ -255,7 +255,8 @@ Treat forum-tag changes, guild-expression changes, scheduled-event changes, Stag
 - Node.js 22 or newer
 - A Discord application with a bot user
 - The bot token available as `DISCORD_BOT_TOKEN`
-- A distinct uppercase `DISCORD_*_TOKEN` environment variable may be selected when creating a named profile
+- One strict non-secret configuration file is recommended for all policy; environment-only policy remains available for compatibility and migration
+- A distinct uppercase `DISCORD_*_TOKEN` environment variable may be selected when creating a standalone configuration or managed profile
 - `View Channels` and `Read Message History` in every channel the connector should read
 - The Message Content privileged intent enabled for full message bodies, native search, announcement crossposts, native message forwarding, and static Components V2 planning; the optional content-free Gateway feed does not request it
 - The Guild Members privileged intent enabled when opt-in member listing is needed; the optional content-free Gateway feed does not request it
@@ -335,14 +336,14 @@ docker run --rm -i \
   ghcr.io/j-256/discord-mcp:0.1.0 catalog --check
 ```
 
-For an operational read-only connection, export the caller-owned token and exact public identity and scope values, then forward them by name. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
+For an operational read-only connection, create one verified non-secret policy file on the host, then mount it read-only and forward only the caller-owned token. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
 
 ```sh
 export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
-export DISCORD_MCP_APPLICATION_ID="YOUR_APPLICATION_ID"
-export DISCORD_MCP_BOT_ID="YOUR_BOT_ID"
-export DISCORD_MCP_ALLOWED_GUILD_IDS="YOUR_GUILD_ID"
-export DISCORD_MCP_TOOLSETS="activity,connector,guilds,observability,permissions,roles"
+npx --yes @j-256/discord-mcp@0.1.0 setup \
+  --config ./discord-mcp.json \
+  --preset server-observer \
+  --guild-id YOUR_GUILD_ID
 
 docker run --rm -i \
   --read-only \
@@ -350,14 +351,11 @@ docker run --rm -i \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
   --env DISCORD_BOT_TOKEN \
-  --env DISCORD_MCP_APPLICATION_ID \
-  --env DISCORD_MCP_BOT_ID \
-  --env DISCORD_MCP_ALLOWED_GUILD_IDS \
-  --env DISCORD_MCP_TOOLSETS \
-  ghcr.io/j-256/discord-mcp:0.1.0 serve
+  --mount "type=bind,source=$PWD/discord-mcp.json,target=/configuration/discord-mcp.json,readonly" \
+  ghcr.io/j-256/discord-mcp:0.1.0 serve --config /configuration/discord-mcp.json
 ```
 
-The image contains only the compiled server, production dependencies, package metadata, and license. It runs as the unprivileged `node` user, embeds no connector configuration, and never stores the forwarded token.
+The image contains only the compiled server, production dependencies, package metadata, and license. It runs as the unprivileged `node` user, embeds no connector configuration, and never stores the forwarded token. The Registry manifest encodes the same read-only root, dropped capabilities, process limit, config mount, fixed in-container path, and explicit `serve` command so OCI installation does not fall back to catalog mode.
 
 For development from source:
 
@@ -372,7 +370,7 @@ The source build's CLI entrypoint is `dist/cli.js`. The npm and source entrypoin
 
 ## Operator CLI
 
-The CLI provides a safe path from environment configuration to a verified MCP connection:
+The CLI provides a safe path from one non-secret configuration document to a verified MCP connection:
 
 ```sh
 node dist/cli.js doctor
@@ -381,14 +379,19 @@ node dist/cli.js catalog --check
 node dist/cli.js preset list
 node dist/cli.js preset show server-observer --json
 node dist/cli.js setup
+node dist/cli.js setup --config ./discord-mcp.json --preset server-observer --guild-id GUILD_ID
+node dist/cli.js setup --config ./discord-reader.json --preset channel-reader --guild-id GUILD_ID --channel-id CHANNEL_ID
+node dist/cli.js config validate ./discord-mcp.json
+node dist/cli.js config show ./discord-mcp.json
+node dist/cli.js config explain capabilities.deletions
+node dist/cli.js config migrate ./migrated.json --name migrated
 node dist/cli.js setup --profile observer --preset server-observer --guild-id GUILD_ID
-node dist/cli.js setup --profile reader --preset channel-reader --guild-id GUILD_ID --channel-id CHANNEL_ID
 node dist/cli.js setup --profile support-bot --token-env DISCORD_SUPPORT_BOT_TOKEN
 node dist/cli.js profile list
 node dist/cli.js coordination list
 node dist/cli.js coordination resolve CLAIM_ID --confirm CLAIM_ID
-node dist/cli.js doctor --profile support-bot --online
-node dist/cli.js smoke --profile support-bot
+node dist/cli.js doctor --config ./discord-mcp.json --online
+node dist/cli.js smoke --config ./discord-mcp.json
 node dist/cli.js smoke
 ```
 
@@ -396,15 +399,15 @@ node dist/cli.js smoke
 
 `preset list` and `preset show NAME` inspect deterministic least-privilege setup contracts without a credential, Discord request, Gateway connection, telemetry exporter, profile write, or activity record. Each report includes the exact toolsets and tool names derived from the production catalogs, allowed risk classes, exact scope requirements, intent guidance, disabled Gateway state, and an explicit zero-write assertion.
 
-`doctor` checks the Node.js version, required token variable, configuration syntax, application and bot identity pins, local allowlists, exact MCP tool surface and toolsets, Gateway policy, native Interaction ingress and managed-command policies, observability policy, interaction policy, reaction-user-audit and reaction-moderation policies, member-directory policy, ban-audit policy, invite-audit and revocation policy, onboarding-audit and replacement policy, Welcome Screen audit and replacement policy, guild-profile audit and change policies, named guild-settings audit and change policies, authenticated widget-settings audit, replacement, and public-exposure policies, member-role policy, member voice-audit and change policies, attachment policy, forum-post policy, forum-tag audit and change policies, message-pin policy, announcement-crosspost policy, native message-forwarding and cross-guild policies, announcement-subscription audit and change policies, native-poll audit, voter-audit, creation, and ending policies, webhook policy, guild-expression policy, soundboard audit and change policy, scheduled-event inventory, subscriber-audit, and change policies, Stage-instance audit, lifecycle, and notification policies, channel-clone audit and change policies, channel-metadata policy, permission-overwrite policy, guild-scaffold policy, channel-creation policy, role-creation policy, role-configuration policy, role-order audit and change policies, deletion policy, and administration policy. Offline checks do not read attachment, soundboard, or cover files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content and Guild Members intent flags, and first guild-membership page without listing guild members, guild bans, reaction users, scheduled-event subscribers, invites, onboarding, Welcome Screens, guild profiles, guild settings, widget settings, announcement subscriptions, member voice state, soundboard sounds, Stage instances, or channels, calling anonymous widget routes, reading messages or reasons, reading local files, opening a Gateway connection, or starting telemetry export. Configured announcement crossposts or message forwarding make an unconfirmed Message Content intent an online failure. Native Interaction startup separately verifies the outgoing-endpoint state and exact managed-command inventory before the Gateway begins accepting requests. Add `--profile NAME` to diagnose the saved identity and read boundary using its selected credential variable.
+`doctor` checks the Node.js version, required token variable, configuration syntax, application and bot identity pins, local allowlists, exact MCP tool surface and toolsets, Gateway policy, native Interaction ingress and managed-command policies, observability policy, interaction policy, reaction-user-audit and reaction-moderation policies, member-directory policy, ban-audit policy, invite-audit and revocation policy, onboarding-audit and replacement policy, Welcome Screen audit and replacement policy, guild-profile audit and change policies, named guild-settings audit and change policies, authenticated widget-settings audit, replacement, and public-exposure policies, member-role policy, member voice-audit and change policies, attachment policy, forum-post policy, forum-tag audit and change policies, message-pin policy, announcement-crosspost policy, native message-forwarding and cross-guild policies, announcement-subscription audit and change policies, native-poll audit, voter-audit, creation, and ending policies, webhook policy, guild-expression policy, soundboard audit and change policy, scheduled-event inventory, subscriber-audit, and change policies, Stage-instance audit, lifecycle, and notification policies, channel-clone audit and change policies, channel-metadata policy, permission-overwrite policy, guild-scaffold policy, channel-creation policy, role-creation policy, role-configuration policy, role-order audit and change policies, deletion policy, and administration policy. Offline checks do not read attachment, soundboard, or cover files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content and Guild Members intent flags, and first guild-membership page without listing guild members, guild bans, reaction users, scheduled-event subscribers, invites, onboarding, Welcome Screens, guild profiles, guild settings, widget settings, announcement subscriptions, member voice state, soundboard sounds, Stage instances, or channels, calling anonymous widget routes, reading messages or reasons, reading local files, opening a Gateway connection, or starting telemetry export. Configured announcement crossposts or message forwarding make an unconfirmed Message Content intent an online failure. Native Interaction startup separately verifies the outgoing-endpoint state and exact managed-command inventory before the Gateway begins accepting requests. Add `--config FILE` to diagnose a standalone policy or `--profile NAME` to diagnose a managed policy using only its referenced secret variables.
 
 Every non-passing doctor check includes one bounded next action and one package-relative documentation reference in both human and JSON output. Guidance is derived from the stable check ID, so new warning and failure checks receive a safe configuration-review fallback until a narrower recovery path is defined. Passing checks omit recovery fields.
 
 The offline nickname diagnostics report the base self-only gate, exact guild scope, broader other-member gate, protected-user and hierarchy boundary, required `CHANGE_NICKNAME` or `MANAGE_NICKNAMES` evidence, signed approval, one-shot execution, and exact readback without reading a member or nickname or contacting Discord.
 
-`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. When invoked through the built CLI, the descriptor points at that exact Node.js executable and CLI entrypoint. Without a profile, it pins the verified public application and bot IDs and names every environment variable that an MCP host may forward. It never includes a bot token value.
+`setup` performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. When invoked through the built CLI, the descriptor points at that exact Node.js executable and CLI entrypoint. Add `--config FILE` to save the complete strict non-secret policy after verification. The descriptor then runs `serve --config FILE`, sets no policy values, and forwards only the document's named secret variables. It never includes a bot token or collector header value.
 
-Add `--profile NAME` to save a strict non-secret profile after verification. Profile setup requires an exact non-empty `DISCORD_MCP_ALLOWED_GUILD_IDS`; channel scope may remain empty to inherit the exact guild boundary. `--token-env DISCORD_NAME_TOKEN` selects a caller-owned credential variable, and `--force` replaces only a profile whose saved application and bot identities still match. Both options require `--profile`. Saved profiles intentionally omit tokens, Discord names and content, MCP host brands, local paths, telemetry configuration, the member-directory, ban-audit, invite-audit, onboarding-audit, Welcome Screen audit, guild-profile audit, guild-settings audit, and widget-settings audit gates and allowlists, every reviewed-write toggle, and every write allowlist.
+Standalone config setup requires an exact non-empty `DISCORD_MCP_ALLOWED_GUILD_IDS`; channel scope may remain empty to inherit the exact guild boundary. `--token-env DISCORD_NAME_TOKEN` selects a caller-owned credential variable, and `--force` replaces only a file whose saved application and bot identities still match while retaining a recoverable hidden backup. Both options require `--config` or `--profile`. Add `--profile NAME` instead when private per-user managed storage is preferable; schema-v2 profiles use the same complete policy contract and secret-only launch boundary.
 
 For the safest first connection, add `--preset server-observer` and repeat `--guild-id ID` for every intended guild. Optional repeated `--channel-id ID` values narrow channel access further. This recommended preset exposes only guild metadata, roles, permission diagnostics, connector health, observability state, content-free activity, and exact-tool discovery, so it does not require Message Content intent. Use `channel-reader` only when bounded message history and native search are needed; it requires at least one exact channel ID and recommends Message Content intent. Channel scope retains the connector's documented child-thread inheritance from an allowlisted parent, and every preset report exposes that fact. Preset setup rejects duplicate, invalid, missing, or excessive scope IDs and any guild scope that is not fully present on the bounded membership-verification page. It disables the Gateway, ignores every ambient connector setting except the credential and application/bot identity pins, and saves the resolved exact scope and toolsets rather than a mutable preset name. Both presets use the full surface and are mechanically rejected if a selected tool ever receives a write risk classification.
 
@@ -414,7 +417,7 @@ Preset setup is intentionally a one-way least-privilege starting point. It canno
 
 `coordination list` inspects durable reviewed-write claims without loading a Discord credential, connector policy, Gateway, telemetry exporter, or Discord client. It reports only content-free claim identity, bounded exact targets, owner liveness, receipt state, and whether the next writer may reclaim automatically or operator review is required. For a quarantined claim, stop the owning connector process, inspect the exact Discord state and audit log, then run `coordination resolve CLAIM_ID --confirm CLAIM_ID`. Resolution writes an immutable content-free acknowledgement before releasing the exact claim and never removes or reopens the old operation receipt or operation key. Add `--json` for a versioned report. Never use coordination state on a network filesystem or assume that separate activity-state roots coordinate with one another.
 
-`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read guild settings, widget settings, or messages, call anonymous widget routes, open a Gateway connection, start telemetry export, or write to Discord. Add `--profile NAME` to smoke the saved contract.
+`smoke` connects an official MCP client to the real adapter over linked protocol transports, validates the configured tool, resource, resource-template, and prompt catalogs, checks every exposed tool's complete risk annotations, and exercises local discovery. For a progressive surface, it reveals every configured toolset inside the temporary smoke server and verifies the resulting exact tools. Identity verification uses `get_connector_status` when the connector toolset is exposed and the same read-only service status path otherwise. The command does not list Discord channels, read guild settings, widget settings, or messages, call anonymous widget routes, open a Gateway connection, start telemetry export, or write to Discord. Add `--config FILE` or `--profile NAME` to smoke the selected contract.
 
 Add `--json` to `setup`, `doctor`, `smoke`, preset commands, coordination commands, or a profile lifecycle command, or use it with `catalog --check`, for a versioned machine-readable report. When a JSON-requested command fails, it emits one redacted error document to stdout with a stable category, message, recovery action, documentation reference, retry boundary, and optional Discord retry delay; stderr stays empty. Human failures print the same action and reference after the concise error. Neither form includes credentials, headers, response bodies, remote routes, local paths, stacks, causes, or arbitrary environment values.
 
@@ -424,9 +427,31 @@ Run `node dist/cli.js help` for the complete command summary.
 
 ## Configuration
 
+The recommended interface is one strict versioned non-secret JSON document plus environment variables only for referenced secrets. The document covers verified identity, read scope, tool selection, Gateway behavior, every capability and exact feature scope, bounded limits, owned local storage roots, runtime settings, and credential-free observability. Its `$schema` field points at the published [JSON Schema](../discord-mcp.config.schema.json) for editor support.
+
+Create and verify the first file directly against the caller-owned bot:
+
+```sh
+export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
+discord-mcp setup \
+  --config ./discord-mcp.json \
+  --preset server-observer \
+  --guild-id YOUR_GUILD_ID
+discord-mcp config validate ./discord-mcp.json
+discord-mcp doctor --config ./discord-mcp.json --online
+discord-mcp smoke --config ./discord-mcp.json
+```
+
+`config init FILE` creates a preset-backed file from caller-supplied public IDs without contacting Discord. `config migrate FILE --name NAME` converts complete environment-only policy, while `config migrate FILE --profile NAME` converts a managed profile. `config validate FILE` uses placeholder secrets to check strict structure and every cross-field policy without reading secret values or contacting Discord. `config show FILE` returns the canonical document and a bounded summary; `config explain [PATH]` returns schema-backed descriptions for the whole document or one field. Add `--json` for versioned reports. `--force` retains a recoverable hidden backup and cannot replace the pinned application or bot identity.
+
+### Environment compatibility reference
+
+Environment-only policy remains supported for compatibility and migration. It is not the recommended new setup surface.
+
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | Yes | Discord bot authentication |
+| `DISCORD_MCP_CONFIG_FILE` | Alternative to `--config` | Absolute path to one strict versioned non-secret configuration document |
 | `DISCORD_MCP_APPLICATION_ID` | Recommended | Reject a token belonging to a different application |
 | `DISCORD_MCP_BOT_ID` | Recommended | Reject a token belonging to a different bot user |
 | `DISCORD_MCP_ALLOWED_GUILD_IDS` | No | Comma- or whitespace-separated read guild allowlist |
@@ -589,13 +614,15 @@ Run `node dist/cli.js help` for the complete command summary.
 | `DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS` | For permission-overwrite changes | Non-empty exact direct guild-channel allowlist and a subset of the read channel allowlist when one exists |
 | `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; reviewed-write operation receipts and durable coordination claims use separate adjacent private directories; defaults under the user's local state directory |
 
-An unset read allowlist means all guild channels Discord allows the bot to view. The bot's Discord role remains authoritative.
+An unset read allowlist in compatibility mode means all guild channels Discord allows the bot to view. The bot's Discord role remains authoritative.
 
-Run `node dist/cli.js setup --json` and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, command, arguments, environment-variable names to forward, both verified public identity IDs to set, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Keep `DISCORD_BOT_TOKEN` in the host process environment or secret store and forward it by name; never copy its value into a static configuration file.
+Selecting a file with `--config FILE` or `DISCORD_MCP_CONFIG_FILE` makes that document the exclusive policy source. Startup permits only the selector and the exact secret variables referenced by the document. It rejects every other populated recognized policy variable, unknown `DISCORD_MCP_*` variable, and unknown `OTEL_*` variable so ambient state cannot override, extend, or ambiguously combine with file policy. A config file and profile are mutually exclusive.
 
-A profile-aware descriptor runs `serve --profile NAME` and sets no identity or read-policy environment values. Activation maps the credential into the canonical process variable, applies both saved identity pins, exact read scope, tool policy, and Gateway policy, and removes the alias from the cloned service environment. A profile created from ambient configuration forwards the selected credential plus runtime settings outside the saved boundary, so independently configured audit and reviewed-write gates remain explicit and must fit inside saved read scope. A preset-created profile forwards only the selected credential variable; the preset verification environment removes all ambient write, Gateway, telemetry, and persistence policy before saving the resolved profile.
+Run `discord-mcp setup --config FILE --json` and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, pinned command and arguments, only the secret-variable names to forward, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Keep every referenced token or collector header in the host process environment or secret store and forward it by name; never copy its value into the JSON document or another static host configuration.
 
-When using the published package, configure the stdio command as `npx` with arguments `--yes`, `@j-256/discord-mcp@0.1.0`, and `serve`. Pinning the package version prevents an unreviewed update from replacing the executable. Host configuration formats differ, so the launch descriptor is intentionally typed data rather than a client-specific configuration fragment.
+A standalone descriptor runs `serve --config ABSOLUTE_FILE` and sets no identity or policy environment values. A schema-v2 profile descriptor runs `serve --profile NAME` with the same secret-only boundary. Profile activation uses private managed storage, maps any selected credential alias into the canonical process variable, and applies the complete saved policy to a cloned environment. Legacy schema-v1 profiles remain compatible with their narrower identity, read, tool, and Gateway boundary. Environment-only setup remains available and its descriptor names the full compatibility catalog, but new installations should use a standalone file or schema-v2 profile.
+
+When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `@j-256/discord-mcp@0.1.0`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. Host configuration formats differ, so the launch descriptor remains typed data rather than a client-specific configuration fragment.
 
 Restart or reload the MCP host after changing its configuration, inspect the negotiated server, and confirm that required-server behavior, write approval, elicitation, and timeouts match the descriptor before enabling reviewed write policies. A host without MCP elicitation can use read-only and plan-only capabilities but must not execute reviewed writes.
 
@@ -1961,6 +1988,7 @@ The default suite uses injected transports and does not contact Discord:
 
 ```sh
 npm run metadata:check
+npm run config:schema:check
 npm run typecheck
 npm test
 npm run test:coverage
@@ -1973,7 +2001,7 @@ npm run security:check
 
 `pack:verify` rebuilds and packs twice under one npm toolchain, requires byte-identical archives, enforces the published-file allowlist, scans for sensitive environment values, installs the archive without lifecycle scripts, runs the installed credential-free catalog check twice without a token, exercises the packaged operational CLI, negotiates the installed MCP catalogs, and reads only the static safety resource. With `--output DIRECTORY`, it emits the verified archive and its deterministic `catalog-evidence.json`. CI requires byte-identical decompressed tar payloads and catalog evidence across supported Node lines because npm patch releases can encode the same payload with different gzip bytes.
 
-`container:verify` builds from the exact digest-pinned Node.js base, checks the non-root image configuration and secret-free history, and exercises it with no network, a read-only root filesystem, no Linux capabilities, no privilege escalation, and a bounded process count. It compares repeated catalog output byte-for-byte with the source contract, negotiates the complete MCP catalogs, proves the catalog-only tool guard, and requires an explicit operational start without a credential to fail safely on stderr. With `--output DIRECTORY`, it emits the same deterministic catalog evidence plus a content-free container report and the reviewed Dockerfile. Neither package verification nor container verification contacts Discord.
+`container:verify` builds from the exact digest-pinned Node.js base, checks the non-root image configuration and secret-free history, and exercises it with no network, a read-only root filesystem, no Linux capabilities, no privilege escalation, and a bounded process count. It compares repeated catalog output byte-for-byte with the source contract, negotiates the complete MCP catalogs, proves the catalog-only tool guard, verifies a read-only mounted standalone policy through the packaged CLI, and requires an explicit operational start without a credential to fail safely on stderr. With `--output DIRECTORY`, it emits the same deterministic catalog evidence plus a content-free container report and the reviewed Dockerfile. Neither package verification nor container verification contacts Discord.
 
 `container:index:verify` builds the release shape for every supported architecture with a digest-pinned SBOM generator, exports an OCI layout without publishing it, verifies every referenced blob digest and size, and requires the exact index annotations, runnable platform set, release labels, root-filesystem layer binding, and one provenance plus SPDX evidence pair for each platform. CI and release automation additionally pin the BuildKit and architecture-emulation images by digest. With `--output DIRECTORY`, the command emits a content-free `oci-index-evidence.json`. It contacts only the public image registries needed for pinned build inputs and never contacts Discord.
 
@@ -2001,7 +2029,7 @@ node dist/cli.js smoke
 
 ## Release integrity
 
-The npm package, OCI image, source constant, lockfile root, MCP Registry manifest, versioned icon URL, and release tag are checked as one identity. The same metadata gate scans every tracked and unignored repository file as raw bytes to prevent model- or harness-specific branding, including hidden binary metadata. Production and development dependencies are exactly pinned to the public npm registry, both container stages use one reviewed base-image digest, and the build engine, architecture emulator, and SBOM generator used by automation are pinned by image digest. Dependency installation disables lifecycle scripts and explicitly rebuilds only the reviewed esbuild version. CI also audits known vulnerabilities and npm registry signatures.
+The npm package, OCI image, source constant, lockfile root, MCP Registry manifest, versioned icon URL, generated config schema, and release tag are checked as one identity. The Registry packages prompt only for the bot-token secret and one non-secret config file; the OCI entry additionally fixes the operational command and hardened read-only mount. The same metadata gate scans every tracked and unignored repository file as raw bytes to prevent model- or harness-specific branding, including hidden binary metadata. Production and development dependencies are exactly pinned to the public npm registry, both container stages use one reviewed base-image digest, and the build engine, architecture emulator, and SBOM generator used by automation are pinned by image digest. Dependency installation disables lifecycle scripts and explicitly rebuilds only the reviewed esbuild version. CI also audits known vulnerabilities and npm registry signatures.
 
 Release candidates are reconstructed from the selected tag, packed twice, installed into an isolated consumer, accompanied by an SPDX SBOM, and signed through GitHub artifact attestations. Normal npm releases use trusted publishing to create a private stage. A human approves that stage with two-factor authentication. A separately approved image operation publishes only an absent exact semantic-version tag for both supported architectures, binds per-platform BuildKit provenance and SPDX records into the image index, signs provenance for that exact root digest, and verifies the public digest plus restricted runtime before Registry publication. Existing image tags are never overwritten.
 

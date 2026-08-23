@@ -50,6 +50,7 @@ Set package publishing access to require two-factor authentication and disallow 
 ```sh
 npm run deps:locked
 npm run metadata:check
+npm run config:schema:check
 npm run typecheck
 npm test
 npm run test:coverage
@@ -116,7 +117,7 @@ After npm and the public OCI image expose the same approved version, dispatch:
 gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=register -f tag=vMAJOR.MINOR.PATCH
 ```
 
-The register operation reconstructs the package from the tag, requires its SHA-512 integrity to equal npm's published integrity, and requires the public OCI index and every platform configuration to match the same version and source commit. It downloads MCP Registry publisher `v1.8.1` from the official release, verifies the pinned Linux archive SHA-256, validates `server.json`, authenticates with GitHub OIDC, and publishes only when the exact registry version is absent. An already matching registry entry is a successful no-op. Existing mismatched metadata fails closed.
+The register operation reconstructs the package from the tag, requires its SHA-512 integrity to equal npm's published integrity, and requires the public OCI index and every platform configuration to match the same version and source commit. It downloads MCP Registry publisher `v1.8.1` from the official release, verifies the pinned Linux archive SHA-256, validates `server.json`, authenticates with GitHub OIDC, and publishes only when the exact registry version is absent. Metadata checks require the npm entry to pass one config-file argument, the OCI entry to use one read-only config mount and the hardened operational command, and both entries to request only the bot-token secret. An already matching registry entry is a successful no-op. Existing mismatched metadata fails closed.
 
 ## Independent verification
 

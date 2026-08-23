@@ -4,9 +4,13 @@ import { constants } from "node:fs"
 import {
   copyFile,
   mkdir,
+  mkdtemp,
   readFile,
+  realpath,
+  rm,
   writeFile,
 } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { basename, join, resolve } from "node:path"
 
 import { Client } from "@modelcontextprotocol/client"
@@ -21,7 +25,11 @@ import {
 
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CONTAINER_EVIDENCE_FILENAME = "container-evidence.json"
-const CONTAINER_EVIDENCE_FORMAT = "discord-mcp.container-evidence.v1"
+const CONTAINER_EVIDENCE_FORMAT = "discord-mcp.container-evidence.v2"
+const CONTAINER_CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONFIG_APPLICATION_ID = "100000000000000001"
+const CONFIG_BOT_ID = "200000000000000001"
+const CONFIG_GUILD_ID = "300000000000000001"
 const IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
 const MCP_NAME = "io.github.j-256/discord-mcp"
 const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
@@ -99,16 +107,81 @@ function assertSafeText(value, label) {
   }
 }
 
-function restrictedRunArguments(image, command = [], entrypoint) {
+function restrictedRunArguments(image, command = [], entrypoint, runtimeArguments = []) {
   return [
     "run",
     "--rm",
     "-i",
     ...RESTRICTED_RUNTIME_ARGUMENTS,
+    ...runtimeArguments,
     ...(entrypoint ? ["--entrypoint", entrypoint] : []),
     image,
     ...command,
   ]
+}
+
+async function verifyMountedConfiguration(image) {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-container-config-"))
+  try {
+    const directory = await realpath(temporary)
+    const configFile = join(directory, "discord-mcp.json")
+    const hostEnvironment = {
+      LANG: "C.UTF-8",
+      PATH: process.env.PATH || "/usr/bin:/bin",
+    }
+    const initialized = await run(
+      process.execPath,
+      [
+        join(REPOSITORY_ROOT, "dist", "cli.js"),
+        "config",
+        "init",
+        configFile,
+        "--name",
+        "container-verification",
+        "--application-id",
+        CONFIG_APPLICATION_ID,
+        "--bot-id",
+        CONFIG_BOT_ID,
+        "--guild-id",
+        CONFIG_GUILD_ID,
+        "--json",
+      ],
+      { capture: true, env: hostEnvironment },
+    )
+    const initReport = JSON.parse(initialized.stdout)
+    invariant(initReport.status === "ok", "host config initialization failed")
+    invariant(initReport.validation?.discordContacted === false, "config initialization contacted Discord")
+    invariant(initReport.validation?.secretValuesRead === false, "config initialization read a secret")
+
+    const mounted = `type=bind,source=${configFile},target=${CONTAINER_CONFIG_FILE},readonly`
+    const validated = await run(
+      "docker",
+      restrictedRunArguments(
+        image,
+        ["config", "validate", CONTAINER_CONFIG_FILE, "--json"],
+        undefined,
+        [`--mount=${mounted}`],
+      ),
+      { capture: true },
+    )
+    assertSafeText(`${validated.stdout}\n${validated.stderr}`, "mounted config validation")
+    const report = JSON.parse(validated.stdout)
+    invariant(report.status === "ok", "mounted config validation failed")
+    invariant(report.file === CONTAINER_CONFIG_FILE, "mounted config path changed")
+    invariant(report.summary?.configSchemaVersion === 2, "mounted config schema changed")
+    invariant(report.validation?.crossFieldPolicy === true, "mounted config policy was not validated")
+    invariant(report.validation?.discordContacted === false, "mounted config validation contacted Discord")
+    invariant(report.validation?.secretValuesRead === false, "mounted config validation read a secret")
+    return {
+      configSchemaVersion: report.summary.configSchemaVersion,
+      crossFieldPolicy: true,
+      discordContacted: false,
+      mountedReadOnly: true,
+      secretValuesRead: false,
+    }
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
 }
 
 async function inspectImage(image, packageJson, revision) {
@@ -370,6 +443,7 @@ try {
   const imageEvidence = await inspectImage(image, packageJson, revision)
   const historyEntries = await inspectHistory(image)
   const runtime = await verifyRestrictedRuntime(image)
+  const configuration = await verifyMountedConfiguration(image)
   const catalog = await verifyCatalog(image)
   const mcp = await verifyMcp(image, catalog.report)
   const missingCredential = await verifyMissingCredentialFailure(image)
@@ -382,6 +456,7 @@ try {
       safetyResourceDigest: catalog.report.safetyResourceDigest,
       toolCount: catalog.report.toolCount,
     },
+    configuration,
     evidenceFormat: CONTAINER_EVIDENCE_FORMAT,
     historyEntries,
     image: imageEvidence,

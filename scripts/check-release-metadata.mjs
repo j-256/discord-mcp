@@ -302,11 +302,52 @@ const EXPECTED_ENVIRONMENT_NAMES = [
   "OTEL_TRACES_SAMPLER_ARG",
 ].sort()
 
-const SECRET_ENVIRONMENT_NAMES = new Set([
-  "DISCORD_BOT_TOKEN",
-  "OTEL_EXPORTER_OTLP_HEADERS",
-  "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
-  "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+const OCI_CONFIG_FILE = "/configuration/discord-mcp.json"
+const REGISTRY_TOKEN_INPUT = Object.freeze({
+  description: "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
+  format: "string",
+  isRequired: true,
+  isSecret: true,
+  name: "DISCORD_BOT_TOKEN",
+})
+const REGISTRY_CONFIG_ARGUMENT = Object.freeze({
+  description: "Absolute path to one strict versioned non-secret configuration document",
+  format: "filepath",
+  isRequired: true,
+  placeholder: "/absolute/path/to/discord-mcp.json",
+  type: "positional",
+  valueHint: "config_file",
+})
+const NPM_PACKAGE_ARGUMENTS = Object.freeze([
+  { type: "positional", value: "serve" },
+  { type: "positional", value: "--config" },
+  REGISTRY_CONFIG_ARGUMENT,
+])
+const OCI_PACKAGE_ARGUMENTS = Object.freeze([
+  { type: "positional", value: "serve" },
+  { type: "positional", value: "--config" },
+  { type: "positional", value: OCI_CONFIG_FILE },
+])
+const OCI_RUNTIME_ARGUMENTS = Object.freeze([
+  { type: "positional", value: "--read-only" },
+  { type: "positional", value: "--cap-drop=ALL" },
+  { type: "positional", value: "--security-opt=no-new-privileges:true" },
+  { type: "positional", value: "--pids-limit=64" },
+  {
+    description: "Read-only bind mount for the non-secret connector configuration",
+    isRequired: true,
+    name: "--mount",
+    type: "named",
+    value: `type=bind,source={config_file},target=${OCI_CONFIG_FILE},readonly`,
+    variables: {
+      config_file: {
+        description: "Absolute host path to the connector configuration",
+        format: "filepath",
+        isRequired: true,
+        placeholder: "/absolute/path/to/discord-mcp.json",
+      },
+    },
+  },
 ])
 
 const EXPECTED_ACTION_PINS = new Map([
@@ -434,7 +475,7 @@ async function checkSourceIdentity(packageJson) {
   const environmentNames = [...environmentBlock.matchAll(/:\s*"([A-Z0-9_]+)"/g)]
     .map((match) => match[1])
     .sort()
-  assertEqual(environmentNames, EXPECTED_ENVIRONMENT_NAMES, "source environment catalog changed without registry metadata")
+  assertEqual(environmentNames, EXPECTED_ENVIRONMENT_NAMES, "source compatibility environment catalog changed without review")
 }
 
 async function checkDocumentation(packageJson) {
@@ -460,9 +501,11 @@ async function checkDocumentation(packageJson) {
   for (const required of [
     "[Complete reference](docs/reference.md)",
     "--preset server-observer",
+    "--config ./discord-mcp.json",
     "catalog --check --json",
-    "doctor --profile observer --online",
-    "smoke --profile observer",
+    "config validate ./discord-mcp.json",
+    "doctor --config ./discord-mcp.json --online",
+    "smoke --config ./discord-mcp.json",
   ]) {
     invariant(readme.includes(required), `README is missing ${required}`)
   }
@@ -509,316 +552,20 @@ async function checkRegistryManifest(packageJson) {
   invariant(npmPackage.version === packageJson.version, "npm registry package version is out of sync")
   invariant(npmPackage.runtimeHint === "npx", "npm registry runtime hint is invalid")
   assertEqual(npmPackage.transport, { type: "stdio" }, "npm registry transport must remain stdio")
+  assertEqual(npmPackage.packageArguments, NPM_PACKAGE_ARGUMENTS, "npm package arguments are invalid")
+  invariant(npmPackage.runtimeArguments === undefined, "npm package must not declare runtime arguments")
   const ociPackage = server.packages[1]
   invariant(ociPackage.registryType === "oci", "OCI registry package type is invalid")
   invariant(ociPackage.identifier === `${OCI_IMAGE_NAME}:${packageJson.version}`, "OCI image reference is out of sync")
   invariant(ociPackage.runtimeHint === "docker", "OCI registry runtime hint is invalid")
   assertEqual(ociPackage.transport, { type: "stdio" }, "OCI registry transport must remain stdio")
+  assertEqual(ociPackage.packageArguments, OCI_PACKAGE_ARGUMENTS, "OCI package arguments are invalid")
+  assertEqual(ociPackage.runtimeArguments, OCI_RUNTIME_ARGUMENTS, "OCI runtime arguments are invalid")
   for (const forbidden of ["fileSha256", "registryBaseUrl", "version"]) {
     invariant(ociPackage[forbidden] === undefined, `OCI registry package must omit ${forbidden}`)
   }
-  assertEqual(
-    ociPackage.environmentVariables,
-    npmPackage.environmentVariables,
-    "npm and OCI registry environment catalogs differ",
-  )
-  const environmentVariables = npmPackage.environmentVariables || []
-  const environmentNames = environmentVariables.map((entry) => entry.name).sort()
-  assertEqual(environmentNames, EXPECTED_ENVIRONMENT_NAMES, "registry environment catalog is incomplete")
-  invariant(new Set(environmentNames).size === environmentNames.length, "registry environment catalog contains duplicates")
-  const byName = new Map(environmentVariables.map((entry) => [entry.name, entry]))
-  for (const entry of environmentVariables) {
-    invariant(typeof entry.description === "string" && entry.description.length > 0, `${entry.name} lacks a registry description`)
-    if (entry.name === "DISCORD_BOT_TOKEN") continue
-    invariant(entry.isRequired === undefined, `${entry.name} must remain optional`)
-    if (SECRET_ENVIRONMENT_NAMES.has(entry.name)) {
-      invariant(entry.isSecret === true, `${entry.name} must be marked secret`)
-    } else {
-      invariant(entry.isSecret === undefined, `${entry.name} must not be marked secret`)
-    }
-  }
-  assertEqual(byName.get("DISCORD_BOT_TOKEN"), {
-    description: "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
-    format: "string",
-    isRequired: true,
-    isSecret: true,
-    name: "DISCORD_BOT_TOKEN",
-  }, "registry token metadata is invalid")
-  for (const name of [
-    "DISCORD_MCP_ALLOW_ADMINISTRATION",
-    "DISCORD_MCP_ALLOW_ATTACHMENTS",
-    "DISCORD_MCP_ALLOW_AUTOMOD_AUDIT",
-    "DISCORD_MCP_ALLOW_AUTOMOD_CHANGES",
-    "DISCORD_MCP_ALLOW_BAN_AUDIT",
-    "DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT",
-    "DISCORD_MCP_ALLOW_CHANNEL_CLONING",
-    "DISCORD_MCP_ALLOW_CHANNEL_CREATION",
-    "DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES",
-    "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT",
-    "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES",
-    "DISCORD_MCP_ALLOW_DELETIONS",
-    "DISCORD_MCP_ALLOW_FORUM_POSTS",
-    "DISCORD_MCP_ALLOW_GATEWAY",
-    "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT",
-    "DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES",
-    "DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT",
-    "DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES",
-    "DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS",
-    "DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT",
-    "DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES",
-    "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT",
-    "DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES",
-    "DISCORD_MCP_ALLOW_INTEGRATION_AUDIT",
-    "DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS",
-    "DISCORD_MCP_ALLOW_INTERACTIONS",
-    "DISCORD_MCP_ALLOW_INVITE_AUDIT",
-    "DISCORD_MCP_ALLOW_INVITE_DELETIONS",
-    "DISCORD_MCP_ALLOW_MEMBER_DIRECTORY",
-    "DISCORD_MCP_ALLOW_NICKNAME_CHANGES",
-    "DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES",
-    "DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES",
-    "DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT",
-    "DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES",
-    "DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES",
-    "DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS",
-    "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
-    "DISCORD_MCP_ALLOW_ONBOARDING_AUDIT",
-    "DISCORD_MCP_ALLOW_ONBOARDING_CHANGES",
-    "DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES",
-    "DISCORD_MCP_ALLOW_PIN_MANAGEMENT",
-    "DISCORD_MCP_ALLOW_POLL_AUDIT",
-    "DISCORD_MCP_ALLOW_POLL_CREATION",
-    "DISCORD_MCP_ALLOW_POLL_ENDING",
-    "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
-    "DISCORD_MCP_ALLOW_ROLE_CONFIGURATION",
-    "DISCORD_MCP_ALLOW_ROLE_CREATION",
-    "DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT",
-    "DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES",
-    "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT",
-    "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES",
-    "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT",
-    "DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT",
-    "DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES",
-    "DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT",
-    "DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES",
-    "DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS",
-    "DISCORD_MCP_ALLOW_THREAD_AUDIT",
-    "DISCORD_MCP_ALLOW_THREAD_CHANGES",
-    "DISCORD_MCP_ALLOW_THREAD_CREATION",
-    "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
-    "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
-    "DISCORD_MCP_ALLOW_WEBHOOK_CREATION",
-    "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
-    "DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT",
-    "DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES",
-    "DISCORD_MCP_OBSERVABILITY_LOGS",
-  ]) {
-    const entry = byName.get(name)
-    invariant(entry?.default === "false", `${name} must default to false`)
-    assertEqual(entry?.choices, ["false", "true"], `${name} must expose bounded boolean choices`)
-  }
-  for (const name of [
-    "DISCORD_MCP_ADMIN_GUILD_IDS",
-    "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
-    "DISCORD_MCP_ALLOWED_GUILD_IDS",
-    "DISCORD_MCP_APPLICATION_ID",
-    "DISCORD_MCP_ATTACHMENT_CHANNEL_IDS",
-    "DISCORD_MCP_ATTACHMENT_ROOTS",
-    "DISCORD_MCP_AUDIT_FILE",
-    "DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS",
-    "DISCORD_MCP_AUTOMOD_GUILD_IDS",
-    "DISCORD_MCP_BAN_AUDIT_GUILD_IDS",
-    "DISCORD_MCP_BOT_ID",
-    "DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS",
-    "DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS",
-    "DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS",
-    "DISCORD_MCP_CHANNEL_METADATA_IDS",
-    "DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS",
-    "DISCORD_MCP_CONFIG_FILE",
-    "DISCORD_MCP_DELETE_CHANNEL_IDS",
-    "DISCORD_MCP_FORUM_POST_CHANNEL_IDS",
-    "DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS",
-    "DISCORD_MCP_GUILD_EXPRESSION_ROOTS",
-    "DISCORD_MCP_GUILD_PROFILE_GUILD_IDS",
-    "DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS",
-    "DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS",
-    "DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS",
-    "DISCORD_MCP_INTEGRATION_GUILD_IDS",
-    "DISCORD_MCP_INTEGRATION_IDS",
-    "DISCORD_MCP_INTERACTION_CHANNEL_IDS",
-    "DISCORD_MCP_INVITE_GUILD_IDS",
-    "DISCORD_MCP_MENTION_USER_IDS",
-    "DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS",
-    "DISCORD_MCP_NICKNAME_GUILD_IDS",
-    "DISCORD_MCP_MEMBER_ROLE_GUILD_IDS",
-    "DISCORD_MCP_MEMBER_ROLE_IDS",
-    "DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS",
-    "DISCORD_MCP_MEMBER_VOICE_GUILD_IDS",
-    "DISCORD_MCP_NATIVE_COMMAND_NAME",
-    "DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS",
-    "DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS",
-    "DISCORD_MCP_NATIVE_INTERACTION_USER_IDS",
-    "DISCORD_MCP_ONBOARDING_GUILD_IDS",
-    "DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS",
-    "DISCORD_MCP_PIN_CHANNEL_IDS",
-    "DISCORD_MCP_POLL_CHANNEL_IDS",
-    "DISCORD_MCP_PROTECTED_USER_IDS",
-    "DISCORD_MCP_ROLE_CONFIGURATION_IDS",
-    "DISCORD_MCP_ROLE_CREATION_GUILD_IDS",
-    "DISCORD_MCP_ROLE_ORDERING_GUILD_IDS",
-    "DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS",
-    "DISCORD_MCP_SCHEDULED_EVENT_ROOTS",
-    "DISCORD_MCP_SOUNDBOARD_GUILD_IDS",
-    "DISCORD_MCP_SOUNDBOARD_ROOTS",
-    "DISCORD_MCP_STAGE_CHANNEL_IDS",
-    "DISCORD_MCP_THREAD_GUILD_IDS",
-    "DISCORD_MCP_THREAD_IDS",
-    "DISCORD_MCP_THREAD_MEMBER_USER_IDS",
-    "DISCORD_MCP_TOOLSETS",
-    "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
-    "DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS",
-    "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
-    "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
-    "OTEL_EXPORTER_OTLP_PROTOCOL",
-    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
-    "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
-    "OTEL_EXPORTER_OTLP_HEADERS",
-    "OTEL_SERVICE_NAME",
-  ]) {
-    invariant(byName.get(name)?.format === "string", `${name} must use string registry input`)
-  }
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_ATTACHMENT_MAX_BYTES")?.default,
-      format: byName.get("DISCORD_MCP_ATTACHMENT_MAX_BYTES")?.format,
-    },
-    { default: "10485760", format: "number" },
-    "attachment byte-limit metadata is invalid",
-  )
-  for (const name of [
-    "OTEL_EXPORTER_OTLP_COMPRESSION",
-    "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION",
-    "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION",
-  ]) {
-    const entry = byName.get(name)
-    assertEqual(entry?.choices, ["none", "gzip"], `${name} must expose bounded compression choices`)
-    invariant(
-      entry?.default === (name === "OTEL_EXPORTER_OTLP_COMPRESSION" ? "none" : undefined),
-      `${name} has an invalid compression default`,
-    )
-  }
-  for (const name of [
-    "OTEL_EXPORTER_OTLP_TIMEOUT",
-    "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
-    "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
-  ]) {
-    assertEqual(
-      { default: byName.get(name)?.default, format: byName.get(name)?.format },
-      {
-        default: name === "OTEL_EXPORTER_OTLP_TIMEOUT" ? "10000" : undefined,
-        format: "number",
-      },
-      `${name} metadata is invalid`,
-    )
-  }
-  assertEqual(
-    byName.get("OTEL_EXPORTER_OTLP_PROTOCOL")?.default,
-    "http/protobuf",
-    "shared OTLP protocol default is invalid",
-  )
-  for (const name of [
-    "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
-    "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
-  ]) {
-    invariant(byName.get(name)?.default === undefined, `${name} must remain an explicit override`)
-  }
-  assertEqual(
-    byName.get("OTEL_TRACES_SAMPLER")?.choices,
-    [
-      "always_off",
-      "always_on",
-      "parentbased_always_off",
-      "parentbased_always_on",
-      "parentbased_traceidratio",
-      "traceidratio",
-    ],
-    "registry trace sampler choices are invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("OTEL_TRACES_SAMPLER_ARG")?.default,
-      format: byName.get("OTEL_TRACES_SAMPLER_ARG")?.format,
-    },
-    { default: "1", format: "number" },
-    "registry trace sampler argument metadata is invalid",
-  )
-  assertEqual(
-    {
-      choices: byName.get("DISCORD_MCP_TOOL_SURFACE")?.choices,
-      default: byName.get("DISCORD_MCP_TOOL_SURFACE")?.default,
-    },
-    { choices: ["full", "progressive"], default: "full" },
-    "registry MCP tool surface metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_TOOLSETS")?.default,
-      format: byName.get("DISCORD_MCP_TOOLSETS")?.format,
-    },
-    { default: "all", format: "string" },
-    "registry MCP toolset metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE")?.default,
-      format: byName.get("DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE")?.format,
-    },
-    { default: "100", format: "number" },
-    "registry Gateway buffer metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_NATIVE_COMMAND_NAME")?.default,
-      format: byName.get("DISCORD_MCP_NATIVE_COMMAND_NAME")?.format,
-    },
-    { default: "discord-mcp", format: "string" },
-    "registry native command-name metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING")?.default,
-      format: byName.get("DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING")?.format,
-    },
-    { default: "25", format: "number" },
-    "registry native Interaction capacity metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS")?.default,
-      format: byName.get("DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS")?.format,
-    },
-    { default: "600", format: "number" },
-    "registry native Interaction lifetime metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE")?.default,
-      format: byName.get("DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE")?.format,
-    },
-    { default: "10", format: "number" },
-    "registry interaction budget metadata is invalid",
-  )
-  assertEqual(
-    {
-      default: byName.get("DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS")?.default,
-      format: byName.get("DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS")?.format,
-    },
-    { default: "500", format: "number" },
-    "registry interaction interval metadata is invalid",
-  )
+  assertEqual(npmPackage.environmentVariables, [REGISTRY_TOKEN_INPUT], "npm registry inputs are invalid")
+  assertEqual(ociPackage.environmentVariables, [REGISTRY_TOKEN_INPUT], "OCI registry inputs are invalid")
 }
 
 async function checkContainerSource(packageJson) {

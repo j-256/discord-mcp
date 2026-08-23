@@ -12,7 +12,7 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 
 | Concern | Enforced behavior |
 | --- | --- |
-| Discord reach | Verified application and bot identities, exact guild and channel scope, risk-separated toolsets, and read-only setup presets |
+| Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, risk-separated toolsets, and read-only setup presets |
 | Read safety | Bounded requests, strict response validation, privacy-tiered projections, untrusted-content handling, and no hidden direct-message access |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence before mutation, one non-retried write, exact readback, durable coordination, and quarantine after ambiguity |
@@ -57,18 +57,19 @@ docker run --rm -i \
   ghcr.io/j-256/discord-mcp:0.1.0 catalog --check
 ```
 
-### Create the safest first profile
+### Create the safest first configuration
 
-Keep the token in the launching environment, verify one exact guild, save a non-secret read-only profile, and test the full MCP path:
+Keep the token in the launching environment, verify one exact guild, save the complete non-secret policy in one file, and test the full MCP path:
 
 ```sh
 export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
 npx --yes @j-256/discord-mcp@0.1.0 setup \
-  --profile observer \
+  --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
-npx --yes @j-256/discord-mcp@0.1.0 doctor --profile observer --online
-npx --yes @j-256/discord-mcp@0.1.0 smoke --profile observer
+npx --yes @j-256/discord-mcp@0.1.0 config validate ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.0 doctor --config ./discord-mcp.json --online
+npx --yes @j-256/discord-mcp@0.1.0 smoke --config ./discord-mcp.json
 ```
 
 On PowerShell, set the token in the current process before running the same commands:
@@ -79,11 +80,13 @@ $env:DISCORD_BOT_TOKEN = "YOUR_DISCORD_BOT_TOKEN"
 
 The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery. It cannot enable writes, the Gateway, telemetry export, activity persistence, or Message Content access. Setup stores the credential variable name and verified public IDs, never the token value, and prints a portable stdio launch descriptor for a compatible MCP client.
 
+The versioned file is the recommended policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. Tokens and collector headers remain environment-only secret references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles remain available when per-user profile storage is preferable.
+
 Use `channel-reader` only when bounded message history and native search are needed. It requires at least one exact channel:
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.0 setup \
-  --profile reader \
+  --config ./discord-reader.json \
   --preset channel-reader \
   --guild-id YOUR_GUILD_ID \
   --channel-id YOUR_CHANNEL_ID
@@ -101,7 +104,7 @@ npm run build
 node dist/cli.js catalog --check
 ```
 
-The exact [installation](docs/reference.md#install), [operator CLI](docs/reference.md#operator-cli), and [configuration](docs/reference.md#configuration) references cover profiles, progressive discovery, toolsets, allowlists, optional Gateway modes, observability, and every independently gated feature.
+The exact [installation](docs/reference.md#install), [operator CLI](docs/reference.md#operator-cli), and [configuration](docs/reference.md#configuration) references cover standalone configuration, managed profiles, OCI bind mounts, progressive discovery, toolsets, allowlists, optional Gateway modes, observability, and every independently gated feature.
 
 ## Capability map
 
@@ -112,7 +115,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | Guild structure | Additive channels and roles, resumable scaffolds, atomic channel cloning, relative channel and role ordering, channel metadata, permission overwrites, forum tags, role configuration, guild settings, and guild profile text |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
-| Operations | Full or progressive tool discovery, resources, prompts, non-secret profiles, deterministic presets, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
+| Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic presets, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).
 
@@ -147,8 +150,8 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, fixed execution guard, and stable contract plus safety digests | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp doctor` | Local Node.js, credential-variable, identity-pin, policy, scope, tool-surface, Gateway, observability, and write-gate diagnostics | None |
-| `discord-mcp doctor --online` | Pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
-| `discord-mcp smoke` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the configured profile | Read-only |
+| `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
+| `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, catalog evidence, and content-free MCP handshake | None |
@@ -178,6 +181,7 @@ The default tests use injected transports and do not contact Discord:
 
 ```sh
 npm run metadata:check
+npm run config:schema:check
 npm run typecheck
 npm test
 npm run test:coverage

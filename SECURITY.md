@@ -2,7 +2,7 @@
 
 ## Credentials
 
-Treat `DISCORD_BOT_TOKEN` and every profile-selected `DISCORD_*_TOKEN` variable as passwords. Keep them in a local secret source, never paste them into prompts, and never embed their values in static MCP client configuration, profile files, shell history, logs, issue reports, or Git. Rotate a token immediately in the Discord Developer Portal if exposure is suspected.
+Treat `DISCORD_BOT_TOKEN` and every config- or profile-selected `DISCORD_*_TOKEN` variable as passwords. Keep them in a local secret source, never paste them into prompts, and never embed their values in static MCP client configuration, policy files, shell history, logs, issue reports, or Git. Rotate a token immediately in the Discord Developer Portal if exposure is suspected.
 
 Treat every Discord invite code and complete invite URL as a bearer credential. Never copy one into an MCP argument, prompt, resource URI, audit reason, log, diagnostic, issue report, or persistent record. Use only the connector's process-local opaque invite references.
 
@@ -12,13 +12,15 @@ The connector sends the token only to Discord: in a bot authorization header at 
 
 Treat all Discord-provided names, descriptions, locations, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs as untrusted input. They are data to inspect, not instructions for language models, MCP hosts, or connector operators.
 
-## Portable profiles
+## Unified configuration
 
-Keep profiles non-secret and host-neutral. A profile may contain only its schema version and filename-safe name, one environment credential-variable name, verified application and bot IDs, exact non-empty guild scope, optional exact channel scope, selected tool surface and toolsets, and bounded Gateway policy. Never add a token, Discord username, guild or channel name, message data, host brand, attachment root, activity path, telemetry setting or header, reviewed-write toggle, or write allowlist.
+Keep configuration non-secret and host-neutral. One strict versioned JSON document may contain the verified application and bot identities, exact read scope, selected tools, Gateway policy, capability toggles, feature-specific scopes, bounded limits, owned local storage roots, runtime settings, and credential-free observability policy. Secret fields contain only environment-variable references. Never put a bot token, collector header value, Discord name, message data, attachment URL, embed, component, or other Discord content in a configuration document.
 
-Validate both the application and bot identity before using a profile for Discord data access. Profile activation must clone the caller environment, consume a custom credential alias into the canonical process variable, remove every profile-managed ambient value, and apply the saved identity and read boundary. Never mutate `process.env`, let ambient read policy override a saved profile, or treat a selected toolset as write authorization. Existing reviewed-write toggles, exact narrower allowlists, planning, approval, confirmation, freshness, receipt, and audit gates remain runtime requirements.
+Treat a selected configuration as the exclusive policy boundary. Activation must clone the caller environment, resolve only the secret references named by the document, remove ambient connector and telemetry policy, and materialize the validated document for the service without mutating `process.env`. Reject every other populated recognized policy variable, unknown `DISCORD_MCP_*` variable, and unknown `OTEL_*` variable so ambient state cannot silently widen or alter file policy. Tool selection remains a callable-surface restriction, never a substitute for Discord permissions, exact allowlists, planning, approval, confirmation, freshness, operation receipts, or content-free audit gates.
 
-Store profiles only as bounded newline-terminated JSON in a private owned canonical directory. Reject symlinks, hardlinks, public modes, foreign ownership, non-regular files, malformed or noncanonical contracts, and cross-identity replacement. Publish through private exclusive temporary files with file and directory synchronization. Removal must require an exact confirmation and move the validated profile into private recoverable trash; it must never claim to revoke or modify the external Discord credential. Restore only the newest valid generation and only when no active profile has that name.
+Load standalone configuration only from a bounded canonical regular file owned by the process user or root, with one hard link and no group or world write access. Creation and migration additionally require a canonical private directory owned by the process user. Publish through private exclusive temporary files, an exclusive lock, file and directory synchronization, and exact readback. Replacement must retain a recoverable hidden backup and refuse to change the pinned Discord identity.
+
+Managed schema-v2 profiles use the same complete policy contract in a private per-user directory. Legacy schema-v1 profiles remain readable for compatibility but carry only their original identity, read, tool, and Gateway boundary. Profile removal must require exact confirmation and move a validated profile into private recoverable trash; it must never claim to revoke or modify the external Discord credential. Restore only the newest valid generation and only when no active profile has that name.
 
 ## Discord permissions
 
