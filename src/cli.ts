@@ -48,12 +48,19 @@ import {
   type WriteCoordinationList,
   type WriteCoordinationResolution,
 } from "./write-coordination.js"
+import {
+  getSetupPreset,
+  SETUP_PRESETS,
+  type SetupPresetDescriptor,
+  type SetupPresetSelection,
+} from "./setup-presets.js"
 
 const CLI_COMMANDS = Object.freeze([
   "catalog",
   "coordination",
   "doctor",
   "help",
+  "preset",
   "profile",
   "serve",
   "setup",
@@ -81,6 +88,17 @@ export type ParsedCliArguments =
   | { command: "help"; topic: CliCommand | undefined }
   | {
     action: "list"
+    command: "preset"
+    json: boolean
+  }
+  | {
+    action: "show"
+    command: "preset"
+    json: boolean
+    name: string
+  }
+  | {
+    action: "list"
     command: "profile"
     json: boolean
   }
@@ -104,6 +122,7 @@ export type ParsedCliArguments =
     json: boolean
     launcherCommand: string | undefined
     overwriteProfile: boolean
+    preset?: SetupPresetSelection
     profileName?: string
     serverName: string | undefined
   }
@@ -199,10 +218,13 @@ function parseBooleanOptions(
 }
 
 function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments, { command: "setup" }> {
+  const channelIds: string[] = []
   let credentialVariable: string | undefined
+  const guildIds: string[] = []
   let json = false
   let launcherCommand: string | undefined
   let overwriteProfile = false
+  let presetName: string | undefined
   let profileName: string | undefined
   let serverName: string | undefined
   const seen = new Set<string>()
@@ -211,10 +233,11 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
     if (!argument?.startsWith("--")) {
       throw new ConfigurationError(`Unexpected setup argument ${argument || ""}`)
     }
-    if (seen.has(argument)) {
+    const repeatable = argument === "--channel-id" || argument === "--guild-id"
+    if (!repeatable && seen.has(argument)) {
       throw new ConfigurationError(`Option ${argument} may be provided only once`)
     }
-    seen.add(argument)
+    if (!repeatable) seen.add(argument)
     if (argument === "--json") {
       json = true
       continue
@@ -223,7 +246,15 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       overwriteProfile = true
       continue
     }
-    if (!["--command", "--name", "--profile", "--token-env"].includes(argument)) {
+    if (![
+      "--channel-id",
+      "--command",
+      "--guild-id",
+      "--name",
+      "--preset",
+      "--profile",
+      "--token-env",
+    ].includes(argument)) {
       throw new ConfigurationError(`Unknown option ${argument}`)
     }
     const value = args[index + 1]
@@ -231,13 +262,42 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       throw new ConfigurationError(`Option ${argument} requires a value`)
     }
     index += 1
+    if (argument === "--channel-id") channelIds.push(value)
     if (argument === "--command") launcherCommand = value
+    if (argument === "--guild-id") guildIds.push(value)
     if (argument === "--name") serverName = value
+    if (argument === "--preset") presetName = value
     if (argument === "--profile") profileName = value
     if (argument === "--token-env") credentialVariable = value
   }
-  if (!profileName && (credentialVariable !== undefined || overwriteProfile)) {
-    throw new ConfigurationError("--token-env and --force require --profile")
+  if (
+    !profileName
+    && (
+      credentialVariable !== undefined
+      || overwriteProfile
+      || presetName !== undefined
+      || guildIds.length > 0
+      || channelIds.length > 0
+    )
+  ) {
+    throw new ConfigurationError(
+      "--token-env, --force, --preset, --guild-id, and --channel-id require --profile",
+    )
+  }
+  if (!presetName && (guildIds.length > 0 || channelIds.length > 0)) {
+    throw new ConfigurationError("--guild-id and --channel-id require --preset")
+  }
+  if (presetName && guildIds.length === 0) {
+    throw new ConfigurationError("--preset requires at least one --guild-id")
+  }
+  const preset = presetName ? getSetupPreset(presetName) : undefined
+  if (
+    preset?.requirements.channelIds === "required"
+    && channelIds.length === 0
+  ) {
+    throw new ConfigurationError(
+      `Setup preset ${preset.name} requires at least one --channel-id`,
+    )
   }
   return {
     command: "setup",
@@ -245,8 +305,41 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
     json,
     launcherCommand,
     overwriteProfile,
+    ...(preset
+      ? {
+          preset: {
+            channelIds,
+            guildIds,
+            name: preset.name,
+          },
+        }
+      : {}),
     ...(profileName ? { profileName } : {}),
     serverName,
+  }
+}
+
+function parsePresetCommand(
+  args: readonly string[],
+): Extract<ParsedCliArguments, { command: "preset" }> {
+  const action = args[0]
+  if (!action || !["list", "show"].includes(action)) {
+    throw new ConfigurationError("preset requires list or show")
+  }
+  if (action === "list") {
+    const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
+    return { action, command: "preset", json: options.has("--json") }
+  }
+  const name = args[1]
+  if (!name || name.startsWith("--")) {
+    throw new ConfigurationError("preset show requires a preset name")
+  }
+  const options = parseBooleanOptions(args.slice(2), new Set(["--json"]))
+  return {
+    action: "show",
+    command: "preset",
+    json: options.has("--json"),
+    name,
   }
 }
 
@@ -448,6 +541,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   }
   if (command === "coordination") return parseCoordinationCommand(rest)
   if (command === "setup") return parseSetupOptions(rest)
+  if (command === "preset") return parsePresetCommand(rest)
   if (command === "profile") return parseProfileCommand(rest)
   const options = parseProfileSelectionOptions(rest, new Set(["--json"]))
   return {
@@ -476,7 +570,7 @@ function helpText(topic: CliCommand | undefined): string {
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup [--profile NAME [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot, optionally save a non-secret profile, and print a credential-free portable stdio launch descriptor."
+    return "Usage: discord-mcp setup [--profile NAME [--preset PRESET --guild-id ID... [--channel-id ID...]] [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot, optionally apply an exact-scope read-only preset, save a non-secret profile, and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
     return "Usage: discord-mcp smoke [--profile NAME] [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool."
@@ -497,6 +591,17 @@ function helpText(topic: CliCommand | undefined): string {
       "Inspect profiles without credentials or Discord access. Removal is recoverable and never revokes the external credential.",
     ].join("\n")
   }
+  if (topic === "preset") {
+    return [
+      "Usage: discord-mcp preset <action> [options]",
+      "",
+      "Actions:",
+      "  list [--json]",
+      "  show NAME [--json]",
+      "",
+      "Inspect deterministic least-privilege setup presets without credentials or Discord access.",
+    ].join("\n")
+  }
   if (topic === "version") return "Usage: discord-mcp version\n\nPrint the package version."
   return [
     `Usage: ${CONNECTOR_NAME} <command> [options]`,
@@ -506,6 +611,7 @@ function helpText(topic: CliCommand | undefined): string {
     "  coordination  Inspect or resolve durable reviewed-write claims",
     "  serve    Run the stdio MCP server (default)",
     "  setup    Verify the bot and generate safe client configuration",
+    "  preset   Inspect deterministic least-privilege setup presets",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
     "  doctor   Diagnose environment, policy, and optional Discord access",
     "  smoke    Verify the read-only MCP path end to end",
@@ -584,6 +690,13 @@ function renderSetup(report: SetupReport): string {
     `Tool surface: ${report.toolSurface}`,
     `Toolsets: ${report.toolsets.join(", ")}`,
   ]
+  if (report.preset) {
+    lines.push(
+      `Preset: ${report.preset.name}`,
+      `Preset tools: ${report.preset.toolNames.length} read-only`,
+      "Preset Gateway: disabled",
+    )
+  }
   if (report.profile) {
     lines.push(
       `Saved profile: ${report.profile.name}`,
@@ -601,6 +714,45 @@ function renderSetup(report: SetupReport): string {
     "Translate the requirements into the MCP host's required-server, write-approval, elicitation, and timeout settings.",
   )
   return lines.join("\n")
+}
+
+interface PresetListReport {
+  presets: readonly SetupPresetDescriptor[]
+  schemaVersion: number
+  status: "ok"
+}
+
+interface PresetShowReport {
+  preset: SetupPresetDescriptor
+  schemaVersion: number
+  status: "ok"
+}
+
+function renderPreset(preset: SetupPresetDescriptor): string {
+  return [
+    `${preset.name}${preset.recommended ? " (recommended)" : ""}`,
+    `  ${preset.description}`,
+    `  Scope: guild IDs ${preset.requirements.guildIds}; channel IDs ${preset.requirements.channelIds}`,
+    `  Thread scope: ${preset.requirements.threadScope}`,
+    `  Message Content intent: ${preset.requirements.messageContentIntent}`,
+    `  Tool surface: ${preset.toolSurface}`,
+    `  Toolsets: ${preset.toolsets.join(", ")}`,
+    `  Tools (${preset.toolNames.length}): ${preset.toolNames.join(", ")}`,
+    `  Risk classes: ${preset.riskClasses.join(", ")}`,
+    "  Writes: disabled",
+    "  Gateway: disabled",
+  ].join("\n")
+}
+
+function renderPresetList(report: PresetListReport): string {
+  return [
+    "Discord MCP least-privilege setup presets",
+    "",
+    ...report.presets.flatMap((preset, index) => [
+      ...(index > 0 ? [""] : []),
+      renderPreset(preset),
+    ]),
+  ].join("\n")
 }
 
 interface ProfileSummary {
@@ -817,6 +969,32 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         )
         return 0
       }
+      case "preset": {
+        if (parsed.action === "list") {
+          const report: PresetListReport = {
+            presets: SETUP_PRESETS,
+            schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
+            status: "ok",
+          }
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderPresetList(report),
+            environment,
+          )
+          return 0
+        }
+        const report: PresetShowReport = {
+          preset: getSetupPreset(parsed.name),
+          schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
+          status: "ok",
+        }
+        safeWrite(
+          stdout,
+          parsed.json ? jsonReport(report) : renderPreset(report.preset),
+          environment,
+        )
+        return 0
+      }
       case "serve":
         dependencies.serve({
           environment: parsed.profileName
@@ -844,6 +1022,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             : {}),
           environment,
           overwriteProfile: parsed.overwriteProfile,
+          ...(parsed.preset ? { preset: parsed.preset } : {}),
           ...(parsed.profileName ? { profileName: parsed.profileName } : {}),
           ...(parsed.serverName ? { serverName: parsed.serverName } : {}),
         })

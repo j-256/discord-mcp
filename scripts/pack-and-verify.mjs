@@ -28,6 +28,7 @@ const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
+const EXPECTED_SETUP_PRESETS = ["server-observer", "channel-reader"]
 const EXPECTED_RISK_CLASSES = [
   "administrative-write",
   "destructive-write",
@@ -204,6 +205,8 @@ assert.equal(typeof connector.GuildTemplateService, "function")
 assert.equal(typeof connector.InviteService, "function")
 assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
+assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
+assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
   botId: "200000000000000001",
@@ -322,6 +325,34 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     join(workDirectory, "catalog-home"),
   )
   await mkdir(catalogEnvironment.HOME, { recursive: true })
+  const presetResult = await run(bin, ["preset", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  const repeatedPresetResult = await run(bin, ["preset", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  assert.equal(
+    repeatedPresetResult.stdout,
+    presetResult.stdout,
+    "installed setup presets are not deterministic",
+  )
+  const presetReport = JSON.parse(presetResult.stdout)
+  invariant(presetReport.status === "ok", "installed setup preset inspection failed")
+  assert.deepEqual(
+    presetReport.presets.map(({ name }) => name),
+    EXPECTED_SETUP_PRESETS,
+  )
+  for (const preset of presetReport.presets) {
+    invariant(preset.writeCapable === false, `installed setup preset ${preset.name} enables writes`)
+    invariant(preset.gatewayEnabled === false, `installed setup preset ${preset.name} enables the Gateway`)
+    assertSortedUniqueStrings(preset.toolNames, `installed setup preset ${preset.name} tool inventory`)
+    assertSortedUniqueStrings(preset.toolsets, `installed setup preset ${preset.name} toolset inventory`)
+    assert.deepEqual(preset.riskClasses, ["discord-read", "local-read"])
+  }
   const catalogResult = await run(bin, ["catalog", "--check", "--json"], {
     capture: true,
     cwd: consumer,

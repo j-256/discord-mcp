@@ -23,6 +23,7 @@ import {
   createConnectorProfile,
   loadProfile,
 } from "../src/profile.js"
+import { getSetupPreset } from "../src/setup-presets.js"
 import type { ConnectorService } from "../src/service.js"
 
 const TOKEN = "test-discord-token"
@@ -1025,6 +1026,17 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
     },
     service: statusProvider(),
   })
+  const omittedMissingIntent = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
   const missingIntent = await diagnoseConnector({
     environment: enabledEnvironment,
     nodeVersion: "22.14.0",
@@ -1057,6 +1069,10 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
   )
   assert.match(setup.warnings.join("\n"), /announcement-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /announcement-crossposts toolset/)
+  assert.doesNotMatch(
+    omittedMissingIntent.warnings.join("\n"),
+    /Message Content intent/,
+  )
   assert.equal(
     missingIntent.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.messageContentIntent,
@@ -1065,6 +1081,7 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
   )
   assert.equal(missingIntent.status, "error")
   assert.match(missingIntentSetup.warnings.join("\n"), /crossposts are blocked/)
+  assert.match(missingIntentSetup.warnings.join("\n"), /native search may be unavailable/)
   for (const name of [
     "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
     "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
@@ -2963,6 +2980,16 @@ test("doctor and setup report Message Content intent needed by native search", a
       },
     },
   })
+  const withoutMessages = await prepareSetup({
+    environment: environment({
+      [ENVIRONMENT_NAMES.toolsets]: "connector",
+    }),
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
 
   assert.equal(report.status, "warning")
   assert.equal(
@@ -2970,6 +2997,7 @@ test("doctor and setup report Message Content intent needed by native search", a
     "warn",
   )
   assert.match(setup.warnings.join("\n"), /Message Content intent/)
+  assert.doesNotMatch(withoutMessages.warnings.join("\n"), /Message Content intent/)
 })
 
 test("doctor and setup diagnose the separately gated Guild Members intent", async () => {
@@ -3246,6 +3274,20 @@ test("stdio launch descriptor makes a saved profile the non-overridable read bou
     true,
   )
   assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
+  assert.deepEqual(createStdioLaunchDescriptor({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    profile,
+    profileEnvironmentForwarding: "credential-only",
+  }).environment.forward, [TOKEN_ALIAS])
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      profileEnvironmentForwarding: "credential-only",
+    }),
+    /requires a profile/,
+  )
   assert.throws(
     () => createStdioLaunchDescriptor({
       applicationId: "999999999999999999",
@@ -3284,6 +3326,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.deepEqual(report.launch.args, ["/srv/discord-mcp/dist/cli.js", "serve"])
   assert.equal(report.launch.command, "/usr/bin/node")
   assert.equal(report.launch.serverName, "discord-safe")
+  assert.equal(report.preset, null)
   assert.equal(report.profile, null)
   assert.deepEqual(report.warnings, [])
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
@@ -3294,6 +3337,97 @@ test("setup verifies in-scope access and emits a credential-free report", async 
       service: statusProvider(0),
     }),
     /no accessible guilds/,
+  )
+})
+
+test("preset setup saves resolved read-only authority and forwards only its credential", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-preset-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const profileDirectory = join(await realpath(temporary), "profiles")
+  const source = environment({
+    [ENVIRONMENT_NAMES.token]: undefined,
+    [TOKEN_ALIAS]: TOKEN,
+    [ENVIRONMENT_NAMES.allowDeletions]: "true",
+    [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
+    [ENVIRONMENT_NAMES.allowGateway]: "true",
+    [ENVIRONMENT_NAMES.auditFile]: join(temporary, "activity.jsonl"),
+    [ENVIRONMENT_NAMES.allowObservabilityExport]: "true",
+    [ENVIRONMENT_NAMES.otelEndpoint]: "https://telemetry.invalid",
+    [ENVIRONMENT_NAMES.toolSurface]: "progressive",
+    [ENVIRONMENT_NAMES.toolsets]: "all",
+  })
+  const before = { ...source }
+
+  const observer = await prepareSetup({
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    profileDirectory,
+    profileName: "observer",
+    preset: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
+
+  assert.deepEqual(source, before)
+  assert.deepEqual(observer.preset, getSetupPreset("server-observer"))
+  assert.deepEqual(observer.profile?.readScope, {
+    channelIds: [CHANNEL_ID],
+    guildIds: [GUILD_ID],
+  })
+  assert.deepEqual(observer.profile?.tools, {
+    surface: "full",
+    toolsets: [...getSetupPreset("server-observer").toolsets],
+  })
+  assert.equal(observer.profile?.gateway.enabled, false)
+  assert.deepEqual(observer.launch.environment.forward, [TOKEN_ALIAS])
+  assert.deepEqual(observer.launch.environment.set, {})
+  assert.doesNotMatch(observer.warnings.join("\n"), /Message Content intent/)
+  assert.doesNotMatch(JSON.stringify(observer), new RegExp(TOKEN))
+  assert.deepEqual(
+    await loadProfile("observer", { directory: profileDirectory }),
+    observer.profile,
+  )
+
+  const reader = await prepareSetup({
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    profileDirectory,
+    profileName: "reader",
+    preset: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+      name: "channel-reader",
+    },
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
+  assert.deepEqual(reader.preset, getSetupPreset("channel-reader"))
+  assert.match(reader.warnings.join("\n"), /Message Content intent/)
+  assert.deepEqual(reader.launch.environment.forward, [TOKEN_ALIAS])
+
+  await assert.rejects(
+    () => prepareSetup({
+      credentialVariable: TOKEN_ALIAS,
+      environment: source,
+      profileDirectory,
+      profileName: "partial-scope",
+      preset: {
+        guildIds: [GUILD_ID, "300000000000000002"],
+        name: "server-observer",
+      },
+      service: statusProvider(1),
+    }),
+    /access 1 of 2 exact preset guilds/,
   )
 })
 
@@ -3388,6 +3522,17 @@ test("profile setup rejects ambient scope and profile-only options fail closed",
     () => prepareSetup({
       credentialVariable: TOKEN_ALIAS,
       environment: environment(),
+      service: statusProvider(),
+    }),
+    /require a profile name/,
+  )
+  await assert.rejects(
+    () => prepareSetup({
+      environment: environment(),
+      preset: {
+        guildIds: [GUILD_ID],
+        name: "server-observer",
+      },
       service: statusProvider(),
     }),
     /require a profile name/,

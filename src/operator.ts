@@ -42,8 +42,13 @@ import {
   type ConnectorProfile,
 } from "./profile.js"
 import { ConnectorService } from "./service.js"
+import {
+  applySetupPreset,
+  type SetupPresetDescriptor,
+  type SetupPresetSelection,
+} from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 15
+export const OPERATOR_REPORT_SCHEMA_VERSION = 16
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -142,6 +147,13 @@ const DEFAULT_MCP_SERVER_NAME = "discord"
 const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/
 const STARTUP_TIMEOUT_SECONDS = 30
 const TOOL_TIMEOUT_SECONDS = 180
+const PROFILE_ENVIRONMENT_FORWARDING = Object.freeze({
+  credentialOnly: "credential-only",
+  includePolicy: "include-policy",
+} as const)
+type ProfileEnvironmentForwarding = typeof PROFILE_ENVIRONMENT_FORWARDING[
+  keyof typeof PROFILE_ENVIRONMENT_FORWARDING
+]
 
 export type DoctorCheckStatus = "fail" | "pass" | "warn"
 export type OperatorReportStatus = "error" | "ok" | "warning"
@@ -173,6 +185,7 @@ export interface SetupReport {
   guildsAccessibleOnFirstPage: number
   guildsInScopeOnFirstPage: number
   launch: StdioLaunchDescriptor
+  preset: SetupPresetDescriptor | null
   profile: ConnectorProfile | null
   schemaVersion: number
   serverName: string
@@ -236,6 +249,7 @@ export interface SetupOptions {
   overwriteProfile?: boolean
   profileDirectory?: string
   profileName?: string
+  preset?: SetupPresetSelection
   serverName?: string
   service?: StatusProvider
 }
@@ -2391,6 +2405,7 @@ export function createStdioLaunchDescriptor(options: {
   botId: string
   command?: string
   profile?: ConnectorProfile
+  profileEnvironmentForwarding?: ProfileEnvironmentForwarding
   serverName?: string
 }): StdioLaunchDescriptor {
   const applicationId = options.applicationId.trim()
@@ -2404,6 +2419,22 @@ export function createStdioLaunchDescriptor(options: {
   const profile = options.profile === undefined
     ? undefined
     : parseConnectorProfile(options.profile)
+  const profileEnvironmentForwarding = options.profileEnvironmentForwarding
+    ?? PROFILE_ENVIRONMENT_FORWARDING.includePolicy
+  if (
+    profileEnvironmentForwarding !== PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
+    && profileEnvironmentForwarding !== PROFILE_ENVIRONMENT_FORWARDING.includePolicy
+  ) {
+    throw new ConfigurationError("Profile environment forwarding mode is invalid")
+  }
+  if (
+    !profile
+    && profileEnvironmentForwarding === PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
+  ) {
+    throw new ConfigurationError(
+      "Credential-only environment forwarding requires a profile",
+    )
+  }
   if (
     profile
     && (
@@ -2609,13 +2640,16 @@ export function createStdioLaunchDescriptor(options: {
   ]
   if (profile) {
     const managed = new Set<string>(PROFILE_MANAGED_ENVIRONMENT_NAMES)
-    environmentVariables = [
-      profile.credential.variable,
-      ...environmentVariables.filter((name) => (
-        name !== ENVIRONMENT_NAMES.token
-        && !managed.has(name)
-      )),
-    ]
+    environmentVariables = profileEnvironmentForwarding
+      === PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
+      ? [profile.credential.variable]
+      : [
+          profile.credential.variable,
+          ...environmentVariables.filter((name) => (
+            name !== ENVIRONMENT_NAMES.token
+            && !managed.has(name)
+          )),
+        ]
   }
   return {
     args,
@@ -2653,6 +2687,7 @@ export async function prepareSetup(
       options.credentialVariable !== undefined
       || options.overwriteProfile
       || options.profileDirectory !== undefined
+      || options.preset !== undefined
     )
   ) {
     throw new ConfigurationError(
@@ -2665,9 +2700,20 @@ export async function prepareSetup(
   const credentialVariable = normalizeCredentialEnvironmentName(
     options.credentialVariable ?? ENVIRONMENT_NAMES.token,
   )
-  const runtimeEnvironment = profileName
+  const credentialEnvironment = profileName
     ? activateCredentialEnvironment(credentialVariable, environment)
     : environment
+  const appliedPreset = options.preset
+    ? applySetupPreset({
+      ...(options.preset.channelIds
+        ? { channelIds: options.preset.channelIds }
+        : {}),
+      environment: credentialEnvironment,
+      guildIds: options.preset.guildIds,
+      name: options.preset.name,
+    })
+    : null
+  const runtimeEnvironment = appliedPreset?.environment ?? credentialEnvironment
   const config = loadConnectorConfig(runtimeEnvironment)
   if (profileName && config.allowedGuildIds.size === 0) {
     throw new ConfigurationError(
@@ -2678,6 +2724,14 @@ export async function prepareSetup(
   const status = await service.getStatus()
   if (status.guildPage.inScope < 1) {
     throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
+  }
+  if (
+    appliedPreset
+    && status.guildPage.inScope !== config.allowedGuildIds.size
+  ) {
+    throw new ConfigurationError(
+      `Discord bot can access ${status.guildPage.inScope} of ${config.allowedGuildIds.size} exact preset guilds on the first membership page`,
+    )
   }
   const profile = profileName
     ? createConnectorProfile({
@@ -2699,6 +2753,12 @@ export async function prepareSetup(
     ...(options.args ? { args: options.args } : {}),
     ...(options.command ? { command: options.command } : {}),
     ...(profile ? { profile } : {}),
+    ...(appliedPreset
+      ? {
+          profileEnvironmentForwarding:
+            PROFILE_ENVIRONMENT_FORWARDING.credentialOnly,
+        }
+      : {}),
     ...(options.serverName !== undefined ? { serverName: options.serverName } : {}),
   })
   if (profile) {
@@ -2711,14 +2771,18 @@ export async function prepareSetup(
   const contentDependentWrites = [
     ...(config.allowAnnouncementCrossposts
       && config.announcementCrosspostChannelIds.size > 0
+      && config.mcpToolsets.has("announcement-crossposts")
       ? ["announcement crossposts"]
       : []),
     ...(config.allowMessageForwarding
       && config.messageForwardSourceChannelIds.size > 0
       && config.messageForwardTargetChannelIds.size > 0
+      && config.mcpToolsets.has("message-forwarding")
       ? ["message forwarding"]
       : []),
-    ...(config.allowInteractions && config.interactionChannelIds.size > 0
+    ...(config.allowInteractions
+      && config.interactionChannelIds.size > 0
+      && config.mcpToolsets.has("interactions")
       ? ["static component messages"]
       : []),
   ]
@@ -2726,6 +2790,7 @@ export async function prepareSetup(
     applicationId: status.application.id,
     botId: status.bot.id,
     launch,
+    preset: appliedPreset?.preset ?? null,
     profile,
     guildsAccessibleOnFirstPage: status.guildPage.accessible,
     guildsInScopeOnFirstPage: status.guildPage.inScope,
@@ -2739,9 +2804,16 @@ export async function prepareSetup(
       ...(status.application.messageContentIntent === "enabled"
         ? []
         : [
-            contentDependentWrites.length > 0
-              ? `Discord application does not advertise confirmed Message Content intent, so configured ${contentDependentWrites.join(" and ")} are blocked`
-              : "Discord application does not advertise confirmed Message Content intent, so native search may be unavailable",
+            ...(contentDependentWrites.length > 0
+              ? [
+                  `Discord application does not advertise confirmed Message Content intent, so configured ${contentDependentWrites.join(" and ")} are blocked`,
+                ]
+              : []),
+            ...(config.mcpToolsets.has("messages")
+              ? [
+                  "Discord application does not advertise confirmed Message Content intent, so native search may be unavailable",
+                ]
+              : []),
           ]),
       ...(config.allowMemberDirectory
         && config.memberDirectoryGuildIds.size > 0

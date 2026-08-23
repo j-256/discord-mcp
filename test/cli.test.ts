@@ -20,6 +20,7 @@ import {
   createConnectorProfile,
   type ConnectorProfile,
 } from "../src/profile.js"
+import { getSetupPreset } from "../src/setup-presets.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
@@ -85,6 +86,7 @@ function setupReport(): SetupReport {
       },
       transport: "stdio",
     },
+    preset: null,
     profile: null,
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName: "discord",
@@ -297,6 +299,44 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     profileName: "support-bot",
     serverName: undefined,
   })
+  assert.deepEqual(parseCliArguments([
+    "setup",
+    "--profile",
+    "reader",
+    "--preset",
+    "CHANNEL-READER",
+    "--guild-id",
+    GUILD_ID,
+    "--guild-id",
+    "300000000000000002",
+    "--channel-id",
+    CHANNEL_ID,
+    "--channel-id",
+    "400000000000000002",
+  ]), {
+    command: "setup",
+    json: false,
+    launcherCommand: undefined,
+    overwriteProfile: false,
+    preset: {
+      channelIds: [CHANNEL_ID, "400000000000000002"],
+      guildIds: [GUILD_ID, "300000000000000002"],
+      name: "channel-reader",
+    },
+    profileName: "reader",
+    serverName: undefined,
+  })
+  assert.deepEqual(parseCliArguments(["preset", "list", "--json"]), {
+    action: "list",
+    command: "preset",
+    json: true,
+  })
+  assert.deepEqual(parseCliArguments(["preset", "show", "server-observer"]), {
+    action: "show",
+    command: "preset",
+    json: false,
+    name: "server-observer",
+  })
   assert.deepEqual(parseCliArguments(["profile", "list", "--json"]), {
     action: "list",
     command: "profile",
@@ -336,6 +376,41 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     () => parseCliArguments(["setup", "--token-env", TOKEN_ALIAS]),
     /require --profile/,
   )
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--profile",
+      "reader",
+      "--guild-id",
+      GUILD_ID,
+    ]),
+    /require --preset/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--profile",
+      "reader",
+      "--preset",
+      "channel-reader",
+      "--guild-id",
+      GUILD_ID,
+    ]),
+    /requires at least one --channel-id/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--profile",
+      "reader",
+      "--preset",
+      "unknown",
+      "--guild-id",
+      GUILD_ID,
+    ]),
+    /Setup preset must be one of/,
+  )
+  assert.throws(() => parseCliArguments(["preset"]), /requires list or show/)
   assert.throws(
     () => parseCliArguments(["profile", "remove", "support-bot"]),
     /requires --confirm/,
@@ -641,6 +716,95 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
   })
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
   assert.match(stdout.value(), /\[redacted\]/)
+})
+
+test("CLI forwards exact preset setup intent and renders its read-only boundary", async () => {
+  let received: unknown
+  const stdout = outputStream()
+  const source = { [TOKEN_ALIAS]: TOKEN }
+  const preset = getSetupPreset("channel-reader")
+  const exitCode = await runCli({
+    args: [
+      "setup",
+      "--profile",
+      "reader",
+      "--preset",
+      "channel-reader",
+      "--guild-id",
+      GUILD_ID,
+      "--channel-id",
+      CHANNEL_ID,
+      "--token-env",
+      TOKEN_ALIAS,
+    ],
+    dependencies: dependencies({
+      async prepareSetup(options) {
+        received = options
+        return {
+          ...setupReport(),
+          preset,
+          profile: connectorProfile(),
+          toolsets: [...preset.toolsets],
+        }
+      },
+    }),
+    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    environment: source,
+    executablePath: "/usr/bin/node",
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.deepEqual(received, {
+    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    command: "/usr/bin/node",
+    credentialVariable: TOKEN_ALIAS,
+    environment: source,
+    overwriteProfile: false,
+    preset: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+      name: "channel-reader",
+    },
+    profileName: "reader",
+  })
+  assert.match(stdout.value(), /Preset: channel-reader/)
+  assert.match(stdout.value(), /Preset tools: [0-9]+ read-only/)
+  assert.match(stdout.value(), /Preset Gateway: disabled/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI inspects presets without credentials or dependency activity", async () => {
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+  const unavailable = dependencies({
+    async prepareSetup() {
+      throw new Error("Preset inspection must not run setup")
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["preset", "list"],
+    dependencies: unavailable,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["preset", "show", "channel-reader", "--json"],
+    dependencies: unavailable,
+    environment: {},
+    stdout: jsonOutput.stream,
+  }), 0)
+
+  assert.match(textOutput.value(), /server-observer \(recommended\)/)
+  assert.match(textOutput.value(), /Writes: disabled/)
+  assert.match(textOutput.value(), /Gateway: disabled/)
+  assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
+  assert.deepEqual(JSON.parse(jsonOutput.value()), {
+    preset: getSetupPreset("channel-reader"),
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
+    status: "ok",
+  })
 })
 
 test("CLI activates profiles before serve, doctor, and smoke without mutating the source", async () => {
