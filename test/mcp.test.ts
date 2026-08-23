@@ -69,6 +69,10 @@ import type {
   ChannelCloneRequest,
 } from "../src/channel-clone-service.js"
 import type {
+  ChannelDeletionPlan,
+  ChannelDeletionRequest,
+} from "../src/channel-deletion-service.js"
+import type {
   ChannelMetadataChangePlan,
   ChannelMetadataChangeRequest,
   ChannelMetadataReadResult,
@@ -246,6 +250,8 @@ import {
   ChannelCreationOperationConflictError,
   ChannelCloneExecutionError,
   ChannelCloneOperationConflictError,
+  ChannelDeletionExecutionError,
+  ChannelDeletionOperationConflictError,
   ChannelMetadataExecutionError,
   ChannelMetadataOperationConflictError,
   ChannelOrderingExecutionError,
@@ -405,6 +411,7 @@ const ROLE_ORDERING_ANCHOR_ID = "350000000000000002"
 const CHANNEL_ORDERING_ANCHOR_ID = "200000000000000004"
 const CHANNEL_ORDERING_MID_ID = "200000000000000005"
 const CHANNEL_ORDERING_OPERATION_KEY = "channel-ordering-attempt-0001"
+const CHANNEL_DELETION_OPERATION_KEY = "channel-deletion-attempt-0001"
 const CHANNEL_CLONE_OPERATION_KEY = "channel-clone-attempt-0001"
 const CHANNEL_CLONE_CREATED_ID = "200000000000000006"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
@@ -4827,6 +4834,149 @@ function channelOrderingInput(
   } as ChannelOrderingRequest & Record<string, unknown>
 }
 
+function channelDeletionInput(
+  overrides: Partial<ChannelDeletionRequest> = {},
+): ChannelDeletionRequest & Record<string, unknown> {
+  return {
+    acknowledgeIrreversibleContentLoss: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: CHANNEL_DELETION_OPERATION_KEY,
+    ...overrides,
+  } as ChannelDeletionRequest & Record<string, unknown>
+}
+
+function channelDeletionPlan(
+  request: ChannelDeletionRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): ChannelDeletionPlan {
+  const references = {
+    activeThreads: 0,
+    automod: 0,
+    categoryChildren: 0,
+    guild: 0,
+    invites: writeRequired ? 0 : 1,
+    onboarding: 0,
+    privateArchivedThreads: 0,
+    publicArchivedThreads: 0,
+    scheduledEvents: 0,
+    stageInstances: 0,
+    webhooks: 0,
+    welcomeScreen: 0,
+    widget: 0,
+  }
+  return {
+    acknowledgeIrreversibleContentLoss: true,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    blockers: writeRequired ? [] : [{ count: 1, kind: "invite" }],
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    dependencies: {
+      blockerCount: writeRequired ? 0 : 1,
+      digest: `hmac-sha256:${"d".repeat(64)}`,
+      references,
+    },
+    digest,
+    guild: {
+      id: request.guildId,
+      name: "Private guild name",
+      ownerId: GUILD_OWNER_ID,
+    },
+    httpEvidenceMode: "complete",
+    layout: {
+      channelCount: 3,
+      obfuscatedChannels: 0,
+      revision: 7,
+      updatedAt: "2026-08-23T00:00:00.000Z",
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      guildEffectivePermissionNames: [
+        "MANAGE_GUILD",
+        "VIEW_CHANNEL",
+        "MANAGE_CHANNELS",
+        "MANAGE_WEBHOOKS",
+        "READ_MESSAGE_HISTORY",
+        "MANAGE_THREADS",
+      ],
+      guildEffectivePermissions: (
+        DISCORD_PERMISSIONS.MANAGE_GUILD
+        | DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+        | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.MANAGE_THREADS
+      ).toString(),
+      guildManageGuild: true,
+      requiredTargetPermissions: [
+        "VIEW_CHANNEL",
+        "MANAGE_CHANNELS",
+        "MANAGE_WEBHOOKS",
+        "READ_MESSAGE_HISTORY",
+        "MANAGE_THREADS",
+      ],
+      targetEffectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "MANAGE_CHANNELS",
+        "MANAGE_WEBHOOKS",
+        "READ_MESSAGE_HISTORY",
+        "MANAGE_THREADS",
+      ],
+      targetEffectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+        | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+        | DISCORD_PERMISSIONS.MANAGE_THREADS
+      ).toString(),
+    },
+    privacy: {
+      channelText: "transient-untrusted",
+      hiddenMetadataReturned: false,
+      omittedFields: [
+        "auditReason",
+        "channelContent",
+        "dependencyIdentifiers",
+        "hiddenChannelMetadata",
+        "inviteCodes",
+        "memberIdentities",
+        "permissionOverwrites",
+        "rawOperationKey",
+        "rawPayloads",
+        "threadMemberData",
+        "voiceOccupancy",
+        "webhookCredentials",
+      ],
+      persistence: "content-free-only",
+    },
+    risks: [
+      "Guild channel deletion is irreversible and can permanently destroy an unbounded message history",
+    ],
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "blocked",
+    target: {
+      id: request.channelId,
+      kind: "text",
+      lastMessagePresent: true,
+      name: "Private target channel",
+      overwriteCount: 0,
+      parentChannelId: PARENT_ID,
+      rawPosition: 2,
+      type: DISCORD_CHANNEL_TYPES.text,
+      unknownFieldCount: 0,
+    },
+    warnings: [
+      "Message content is not fetched or counted; channel deletion can destroy an unbounded history",
+    ],
+    writeRequired,
+  }
+}
+
 function memberRolePlan(
   request: MemberRoleChangeRequest,
   digest = DIGEST,
@@ -5388,6 +5538,9 @@ function fixturePolicy(): PolicyDescription {
     channelCloningEnabled: false,
     channelCreationEnabled: false,
     channelCreationGuildIds: [],
+    channelDeletionAuditEnabled: false,
+    channelDeletionIds: [],
+    channelDeletionsEnabled: false,
     channelMetadataChangesEnabled: false,
     channelMetadataIds: [],
     channelOrderingAuditEnabled: false,
@@ -5540,6 +5693,9 @@ function serviceFixture(overrides: {
   channelCreationPlanDigest?: string
   channelCloneError?: Error
   channelClonePlanDigest?: string
+  channelDeletionError?: Error
+  channelDeletionPlanDigest?: string
+  channelDeletionWriteRequired?: boolean
   channelMetadataEffect?: "change" | "none"
   channelMetadataError?: Error
   channelMetadataPlanDigest?: string
@@ -5698,6 +5854,9 @@ function serviceFixture(overrides: {
     banList: 0,
     channelCloneExecute: 0,
     channelClonePlan: 0,
+    channelDeletionAudit: 0,
+    channelDeletionExecute: 0,
+    channelDeletionPlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     channelMetadataExecute: 0,
@@ -5900,6 +6059,67 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async auditChannelDeletion(guildId, channelId) {
+      calls.channelDeletionAudit += 1
+      const planned = channelDeletionPlan(channelDeletionInput({
+        channelId,
+        guildId,
+      }))
+      const {
+        acknowledgeIrreversibleContentLoss: _acknowledgement,
+        auditReason: _auditReason,
+        createdAt: _createdAt,
+        digest: _digest,
+        operationKeyHash: _operationKeyHash,
+        status: _status,
+        writeRequired: _writeRequired,
+        ...readiness
+      } = planned
+      return {
+        ...readiness,
+        evidenceDigest: `hmac-sha256:${"e".repeat(64)}`,
+        ready: true,
+        status: "ready",
+      }
+    },
+    async executeChannelDeletion(request, planDigest) {
+      if (overrides.channelDeletionError) throw overrides.channelDeletionError
+      calls.channelDeletionExecute += 1
+      const planned = channelDeletionPlan(
+        request,
+        planDigest,
+        overrides.channelDeletionWriteRequired ?? true,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-channel-deletion" : null,
+        addedChannelCount: 0,
+        baselineChannelCount: planned.layout.channelCount,
+        baselineLayoutRevision: planned.layout.revision,
+        blockerCount: planned.blockers.length,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        observedChannelCount: planned.writeRequired
+          ? planned.layout.channelCount - 1
+          : null,
+        observedLayoutRevision: planned.writeRequired
+          ? planned.layout.revision + 1
+          : null,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "blocked",
+        targetKind: planned.target.kind,
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
+    async planChannelDeletion(request) {
+      calls.channelDeletionPlan += 1
+      return channelDeletionPlan(
+        request,
+        overrides.channelDeletionPlanDigest || DIGEST,
+        overrides.channelDeletionWriteRequired ?? true,
+      )
+    },
     async executeApplicationEmojiChange(request, planDigest) {
       if (overrides.applicationEmojiError) throw overrides.applicationEmojiError
       calls.applicationEmojiExecute += 1
@@ -8978,6 +9198,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_channel_clone",
       "plan_channel_order",
       "execute_channel_order",
+      "plan_channel_deletion",
+      "execute_channel_deletion",
       "plan_member_moderation",
       "execute_member_moderation",
       "list_activity",
@@ -10624,6 +10846,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     banList: 0,
     channelCloneExecute: 0,
     channelClonePlan: 0,
+    channelDeletionAudit: 0,
+    channelDeletionExecute: 0,
+    channelDeletionPlan: 0,
     channelCreationExecute: 0,
     channelCreationPlan: 0,
     channelMetadataExecute: 0,
@@ -23071,6 +23296,223 @@ test("MCP channel ordering exposes uncertainty and content-free conflicts", asyn
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(CHANNEL_ORDERING_OPERATION_KEY),
+  )
+})
+
+test("MCP channel deletion requires explicit irreversible intent and returns content-free plans", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: channelDeletionInput(),
+    name: "plan_channel_deletion",
+  })
+  const unacknowledged = await client.callTool({
+    arguments: {
+      ...channelDeletionInput(),
+      acknowledgeIrreversibleContentLoss: false,
+    },
+    name: "plan_channel_deletion",
+  })
+  const extraField = await client.callTool({
+    arguments: { ...channelDeletionInput(), channelName: "unsafe-target" },
+    name: "plan_channel_deletion",
+  })
+
+  const plan = structuredContent(planned)
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.writeRequired, true)
+  assert.equal(
+    (plan.target as Record<string, unknown>).kind,
+    "text",
+  )
+  assert.equal(
+    (plan.dependencies as Record<string, unknown>).blockerCount,
+    0,
+  )
+  assert.equal(unacknowledged.isError, true)
+  assert.equal(extraField.isError, true)
+  assert.equal(calls.channelDeletionPlan, 1)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(CHANNEL_DELETION_OPERATION_KEY))
+})
+
+test("MCP channel deletion binds signed approval to complete irreversible evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: { ...channelDeletionInput(), planDigest: DIGEST },
+    name: "execute_channel_deletion",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.channelDeletionPlan, 1)
+  assert.equal(calls.channelDeletionExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    PARENT_ID,
+    "Private target channel",
+    "MANAGE_GUILD",
+    "MANAGE_CHANNELS",
+    "MANAGE_WEBHOOKS",
+    "READ_MESSAGE_HISTORY",
+    "MANAGE_THREADS",
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Irreversible content-loss acknowledged: true/)
+  assert.match(confirmationMessage, /permanently deletes the exact direct guild channel/)
+  assert.match(confirmationMessage, /cannot be reused/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(CHANNEL_DELETION_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(CHANNEL_DELETION_OPERATION_KEY),
+  )
+})
+
+test("MCP channel deletion skips approval for blockers and stops on refusal or drift", async (context) => {
+  const argumentsValue = { ...channelDeletionInput(), planDigest: DIGEST }
+  let blockedConfirmations = 0
+  const blocked = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      blockedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelDeletionWriteRequired: false },
+  })
+  const blockedResult = await blocked.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_deletion",
+  })
+  assert.equal(structuredContent(blockedResult).status, "blocked")
+  assert.equal(blockedConfirmations, 0)
+  assert.equal(blocked.calls.channelDeletionExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_deletion",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.channelDeletionExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { channelDeletionPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_deletion",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.channelDeletionExecute, 0)
+})
+
+test("MCP channel-deletion approval state binds the exact destructive target", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = { ...channelDeletionInput(), planDigest: DIGEST }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_channel_deletion",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        channelId: "200000000000000006",
+      },
+      inputResponses: {
+        confirm_channel_deletion: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_channel_deletion",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.channelDeletionExecute, 0)
+})
+
+test("MCP channel deletion exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = { ...channelDeletionInput(), planDigest: DIGEST }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelDeletionError: new ChannelDeletionExecutionError(
+        "Discord channel-deletion outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_deletion",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-channel-deletion",
+    channelId: CHANNEL_ID,
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      channelDeletionError: new ChannelDeletionOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_deletion",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(CHANNEL_DELETION_OPERATION_KEY),
   )
 })
 

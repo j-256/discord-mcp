@@ -482,6 +482,9 @@ function serviceFixture(overrides: {
       throw new Error("Unexpected application emoji deletion")
     },
     async deleteChannelPermissionOverwrite() {},
+    async deleteGuildChannel() {
+      throw new Error("Unexpected guild channel deletion")
+    },
     async deleteMessage() {},
     async deleteGuildEmoji() {},
     async deleteGuildAutoModerationRule() {},

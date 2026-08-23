@@ -33,6 +33,7 @@ export const OPERATION_KINDS = [
   "automod-change",
   "channel-clone",
   "channel-creation",
+  "channel-deletion",
   "channel-metadata-change",
   "channel-ordering",
   "channel-permission-overwrite",

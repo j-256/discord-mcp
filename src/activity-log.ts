@@ -1045,6 +1045,32 @@ export interface ChannelOrderingActivity {
   verification: "match" | null
 }
 
+export type ChannelDeletionActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ChannelDeletionActivity {
+  baselineChannelCount: number
+  baselineRevision: number
+  channelId: string
+  dependencyCount: number
+  error: string | null
+  guildId: string
+  id: string
+  kind: "channel-deletion"
+  observedRevision: number | null
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: ChannelDeletionActivityStatus
+  targetKind: "category" | "forum" | "media" | "stage" | "text" | "voice"
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ForumTagActivityStatus =
   | "completed"
   | "failed"
@@ -1102,6 +1128,7 @@ export type ActivityEntry =
   | AutoModerationActivity
   | ChannelCloneActivity
   | ChannelCreationActivity
+  | ChannelDeletionActivity
   | ChannelMetadataActivity
   | ChannelOrderingActivity
   | ChannelPermissionOverwriteActivity
@@ -2637,6 +2664,92 @@ function parseChannelOrderingActivity(
     status: record.status as ChannelOrderingActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "match" | null,
+  }
+}
+
+function parseChannelDeletionActivity(
+  value: unknown,
+): ChannelDeletionActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const status = String(record.status)
+  const observedRevision = record.observedRevision
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "channel-deletion"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.channelId !== "string"
+    || !positiveActivitySnowflake(record.channelId)
+    || !Number.isSafeInteger(record.baselineRevision)
+    || (record.baselineRevision as number) < 1
+    || !Number.isSafeInteger(record.baselineChannelCount)
+    || (record.baselineChannelCount as number) < 1
+    || !Number.isSafeInteger(record.dependencyCount)
+    || (record.dependencyCount as number) < 0
+    || !(observedRevision === null || (
+      Number.isSafeInteger(observedRevision)
+      && (observedRevision as number) > (record.baselineRevision as number)
+    ))
+    || !["category", "forum", "media", "stage", "text", "voice"]
+      .includes(String(record.targetKind))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null
+      || observedRevision !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || observedRevision === null
+      || record.verification !== "match"
+    ))
+    || (status === "completed-with-drift" && (
+      record.error !== null
+      || observedRevision === null
+      || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    baselineChannelCount: record.baselineChannelCount as number,
+    baselineRevision: record.baselineRevision as number,
+    channelId: record.channelId,
+    dependencyCount: record.dependencyCount as number,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "channel-deletion",
+    observedRevision: observedRevision as number | null,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: status as ChannelDeletionActivityStatus,
+    targetKind: record.targetKind as ChannelDeletionActivity["targetKind"],
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
   }
 }
 
@@ -4430,6 +4543,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseChannelCreationActivity(value)
     || parseChannelMetadataActivity(value)
     || parseChannelCloneActivity(value)
+    || parseChannelDeletionActivity(value)
     || parseChannelOrderingActivity(value)
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)

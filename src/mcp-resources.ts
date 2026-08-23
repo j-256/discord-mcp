@@ -230,6 +230,8 @@ export function registerDiscordResources(
           "",
           "Channel ordering requires separate audit and change toggles plus an exact guild allowlist. Audit combines a complete obfuscation-safe Gateway layout with complete legacy HTTP evidence or the exact visible HTTP subset after Discord's channel-obfuscation transition, discards metadata for Gateway-obfuscated channels, and returns canonical same-parent sortable families with complete guild or parent-category MANAGE_CHANNELS authority. Planning accepts one exact target channel, exact anchor channel, and immediate above-or-below placement in the same parent and sortable family; it binds the complete layout, visibility-bounded HTTP evidence, full normalized family payload, identities, authority, reason, and one-shot key into a keyed digest. Unsupported sibling types, incomplete or incoherent evidence, parent moves, family changes, and authority gaps fail closed. Execution requires a fresh matching plan, signed approval, durable claims on the guild channel collection plus target, anchor, and optional parent, one-shot reservation, pending content-free activity, a verification subscription armed before one non-retried complete position PATCH, and a newer complete matching Gateway layout. Uncertain outcomes quarantine the guild channel collection. It never syncs permissions, changes flags or metadata, retries, rolls back, exposes hidden metadata, or persists channel text, layout details, reasons, or raw keys.",
           "",
+          "Channel deletion requires separate audit and change toggles plus exact guild and channel allowlists. Readiness and planning combine a complete coherent obfuscation-safe Gateway layout with exact target, guild, member, role, overwrite, permission, special-channel, widget, onboarding, Welcome Screen, AutoMod, scheduled-event, invite, active and archived thread, webhook, category-child, and Stage-instance evidence. Planning requires literal acknowledgement of irreversible content loss and binds the complete content-free evidence, audit reason, identity, and one-shot key into a keyed digest. DMs, threads, directory and announcement channels, non-empty categories, active Stage instances, special guild channels, dependency blockers, incomplete evidence, and authority gaps fail closed. Voice and Stage occupancy is unavailable through the bounded REST evidence and must be checked by the operator before approval. Execution requires a fresh matching plan, signed approval, durable claims on the guild channel collection plus target and optional parent, one-shot reservation, pending content-free activity, a verification subscription armed before one non-retried exact-ID DELETE, strict response validation, and a newer coherent layout proving target absence while every baseline survivor retains its type, parent, and visibility. Uncertain outcomes quarantine the guild channel collection. It never fetches message content, treats an absent target as success, retries, rolls back, exposes hidden metadata or dependency identifiers, or persists Discord text, reasons, or raw keys.",
+          "",
           "Channel cloning requires separate audit and change toggles plus exact guild and source-channel allowlists. Planning combines continuity-stable complete Gateway and HTTP evidence, supports one exact same-guild and same-parent text, voice, category, announcement, Stage, forum, or media source, and fails closed unless one create request can preserve every supported setting and overwrite with complete capacity, target, permission, and authority evidence. Execution requires a fresh matching keyed plan, signed approval, durable source and guild-channel-collection claims, one-shot reservation, pending content-free activity, a pre-armed verification subscription, one non-retried create, exact response and GET readback, a newer complete topology containing exactly one added channel, unchanged source semantics, and preserved relative order for every existing sortable family. Source position and child resources are excluded; forum and media tag IDs are regenerated and mapped after verification. Ambiguous outcomes and terminal receipt failures quarantine the guild without retry, deletion, rollback, or position repair, while names, topics, tags, emoji, overwrites, layout inventories, reasons, and raw keys never enter durable records.",
           "",
           "Forum-tag audit requires a separate exact stable-forum allowlist and complete VIEW_CHANNEL evidence. It returns the complete bounded ordered inventory transiently, preserves existing custom emoji IDs, reports unknown channel and tag fields only as counts, fails closed on unknown permission-overwrite fields, never enumerates posts or threads, and never persists tag text. Reviewed create, exact metadata update, and exact-ID deletion require an additional toggle, complete MANAGE_CHANNELS evidence, a fresh full-inventory keyed plan, signed approval, durable channel coordination and one-shot reservation, pending content-free activity, one non-retried full available_tags PATCH, strict response validation, and a fresh complete readback. Deletion usage is unavailable and explicit, while media channels, custom emoji introduction, fuzzy names, raw replacement, reordering, retry, and rollback are unsupported. Same-channel uncertain outcomes remain quarantined for operator review.",
@@ -456,6 +458,31 @@ export function registerDiscordResources(
       secrets,
       () => service.auditChannelOrder(
         templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.channelDeletionReadiness,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.channelDeletionReadiness, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Fresh content-free deletion readiness for one exact separately allowlisted direct guild channel. Returns the target type and visible name, complete obfuscation-safe topology, connector authority, blocker counts, dependency evidence digest, risks, warnings, and privacy omissions without message content, dependency identifiers, invite codes, webhook credentials, or raw payloads. Nothing is persisted.",
+      mimeType: "application/json",
+      title: "Reviewed Discord channel deletion readiness",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditChannelDeletion(
+        templateSnowflake(variables, "guildId"),
+        templateSnowflake(variables, "channelId"),
         { signal: context.mcpReq.signal },
       ),
     ),

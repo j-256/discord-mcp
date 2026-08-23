@@ -110,6 +110,17 @@ import {
   normalizeChannelCloneRequest,
 } from "./channel-clone-service.js"
 import type {
+  ChannelDeletionPlan,
+  ChannelDeletionReadiness,
+  ChannelDeletionRequest,
+  ChannelDeletionResult,
+  ChannelDeletionServiceOptions,
+} from "./channel-deletion-service.js"
+import {
+  ChannelDeletionService,
+  normalizeChannelDeletionRequest,
+} from "./channel-deletion-service.js"
+import type {
   ChannelMetadataChangePlan,
   ChannelMetadataChangeRequest,
   ChannelMetadataChangeResult,
@@ -173,6 +184,7 @@ import { DiscordClient } from "./discord-client.js"
 import {
   AnnouncementSubscriptionPlanChangedError,
   ChannelClonePlanChangedError,
+  ChannelDeletionPlanChangedError,
   ChannelOrderingPlanChangedError,
   ConfigurationError,
   ComponentMessagePlanChangedError,
@@ -600,6 +612,7 @@ export interface DiscordServiceClient {
   deleteAllMessageReactions: DiscordClient["deleteAllMessageReactions"]
   deleteAllMessageReactionsForEmoji: DiscordClient["deleteAllMessageReactionsForEmoji"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
+  deleteGuildChannel: DiscordClient["deleteGuildChannel"]
   deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
@@ -755,6 +768,10 @@ export interface ConnectorServiceOptions {
   >
   channelCloneOptions?: Pick<
     ChannelCloneServiceOptions,
+    "clock" | "planKey" | "randomId" | "verificationTimeoutMs"
+  >
+  channelDeletionOptions?: Pick<
+    ChannelDeletionServiceOptions,
     "clock" | "planKey" | "randomId" | "verificationTimeoutMs"
   >
   channelMetadataOptions?: Pick<
@@ -1016,6 +1033,7 @@ export class ConnectorService {
   readonly #banAuditService: BanAuditService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #channelCloneService: ChannelCloneService
+  readonly #channelDeletionService: ChannelDeletionService
   readonly #channelMetadataService: ChannelMetadataService
   readonly #channelOrderingService: ChannelOrderingService
   readonly #client: DiscordServiceClient
@@ -1134,6 +1152,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelCloneOptions,
+    })
+    this.#channelDeletionService = new ChannelDeletionService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      layoutSource: gateway,
+      operationStore,
+      policy: this.#policy,
+      ...options.channelDeletionOptions,
     })
     this.#channelMetadataService = new ChannelMetadataService({
       activityStore: this.#activityStore,
@@ -1628,6 +1654,21 @@ export class ConnectorService {
       identity.application.id,
       identity.bot.id,
       guildId,
+      options,
+    )
+  }
+
+  async auditChannelDeletion(
+    guildId: string,
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelDeletionReadiness> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelDeletionService.audit(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      channelId,
       options,
     )
   }
@@ -2995,6 +3036,20 @@ export class ConnectorService {
     )
   }
 
+  async planChannelDeletion(
+    request: ChannelDeletionRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelDeletionPlan> {
+    normalizeChannelDeletionRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#channelDeletionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planChannelClone(
     request: ChannelCloneRequest,
     options: RequestOptions = {},
@@ -3357,6 +3412,55 @@ export class ConnectorService {
         writeGuildCollectionTarget("channels", request.guildId),
       ],
       () => this.#channelOrderingService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeChannelDeletion(
+    request: ChannelDeletionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelDeletionResult> {
+    normalizeChannelDeletionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord channel-deletion plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#channelDeletionService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new ChannelDeletionPlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#channelDeletionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "channel-deletion",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        ...(coordinationPlan.target.parentChannelId
+          ? [writeResourceTarget("channel", coordinationPlan.target.parentChannelId)]
+          : []),
+        writeGuildCollectionTarget("channels", request.guildId),
+      ],
+      () => this.#channelDeletionService.execute(
         identity.application.id,
         identity.bot.id,
         request,

@@ -1343,6 +1343,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_stage_instance",
   "create_webhook",
   "delete_application_emoji",
+  "delete_guild_channel",
   "delete_guild_auto_moderation_rule",
   "delete_guild_emoji",
   "delete_guild_soundboard_sound",
@@ -7911,6 +7912,25 @@ export class DiscordClient {
         suppressFailureCause: true,
       },
     )
+  }
+
+  deleteGuildChannel(
+    channelId: string,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannel> {
+    assertPositiveSnowflake(channelId, "Discord channel-deletion channel ID")
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord channel-deletion audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("delete_guild_channel", `/channels/${channelId}`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      diagnosticRoute: "/channels/{channel.id}",
+      suppressFailureCause: true,
+    })
   }
 
   createForumPost(

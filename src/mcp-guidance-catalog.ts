@@ -31,6 +31,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
   channelAccess: "channel_access",
   channelAnnouncementSubscriptions: "channel_announcement_subscriptions",
+  channelDeletionReadiness: "channel_deletion_readiness",
   channelForumTags: "channel_forum_tags",
   channelMetadata: "channel_metadata",
   channelPermissionOverwrites: "channel_permission_overwrites",
@@ -67,6 +68,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
   channelAccess: "discord://channels/{channelId}/access",
   channelAnnouncementSubscriptions: "discord://channels/{channelId}/announcement-subscriptions",
+  channelDeletionReadiness: "discord://guilds/{guildId}/channels/{channelId}/deletion-readiness",
   channelForumTags: "discord://channels/{channelId}/forum-tags",
   channelMetadata: "discord://channels/{channelId}",
   channelPermissionOverwrites: "discord://channels/{channelId}/permission-overwrites",
@@ -115,6 +117,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewAttachmentMessage: "review_attachment_message",
   reviewAutomodChange: "review_automod_change",
   reviewChannelCreation: "review_channel_creation",
+  reviewChannelDeletion: "review_channel_deletion",
   reviewChannelClone: "review_channel_clone",
   reviewChannelMetadataChange: "review_channel_metadata_change",
   reviewChannelOrder: "review_channel_order",
@@ -167,6 +170,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewAttachmentMessage]: "attachments",
   [MCP_PROMPT_NAMES.reviewAutomodChange]: "automod",
   [MCP_PROMPT_NAMES.reviewChannelCreation]: "channel-creation",
+  [MCP_PROMPT_NAMES.reviewChannelDeletion]: "channel-deletion",
   [MCP_PROMPT_NAMES.reviewChannelClone]: "channel-cloning",
   [MCP_PROMPT_NAMES.reviewChannelMetadataChange]: "channel-metadata",
   [MCP_PROMPT_NAMES.reviewChannelOrder]: "channel-ordering",

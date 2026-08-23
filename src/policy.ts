@@ -40,6 +40,9 @@ export interface PolicyDescription {
   channelCloningEnabled: boolean
   channelCreationEnabled: boolean
   channelCreationGuildIds: string[]
+  channelDeletionAuditEnabled: boolean
+  channelDeletionIds: string[]
+  channelDeletionsEnabled: boolean
   channelMetadataChangesEnabled: boolean
   channelMetadataIds: string[]
   channelOrderingAuditEnabled: boolean
@@ -195,6 +198,8 @@ export class ScopePolicy {
   readonly #allowChannelCloneAudit: boolean
   readonly #allowChannelCloning: boolean
   readonly #allowChannelCreation: boolean
+  readonly #allowChannelDeletionAudit: boolean
+  readonly #allowChannelDeletions: boolean
   readonly #allowChannelMetadataChanges: boolean
   readonly #allowChannelOrderingAudit: boolean
   readonly #allowChannelOrderingChanges: boolean
@@ -275,6 +280,7 @@ export class ScopePolicy {
   readonly #channelCloneGuildIds: ReadonlySet<string>
   readonly #channelCloneSourceIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
+  readonly #channelDeletionIds: ReadonlySet<string>
   readonly #channelMetadataIds: ReadonlySet<string>
   readonly #channelOrderingGuildIds: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
@@ -358,6 +364,8 @@ export class ScopePolicy {
     | "allowBanAudit"
     | "allowChannelCloneAudit"
     | "allowChannelCloning"
+    | "allowChannelDeletionAudit"
+    | "allowChannelDeletions"
     | "allowChannelMetadataChanges"
     | "allowChannelOrderingAudit"
     | "allowChannelOrderingChanges"
@@ -424,6 +432,7 @@ export class ScopePolicy {
     | "allowWidgetSettingsAudit"
     | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
+    | "channelDeletionIds"
     | "channelCloneGuildIds"
     | "channelCloneSourceIds"
     | "announcementCrosspostChannelIds"
@@ -505,6 +514,8 @@ export class ScopePolicy {
     this.#allowChannelCloneAudit = config.allowChannelCloneAudit ?? false
     this.#allowChannelCloning = config.allowChannelCloning ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
+    this.#allowChannelDeletionAudit = config.allowChannelDeletionAudit ?? false
+    this.#allowChannelDeletions = config.allowChannelDeletions ?? false
     this.#allowChannelOrderingAudit = config.allowChannelOrderingAudit ?? false
     this.#allowChannelOrderingChanges = config.allowChannelOrderingChanges ?? false
     this.#allowChannelMetadataChanges = config.allowChannelMetadataChanges ?? false
@@ -588,6 +599,7 @@ export class ScopePolicy {
     this.#channelCloneGuildIds = config.channelCloneGuildIds ?? new Set()
     this.#channelCloneSourceIds = config.channelCloneSourceIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
+    this.#channelDeletionIds = config.channelDeletionIds ?? new Set()
     this.#channelMetadataIds = config.channelMetadataIds ?? new Set()
     this.#channelOrderingGuildIds = config.channelOrderingGuildIds ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
@@ -700,6 +712,12 @@ export class ScopePolicy {
       channelCreationEnabled: this.#allowChannelCreation
         && this.#channelCreationGuildIds.size > 0,
       channelCreationGuildIds: [...this.#channelCreationGuildIds].sort(),
+      channelDeletionAuditEnabled: this.#allowChannelDeletionAudit
+        && this.#channelDeletionIds.size > 0,
+      channelDeletionIds: [...this.#channelDeletionIds].sort(),
+      channelDeletionsEnabled: this.#allowChannelDeletionAudit
+        && this.#allowChannelDeletions
+        && this.#channelDeletionIds.size > 0,
       channelMetadataChangesEnabled: this.#allowChannelMetadataChanges
         && this.#channelMetadataIds.size > 0,
       channelMetadataIds: [...this.#channelMetadataIds].sort(),
@@ -1366,6 +1384,29 @@ export class ScopePolicy {
     }
     if (!this.#channelOrderingGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the channel-ordering scope`)
+    }
+  }
+
+  assertChannelDeletionAuditable(guildId: string, channelId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.channelIdReadable(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the configured read scope`)
+    }
+    if (!this.#allowChannelDeletionAudit) {
+      throw new PolicyError("Discord channel-deletion audit is disabled by connector configuration")
+    }
+    if (this.#channelDeletionIds.size === 0) {
+      throw new PolicyError("Discord channel-deletion audit requires an exact channel allowlist")
+    }
+    if (!this.#channelDeletionIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the channel-deletion scope`)
+    }
+  }
+
+  assertChannelDeletionAllowed(guildId: string, channelId: string): void {
+    this.assertChannelDeletionAuditable(guildId, channelId)
+    if (!this.#allowChannelDeletions) {
+      throw new PolicyError("Discord channel deletion is disabled by connector configuration")
     }
   }
 

@@ -139,6 +139,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   roleConfigurationPolicy: "role-configuration-policy",
   channelOrderingAuditPolicy: "channel-ordering-audit-policy",
   channelOrderingChangePolicy: "channel-ordering-change-policy",
+  channelDeletionAuditPolicy: "channel-deletion-audit-policy",
+  channelDeletionChangePolicy: "channel-deletion-change-policy",
   roleOrderingAuditPolicy: "role-ordering-audit-policy",
   roleOrderingChangePolicy: "role-ordering-change-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
@@ -508,6 +510,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowChannelOrderingChanges && config.channelOrderingGuildIds.size === 0) {
     warnings.push("The channel-ordering change toggle is enabled but layout changes remain blocked because no exact guild allowlist is configured")
   }
+  if (config.allowChannelDeletionAudit && config.channelDeletionIds.size === 0) {
+    warnings.push("The channel-deletion audit toggle is enabled but readiness inspection remains blocked because no exact channel allowlist is configured")
+  }
+  if (config.allowChannelDeletions && config.channelDeletionIds.size === 0) {
+    warnings.push("The channel-deletion change toggle is enabled but deletion remains blocked because no exact channel allowlist is configured")
+  }
   if (config.allowRoleCreation && config.roleCreationGuildIds.size === 0) {
     warnings.push("The role-creation toggle is enabled but role creation remains blocked because no role-creation guild allowlist is configured")
   }
@@ -813,6 +821,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowChannelOrderingAudit || config.allowChannelOrderingChanges,
       "channel-ordering",
       "Channel-order audit and reviewed changes",
+    ],
+    [
+      config.allowChannelDeletionAudit || config.allowChannelDeletions,
+      "channel-deletion",
+      "Channel-deletion readiness and reviewed execution",
     ],
     [
       config.allowRoleOrderingAudit || config.allowRoleOrderingChanges,
@@ -1121,6 +1134,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
         "pass",
         `Reviewed channel-order changes are constrained to ${config.channelOrderingGuildIds.size} exact guilds with signed approval, one-shot execution, durable channel-collection coordination, and newer complete Gateway verification`,
+      ))
+    }
+    if (!config.allowChannelDeletionAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelDeletionAuditPolicy,
+        "pass",
+        "Channel-deletion readiness audit is disabled",
+      ))
+    } else if (config.channelDeletionIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelDeletionAuditPolicy,
+        "warn",
+        "Channel-deletion audit is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelDeletionAuditPolicy,
+        "pass",
+        `Channel-deletion readiness is constrained to ${config.channelDeletionIds.size} exact channels with complete topology, dependency, permission, and privacy-safe evidence`,
+      ))
+    }
+    if (!config.allowChannelDeletions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelDeletionChangePolicy,
+        "pass",
+        "Reviewed channel deletion is disabled",
+      ))
+    } else if (config.channelDeletionIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelDeletionChangePolicy,
+        "warn",
+        "Channel deletion is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.channelDeletionChangePolicy,
+        "pass",
+        `Reviewed channel deletion is constrained to ${config.channelDeletionIds.size} exact channels with irreversible acknowledgement, signed approval, one-shot execution, content-free auditing, durable guild-channel coordination, and newer Gateway absence verification`,
       ))
     }
     if (!config.allowDeletions) {
@@ -2666,6 +2717,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.protectedUserIds,
     ENVIRONMENT_NAMES.allowChannelCreation,
     ENVIRONMENT_NAMES.channelCreationGuildIds,
+    ENVIRONMENT_NAMES.allowChannelDeletionAudit,
+    ENVIRONMENT_NAMES.allowChannelDeletions,
+    ENVIRONMENT_NAMES.channelDeletionIds,
     ENVIRONMENT_NAMES.allowChannelCloneAudit,
     ENVIRONMENT_NAMES.allowChannelCloning,
     ENVIRONMENT_NAMES.channelCloneGuildIds,

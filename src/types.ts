@@ -147,6 +147,9 @@ export interface DiscordGuild {
   owner_id?: string
   premium_tier?: number
   premium_progress_bar_enabled?: boolean
+  public_updates_channel_id?: string | null
+  rules_channel_id?: string | null
+  safety_alerts_channel_id?: string | null
   permissions?: string
   system_channel_flags?: number
   system_channel_id?: string | null

@@ -165,6 +165,7 @@ interface GuidanceCalls {
   automod: number
   bans: number
   channelAccess: number
+  channelDeletions: number
   channelMetadata: number
   channelOrders: number
   channels: number
@@ -218,6 +219,7 @@ function guidanceService(options: {
     channelAccess: 0,
     channelMetadata: 0,
     channelOrders: 0,
+    channelDeletions: 0,
     channels: 0,
     forumTags: 0,
     guilds: 0,
@@ -258,6 +260,109 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    async auditChannelDeletion(guildId, channelId) {
+      calls.channelDeletions += 1
+      calls.lastGuildId = guildId
+      calls.lastChannelId = channelId
+      return {
+        applicationId: APPLICATION_ID,
+        blockers: [],
+        botId: BOT_ID,
+        dependencies: {
+          blockerCount: 0,
+          digest: `hmac-sha256:${"d".repeat(64)}`,
+          references: {
+            activeThreads: 0,
+            automod: 0,
+            categoryChildren: 0,
+            guild: 0,
+            invites: 0,
+            onboarding: 0,
+            privateArchivedThreads: 0,
+            publicArchivedThreads: 0,
+            scheduledEvents: 0,
+            stageInstances: 0,
+            webhooks: 0,
+            welcomeScreen: 0,
+            widget: 0,
+          },
+        },
+        evidenceDigest: `hmac-sha256:${"e".repeat(64)}`,
+        guild: { id: guildId, name: "Private deletion guild", ownerId: USER_ID },
+        httpEvidenceMode: "complete",
+        layout: {
+          channelCount: 2,
+          obfuscatedChannels: 0,
+          revision: 7,
+          updatedAt: "2026-08-23T00:00:00.000Z",
+        },
+        permission: {
+          administrator: false,
+          confidence: "complete",
+          guildEffectivePermissionNames: ["MANAGE_GUILD"],
+          guildEffectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          guildManageGuild: true,
+          requiredTargetPermissions: [
+            "VIEW_CHANNEL",
+            "MANAGE_CHANNELS",
+            "MANAGE_WEBHOOKS",
+            "READ_MESSAGE_HISTORY",
+            "MANAGE_THREADS",
+          ],
+          targetEffectivePermissionNames: [
+            "VIEW_CHANNEL",
+            "MANAGE_CHANNELS",
+            "MANAGE_WEBHOOKS",
+            "READ_MESSAGE_HISTORY",
+            "MANAGE_THREADS",
+          ],
+          targetEffectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+            | DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.MANAGE_THREADS
+          ).toString(),
+        },
+        privacy: {
+          channelText: "transient-untrusted",
+          hiddenMetadataReturned: false,
+          omittedFields: [
+            "auditReason",
+            "channelContent",
+            "dependencyIdentifiers",
+            "hiddenChannelMetadata",
+            "inviteCodes",
+            "memberIdentities",
+            "permissionOverwrites",
+            "rawOperationKey",
+            "rawPayloads",
+            "threadMemberData",
+            "voiceOccupancy",
+            "webhookCredentials",
+          ],
+          persistence: "content-free-only",
+        },
+        ready: true,
+        risks: ["Deletion is irreversible"],
+        schemaVersion: 1,
+        status: "ready",
+        target: {
+          id: channelId,
+          kind: "text",
+          lastMessagePresent: true,
+          name: "Private deletion target",
+          overwriteCount: 0,
+          parentChannelId: null,
+          rawPosition: 1,
+          type: 0,
+          unknownFieldCount: 0,
+        },
+        warnings: ["Message content was not fetched"],
+      }
+    },
+    executeChannelDeletion: unexpected,
+    planChannelDeletion: unexpected,
     async auditChannelOrder(guildId) {
       calls.channelOrders += 1
       calls.lastGuildId = guildId
@@ -1590,6 +1695,9 @@ function guidanceService(options: {
         channelCloningEnabled: false,
         channelCreationEnabled: false,
         channelCreationGuildIds: [],
+        channelDeletionAuditEnabled: false,
+        channelDeletionIds: [],
+        channelDeletionsEnabled: false,
         channelMetadataChangesEnabled: false,
         channelMetadataIds: [],
         channelOrderingAuditEnabled: false,
@@ -2284,6 +2392,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.automod
     + calls.bans
     + calls.channelAccess
+    + calls.channelDeletions
     + calls.channelMetadata
     + calls.channelOrders
     + calls.channels
@@ -2389,6 +2498,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelAnnouncementSubscriptions,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAnnouncementSubscriptions,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelDeletionReadiness,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelDeletionReadiness,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelForumTags,
@@ -2538,6 +2651,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(safety.content.mimeType, "text/markdown")
   assert.match(safety.text, /Resource discovery never enumerates messages/)
   assert.match(safety.text, /Channel creation is additive-only/)
+  assert.match(safety.text, /Channel deletion requires separate audit and change toggles/)
+  assert.match(safety.text, /never fetches message content, treats an absent target as success/)
   assert.match(safety.text, /Forum-post creation requires a separate exact forum-channel/)
   assert.match(safety.text, /Forum-tag audit requires a separate exact stable-forum/)
   assert.match(safety.text, /Deletion usage is unavailable and explicit/)
@@ -5354,4 +5469,52 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
     )
   }
   assert.equal(totalCalls(calls), 0)
+})
+
+test("MCP channel-deletion guidance exposes exact readiness and a plan-only strict prompt", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const readiness = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/channels/${CHANNEL_ID}/deletion-readiness`,
+  )
+  const readinessData = readiness.value.data as Record<string, unknown>
+  assert.equal(readinessData.status, "ready")
+  assert.equal(
+    (readinessData.target as Record<string, unknown>).id,
+    CHANNEL_ID,
+  )
+  assert.equal(calls.channelDeletions, 1)
+  assert.equal(calls.lastGuildId, GUILD_ID)
+  assert.equal(calls.lastChannelId, CHANNEL_ID)
+  assert.doesNotMatch(JSON.stringify(readiness.value), new RegExp(TOKEN))
+
+  const request = {
+    acknowledgeIrreversibleContentLoss: true,
+    auditReason: "Retire an empty test channel",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+  }
+  const reviewed = await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(request) },
+    name: MCP_PROMPT_NAMES.reviewChannelDeletion,
+  })
+  const text = promptText(reviewed)
+  assert.deepEqual(JSON.parse(text.split("\n")[1] || ""), request)
+  assert.match(text, /Call only plan_channel_deletion/)
+  assert.match(text, /Do not call execute_channel_deletion/)
+  assert.equal(totalCalls(calls), 1)
+
+  await assert.rejects(
+    () => client.getPrompt({
+      arguments: {
+        requestJson: JSON.stringify({
+          ...request,
+          acknowledgeIrreversibleContentLoss: false,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelDeletion,
+    }),
+    /valid strict plan_channel_deletion input object/,
+  )
 })

@@ -321,6 +321,46 @@ export class ChannelMetadataEvidenceError extends Error {
   override name = "ChannelMetadataEvidenceError"
 }
 
+export class ChannelDeletionPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord channel state does not match the reviewed deletion plan")
+    this.name = "ChannelDeletionPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelDeletionOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord channel-deletion operation key has already been reserved")
+    this.name = "ChannelDeletionOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelDeletionExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelDeletionExecutionError"
+    this.result = result
+  }
+}
+
+export class ChannelDeletionEvidenceError extends Error {
+  override name = "ChannelDeletionEvidenceError"
+}
+
+export class ChannelDeletionVerificationTimeoutError extends Error {
+  override name = "ChannelDeletionVerificationTimeoutError"
+}
+
 export class ChannelOrderingPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

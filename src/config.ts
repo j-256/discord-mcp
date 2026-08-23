@@ -57,6 +57,8 @@ export interface ConnectorConfig {
   allowChannelCloneAudit: boolean
   allowChannelCloning: boolean
   allowChannelCreation: boolean
+  allowChannelDeletionAudit: boolean
+  allowChannelDeletions: boolean
   allowChannelMetadataChanges: boolean
   allowChannelOrderingAudit: boolean
   allowChannelOrderingChanges: boolean
@@ -134,6 +136,7 @@ export interface ConnectorConfig {
   channelCloneGuildIds: ReadonlySet<string>
   channelCloneSourceIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
+  channelDeletionIds: ReadonlySet<string>
   channelMetadataIds: ReadonlySet<string>
   channelOrderingGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
@@ -418,6 +421,11 @@ function loadConnectorEnvironmentConfig(
     environment[ENVIRONMENT_NAMES.channelMetadataIds],
     ENVIRONMENT_NAMES.channelMetadataIds,
   )
+  const channelDeletionIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.channelDeletionIds],
+    ENVIRONMENT_NAMES.channelDeletionIds,
+    CONNECTOR_LIMITS.channelDeletionAllowlist,
+  )
   const channelOrderingGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.channelOrderingGuildIds],
     ENVIRONMENT_NAMES.channelOrderingGuildIds,
@@ -682,6 +690,7 @@ function loadConnectorEnvironmentConfig(
     [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
     [ENVIRONMENT_NAMES.automodAlertChannelIds, automodAlertChannelIds],
     [ENVIRONMENT_NAMES.channelMetadataIds, channelMetadataIds],
+    [ENVIRONMENT_NAMES.channelDeletionIds, channelDeletionIds],
     [ENVIRONMENT_NAMES.channelCloneSourceIds, channelCloneSourceIds],
     [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
     [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
@@ -814,6 +823,34 @@ function loadConnectorEnvironmentConfig(
       `${ENVIRONMENT_NAMES.allowChannelOrderingAudit} requires ${ENVIRONMENT_NAMES.channelOrderingGuildIds}`,
     )
   }
+  const allowChannelDeletionAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowChannelDeletionAudit],
+    ENVIRONMENT_NAMES.allowChannelDeletionAudit,
+  )
+  const allowChannelDeletions = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowChannelDeletions],
+    ENVIRONMENT_NAMES.allowChannelDeletions,
+  )
+  if (allowChannelDeletions && !allowChannelDeletionAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelDeletions} requires ${ENVIRONMENT_NAMES.allowChannelDeletionAudit}`,
+    )
+  }
+  if (allowChannelDeletionAudit && channelDeletionIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelDeletionAudit} requires ${ENVIRONMENT_NAMES.channelDeletionIds}`,
+    )
+  }
+  if (allowChannelDeletionAudit && allowedGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelDeletionAudit} requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+    )
+  }
+  if (allowChannelDeletionAudit && !allowGateway) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowChannelDeletionAudit} requires ${ENVIRONMENT_NAMES.allowGateway}`,
+    )
+  }
   const allowNativeCommandChanges = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowNativeCommandChanges],
     ENVIRONMENT_NAMES.allowNativeCommandChanges,
@@ -826,6 +863,7 @@ function loadConnectorEnvironmentConfig(
     (
       allowGateway
       || allowChannelCloneAudit
+      || allowChannelDeletionAudit
       || allowChannelOrderingAudit
       || allowNativeCommandChanges
       || allowNativeInteractions
@@ -1273,6 +1311,8 @@ function loadConnectorEnvironmentConfig(
       environment[ENVIRONMENT_NAMES.allowChannelCreation],
       ENVIRONMENT_NAMES.allowChannelCreation,
     ),
+    allowChannelDeletionAudit,
+    allowChannelDeletions,
     allowChannelMetadataChanges: parseBoolean(
       environment[ENVIRONMENT_NAMES.allowChannelMetadataChanges],
       ENVIRONMENT_NAMES.allowChannelMetadataChanges,
@@ -1394,6 +1434,7 @@ function loadConnectorEnvironmentConfig(
     channelCloneGuildIds,
     channelCloneSourceIds,
     channelCreationGuildIds,
+    channelDeletionIds,
     channelMetadataIds,
     channelOrderingGuildIds,
     deleteChannelIds,

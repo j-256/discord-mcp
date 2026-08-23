@@ -2685,6 +2685,82 @@ test("Discord client never retries channel ordering or leaks transport causes", 
   )
 })
 
+test("Discord client deletes one exact guild channel with an encoded reason", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const deleted = {
+    guild_id: "100",
+    id: "200",
+    name: "retired-channel",
+    parent_id: "300",
+    permission_overwrites: [],
+    position: 4,
+    type: 0,
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body ?? null,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse(deleted)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.deleteGuildChannel("200", "Reviewed retirement / case 42"),
+    deleted,
+  )
+  assert.deepEqual(requests, [{
+    body: null,
+    method: "DELETE",
+    reason: "Reviewed%20retirement%20%2F%20case%2042",
+    url: `${API_BASE_URL}/channels/200`,
+  }])
+})
+
+test("Discord client validates channel deletion and never retries or leaks causes", async () => {
+  let requests = 0
+  let sleeps = 0
+  const secret = "private-channel-deletion-transport-cause"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      throw new Error(secret)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  assert.throws(
+    () => client.deleteGuildChannel("invalid", "reviewed"),
+    /channel ID/,
+  )
+  await assert.rejects(
+    client.deleteGuildChannel("200", "reviewed"),
+    (error: Error) => {
+      assert.doesNotMatch(error.message, new RegExp(secret))
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client rejects malformed role configuration evidence and input", async () => {
   let requests = 0
   const malformed = new DiscordClient({

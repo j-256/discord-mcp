@@ -124,7 +124,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | --- | --- |
 | Discovery and reads | Guilds, channels, roles, effective permissions, member-safe audits, message history, indexed search, threads, forums, polls, reactions, audit history, integrations, invites, templates, guild and application-owned emojis, stickers, soundboard, events, Stage instances, onboarding, Welcome Screens, profiles, settings, and webhooks |
 | Messages and communities | Idempotent sends and edits, exact pins, reactions, announcement crossposts and subscriptions, immutable forwarding, attachments, static Components V2, forum posts, thread creation, native polls, and exact deletion |
-| Guild structure | Additive channels and roles, resumable scaffolds, atomic channel cloning, relative channel and role ordering, channel metadata, permission overwrites, forum tags, role configuration, guild settings, and guild profile text |
+| Guild structure | Additive channels and roles, reviewed exact channel retirement, resumable scaffolds, atomic channel cloning, relative channel and role ordering, channel metadata, permission overwrites, forum tags, role configuration, guild settings, and guild profile text |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
 | Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic presets, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
@@ -141,7 +141,8 @@ Discord permissions are the outer boundary. Connector policy narrows that author
 - Discord names, messages, embeds, components, filenames, URLs, and other remote text are treated as untrusted data rather than instructions
 - Discord content may be returned transiently when explicitly requested, but it is not cached, journaled, exported, or persisted by the connector
 - Every consequential write retains its domain-specific permission, freshness, approval, audit, readback, and uncertainty gates
-- Deletion accepts exact message IDs only and preserves every independent deletion gate
+- Message deletion accepts exact message IDs only and preserves every independent deletion gate
+- Channel deletion requires one exact allowlisted channel, complete dependency and permission evidence, explicit irreversible-content-loss acknowledgement, signed review, and newer complete Gateway absence proof; it never reads message content to estimate impact
 
 The common reviewed-write sequence is:
 

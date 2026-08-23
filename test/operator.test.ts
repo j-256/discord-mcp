@@ -103,6 +103,9 @@ function status(
       channelCloningEnabled: false,
       channelCreationEnabled: false,
       channelCreationGuildIds: [],
+      channelDeletionAuditEnabled: false,
+      channelDeletionIds: [],
+      channelDeletionsEnabled: false,
       channelMetadataChangesEnabled: false,
       channelMetadataIds: [],
       channelOrderingAuditEnabled: false,
@@ -261,6 +264,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    auditChannelDeletion: unexpected,
     auditChannelOrder: unexpected,
     auditForumTags: unexpected,
     auditRoleOrder: unexpected,
@@ -361,6 +365,7 @@ function toolService(): DiscordToolService {
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
     executeChannelCreation: unexpected,
+    executeChannelDeletion: unexpected,
     executeChannelClone: unexpected,
     executeChannelOrder: unexpected,
     executeChannelMetadataChange: unexpected,
@@ -406,6 +411,7 @@ function toolService(): DiscordToolService {
     planAttachmentMessage: unexpected,
     planComponentMessage: unexpected,
     planChannelCreation: unexpected,
+    planChannelDeletion: unexpected,
     planChannelClone: unexpected,
     planChannelMetadataChange: unexpected,
     planChannelOrder: unexpected,
@@ -2641,6 +2647,51 @@ test("doctor and setup separate channel-order audit from reviewed changes", asyn
   }
 })
 
+test("doctor and setup explain reviewed exact channel deletion", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT: "true",
+    DISCORD_MCP_ALLOW_CHANNEL_DELETIONS: "true",
+    DISCORD_MCP_ALLOW_GATEWAY: "true",
+    DISCORD_MCP_CHANNEL_DELETION_IDS: CHANNEL_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelDeletionAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.channelDeletionChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact channels/)
+  assert.match(audit?.summary || "", /complete topology, dependency, permission, and privacy-safe evidence/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /irreversible acknowledgement/)
+  assert.match(changes?.summary || "", /newer Gateway absence verification/)
+  assert.match(omitted.warnings.join("\n"), /channel-deletion toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT",
+    "DISCORD_MCP_ALLOW_CHANNEL_DELETIONS",
+    "DISCORD_MCP_CHANNEL_DELETION_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
 test("doctor and setup explain reviewed member-role scope without Discord writes", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
@@ -3831,6 +3882,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_automod_change",
     "review_channel_clone",
     "review_channel_creation",
+    "review_channel_deletion",
     "review_channel_metadata_change",
     "review_channel_order",
     "review_channel_permission_overwrite",
@@ -3894,6 +3946,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/bans/{userId}",
     "discord://guilds/{guildId}/channel-order",
     "discord://guilds/{guildId}/channels",
+    "discord://guilds/{guildId}/channels/{channelId}/deletion-readiness",
     "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/integrations",
@@ -3924,6 +3977,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_application_emoji_change",
     "execute_automod_change",
     "execute_channel_clone",
+    "execute_channel_deletion",
     "execute_channel_metadata_change",
     "execute_channel_order",
     "execute_channel_permission_overwrite",

@@ -19,6 +19,7 @@ import {
   type AutoModerationActivity,
   type ChannelCloneActivity,
   type ChannelCreationActivity,
+  type ChannelDeletionActivity,
   type ChannelMetadataActivity,
   type ChannelOrderingActivity,
   type ChannelPermissionOverwriteActivity,
@@ -334,6 +335,37 @@ function channelOrdering(
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed" ? "match" : null,
+  }
+}
+
+function channelDeletion(
+  id: string,
+  status: ChannelDeletionActivity["status"],
+): ChannelDeletionActivity {
+  const completed = status === "completed" || status === "completed-with-drift"
+  return {
+    baselineChannelCount: 8,
+    baselineRevision: 4,
+    channelId: "250",
+    dependencyCount: 0,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "channel-deletion",
+    observedRevision: completed ? 5 : null,
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"c".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    targetKind: "text",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
   }
 }
 
@@ -1731,6 +1763,71 @@ test("JSONL activity log keeps channel-ordering evidence content-free", async (c
       "planDigest",
       "schemaVersion",
       "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps channel-deletion evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-channel-name",
+    "private-operation-key",
+    "private-thread-id",
+    "private-webhook-id",
+  ]
+
+  await store.append(channelDeletion("1", "pending"))
+  await store.append({
+    ...channelDeletion("2", "completed-with-drift"),
+    auditReason: privateValues[0],
+    channelName: privateValues[1],
+    operationKey: privateValues[2],
+    threadIds: [privateValues[3]],
+    webhookIds: [privateValues[4]],
+  } as ChannelDeletionActivity)
+  await appendFile(
+    file,
+    [
+      { ...channelDeletion("3", "completed"), targetKind: "announcement" },
+      { ...channelDeletion("4", "completed"), observedRevision: 4 },
+      { ...channelDeletion("5", "pending"), dependencyCount: -1 },
+      { ...channelDeletion("6", "completed"), verification: "drift" },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 4)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "baselineChannelCount",
+      "baselineRevision",
+      "channelId",
+      "dependencyCount",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "observedRevision",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "targetKind",
       "timestamp",
       "verification",
     ],

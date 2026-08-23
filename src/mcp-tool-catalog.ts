@@ -44,6 +44,7 @@ type McpToolWorkflow =
   | "automod-change"
   | "channel-cloning"
   | "channel-creation"
+  | "channel-deletion"
   | "channel-metadata-change"
   | "channel-ordering"
   | "channel-permission-overwrite"
@@ -165,6 +166,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "execute", "forum", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  execute_channel_deletion: {
+    keywords: ["channel", "delete", "execute", "irreversible", "retire"],
+    toolset: "channel-deletion",
+    workflow: "channel-deletion",
   },
   execute_channel_clone: {
     keywords: ["channel", "clone", "copy", "execute", "forum", "media", "stage", "voice"],
@@ -636,6 +642,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
+  },
+  plan_channel_deletion: {
+    keywords: ["channel", "delete", "dependency", "plan", "retire", "review"],
+    toolset: "channel-deletion",
+    workflow: "channel-deletion",
   },
   plan_channel_clone: {
     keywords: ["channel", "clone", "copy", "forum", "media", "plan", "review", "stage", "voice"],
