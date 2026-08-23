@@ -221,6 +221,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    scheduledEventUserAuditEnabled: false,
     soundboardAuditEnabled: false,
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
@@ -789,6 +790,7 @@ test("configuration and policy require an exact administration guild and protect
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    scheduledEventUserAuditEnabled: false,
     soundboardAuditEnabled: false,
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
@@ -2887,6 +2889,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    scheduledEventUserAuditEnabled: false,
     soundboardAuditEnabled: false,
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
@@ -3160,6 +3163,7 @@ test("configuration and policy isolate scheduled event audit, changes, and cover
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
       DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
       DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_SCHEDULED_EVENT_ROOTS: JSON.stringify([root]),
     }, { homeDirectory: "/test/home" })
@@ -3167,10 +3171,12 @@ test("configuration and policy isolate scheduled event audit, changes, and cover
 
     assert.equal(config.allowScheduledEventAudit, true)
     assert.equal(config.allowScheduledEventChanges, true)
+    assert.equal(config.allowScheduledEventUserAudit, true)
     assert.deepEqual([...config.scheduledEventGuildIds], [GUILD_ID])
     assert.deepEqual(config.scheduledEventRoots, [root])
     scoped.assertScheduledEventAuditable(GUILD_ID)
     scoped.assertScheduledEventChangeAllowed(GUILD_ID)
+    scoped.assertScheduledEventUsersAuditable(GUILD_ID)
     assert.throws(
       () => scoped.assertScheduledEventAuditable(OTHER_GUILD_ID),
       /configured read scope/,
@@ -3180,12 +3186,20 @@ test("configuration and policy isolate scheduled event audit, changes, and cover
     assert.equal(description.scheduledEventChangesEnabled, true)
     assert.equal(description.scheduledEventCoverChangesEnabled, true)
     assert.equal(description.scheduledEventRootCount, 1)
+    assert.equal(description.scheduledEventUserAuditEnabled, true)
     assert.equal(JSON.stringify(description).includes(root), false)
 
     assert.throws(
       () => loadConnectorConfig({
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+      }, { homeDirectory: "/test/home" }),
+      /requires DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        DISCORD_BOT_TOKEN: TOKEN,
+        DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
       }, { homeDirectory: "/test/home" }),
       /requires DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT/,
     )

@@ -116,6 +116,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   roleOrderingChangePolicy: "role-ordering-change-policy",
   scheduledEventAuditPolicy: "scheduled-event-audit-policy",
   scheduledEventChangePolicy: "scheduled-event-change-policy",
+  scheduledEventUserAuditPolicy: "scheduled-event-user-audit-policy",
   soundboardAuditPolicy: "soundboard-audit-policy",
   soundboardChangePolicy: "soundboard-change-policy",
   stageInstanceAuditPolicy: "stage-instance-audit-policy",
@@ -502,6 +503,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowScheduledEventChanges && config.scheduledEventGuildIds.size === 0) {
     warnings.push("The scheduled-event change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (config.allowScheduledEventUserAudit && config.scheduledEventGuildIds.size === 0) {
+    warnings.push("The scheduled-event user-audit toggle is enabled but identity inspection remains blocked because an exact guild allowlist is required")
   }
   if (
     config.allowScheduledEventChanges
@@ -2037,6 +2041,25 @@ export async function diagnoseConnector(
         `Reviewed scheduled-event changes are constrained to ${config.scheduledEventGuildIds.size} exact guilds and ${config.scheduledEventRoots.length} canonical cover roots with one-shot execution and exact state or absence readback`,
       ))
     }
+    if (!config.allowScheduledEventUserAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventUserAuditPolicy,
+        "pass",
+        "Scheduled-event user audit is disabled",
+      ))
+    } else if (config.scheduledEventGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventUserAuditPolicy,
+        "warn",
+        "Scheduled-event user audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.scheduledEventUserAuditPolicy,
+        "pass",
+        `Scheduled-event user audit is constrained to ${config.scheduledEventGuildIds.size} exact guilds with bounded ID-and-bot-only pages, member expansion disabled, and no persistence`,
+      ))
+    }
     if (!config.allowSoundboardAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.soundboardAuditPolicy,
@@ -2370,6 +2393,7 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.guildExpressionRoots,
     ENVIRONMENT_NAMES.allowScheduledEventAudit,
     ENVIRONMENT_NAMES.allowScheduledEventChanges,
+    ENVIRONMENT_NAMES.allowScheduledEventUserAudit,
     ENVIRONMENT_NAMES.scheduledEventGuildIds,
     ENVIRONMENT_NAMES.scheduledEventRoots,
     ENVIRONMENT_NAMES.allowSoundboardAudit,

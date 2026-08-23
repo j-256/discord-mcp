@@ -536,6 +536,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["calendar", "event", "guild", "inventory", "list", "schedule", "subscriber"],
     toolset: "scheduled-events",
   },
+  list_scheduled_event_users: {
+    keywords: ["attendance", "event", "list", "rsvp", "subscriber", "user"],
+    toolset: "scheduled-events",
+  },
   list_stage_instances: {
     keywords: ["active", "configured", "inventory", "list", "live", "stage"],
     toolset: "stage-instances",

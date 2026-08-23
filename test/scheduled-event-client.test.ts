@@ -18,6 +18,8 @@ const API_BASE_URL = "https://discord.test/api/v10"
 const GUILD_ID = "100"
 const EVENT_ID = "200"
 const CHANNEL_ID = "300"
+const USER_ID = "401"
+const OTHER_USER_ID = "402"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -113,6 +115,97 @@ test("Discord client projects scheduled events without profiles or cover hashes"
   assert.equal(JSON.stringify(events).includes("private-avatar"), false)
   assert.equal(JSON.stringify(events).includes("private-name"), false)
   assert.equal(JSON.stringify(events).includes("private-cover-hash"), false)
+})
+
+test("Discord client requests member-free scheduled event users and projects IDs immediately", async () => {
+  const requestUrls: string[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      requestUrls.push(String(input))
+      return jsonResponse([
+        {
+          guild_scheduled_event_id: EVENT_ID,
+          user: {
+            avatar: "private-avatar",
+            bot: false,
+            global_name: "Private display name",
+            id: USER_ID,
+            username: "private-username",
+          },
+        },
+        {
+          guild_scheduled_event_id: EVENT_ID,
+          user: {
+            bot: true,
+            id: OTHER_USER_ID,
+            username: "private-bot-name",
+          },
+        },
+      ])
+    },
+    token: TOKEN,
+  })
+
+  const users = await client.listGuildScheduledEventUsers(GUILD_ID, EVENT_ID, {
+    after: "400",
+    limit: 2,
+  })
+
+  assert.equal(
+    requestUrls[0],
+    `${API_BASE_URL}/guilds/${GUILD_ID}/scheduled-events/${EVENT_ID}/users?after=400&limit=2&with_member=false`,
+  )
+  assert.deepEqual(users, [
+    { bot: false, eventId: EVENT_ID, userId: USER_ID },
+    { bot: true, eventId: EVENT_ID, userId: OTHER_USER_ID },
+  ])
+  assert.equal(JSON.stringify(users).includes("private"), false)
+})
+
+test("Discord client rejects non-positive scheduled event user cursors before network access", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse([])
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.listGuildScheduledEventUsers(GUILD_ID, EVENT_ID, { after: "0" }),
+    /must be a positive Discord snowflake/,
+  )
+  assert.equal(requests, 0)
+})
+
+test("Discord client fails closed on expanded or inconsistent scheduled event users", async () => {
+  const malformed: unknown[] = [
+    [{
+      guild_scheduled_event_id: EVENT_ID,
+      member: { nick: "private-nickname", roles: [] },
+      user: { id: USER_ID },
+    }],
+    [{ guild_scheduled_event_id: "201", user: { id: USER_ID } }],
+    [{ guild_scheduled_event_id: EVENT_ID, user: { bot: "false", id: USER_ID } }],
+    [
+      { guild_scheduled_event_id: EVENT_ID, user: { id: OTHER_USER_ID } },
+      { guild_scheduled_event_id: EVENT_ID, user: { id: USER_ID } },
+    ],
+  ]
+  for (const response of malformed) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(response),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      client.listGuildScheduledEventUsers(GUILD_ID, EVENT_ID, { limit: 2 }),
+      ScheduledEventEvidenceError,
+    )
+  }
 })
 
 test("Discord client sends exact non-retried scheduled event lifecycle writes", async () => {

@@ -1094,6 +1094,15 @@
           ]
         },
         {
+          "name": "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT",
+          "description": "Enable bounded ID-and-bot-only scheduled-event subscriber pages; requires event audit",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
           "name": "DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES",
           "description": "Enable reviewed scheduled-event creation, update, transition, and deletion; requires event audit",
           "default": "false",
@@ -1104,7 +1113,7 @@
         },
         {
           "name": "DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS",
-          "description": "Exact guild IDs eligible for privacy-safe scheduled-event inventory and reviewed changes",
+          "description": "Exact guild IDs eligible for privacy-safe scheduled-event inventory, opt-in subscriber audit, and reviewed changes",
           "format": "string"
         },
         {

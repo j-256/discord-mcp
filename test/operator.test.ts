@@ -130,6 +130,7 @@ function status(
       scheduledEventCoverChangesEnabled: false,
       scheduledEventGuildIds: [],
       scheduledEventRootCount: 0,
+      scheduledEventUserAuditEnabled: false,
       soundboardAuditEnabled: false,
       soundboardChangesEnabled: false,
       soundboardCreationEnabled: false,
@@ -305,6 +306,7 @@ function toolService(): DiscordToolService {
     listGuildSoundboardSounds: unexpected,
     listAutoModerationRules: unexpected,
     listScheduledEvents: unexpected,
+    listScheduledEventUsers: unexpected,
     listStageInstances: unexpected,
     planWebhookChange: unexpected,
     planWebhookCreation: unexpected,
@@ -1871,6 +1873,7 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
     DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
     DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_SCHEDULED_EVENT_ROOTS: canonicalRoot,
   })
@@ -1881,6 +1884,7 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   const missingGuildEnvironment = environment({
     DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
     DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
   })
   const missingGuild = await diagnoseConnector({
     environment: missingGuildEnvironment,
@@ -1889,6 +1893,7 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   const missingRootEnvironment = environment({
     DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
     DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
     DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
   })
   const missingRoot = await diagnoseConnector({
@@ -1897,6 +1902,10 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   })
   const setup = await prepareSetup({
     environment: missingRootEnvironment,
+    service: statusProvider(),
+  })
+  const missingGuildSetup = await prepareSetup({
+    environment: missingGuildEnvironment,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
@@ -1913,12 +1922,18 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   const changes = enabled.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.scheduledEventChangePolicy,
   )
+  const users = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.scheduledEventUserAuditPolicy,
+  )
   assert.equal(audit?.status, "pass")
   assert.match(audit?.summary || "", /privacy-safe scheduled event inventory/i)
   assert.match(audit?.summary || "", /1 exact guilds/)
   assert.equal(changes?.status, "pass")
   assert.match(changes?.summary || "", /1 canonical cover roots/)
   assert.match(changes?.summary || "", /exact state or absence readback/)
+  assert.equal(users?.status, "pass")
+  assert.match(users?.summary || "", /ID-and-bot-only pages/)
+  assert.match(users?.summary || "", /member expansion disabled/)
   assert.equal(
     missingGuild.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.scheduledEventAuditPolicy,
@@ -1932,12 +1947,19 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
     "warn",
   )
   assert.equal(
+    missingGuild.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.scheduledEventUserAuditPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
     missingRoot.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.scheduledEventChangePolicy,
     )?.status,
     "warn",
   )
   assert.match(setup.warnings.join("\n"), /cover updates remain blocked/)
+  assert.match(missingGuildSetup.warnings.join("\n"), /user-audit toggle/)
   assert.match(omitted.warnings.join("\n"), /scheduled-events toolset/)
 })
 

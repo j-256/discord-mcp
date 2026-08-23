@@ -95,6 +95,7 @@ export interface ConnectorConfig {
   allowRoleOrderingChanges: boolean
   allowScheduledEventAudit: boolean
   allowScheduledEventChanges: boolean
+  allowScheduledEventUserAudit: boolean
   allowSoundboardAudit: boolean
   allowSoundboardChanges: boolean
   allowStageInstanceAudit: boolean
@@ -1000,9 +1001,18 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowScheduledEventChanges],
     ENVIRONMENT_NAMES.allowScheduledEventChanges,
   )
+  const allowScheduledEventUserAudit = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowScheduledEventUserAudit],
+    ENVIRONMENT_NAMES.allowScheduledEventUserAudit,
+  )
   if (allowScheduledEventChanges && !allowScheduledEventAudit) {
     throw new ConfigurationError(
       `${ENVIRONMENT_NAMES.allowScheduledEventChanges} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
+    )
+  }
+  if (allowScheduledEventUserAudit && !allowScheduledEventAudit) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowScheduledEventUserAudit} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
     )
   }
   const allowSoundboardAudit = parseBoolean(
@@ -1230,6 +1240,7 @@ export function loadConnectorConfig(
     allowRoleOrderingChanges,
     allowScheduledEventAudit,
     allowScheduledEventChanges,
+    allowScheduledEventUserAudit,
     allowSoundboardAudit,
     allowSoundboardChanges,
     allowStageInstanceAudit,

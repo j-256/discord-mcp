@@ -6,6 +6,7 @@ import type {
   ScheduledEventActivityStatus,
 } from "./activity-log.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
@@ -24,8 +25,10 @@ import {
   type DiscordScheduledEventRecurrenceRule,
   type DiscordScheduledEventStatus,
   type DiscordScheduledEventSummary,
+  type DiscordScheduledEventUserSummary,
   type ModifyGuildScheduledEventInput,
   type ScheduledEventReadOptions,
+  type ScheduledEventUserPageOptions,
 } from "./discord-client.js"
 import {
   DiscordApiError,
@@ -97,6 +100,14 @@ export const SCHEDULED_EVENT_OMITTED_FIELDS = Object.freeze([
   "creatorProfile",
   "rawDiscordObject",
   "subscriberProfiles",
+] as const)
+
+export const SCHEDULED_EVENT_USER_OMITTED_FIELDS = Object.freeze([
+  "avatars",
+  "displayNames",
+  "memberData",
+  "rawDiscordObjects",
+  "usernames",
 ] as const)
 
 export type ScheduledEventAction = "create" | "delete" | "transition" | "update"
@@ -340,6 +351,35 @@ export interface ScheduledEventLookupResult {
   subscriberCountIncluded: boolean
 }
 
+export interface ScheduledEventUserPageResult {
+  access: ScheduledEventAccessEvidence
+  event: ProjectedScheduledEvent
+  guild: {
+    id: string
+    name: string
+  }
+  page: {
+    nextAfter: string | null
+    requestedAfter: string | null
+    requestedLimit: number
+    returned: number
+  }
+  privacy: {
+    memberDataRequested: false
+    omittedFields: typeof SCHEDULED_EVENT_USER_OMITTED_FIELDS
+    persistence: "none"
+    profileFieldsProjectedOut: true
+    rawPayloads: "omitted"
+    userIdsExposed: true
+  }
+  schemaVersion: number
+  status: "ok"
+  users: Array<{
+    bot: boolean
+    id: string
+  }>
+}
+
 export interface ScheduledEventPlan {
   action: ScheduledEventAction
   applicationId: string
@@ -394,6 +434,7 @@ export interface ScheduledEventServiceClient extends Pick<
   | "getGuildRoles"
   | "getGuildScheduledEvent"
   | "listGuildScheduledEvents"
+  | "listGuildScheduledEventUsers"
   | "modifyGuildScheduledEvent"
 > {}
 
@@ -1086,6 +1127,55 @@ function privacyProjection(): ScheduledEventPrivacyProjection {
   }
 }
 
+function exactScheduledEventUsers(
+  value: readonly DiscordScheduledEventUserSummary[],
+  eventId: string,
+  limit: number,
+  after: string | undefined,
+): Array<{ bot: boolean; id: string }> {
+  if (!Array.isArray(value) || value.length > limit) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid bounded scheduled event user page",
+    )
+  }
+  const users: Array<{ bot: boolean; id: string }> = []
+  let previousId = after === undefined ? 0n : BigInt(after)
+  for (const user of value) {
+    if (
+      !user
+      || typeof user !== "object"
+      || Array.isArray(user)
+      || user.eventId !== eventId
+      || !validSnowflake(user.userId)
+      || typeof user.bot !== "boolean"
+    ) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned invalid scheduled event user identity evidence",
+      )
+    }
+    const userId = BigInt(user.userId)
+    if (userId <= previousId) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned unordered or duplicate scheduled event user identities",
+      )
+    }
+    users.push({ bot: user.bot, id: user.userId })
+    previousId = userId
+  }
+  return users
+}
+
+function scheduledEventUserPrivacy(): ScheduledEventUserPageResult["privacy"] {
+  return {
+    memberDataRequested: false,
+    omittedFields: SCHEDULED_EVENT_USER_OMITTED_FIELDS,
+    persistence: "none",
+    profileFieldsProjectedOut: true,
+    rawPayloads: "omitted",
+    userIdsExposed: true,
+  }
+}
+
 function channelForEvent(
   state: EventEvidenceState,
   entityType: ScheduledEventEntityType,
@@ -1630,6 +1720,71 @@ export class ScheduledEventService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
       subscriberCountIncluded: options.includeSubscriberCount === true,
+    }
+  }
+
+  async listUsers(
+    botId: string,
+    guildId: string,
+    eventId: string,
+    options: ScheduledEventUserPageOptions = {},
+  ): Promise<ScheduledEventUserPageResult> {
+    assertSnowflake(eventId, "Discord scheduled event ID")
+    if (options.after !== undefined) {
+      assertSnowflake(options.after, "Discord scheduled event user cursor")
+    }
+    const limit = options.limit ?? CONNECTOR_LIMITS.scheduledEventUserPageDefault
+    if (
+      !Number.isInteger(limit)
+      || limit < 1
+      || limit > DISCORD_LIMITS.scheduledEventUsers
+    ) {
+      throw new RangeError(
+        `Discord scheduled event user page limit must be an integer between 1 and ${DISCORD_LIMITS.scheduledEventUsers}`,
+      )
+    }
+    this.#policy.assertScheduledEventUsersAuditable(guildId)
+    const requestOptions = options.signal ? { signal: options.signal } : {}
+    const [state, rawEvent] = await Promise.all([
+      this.#evidence(botId, guildId, "audit", requestOptions),
+      this.#client.getGuildScheduledEvent(guildId, eventId, requestOptions),
+    ])
+    const event = projectedEvent(rawEvent)
+    if (event.guildId !== guildId || event.eventId !== eventId) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned another scheduled event for an exact user audit",
+      )
+    }
+    const access = accessEvidence(
+      state,
+      event.entityType,
+      event.channelId,
+      readPermissions(event.entityType),
+    )
+    const rawUsers = await this.#client.listGuildScheduledEventUsers(
+      guildId,
+      eventId,
+      {
+        ...(options.after ? { after: options.after } : {}),
+        limit,
+        ...(options.signal ? { signal: options.signal } : {}),
+      },
+    )
+    const users = exactScheduledEventUsers(rawUsers, eventId, limit, options.after)
+    return {
+      access,
+      event,
+      guild: { id: guildId, name: state.guild.name },
+      page: {
+        nextAfter: users.length === limit ? users.at(-1)?.id ?? null : null,
+        requestedAfter: options.after ?? null,
+        requestedLimit: limit,
+        returned: users.length,
+      },
+      privacy: scheduledEventUserPrivacy(),
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+      users,
     }
   }
 

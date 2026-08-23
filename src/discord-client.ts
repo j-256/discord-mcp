@@ -735,6 +735,17 @@ export interface ScheduledEventReadOptions extends RequestOptions {
   includeSubscriberCount?: boolean
 }
 
+export interface ScheduledEventUserPageOptions extends RequestOptions {
+  after?: string
+  limit?: number
+}
+
+export interface DiscordScheduledEventUserSummary {
+  bot: boolean
+  eventId: string
+  userId: string
+}
+
 export interface ScheduledEventCoverInput {
   bytes: Uint8Array
   format: ScheduledEventCoverFormat
@@ -1318,6 +1329,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_soundboard_sounds",
   "list_guild_stickers",
   "list_guild_templates",
+  "list_guild_scheduled_event_users",
   "list_reaction_users",
   "modify_guild_emoji",
   "modify_forum_tags",
@@ -4419,6 +4431,48 @@ function projectGuildScheduledEvent(
       "Discord returned an invalid scheduled event object",
       { cause: error },
     )
+  }
+}
+
+function projectGuildScheduledEventUser(
+  value: unknown,
+  eventId: string,
+): DiscordScheduledEventUserSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid scheduled event user object",
+    )
+  }
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).sort().join("\0") !== "guild_scheduled_event_id\0user"
+    || record.guild_scheduled_event_id !== eventId
+    || !record.user
+    || typeof record.user !== "object"
+    || Array.isArray(record.user)
+  ) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned invalid or expanded scheduled event user evidence",
+    )
+  }
+  const user = record.user as Record<string, unknown>
+  try {
+    assertPositiveSnowflake(user.id as string, "Discord scheduled event user ID")
+  } catch (error) {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid scheduled event user identity",
+      { cause: error },
+    )
+  }
+  if (user.bot !== undefined && typeof user.bot !== "boolean") {
+    throw new ScheduledEventEvidenceError(
+      "Discord returned an invalid scheduled event user bot flag",
+    )
+  }
+  return {
+    bot: user.bot ?? false,
+    eventId,
+    userId: user.id as string,
   }
 }
 
@@ -8686,6 +8740,50 @@ export class DiscordClient {
       )
     }
     return events
+  }
+
+  async listGuildScheduledEventUsers(
+    guildId: string,
+    eventId: string,
+    options: ScheduledEventUserPageOptions = {},
+  ): Promise<DiscordScheduledEventUserSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord scheduled event guild ID")
+    assertPositiveSnowflake(eventId, "Discord scheduled event ID")
+    if (options.after !== undefined) {
+      assertPositiveSnowflake(options.after, "Discord scheduled event user cursor")
+    }
+    assertBoundedLimit(
+      options.limit,
+      DISCORD_LIMITS.scheduledEventUsers,
+      "Discord scheduled event user page limit",
+    )
+    const limit = options.limit ?? CONNECTOR_LIMITS.scheduledEventUserPageDefault
+    const response = await this.#request<unknown>(
+      "list_guild_scheduled_event_users",
+      `/guilds/${guildId}/scheduled-events/${eventId}/users${queryString({
+        after: options.after,
+        limit,
+        with_member: false,
+      })}`,
+      options.signal ? { signal: options.signal } : {},
+    )
+    if (!Array.isArray(response) || response.length > limit) {
+      throw new ScheduledEventEvidenceError(
+        "Discord returned an invalid bounded scheduled event user page",
+      )
+    }
+    const users = response.map((value) => projectGuildScheduledEventUser(value, eventId))
+    let previousId = options.after === undefined ? 0n : BigInt(options.after)
+    for (const user of users) {
+      const userId = BigInt(user.userId)
+      if (userId <= previousId) {
+        throw new ScheduledEventEvidenceError(
+          "Discord returned unordered or duplicate scheduled event user identities",
+        )
+      }
+      previousId = userId
+    }
+    return users
   }
 
   async getStageInstance(

@@ -5078,6 +5078,7 @@ function fixturePolicy(): PolicyDescription {
     scheduledEventCoverChangesEnabled: false,
     scheduledEventGuildIds: [],
     scheduledEventRootCount: 0,
+    scheduledEventUserAuditEnabled: false,
     soundboardAuditEnabled: false,
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
@@ -5404,6 +5405,7 @@ function serviceFixture(overrides: {
     scheduledEventExecute: 0,
     scheduledEventGet: 0,
     scheduledEventList: 0,
+    scheduledEventUsers: 0,
     scheduledEventPlan: 0,
     soundboardDefaultList: 0,
     soundboardExecute: 0,
@@ -6169,6 +6171,38 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: "ok",
         subscriberCountsIncluded: includeSubscriberCount === true,
+      }
+    },
+    async listScheduledEventUsers(guildId, eventId, options) {
+      calls.scheduledEventUsers += 1
+      const event = projectedScheduledEvent(eventId)
+      return {
+        access: scheduledEventAccess(event.entityType, event.channelId),
+        event,
+        guild: { id: guildId, name: "Private guild name" },
+        page: {
+          nextAfter: null,
+          requestedAfter: options?.after ?? null,
+          requestedLimit: options?.limit ?? 25,
+          returned: 1,
+        },
+        privacy: {
+          memberDataRequested: false,
+          omittedFields: [
+            "avatars",
+            "displayNames",
+            "memberData",
+            "rawDiscordObjects",
+            "usernames",
+          ],
+          persistence: "none",
+          profileFieldsProjectedOut: true,
+          rawPayloads: "omitted",
+          userIdsExposed: true,
+        },
+        schemaVersion: 1,
+        status: "ok",
+        users: [{ bot: false, id: USER_ID }],
       }
     },
     async planScheduledEventChange(request) {
@@ -8332,6 +8366,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_automod_rule",
       "list_scheduled_events",
       "get_scheduled_event",
+      "list_scheduled_event_users",
       "list_stage_instances",
       "get_stage_instance",
       "list_channel_permission_overwrites",
@@ -8647,6 +8682,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_guild_soundboard_sound",
     "list_scheduled_events",
     "get_scheduled_event",
+    "list_scheduled_event_users",
     "get_channel",
     "audit_forum_tags",
     "audit_channel_order",
@@ -10108,6 +10144,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     scheduledEventExecute: 0,
     scheduledEventGet: 0,
     scheduledEventList: 0,
+    scheduledEventUsers: 0,
     scheduledEventPlan: 0,
     soundboardDefaultList: 0,
     soundboardExecute: 0,
@@ -16934,6 +16971,14 @@ test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in 
     },
     name: "get_scheduled_event",
   })
+  const users = await client.callTool({
+    arguments: {
+      eventId: SCHEDULED_EVENT_ID,
+      guildId: GUILD_ID,
+      limit: 2,
+    },
+    name: "list_scheduled_event_users",
+  })
   const invalid = await client.callTool({
     arguments: { eventId: "invalid", guildId: GUILD_ID },
     name: "get_scheduled_event",
@@ -16941,6 +16986,7 @@ test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in 
 
   const listedContent = structuredContent(listed)
   const exactContent = structuredContent(exact)
+  const userContent = structuredContent(users)
   const listedItem = (
     listedContent.events as Array<Record<string, unknown>>
   )[0] || {}
@@ -16952,6 +16998,27 @@ test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in 
   assert.equal(exactContent.subscriberCountIncluded, false)
   assert.equal(listedEvent.subscriberCount, 7)
   assert.equal(exactEvent.subscriberCount, null)
+  assert.deepEqual(userContent.users, [{ bot: false, id: USER_ID }])
+  assert.deepEqual(userContent.page, {
+    nextAfter: null,
+    requestedAfter: null,
+    requestedLimit: 2,
+    returned: 1,
+  })
+  assert.deepEqual(userContent.privacy, {
+    memberDataRequested: false,
+    omittedFields: [
+      "avatars",
+      "displayNames",
+      "memberData",
+      "rawDiscordObjects",
+      "usernames",
+    ],
+    persistence: "none",
+    profileFieldsProjectedOut: true,
+    rawPayloads: "omitted",
+    userIdsExposed: true,
+  })
   assert.deepEqual(Object.keys(exactEvent).sort(), [
     "channelId",
     "creatorUserId",
@@ -16986,6 +17053,24 @@ test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in 
   assert.equal(invalid.isError, true)
   assert.equal(calls.scheduledEventList, 1)
   assert.equal(calls.scheduledEventGet, 1)
+  assert.equal(calls.scheduledEventUsers, 1)
+})
+
+test("progressive discovery reveals the exact scheduled-event user audit", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "list_scheduled_event_users" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, ["list_scheduled_event_users"])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["list_scheduled_event_users", "discover_discord_tools"],
+  )
 })
 
 test("MCP scheduled event plans accept exact lifecycle actions and reject transported media", async (context) => {

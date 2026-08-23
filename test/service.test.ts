@@ -631,6 +631,9 @@ function serviceFixture(overrides: {
     async listGuildScheduledEvents() {
       return []
     },
+    async listGuildScheduledEventUsers() {
+      throw new Error("Unexpected scheduled-event user listing")
+    },
     async listGuildSoundboardSounds() {
       return []
     },
@@ -3297,6 +3300,7 @@ test("service pins identity through privacy-safe scheduled event reads and revie
   }
   let exactReads = 0
   let inventoryReads = 0
+  let userReads = 0
   let updateCalls = 0
   const botPermissions = DISCORD_PERMISSIONS.CREATE_EVENTS
     | DISCORD_PERMISSIONS.MANAGE_EVENTS
@@ -3330,6 +3334,13 @@ test("service pins identity through privacy-safe scheduled event reads and revie
           subscriberCount: options?.includeSubscriberCount ? 4 : null,
         }]
       },
+      async listGuildScheduledEventUsers(guildId, eventId, options) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(eventId, SCHEDULED_EVENT_ID)
+        assert.equal(options?.limit, 25)
+        userReads += 1
+        return [{ bot: false, eventId, userId: MEMBER_USER_ID }]
+      },
       async modifyGuildScheduledEvent(guildId, eventId, input, auditReason) {
         assert.equal(guildId, GUILD_ID)
         assert.equal(eventId, SCHEDULED_EVENT_ID)
@@ -3346,6 +3357,7 @@ test("service pins identity through privacy-safe scheduled event reads and revie
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
       DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
+      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
       DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
     },
     operationStore,
@@ -3366,11 +3378,13 @@ test("service pins identity through privacy-safe scheduled event reads and revie
 
   const listed = await service.listScheduledEvents(GUILD_ID, true)
   const exact = await service.getScheduledEvent(GUILD_ID, SCHEDULED_EVENT_ID)
+  const users = await service.listScheduledEventUsers(GUILD_ID, SCHEDULED_EVENT_ID)
   const plan = await service.planScheduledEventChange(request)
   const result = await service.executeScheduledEventChange(request, plan.digest)
 
   assert.equal(listed.events[0]?.event.subscriberCount, 4)
   assert.equal(exact.event.subscriberCount, null)
+  assert.deepEqual(users.users, [{ bot: false, id: MEMBER_USER_ID }])
   assert.equal(plan.existing?.eventId, SCHEDULED_EVENT_ID)
   assert.deepEqual(plan.permission.current.requiredPermissions, [
     "MANAGE_EVENTS",
@@ -3380,7 +3394,8 @@ test("service pins identity through privacy-safe scheduled event reads and revie
   assert.equal(result.status, "completed")
   assert.equal(result.observed?.name, "Release planning call")
   assert.equal(inventoryReads, 1)
-  assert.equal(exactReads, 4)
+  assert.equal(exactReads, 5)
+  assert.equal(userReads, 1)
   assert.equal(updateCalls, 1)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)

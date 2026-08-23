@@ -15,6 +15,7 @@ import {
   DISCORD_SCHEDULED_EVENT_STATUSES,
   type DiscordScheduledEventRecurrenceInput,
   type DiscordScheduledEventSummary,
+  type DiscordScheduledEventUserSummary,
 } from "../src/discord-client.js"
 import {
   DiscordApiError,
@@ -48,6 +49,7 @@ const GUILD_ID = "200000000000000001"
 const OTHER_GUILD_ID = "200000000000000002"
 const BOT_ID = "300000000000000001"
 const OTHER_USER_ID = "300000000000000002"
+const THIRD_USER_ID = "300000000000000003"
 const BOT_ROLE_ID = "400000000000000001"
 const VOICE_CHANNEL_ID = "500000000000000001"
 const STAGE_CHANNEL_ID = "500000000000000002"
@@ -151,6 +153,7 @@ function policy(options: {
   audit?: boolean
   changes?: boolean
   guildIds?: readonly string[]
+  users?: boolean
 } = {}): ScopePolicy {
   return new ScopePolicy({
     adminGuildIds: new Set(),
@@ -161,6 +164,7 @@ function policy(options: {
     allowInteractions: false,
     allowScheduledEventAudit: options.audit ?? true,
     allowScheduledEventChanges: options.changes ?? true,
+    allowScheduledEventUserAudit: options.users ?? true,
     deleteChannelIds: new Set(),
     interactionChannelIds: new Set(),
     interactionMaxWritesPerMinute: 10,
@@ -208,6 +212,7 @@ interface FixtureState {
   preserveDeletion: boolean
   readbackError: unknown
   roles: DiscordRole[]
+  users: DiscordScheduledEventUserSummary[]
 }
 
 function recurrenceResponse(
@@ -251,6 +256,10 @@ function fixture(options: {
     roles: [
       role(GUILD_ID, 0n, 0),
       role(BOT_ROLE_ID, permissions, 10),
+    ],
+    users: [
+      { bot: false, eventId: EVENT_ID, userId: OTHER_USER_ID },
+      { bot: true, eventId: EVENT_ID, userId: THIRD_USER_ID },
     ],
     ...options.state,
   }
@@ -344,6 +353,13 @@ function fixture(options: {
         ...event,
         subscriberCount: readOptions?.includeSubscriberCount ? 7 : null,
       }))
+    },
+    async listGuildScheduledEventUsers(_guildId, eventId, readOptions) {
+      trace.push("read:event:users")
+      return state.users.filter((user) => (
+        user.eventId === eventId
+        && (readOptions?.after === undefined || BigInt(user.userId) > BigInt(readOptions.after))
+      )).slice(0, readOptions?.limit)
     },
     async modifyGuildScheduledEvent(_guildId, eventId, input) {
       trace.push(input.status === undefined ? "write:update" : "write:transition")
@@ -470,6 +486,96 @@ test("scheduled event reads return privacy-safe access evidence and optional cou
     "rawDiscordObject",
     "subscriberProfiles",
   ])
+})
+
+test("scheduled event user audit returns ordered ID-and-bot-only pages", async () => {
+  const { service, trace } = fixture()
+
+  const result = await service.listUsers(BOT_ID, GUILD_ID, EVENT_ID, { limit: 2 })
+
+  assert.deepEqual(result.users, [
+    { bot: false, id: OTHER_USER_ID },
+    { bot: true, id: THIRD_USER_ID },
+  ])
+  assert.deepEqual(result.page, {
+    nextAfter: THIRD_USER_ID,
+    requestedAfter: null,
+    requestedLimit: 2,
+    returned: 2,
+  })
+  assert.equal(result.event.subscriberCount, null)
+  assert.deepEqual(result.access.requiredPermissions, ["VIEW_CHANNEL"])
+  assert.deepEqual(result.privacy, {
+    memberDataRequested: false,
+    omittedFields: [
+      "avatars",
+      "displayNames",
+      "memberData",
+      "rawDiscordObjects",
+      "usernames",
+    ],
+    persistence: "none",
+    profileFieldsProjectedOut: true,
+    rawPayloads: "omitted",
+    userIdsExposed: true,
+  })
+  assert.equal(trace.at(-1), "read:event:users")
+})
+
+test("scheduled event user audit fails before identity fetch on policy or permission gaps", async () => {
+  const disabled = fixture({ policy: policy({ users: false }) })
+  await assert.rejects(
+    disabled.service.listUsers(BOT_ID, GUILD_ID, EVENT_ID),
+    /user audit is disabled/,
+  )
+  assert.deepEqual(disabled.trace, [])
+
+  const denied = fixture({
+    state: {
+      roles: [role(GUILD_ID, 0n, 0), role(BOT_ROLE_ID, 0n, 10)],
+    },
+  })
+  await assert.rejects(
+    denied.service.listUsers(BOT_ID, GUILD_ID, EVENT_ID),
+    /VIEW_CHANNEL/,
+  )
+  assert.equal(denied.trace.includes("read:event:users"), false)
+})
+
+test("scheduled event user audit rejects minimized page drift and supports external events", async () => {
+  const malformed = fixture({
+    state: {
+      users: [
+        { bot: false, eventId: EVENT_ID, userId: THIRD_USER_ID },
+        { bot: false, eventId: EVENT_ID, userId: OTHER_USER_ID },
+      ],
+    },
+  })
+  await assert.rejects(
+    malformed.service.listUsers(BOT_ID, GUILD_ID, EVENT_ID, { limit: 2 }),
+    /unordered or duplicate/,
+  )
+
+  const external = fixture({
+    state: {
+      events: [scheduledEvent({
+        channelId: null,
+        entityType: DISCORD_SCHEDULED_EVENT_ENTITY_TYPES.external,
+        location: "Town Hall",
+        scheduledEndTime: END,
+      })],
+      roles: [role(GUILD_ID, 0n, 0), role(BOT_ROLE_ID, 0n, 10)],
+    },
+  })
+  const result = await external.service.listUsers(
+    BOT_ID,
+    GUILD_ID,
+    EVENT_ID,
+    { after: OTHER_USER_ID, limit: 2 },
+  )
+  assert.deepEqual(result.users, [{ bot: true, id: THIRD_USER_ID }])
+  assert.deepEqual(result.access.requiredPermissions, [])
+  assert.equal(result.access.permissionScope, "guild")
 })
 
 test("scheduled event policy separates audit, changes, and exact guild scope", async () => {

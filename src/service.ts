@@ -155,6 +155,7 @@ import type {
   MessagePageOptions,
   PollVoterPageOptions,
   ReactionUserPageOptions,
+  ScheduledEventUserPageOptions,
 } from "./discord-client.js"
 import { DiscordClient } from "./discord-client.js"
 import {
@@ -396,6 +397,7 @@ import type {
   ScheduledEventPlan,
   ScheduledEventResult,
   ScheduledEventServiceOptions,
+  ScheduledEventUserPageResult,
 } from "./scheduled-event-service.js"
 import { ScheduledEventService } from "./scheduled-event-service.js"
 import type {
@@ -615,6 +617,7 @@ export interface DiscordServiceClient {
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
+  listGuildScheduledEventUsers: DiscordClient["listGuildScheduledEventUsers"]
   listGuildSoundboardSounds: DiscordClient["listGuildSoundboardSounds"]
   listGuildEmojis: DiscordClient["listGuildEmojis"]
   listGuildStickers: DiscordClient["listGuildStickers"]
@@ -2419,6 +2422,20 @@ export class ConnectorService {
       ...options,
       includeSubscriberCount,
     })
+  }
+
+  async listScheduledEventUsers(
+    guildId: string,
+    eventId: string,
+    options: ScheduledEventUserPageOptions = {},
+  ): Promise<ScheduledEventUserPageResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#scheduledEventService.listUsers(
+      identity.bot.id,
+      guildId,
+      eventId,
+      options,
+    )
   }
 
   async listStageInstances(

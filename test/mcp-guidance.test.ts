@@ -1344,6 +1344,7 @@ function guidanceService(options: {
         subscriberCountsIncluded: false,
       }
     },
+    listScheduledEventUsers: unexpected,
     listStageInstances: unexpected,
     async listDefaultSoundboardSounds() {
       calls.soundboardDefaults += 1
@@ -1521,6 +1522,7 @@ function guidanceService(options: {
         scheduledEventCoverChangesEnabled: false,
         scheduledEventGuildIds: [],
         scheduledEventRootCount: 0,
+        scheduledEventUserAuditEnabled: false,
         soundboardAuditEnabled: false,
         soundboardChangesEnabled: false,
         soundboardCreationEnabled: false,

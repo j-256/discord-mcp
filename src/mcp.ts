@@ -2347,6 +2347,18 @@ const scheduledEventLookupInputSchema = z.strictObject({
     .default(false)
     .describe("Request the aggregate subscriber count without subscriber identities"),
 })
+const scheduledEventUserInputSchema = z.strictObject({
+  after: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional exact subscriber user ID cursor from nextAfter"),
+  eventId: positiveSnowflakeSchema.describe("Exact Discord scheduled event ID"),
+  guildId: positiveSnowflakeSchema.describe("Exact scheduled-event audit guild ID"),
+  limit: z.number()
+    .int()
+    .min(1)
+    .max(DISCORD_LIMITS.scheduledEventUsers)
+    .default(CONNECTOR_LIMITS.scheduledEventUserPageDefault),
+})
 const oneShotOperationKeySchema = z.string()
   .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
   .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
@@ -5919,6 +5931,7 @@ export interface DiscordToolService {
   listAnnouncementSubscriptions: ConnectorService["listAnnouncementSubscriptions"]
   listRoles: ConnectorService["listRoles"]
   listScheduledEvents: ConnectorService["listScheduledEvents"]
+  listScheduledEventUsers: ConnectorService["listScheduledEventUsers"]
   listStageInstances: ConnectorService["listStageInstances"]
   planMessageDeletion: ConnectorService["planMessageDeletion"]
   planAutoModerationChange: ConnectorService["planAutoModerationChange"]
@@ -11880,7 +11893,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Guild-settings audit and changes require a separate exact guild scope plus complete continuity-safe channel evidence. Call get_guild_settings for the named privacy-minimized state, or call plan_guild_settings_change and review the exact requested and changed fields, complete current and desired settings, effects, MANAGE_GUILD authority, AFK and system-channel references, unknown system-bit boundary, audit reason, one-shot operation key hash, risks, warnings, and keyed digest before execute_guild_settings_change. Omitted fields are preserved, raw bitfields are never accepted, the sparse PATCH is never retried, and an uncertain outcome blocks later same-guild changes until process restart and manual review.",
       "Soundboard inventory requires a separate feature gate, and guild inventory requires an exact guild scope. Results project audio bytes, CDN URLs, creator profiles, and unknown raw fields out before returning data. For create, metadata update, or delete, call plan_guild_soundboard_change, review the exact identity, privacy-safe current and desired metadata, ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence, custom emoji evidence, local audio validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_guild_soundboard_change with identical inputs and the digest. Creation accepts only canonical owned local MP3 or Ogg files from dedicated roots, never URLs or base64. Playback is separate and unsupported. Never retry with the same operation key after reservation or an uncertain outcome.",
       "AutoMod inventory requires a separate exact guild scope. Lists expose policy-entry counts and reference health without policy strings; exact lookup returns a complete projected policy transiently. Action-execution content and match data are never exposed or persisted. For create, disabled-rule policy update, enable-state change, or disabled-rule delete, call plan_automod_change, review the complete current and desired policy, trigger compatibility and capacity, MANAGE_GUILD and conditional MODERATE_MEMBERS evidence, every role and channel reference, alert-channel scope and visibility, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_automod_change with identical inputs and the digest. New rules are always disabled, and policy update or deletion requires a disabled rule. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Scheduled event inventory requires a separate exact guild scope and projects subscriber identities, creator profiles, cover URLs and hashes, and unknown raw fields out before returning data; aggregate subscriber counts are opt-in. For create, metadata update, status transition, or delete, call plan_scheduled_event_change, review the exact identity, current and desired state, hosting and recurrence, future timing, entity-specific permissions and ownership, visible capacity, local cover validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_scheduled_event_change with identical inputs and the digest. Cover changes accept only canonical owned local JPEG or non-animated PNG files from dedicated roots, never URLs or base64. Never retry with the same operation key after reservation or an uncertain outcome.",
+      "Scheduled event inventory requires a separate exact guild scope and projects subscriber identities, creator profiles, cover URLs and hashes, and unknown raw fields out before returning data; aggregate subscriber counts are opt-in. list_scheduled_event_users requires an additional user-audit toggle and returns bounded ascending user IDs plus bot flags only after exact event and permission verification, with member expansion disabled and no persistence. For create, metadata update, status transition, or delete, call plan_scheduled_event_change, review the exact identity, current and desired state, hosting and recurrence, future timing, entity-specific permissions and ownership, visible capacity, local cover validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_scheduled_event_change with identical inputs and the digest. Cover changes accept only canonical owned local JPEG or non-animated PNG files from dedicated roots, never URLs or base64. Never retry with the same operation key after reservation or an uncertain outcome.",
       "Stage-instance audit requires a separate exact Stage-channel scope and returns bounded active or inactive state without speaker or audience identities. For start, topic update, or end, call plan_stage_instance_change, review the exact application, bot, guild, channel, current and desired state, guild-only privacy, complete VIEW_CHANNEL, CONNECT, MANAGE_CHANNELS, MUTE_MEMBERS, MOVE_MEMBERS, and conditional MENTION_EVERYONE evidence, notification setting, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_stage_instance_change with identical inputs and the digest. Deprecated public and scheduled-event-linked instances are read-only, writes are never retried or rolled back, and an uncertain outcome blocks later same-channel changes until process restart and manual review.",
       "Channel permission overwrites use bounded read-only inventory and a separate exact direct-channel change scope: call plan_channel_permission_overwrite with named allow, deny, or inherit deltas or an explicit delete, review the exact target, before-and-after effective access, connector lockout checks, parent synchronization evidence, audit reason, warnings, one-shot operation key hash, and keyed digest, then call execute_channel_permission_overwrite with identical inputs and the digest. Raw bitfields, bulk reset, copy, sync, thread mutation, and retries after reservation or uncertainty are not supported.",
       "Message deletion uses an exact reviewed workflow: call plan_message_deletion with exact IDs, a Discord audit-log reason, and a unique one-shot key; review identity, transient previews, permissions, strategy, warnings, key hash, and keyed digest; then call delete_messages with identical inputs and the digest. Execution requires signed interactive approval, durable exact-message coordination, pending content-free evidence, one non-retried mutation sequence, and exact absence readback. Never retry a reserved key or an uncertain outcome.",
@@ -13386,6 +13399,35 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord returned privacy-safe scheduled event ${input.eventId} from guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_scheduled_event_users", server.registerTool(
+    "list_scheduled_event_users",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "List one bounded ascending page of subscriber user IDs and bot flags for one exact scheduled event. Requires the additional user-audit toggle, verifies complete entity-specific read permissions before fetching identities, explicitly disables member expansion, omits all profile fields and raw payloads, and persists nothing.",
+      inputSchema: scheduledEventUserInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List Discord scheduled-event subscriber IDs",
+    },
+    safeToolHandler("list_scheduled_event_users", async (
+      input: z.infer<typeof scheduledEventUserInputSchema>,
+      context,
+    ) => {
+      const result = await service.listScheduledEventUsers(
+        input.guildId,
+        input.eventId,
+        {
+          ...(input.after ? { after: input.after } : {}),
+          limit: input.limit,
+          signal: context.mcpReq.signal,
+        },
+      )
+      return toolResult(
+        result,
+        `Discord returned ${result.users.length} subscriber user IDs for scheduled event ${input.eventId}`,
       )
     }, secrets, observability),
   ))
