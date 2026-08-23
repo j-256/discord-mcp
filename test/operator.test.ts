@@ -149,6 +149,9 @@ function status(
       inviteGuildIds: [],
       memberDirectoryEnabled: false,
       memberDirectoryGuildIds: [],
+      nicknameChangesEnabled: false,
+      nicknameGuildIds: [],
+      otherMemberNicknameChangesEnabled: false,
       memberRoleChangesEnabled: false,
       memberRoleGuildIds: [],
       memberRoleCount: 0,
@@ -254,6 +257,7 @@ function toolService(): DiscordToolService {
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeRoleOrder: unexpected,
+    executeMemberNicknameChange: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
@@ -324,6 +328,7 @@ function toolService(): DiscordToolService {
     planGuildIntegrationDeletion: unexpected,
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
+    planMemberNicknameChange: unexpected,
     planMemberRoleChange: unexpected,
     planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
@@ -2497,6 +2502,66 @@ test("doctor and setup explain reviewed member-role scope without Discord writes
   assert.match(omitted.warnings.join("\n"), /member-roles toolset/)
 })
 
+test("doctor and setup explain reviewed member nickname scope without Discord writes", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+    DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES: "true",
+    DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const warningEnvironment = environment({
+    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+  })
+  const warning = await diagnoseConnector({
+    environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: warningEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const currentBot = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.memberNicknamePolicy,
+  )
+  const otherMember = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.otherMemberNicknamePolicy,
+  )
+  assert.equal(currentBot?.status, "pass")
+  assert.match(currentBot?.summary || "", /1 exact guilds/)
+  assert.match(currentBot?.summary || "", /CHANGE_NICKNAME evidence/)
+  assert.match(currentBot?.summary || "", /signed approval, one-shot execution, and exact readback/)
+  assert.equal(otherMember?.status, "pass")
+  assert.match(otherMember?.summary || "", /protected-user/)
+  assert.match(otherMember?.summary || "", /MANAGE_NICKNAMES/)
+  assert.match(otherMember?.summary || "", /strict hierarchy checks/)
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.memberNicknamePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /exact guild allowlist/)
+  assert.match(omitted.warnings.join("\n"), /member-nicknames toolset/)
+  for (const name of [
+    "DISCORD_MCP_ALLOW_NICKNAME_CHANGES",
+    "DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES",
+    "DISCORD_MCP_NICKNAME_GUILD_IDS",
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), true)
+  }
+})
+
 test("doctor and setup explain privacy-safe reviewed member voice scope", async () => {
   const enabledEnvironment = environment({
     DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
@@ -3307,6 +3372,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_template_change",
     "review_invite_deletion",
     "review_member_moderation",
+    "review_member_nickname_change",
     "review_member_role_change",
     "review_member_voice_change",
     "review_message_deletion",
@@ -3397,6 +3463,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_guild_widget_settings_change",
     "execute_invite_deletion",
     "execute_member_moderation",
+    "execute_member_nickname_change",
     "execute_member_role_change",
     "execute_member_voice_change",
     "execute_message_forward",

@@ -281,6 +281,28 @@ export interface MemberRoleActivity {
   verification: "drift" | "match" | null
 }
 
+export type MemberNicknameActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface MemberNicknameActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "member-nickname-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: MemberNicknameActivityStatus
+  targetKind: "current-bot" | "member"
+  timestamp: string
+  userId: string
+  verification: "drift" | "match" | null
+}
+
 export type MemberVoiceActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1035,6 +1057,7 @@ export type ActivityEntry =
   | IntegrationDeletionActivity
   | InviteDeletionActivity
   | MemberModerationActivity
+  | MemberNicknameActivity
   | MemberRoleActivity
   | MemberVoiceActivity
   | MessagePinActivity
@@ -1752,6 +1775,66 @@ function parseMemberRoleActivity(
     roleId: record.roleId,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as MemberRoleActivityStatus,
+    timestamp: record.timestamp,
+    userId: record.userId,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseMemberNicknameActivity(
+  value: unknown,
+): MemberNicknameActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "member-nickname-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || !["current-bot", "member"].includes(String(record.targetKind))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.userId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.userId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "member-nickname-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as MemberNicknameActivityStatus,
+    targetKind: record.targetKind as "current-bot" | "member",
     timestamp: record.timestamp,
     userId: record.userId,
     verification: record.verification as "drift" | "match" | null,
@@ -4160,6 +4243,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseReactionModerationActivity(value)
     || parseInviteDeletionActivity(value)
     || parseOnboardingActivity(value)
+    || parseMemberNicknameActivity(value)
     || parseMemberRoleActivity(value)
     || parseMemberVoiceActivity(value)
     || parseThreadGovernanceActivity(value)

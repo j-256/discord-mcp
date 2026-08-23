@@ -76,6 +76,9 @@ export interface PolicyDescription {
   inviteGuildIds: string[]
   memberDirectoryEnabled: boolean
   memberDirectoryGuildIds: string[]
+  nicknameChangesEnabled: boolean
+  nicknameGuildIds: string[]
+  otherMemberNicknameChangesEnabled: boolean
   memberRoleChangesEnabled: boolean
   memberRoleGuildIds: string[]
   memberRoleCount: number
@@ -191,6 +194,8 @@ export class ScopePolicy {
   readonly #allowInviteAudit: boolean
   readonly #allowInviteDeletions: boolean
   readonly #allowMemberDirectory: boolean
+  readonly #allowNicknameChanges: boolean
+  readonly #allowOtherMemberNicknameChanges: boolean
   readonly #allowMemberRoleChanges: boolean
   readonly #allowMemberVoiceAudit: boolean
   readonly #allowMemberVoiceChanges: boolean
@@ -276,6 +281,7 @@ export class ScopePolicy {
   readonly #forumTagChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
+  readonly #nicknameGuildIds: ReadonlySet<string>
   readonly #memberRoleGuildIds: ReadonlySet<string>
   readonly #memberRoleIds: ReadonlySet<string>
   readonly #memberVoiceChannelIds: ReadonlySet<string>
@@ -352,6 +358,8 @@ export class ScopePolicy {
     | "allowInviteAudit"
     | "allowInviteDeletions"
     | "allowMemberDirectory"
+    | "allowNicknameChanges"
+    | "allowOtherMemberNicknameChanges"
     | "allowMemberRoleChanges"
     | "allowMemberVoiceAudit"
     | "allowMemberVoiceChanges"
@@ -422,6 +430,7 @@ export class ScopePolicy {
     | "integrationIds"
     | "inviteGuildIds"
     | "memberDirectoryGuildIds"
+    | "nicknameGuildIds"
     | "memberRoleGuildIds"
     | "memberRoleIds"
     | "memberVoiceChannelIds"
@@ -483,6 +492,9 @@ export class ScopePolicy {
     this.#allowInviteAudit = config.allowInviteAudit ?? false
     this.#allowInviteDeletions = config.allowInviteDeletions ?? false
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
+    this.#allowNicknameChanges = config.allowNicknameChanges ?? false
+    this.#allowOtherMemberNicknameChanges = config.allowOtherMemberNicknameChanges
+      ?? false
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
     this.#allowMemberVoiceAudit = config.allowMemberVoiceAudit ?? false
     this.#allowMemberVoiceChanges = config.allowMemberVoiceChanges ?? false
@@ -571,6 +583,7 @@ export class ScopePolicy {
     this.#forumTagChannelIds = config.forumTagChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
+    this.#nicknameGuildIds = config.nicknameGuildIds ?? new Set()
     this.#memberRoleGuildIds = config.memberRoleGuildIds ?? new Set()
     this.#memberRoleIds = config.memberRoleIds ?? new Set()
     this.#memberVoiceChannelIds = config.memberVoiceChannelIds ?? new Set()
@@ -721,6 +734,12 @@ export class ScopePolicy {
       memberDirectoryEnabled: this.#allowMemberDirectory
         && this.#memberDirectoryGuildIds.size > 0,
       memberDirectoryGuildIds: [...this.#memberDirectoryGuildIds].sort(),
+      nicknameChangesEnabled: this.#allowNicknameChanges
+        && this.#nicknameGuildIds.size > 0,
+      nicknameGuildIds: [...this.#nicknameGuildIds].sort(),
+      otherMemberNicknameChangesEnabled: this.#allowNicknameChanges
+        && this.#allowOtherMemberNicknameChanges
+        && this.#nicknameGuildIds.size > 0,
       memberRoleChangesEnabled: this.#allowMemberRoleChanges
         && this.#memberRoleGuildIds.size > 0
         && this.#memberRoleIds.size > 0,
@@ -1163,6 +1182,27 @@ export class ScopePolicy {
     }
     if (!this.#memberRoleIds.has(roleId)) {
       throw new PolicyError(`Discord role ${roleId} is outside the member-role scope`)
+    }
+    this.assertUserNotProtected(userId)
+  }
+
+  assertNicknameChangeAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowNicknameChanges) {
+      throw new PolicyError("Discord nickname changes are disabled by connector configuration")
+    }
+    if (this.#nicknameGuildIds.size === 0) {
+      throw new PolicyError("Discord nickname changes require an explicit guild allowlist")
+    }
+    if (!this.#nicknameGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the nickname-change scope`)
+    }
+  }
+
+  assertOtherMemberNicknameChangeAllowed(guildId: string, userId: string): void {
+    this.assertNicknameChangeAllowed(guildId)
+    if (!this.#allowOtherMemberNicknameChanges) {
+      throw new PolicyError("Discord other-member nickname changes are disabled by connector configuration")
     }
     this.assertUserNotProtected(userId)
   }

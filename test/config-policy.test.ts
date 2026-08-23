@@ -125,6 +125,9 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.allowInteractions, true)
   assert.equal(config.allowMemberDirectory, true)
   assert.deepEqual([...config.memberDirectoryGuildIds], [GUILD_ID])
+  assert.equal(config.allowNicknameChanges, false)
+  assert.equal(config.allowOtherMemberNicknameChanges, false)
+  assert.deepEqual([...config.nicknameGuildIds], [])
   assert.equal(config.allowMemberRoleChanges, false)
   assert.deepEqual([...config.memberRoleGuildIds], [])
   assert.deepEqual([...config.memberRoleIds], [])
@@ -250,6 +253,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     widgetSettingsGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
+    nicknameChangesEnabled: false,
+    nicknameGuildIds: [],
+    otherMemberNicknameChangesEnabled: false,
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
@@ -819,6 +825,9 @@ test("configuration and policy require an exact administration guild and protect
     widgetSettingsGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
+    nicknameChangesEnabled: false,
+    nicknameGuildIds: [],
+    otherMemberNicknameChangesEnabled: false,
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
@@ -1400,6 +1409,103 @@ test("configuration and policy isolate reviewed guild settings", () => {
       ).join(","),
     }, { homeDirectory: "/test/home" }),
     /at most 100 unique IDs/,
+  )
+})
+
+test("configuration and policy isolate reviewed member nickname authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_NICKNAME_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_NICKNAME_GUILD_IDS must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES requires DISCORD_MCP_ALLOW_NICKNAME_CHANGES/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+      DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /Nickname changes require DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertNicknameChangeAllowed(GUILD_ID),
+    /nickname changes are disabled/,
+  )
+
+  const missingGuilds = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => missingGuilds.assertNicknameChangeAllowed(GUILD_ID),
+    /require an explicit guild allowlist/,
+  )
+
+  const selfOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  selfOnly.assertNicknameChangeAllowed(GUILD_ID)
+  assert.throws(
+    () => selfOnly.assertNicknameChangeAllowed(OTHER_GUILD_ID),
+    /outside the nickname-change scope/,
+  )
+  assert.throws(
+    () => selfOnly.assertOtherMemberNicknameChangeAllowed(GUILD_ID, USER_ID),
+    /other-member nickname changes are disabled/,
+  )
+  assert.deepEqual(selfOnly.describe().nicknameGuildIds, [GUILD_ID])
+  assert.equal(selfOnly.describe().nicknameChangesEnabled, true)
+  assert.equal(selfOnly.describe().otherMemberNicknameChangesEnabled, false)
+
+  const otherMembers = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+    DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
+  }, { homeDirectory: "/test/home" }))
+  otherMembers.assertOtherMemberNicknameChangeAllowed(
+    GUILD_ID,
+    "400000000000000002",
+  )
+  assert.throws(
+    () => otherMembers.assertOtherMemberNicknameChangeAllowed(GUILD_ID, USER_ID),
+    /protected from administration/,
+  )
+  assert.equal(otherMembers.describe().otherMemberNicknameChangesEnabled, true)
+
+  const excessiveGuilds = Array.from(
+    { length: CONNECTOR_LIMITS.memberNicknameGuildAllowlist + 1 },
+    (_, index) => (600_000_000_000_000_000n + BigInt(index)).toString(),
+  ).join(",")
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_NICKNAME_GUILD_IDS: excessiveGuilds,
+    }, { homeDirectory: "/test/home" }),
+    /must contain at most 100 unique IDs/,
   )
 })
 
@@ -2918,6 +3024,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     widgetSettingsGuildIds: [],
     memberDirectoryEnabled: false,
     memberDirectoryGuildIds: [],
+    nicknameChangesEnabled: false,
+    nicknameGuildIds: [],
+    otherMemberNicknameChangesEnabled: false,
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,

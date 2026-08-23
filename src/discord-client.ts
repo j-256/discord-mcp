@@ -41,6 +41,7 @@ import {
   IntegrationEvidenceError,
   GuildTemplateEvidenceError,
   InviteEvidenceError,
+  MemberNicknameEvidenceError,
   MemberVoiceEvidenceError,
   OnboardingEvidenceError,
   redactText,
@@ -59,6 +60,10 @@ import type {
 } from "./guild-expression-file.js"
 import type { ScheduledEventCoverFormat } from "./scheduled-event-file.js"
 import type { SoundboardFileFormat } from "./soundboard-file.js"
+import {
+  normalizeDesiredMemberNickname,
+  projectMemberNickname,
+} from "./member-nickname.js"
 import {
   DISCORD_REST_OPERATIONS,
   type DiscordRestOperation,
@@ -1189,6 +1194,11 @@ export interface DiscordGuildMemberVoiceUpdate {
   userId: string
 }
 
+export interface DiscordGuildMemberNicknameUpdate {
+  nickname: string | null
+  userId: string
+}
+
 export type ModifyGuildMemberVoiceInput =
   | { channelId: string | null }
   | { deaf: boolean }
@@ -1337,6 +1347,8 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_auto_moderation_rule",
   "modify_guild_sticker",
   "modify_guild_template",
+  "modify_current_member_nickname",
+  "modify_guild_member_nickname",
   "modify_guild_member_voice",
   "modify_thread_state",
   "modify_webhook",
@@ -2363,6 +2375,40 @@ function projectGuildMemberVoiceUpdate(
     mute: record.mute as boolean,
     unknownFieldCount: countUnknownFields(record, GUILD_MEMBER_KEYS),
     userId: (user as Record<string, unknown>).id as string,
+  }
+}
+
+function projectGuildMemberNicknameUpdate(
+  value: unknown,
+  userId: string,
+): DiscordGuildMemberNicknameUpdate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new MemberNicknameEvidenceError(
+      "Discord returned invalid member nickname evidence",
+    )
+  }
+  const record = value as Record<string, unknown>
+  const user = record.user
+  try {
+    if (!user || typeof user !== "object" || Array.isArray(user)) {
+      throw new RangeError("Discord guild-member update omitted its user")
+    }
+    assertPositiveSnowflake(
+      (user as Record<string, unknown>).id as string,
+      "Discord guild-member update user ID",
+    )
+    if ((user as Record<string, unknown>).id !== userId) {
+      throw new RangeError("Discord guild-member update user ID does not match the request")
+    }
+    return {
+      nickname: projectMemberNickname(record.nick),
+      userId,
+    }
+  } catch (error) {
+    throw new MemberNicknameEvidenceError(
+      "Discord returned invalid member nickname evidence",
+      { cause: error },
+    )
   }
 }
 
@@ -9399,6 +9445,58 @@ export class DiscordClient {
         communication_disabled_until: input.communicationDisabledUntil,
       },
     })
+  }
+
+  async modifyCurrentMemberNickname(
+    guildId: string,
+    expectedBotId: string,
+    nickname: string | null,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildMemberNicknameUpdate> {
+    assertPositiveSnowflake(guildId, "Discord member nickname guild ID")
+    assertPositiveSnowflake(expectedBotId, "Discord member nickname bot ID")
+    normalizeDesiredMemberNickname(nickname)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_current_member_nickname",
+      `/guilds/${guildId}/members/@me`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { nick: nickname },
+        diagnosticRoute: "/guilds/{guild.id}/members/@me",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildMemberNicknameUpdate(response, expectedBotId)
+  }
+
+  async modifyGuildMemberNickname(
+    guildId: string,
+    userId: string,
+    nickname: string | null,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildMemberNicknameUpdate> {
+    assertPositiveSnowflake(guildId, "Discord member nickname guild ID")
+    assertPositiveSnowflake(userId, "Discord member nickname user ID")
+    normalizeDesiredMemberNickname(nickname)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_member_nickname",
+      `/guilds/${guildId}/members/${userId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { nick: nickname },
+        diagnosticRoute: "/guilds/{guild.id}/members/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildMemberNicknameUpdate(response, userId)
   }
 
   async modifyGuildMemberVoice(

@@ -1053,6 +1053,42 @@ export class MemberVoiceEvidenceError extends Error {
   override name = "MemberVoiceEvidenceError"
 }
 
+export class MemberNicknamePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord member nickname snapshot does not match the reviewed plan")
+    this.name = "MemberNicknamePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class MemberNicknameOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord member nickname operation key has already been reserved")
+    this.name = "MemberNicknameOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class MemberNicknameExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "MemberNicknameExecutionError"
+    this.result = result
+  }
+}
+
+export class MemberNicknameEvidenceError extends Error {
+  override name = "MemberNicknameEvidenceError"
+}
+
 export class ThreadGovernancePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

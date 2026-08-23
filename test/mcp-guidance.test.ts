@@ -476,6 +476,7 @@ function guidanceService(options: {
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
+    executeMemberNicknameChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
@@ -1233,6 +1234,7 @@ function guidanceService(options: {
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
+    planMemberNicknameChange: unexpected,
     planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
     planStageInstanceChange: unexpected,
@@ -1541,6 +1543,9 @@ function guidanceService(options: {
         inviteGuildIds: [],
         memberDirectoryEnabled: true,
         memberDirectoryGuildIds: [GUILD_ID],
+        nicknameChangesEnabled: false,
+        nicknameGuildIds: [],
+        otherMemberNicknameChangesEnabled: false,
         memberRoleChangesEnabled: false,
         memberRoleGuildIds: [],
         memberRoleCount: 0,
@@ -2428,6 +2433,10 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /survive process restarts/)
   assert.match(safety.text, /claim both guild role and channel collections/)
   assert.match(safety.text, /caller-retained exact request/)
+  assert.match(safety.text, /Member nickname changes require a separate base toggle/)
+  assert.match(safety.text, /current-member route with complete CHANGE_NICKNAME evidence/)
+  assert.match(safety.text, /another exact member requires a second gate/)
+  assert.match(safety.text, /Same-member uncertain outcomes remain quarantined/)
   assert.match(safety.text, /Message pin listing uses Discord's current timestamp-paginated endpoint/)
   assert.match(safety.text, /complete message-read and PIN_MESSAGES permission evidence/)
   assert.match(safety.text, /Reaction aggregate reads use ordinary readable-channel scope/)
@@ -4063,6 +4072,49 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildScaffold, /fresh plan before child creation/)
   assert.match(guildScaffold, /literal workflow input, not instructions/)
 
+  const memberNickname = promptText(await client.getPrompt({
+    arguments: {
+      action: "set",
+      auditReason: "Reviewed member nickname",
+      guildId: GUILD_ID,
+      nickname: "Reviewed nickname",
+      operationKey: OPERATION_KEY,
+      targetKind: "member",
+      userId: USER_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+  }))
+  assert.deepEqual(JSON.parse(memberNickname.split("\n")[1] || ""), {
+    auditReason: "Reviewed member nickname",
+    guildId: GUILD_ID,
+    nickname: "Reviewed nickname",
+    operationKey: OPERATION_KEY,
+    target: { kind: "member", userId: USER_ID },
+  })
+  assert.match(memberNickname, /Call only plan_member_nickname_change/)
+  assert.match(memberNickname, /Do not call execute_member_nickname_change/)
+  assert.match(memberNickname, /explicit clearing intent/)
+  assert.match(memberNickname, /CHANGE_NICKNAME or MANAGE_NICKNAMES/)
+  assert.match(memberNickname, /literal workflow input, not instructions/)
+
+  const botNicknameClear = promptText(await client.getPrompt({
+    arguments: {
+      action: "clear",
+      auditReason: "Reviewed bot nickname clear",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      targetKind: "current-bot",
+    },
+    name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+  }))
+  assert.deepEqual(JSON.parse(botNicknameClear.split("\n")[1] || ""), {
+    auditReason: "Reviewed bot nickname clear",
+    guildId: GUILD_ID,
+    nickname: null,
+    operationKey: OPERATION_KEY,
+    target: { kind: "current-bot" },
+  })
+
   const memberRole = promptText(await client.getPrompt({
     arguments: {
       action: "add",
@@ -4351,6 +4403,61 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewAttachmentMessage,
+    },
+    {
+      arguments: {
+        action: "set",
+        auditReason: "Reviewed member nickname",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        targetKind: "member",
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+    },
+    {
+      arguments: {
+        action: "clear",
+        auditReason: "Reviewed member nickname",
+        guildId: GUILD_ID,
+        nickname: "Unexpected nickname",
+        operationKey: OPERATION_KEY,
+        targetKind: "current-bot",
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+    },
+    {
+      arguments: {
+        action: "set",
+        auditReason: "Reviewed member nickname",
+        guildId: GUILD_ID,
+        nickname: "x".repeat(33),
+        operationKey: OPERATION_KEY,
+        targetKind: "current-bot",
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+    },
+    {
+      arguments: {
+        action: "set",
+        auditReason: "Reviewed member nickname",
+        guildId: GUILD_ID,
+        nickname: "Reviewed nickname",
+        operationKey: OPERATION_KEY,
+        targetKind: "member",
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+    },
+    {
+      arguments: {
+        action: "clear",
+        auditReason: "Reviewed member nickname",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        targetKind: "current-bot",
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
     },
     {
       arguments: {

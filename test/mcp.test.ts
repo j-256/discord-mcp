@@ -169,6 +169,10 @@ import type {
   PollReadResult,
 } from "../src/poll-service.js"
 import type {
+  MemberNicknameChangePlan,
+  MemberNicknameChangeRequest,
+} from "../src/member-nickname-service.js"
+import type {
   MemberRoleChangePlan,
   MemberRoleChangeRequest,
 } from "../src/member-role-service.js"
@@ -259,6 +263,9 @@ import {
   MessagePinOperationConflictError,
   MessageForwardExecutionError,
   MessageForwardOperationConflictError,
+  MemberNicknameExecutionError,
+  MemberNicknameOperationConflictError,
+  MemberNicknamePlanChangedError,
   MemberRoleExecutionError,
   MemberRoleOperationConflictError,
   MemberRolePlanChangedError,
@@ -406,6 +413,8 @@ const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
 const POLL_QUESTION = "Which release theme should we choose?"
 const POLL_ANSWER_ONE = "Reliability"
 const POLL_ANSWER_TWO = "Usability"
+const MEMBER_NICKNAME_OPERATION_KEY = "member-nickname-attempt-0001"
+const MEMBER_NICKNAME = "Reviewed nickname"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
@@ -4684,6 +4693,81 @@ function memberRolePlan(
   }
 }
 
+function memberNicknamePlan(
+  request: MemberNicknameChangeRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): MemberNicknameChangePlan {
+  const currentBot = request.target.kind === "current-bot"
+  const requiredPermission: MemberNicknameChangePlan["permission"]["requiredPermission"] = currentBot
+    ? "CHANGE_NICKNAME"
+    : "MANAGE_NICKNAMES"
+  const targetId = request.target.kind === "member" ? request.target.userId : BOT_ID
+  const currentNickname = writeRequired ? "Old private nickname" : request.nickname
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    desiredNickname: request.nickname,
+    digest,
+    guild: {
+      id: request.guildId,
+      name: "Untrusted private guild",
+      ownerId: GUILD_OWNER_ID,
+    },
+    hierarchy: currentBot
+      ? null
+      : {
+          botHighestRoleIds: [ROLE_ID],
+          botHighestRolePosition: 10,
+          targetAdministrator: false,
+          targetBelowBot: true,
+          targetHighestRoleIds: [request.guildId],
+          targetHighestRolePosition: 0,
+        },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      effectivePermissionNames: [requiredPermission],
+      effectivePermissions: DISCORD_PERMISSIONS[requiredPermission].toString(),
+      requiredPermission,
+      requiredPermissionPresent: true,
+      unknownPermissionBits: "0",
+    },
+    privacy: {
+      persistence: "content-free-outcomes-only",
+      rawPayloadExposed: false,
+      transientUntrustedFields: [
+        "currentNickname",
+        "desiredNickname",
+        "guildName",
+        "username",
+      ],
+    },
+    risks: writeRequired
+      ? ["The exact member's guild nickname will change immediately"]
+      : [],
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    target: {
+      bot: currentBot,
+      currentNickname,
+      id: targetId,
+      kind: request.target.kind,
+      pending: false,
+      username: currentBot ? "untrusted-bot-name" : "untrusted-member-name",
+    },
+    warnings: [
+      currentBot
+        ? "The narrow current-member route does not grant authority over other members"
+        : "The other-member gate and strict role hierarchy apply",
+      "Nickname labels are transient untrusted Discord content",
+    ],
+    writeRequired,
+  }
+}
+
 function memberVoicePlan(
   request: MemberVoiceChangeRequest,
   digest = DIGEST,
@@ -5097,6 +5181,9 @@ function fixturePolicy(): PolicyDescription {
     inviteGuildIds: [],
     memberDirectoryEnabled: true,
     memberDirectoryGuildIds: [GUILD_ID],
+    nicknameChangesEnabled: false,
+    nicknameGuildIds: [],
+    otherMemberNicknameChangesEnabled: false,
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
@@ -5219,6 +5306,10 @@ function serviceFixture(overrides: {
   messagePinAction?: "change" | "none"
   messagePinError?: Error
   messagePinPlanDigest?: string
+  memberNicknameDrift?: boolean
+  memberNicknameError?: Error
+  memberNicknamePlanDigest?: string
+  memberNicknameWriteRequired?: boolean
   memberRoleAction?: "add" | "none" | "remove"
   memberRoleError?: Error
   memberRolePlanDigest?: string
@@ -5372,6 +5463,8 @@ function serviceFixture(overrides: {
     messagePinPlan: 0,
     messageForwardExecute: 0,
     messageForwardPlan: 0,
+    memberNicknameExecute: 0,
+    memberNicknamePlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
     memberVoiceExecute: 0,
@@ -7127,6 +7220,41 @@ function serviceFixture(overrides: {
         userId: request.userId,
       }
     },
+    async executeMemberNicknameChange(request, planDigest) {
+      if (overrides.memberNicknameError) throw overrides.memberNicknameError
+      calls.memberNicknameExecute += 1
+      const planned = memberNicknamePlan(
+        request,
+        planDigest,
+        overrides.memberNicknameWriteRequired ?? true,
+      )
+      const observedNickname = overrides.memberNicknameDrift
+        ? request.nickname === null ? "unexpected nickname" : null
+        : request.nickname
+      const verification = !planned.writeRequired
+        ? "not-required" as const
+        : overrides.memberNicknameDrift
+          ? "drift" as const
+          : "match" as const
+      return {
+        activityId: planned.writeRequired ? "activity-member-nickname" : null,
+        guildId: request.guildId,
+        observedNickname: planned.writeRequired
+          ? observedNickname
+          : planned.target.currentNickname,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: !planned.writeRequired
+          ? "already-current" as const
+          : overrides.memberNicknameDrift
+            ? "completed-with-drift" as const
+            : "completed" as const,
+        targetKind: request.target.kind,
+        userId: planned.target.id,
+        verification,
+      }
+    },
     async executeMemberVoiceChange(request, planDigest) {
       if (overrides.memberVoiceError) throw overrides.memberVoiceError
       calls.memberVoiceExecute += 1
@@ -7936,6 +8064,14 @@ function serviceFixture(overrides: {
         overrides.memberRoleAction,
       )
     },
+    async planMemberNicknameChange(request) {
+      calls.memberNicknamePlan += 1
+      return memberNicknamePlan(
+        request,
+        overrides.memberNicknamePlanDigest || DIGEST,
+        overrides.memberNicknameWriteRequired ?? true,
+      )
+    },
     async planMemberVoiceChange(request) {
       calls.memberVoicePlan += 1
       return memberVoicePlan(
@@ -8443,6 +8579,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_guild_scaffold",
       "execute_guild_scaffold",
       "verify_guild_scaffold",
+      "plan_member_nickname_change",
+      "execute_member_nickname_change",
       "plan_member_role_change",
       "execute_member_role_change",
       "plan_member_voice_change",
@@ -8527,6 +8665,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const memberRole = result.tools.find((tool) => (
     tool.name === "execute_member_role_change"
   ))
+  const memberNickname = result.tools.find((tool) => (
+    tool.name === "execute_member_nickname_change"
+  ))
   const memberVoice = result.tools.find((tool) => (
     tool.name === "execute_member_voice_change"
   ))
@@ -8567,6 +8708,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     channelMetadata,
     permissionOverwrite,
     administration,
+    memberNickname,
     memberRole,
     memberVoice,
     threadChange,
@@ -9354,6 +9496,30 @@ test("progressive discovery enables the complete reviewed role-creation workflow
   )
 })
 
+test("progressive discovery enables the complete reviewed member nickname workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_member_nickname_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_member_nickname_change",
+    "plan_member_nickname_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_member_nickname_change",
+      "execute_member_nickname_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed member-role workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
@@ -10111,6 +10277,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinPlan: 0,
     messageForwardExecute: 0,
     messageForwardPlan: 0,
+    memberNicknameExecute: 0,
+    memberNicknamePlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
     memberVoiceExecute: 0,
@@ -19204,6 +19372,450 @@ test("MCP guild scaffolds expose resumable, uncertain, and content-free conflict
     JSON.stringify(unsafeResult),
     new RegExp(GUILD_SCAFFOLD_OPERATION_KEY),
   )
+})
+
+test("MCP member nickname changes plan exact targets and reject unsafe schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const currentBot = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: MEMBER_NICKNAME,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot" },
+    },
+    name: "plan_member_nickname_change",
+  })
+  const exactMember = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: null,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "member", userId: USER_ID },
+    },
+    name: "plan_member_nickname_change",
+  })
+  const invalidRequests = [
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: "",
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot" },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: " surrounding ",
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot" },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: "repeated  whitespace",
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot" },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: "\ud800",
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot" },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: "x".repeat(33),
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot" },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: MEMBER_NICKNAME,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "current-bot", userId: USER_ID },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: MEMBER_NICKNAME,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      target: { kind: "member" },
+    },
+    {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: MEMBER_NICKNAME,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      replaceDisplayName: true,
+      target: { kind: "member", userId: USER_ID },
+    },
+  ]
+  for (const arguments_ of invalidRequests) {
+    const result = await client.callTool({
+      arguments: arguments_ as never,
+      name: "plan_member_nickname_change",
+    })
+    assert.equal(result.isError, true)
+  }
+
+  assert.equal(structuredContent(currentBot).status, "planned")
+  assert.equal(structuredContent(currentBot).desiredNickname, MEMBER_NICKNAME)
+  assert.equal(
+    (structuredContent(currentBot).target as Record<string, unknown>).kind,
+    "current-bot",
+  )
+  assert.equal(structuredContent(exactMember).desiredNickname, null)
+  assert.equal(
+    (structuredContent(exactMember).target as Record<string, unknown>).id,
+    USER_ID,
+  )
+  assert.equal(calls.memberNicknamePlan, 2)
+})
+
+test("MCP member nickname changes bind approval to exact names and hierarchy", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: MEMBER_NICKNAME,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      planDigest: DIGEST,
+      target: { kind: "member", userId: USER_ID },
+    },
+    name: "execute_member_nickname_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).observedNickname, MEMBER_NICKNAME)
+  assert.equal(calls.memberNicknamePlan, 1)
+  assert.equal(calls.memberNicknameExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, /Target kind: member/)
+  assert.match(confirmationMessage, /Old private nickname/)
+  assert.match(confirmationMessage, new RegExp(MEMBER_NICKNAME))
+  assert.match(confirmationMessage, /Required permission: MANAGE_NICKNAMES/)
+  assert.match(confirmationMessage, /Target is below bot: true/)
+  assert.match(confirmationMessage, /Target administrator: false/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /non-retried PATCH/)
+  assert.match(confirmationMessage, /will not retry, transform the nickname, or roll back/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(MEMBER_NICKNAME_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MEMBER_NICKNAME_OPERATION_KEY),
+  )
+})
+
+test("MCP member nickname changes skip no-op approval and stop on refusal", async (context) => {
+  let confirmations = 0
+  const current = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberNicknameWriteRequired: false },
+  })
+  const currentResult = await current.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: null,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      planDigest: DIGEST,
+      target: { kind: "current-bot" },
+    },
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(currentResult).status, "already-current")
+  assert.equal(structuredContent(currentResult).userId, BOT_ID)
+  assert.equal(confirmations, 0)
+  assert.equal(current.calls.memberNicknameExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: null,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      planDigest: DIGEST,
+      target: { kind: "member", userId: USER_ID },
+    },
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.memberNicknameExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      nickname: MEMBER_NICKNAME,
+      operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      planDigest: DIGEST,
+      target: { kind: "current-bot" },
+    },
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.memberNicknameExecute, 0)
+})
+
+test("MCP member nickname signed state rejects every changed intent field", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    nickname: MEMBER_NICKNAME,
+    operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+    planDigest: DIGEST,
+    target: { kind: "member" as const, userId: USER_ID },
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_member_nickname_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, nickname: null },
+    { ...request, operationKey: "member-nickname-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, target: { kind: "current-bot" as const } },
+    { ...request, target: { kind: "member" as const, userId: GUILD_OWNER_ID } },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_member_nickname_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_member_nickname_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.memberNicknameExecute, 0)
+})
+
+test("MCP member nickname changes refuse fresh drift and report verified drift", async (context) => {
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberNicknamePlanDigest: DIFFERENT_DIGEST },
+  })
+  const arguments_ = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    nickname: MEMBER_NICKNAME,
+    operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+    planDigest: DIGEST,
+    target: { kind: "member" as const, userId: USER_ID },
+  }
+  const changedResult = await changed.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.memberNicknameExecute, 0)
+
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: { memberNicknameDrift: true },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "completed-with-drift")
+  assert.equal(structuredContent(driftResult).verification, "drift")
+  assert.equal(structuredContent(driftResult).observedNickname, null)
+})
+
+test("MCP member nickname changes expose uncertain, rate-limited, and conflict outcomes", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const arguments_ = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    nickname: MEMBER_NICKNAME,
+    operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+    planDigest: DIGEST,
+    target: { kind: "member" as const, userId: USER_ID },
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberNicknameError: new MemberNicknameExecutionError(
+        "Discord member nickname outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const changed = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberNicknameError: new MemberNicknamePlanChangedError(
+        DIGEST,
+        DIFFERENT_DIGEST,
+      ),
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(
+    ((structuredContent(changedResult).error as Record<string, unknown>).actualDigest),
+    DIFFERENT_DIGEST,
+  )
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PATCH",
+    retryAfterMs: 2_500,
+    route: "/guilds/{guild_id}/members/{user_id}",
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberNicknameError: new MemberNicknameExecutionError(
+        "Discord member nickname change was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(limitedResult).status, "rate-limited")
+  assert.equal(
+    ((structuredContent(limitedResult).error as Record<string, unknown>).retryAfterMs),
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-member-nickname",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    userId: USER_ID,
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberNicknameError: new MemberNicknameOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(MEMBER_NICKNAME_OPERATION_KEY),
+  )
+
+  const unsafeConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberNicknameError: new MemberNicknameOperationConflictError({
+        ...receipt,
+        nickname: "private nickname",
+        operationKey: MEMBER_NICKNAME_OPERATION_KEY,
+      }),
+    },
+  })
+  const unsafeResult = await unsafeConflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_nickname_change",
+  })
+  assert.deepEqual(
+    (structuredContent(unsafeResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(
+    JSON.stringify(unsafeResult),
+    new RegExp(MEMBER_NICKNAME_OPERATION_KEY),
+  )
+  assert.doesNotMatch(JSON.stringify(unsafeResult), /private nickname/)
 })
 
 test("MCP member-role changes plan exact IDs and reject unsafe schemas", async (context) => {

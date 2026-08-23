@@ -82,6 +82,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   inviteAuditPolicy: "invite-audit-policy",
   inviteDeletionPolicy: "invite-deletion-policy",
   memberDirectoryPolicy: "member-directory-policy",
+  memberNicknamePolicy: "member-nickname-policy",
+  otherMemberNicknamePolicy: "other-member-nickname-policy",
   memberRolePolicy: "member-role-policy",
   memberVoiceAuditPolicy: "member-voice-audit-policy",
   memberVoiceChangePolicy: "member-voice-change-policy",
@@ -450,6 +452,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
     warnings.push("The widget public-exposure toggle is enabled but exposure-changing writes remain blocked because an exact guild allowlist is required")
   }
   if (
+    config.allowNicknameChanges
+    && config.nicknameGuildIds.size === 0
+  ) {
+    warnings.push("The nickname-change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (
     config.allowMemberRoleChanges
     && (config.memberRoleGuildIds.size === 0 || config.memberRoleIds.size === 0)
   ) {
@@ -614,6 +622,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     ],
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
+    [config.allowNicknameChanges, "member-nicknames", "Reviewed member nickname changes"],
     [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
     [
       config.allowMemberVoiceAudit || config.allowMemberVoiceChanges,
@@ -1754,6 +1763,32 @@ export async function diagnoseConnector(
         `Reviewed member-role changes are constrained to ${config.memberRoleGuildIds.size} exact guilds and ${config.memberRoleIds.size} exact roles with bounded permission-impact review and one-shot execution`,
       ))
     }
+    if (!config.allowNicknameChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberNicknamePolicy,
+        "pass",
+        "Reviewed member nickname changes are disabled",
+      ))
+    } else if (config.nicknameGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberNicknamePolicy,
+        "warn",
+        "Member nickname changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberNicknamePolicy,
+        "pass",
+        `Reviewed current-bot nickname changes are constrained to ${config.nicknameGuildIds.size} exact guilds with CHANGE_NICKNAME evidence, signed approval, one-shot execution, and exact readback`,
+      ))
+    }
+    checks.push(check(
+      DOCTOR_CHECK_IDS.otherMemberNicknamePolicy,
+      "pass",
+      config.allowOtherMemberNicknameChanges
+        ? "Other-member nickname changes are enabled behind the base gate with protected-user, owner, pending-member, administrator, MANAGE_NICKNAMES, and strict hierarchy checks"
+        : "Other-member nickname changes are disabled; the narrower current-bot route remains independently available",
+    ))
     if (!config.allowMemberVoiceAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,
@@ -2465,6 +2500,9 @@ export function createStdioLaunchDescriptor(options: {
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
     ENVIRONMENT_NAMES.allowBanAudit,
     ENVIRONMENT_NAMES.banAuditGuildIds,
+    ENVIRONMENT_NAMES.allowNicknameChanges,
+    ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges,
+    ENVIRONMENT_NAMES.nicknameGuildIds,
     ENVIRONMENT_NAMES.allowMemberRoleChanges,
     ENVIRONMENT_NAMES.memberRoleGuildIds,
     ENVIRONMENT_NAMES.memberRoleIds,

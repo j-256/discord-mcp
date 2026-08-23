@@ -72,6 +72,8 @@ export interface ConnectorConfig {
   allowInviteAudit: boolean
   allowInviteDeletions: boolean
   allowMemberDirectory: boolean
+  allowNicknameChanges: boolean
+  allowOtherMemberNicknameChanges: boolean
   allowMemberRoleChanges: boolean
   allowMemberVoiceAudit: boolean
   allowMemberVoiceChanges: boolean
@@ -144,6 +146,7 @@ export interface ConnectorConfig {
   inviteGuildIds: ReadonlySet<string>
   mentionUserIds: ReadonlySet<string>
   memberDirectoryGuildIds: ReadonlySet<string>
+  nicknameGuildIds: ReadonlySet<string>
   memberRoleGuildIds: ReadonlySet<string>
   memberRoleIds: ReadonlySet<string>
   memberVoiceChannelIds: ReadonlySet<string>
@@ -483,6 +486,11 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.memberDirectoryGuildIds],
     ENVIRONMENT_NAMES.memberDirectoryGuildIds,
   )
+  const nicknameGuildIds = parseIdSet(
+    environment[ENVIRONMENT_NAMES.nicknameGuildIds],
+    ENVIRONMENT_NAMES.nicknameGuildIds,
+    CONNECTOR_LIMITS.memberNicknameGuildAllowlist,
+  )
   const memberRoleGuildIds = parseIdSet(
     environment[ENVIRONMENT_NAMES.memberRoleGuildIds],
     ENVIRONMENT_NAMES.memberRoleGuildIds,
@@ -610,6 +618,7 @@ export function loadConnectorConfig(
     [ENVIRONMENT_NAMES.inviteGuildIds, inviteGuildIds],
     [ENVIRONMENT_NAMES.onboardingGuildIds, onboardingGuildIds],
     [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
+    [ENVIRONMENT_NAMES.nicknameGuildIds, nicknameGuildIds],
     [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
     [ENVIRONMENT_NAMES.memberVoiceGuildIds, memberVoiceGuildIds],
     [ENVIRONMENT_NAMES.nativeInteractionGuildIds, nativeInteractionGuildIds],
@@ -910,6 +919,24 @@ export function loadConnectorConfig(
     environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
     ENVIRONMENT_NAMES.allowMemberRoleChanges,
   )
+  const allowNicknameChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowNicknameChanges],
+    ENVIRONMENT_NAMES.allowNicknameChanges,
+  )
+  const allowOtherMemberNicknameChanges = parseBoolean(
+    environment[ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges],
+    ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges,
+  )
+  if (allowOtherMemberNicknameChanges && !allowNicknameChanges) {
+    throw new ConfigurationError(
+      `${ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges} requires ${ENVIRONMENT_NAMES.allowNicknameChanges}`,
+    )
+  }
+  if (allowNicknameChanges && (!expectedApplicationId || !expectedBotId)) {
+    throw new ConfigurationError(
+      `Nickname changes require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
+    )
+  }
   const allowGuildExpressionAudit = parseBoolean(
     environment[ENVIRONMENT_NAMES.allowGuildExpressionAudit],
     ENVIRONMENT_NAMES.allowGuildExpressionAudit,
@@ -1206,6 +1233,8 @@ export function loadConnectorConfig(
       environment[ENVIRONMENT_NAMES.allowMemberDirectory],
       ENVIRONMENT_NAMES.allowMemberDirectory,
     ),
+    allowNicknameChanges,
+    allowOtherMemberNicknameChanges,
     allowMemberRoleChanges,
     allowNativeCommandChanges,
     allowNativeInteractions,
@@ -1322,6 +1351,7 @@ export function loadConnectorConfig(
     inviteGuildIds,
     mentionUserIds,
     memberDirectoryGuildIds,
+    nicknameGuildIds,
     memberRoleGuildIds,
     memberRoleIds,
     memberVoiceChannelIds,

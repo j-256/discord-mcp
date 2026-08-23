@@ -271,6 +271,7 @@ function serviceFixture(overrides: {
   integrationOptions?: ConnectorServiceOptions["integrationOptions"]
   interactionOptions?: ConnectorServiceOptions["interactionOptions"]
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
+  memberNicknameOptions?: ConnectorServiceOptions["memberNicknameOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
   memberVoiceOptions?: ConnectorServiceOptions["memberVoiceOptions"]
   onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
@@ -696,6 +697,12 @@ function serviceFixture(overrides: {
         user: { id: userId, username: "target" },
       }
     },
+    async modifyCurrentMemberNickname() {
+      throw new Error("Unexpected current-member nickname change")
+    },
+    async modifyGuildMemberNickname() {
+      throw new Error("Unexpected member nickname change")
+    },
     async modifyGuildMemberVoice() {
       throw new Error("Unexpected member voice change")
     },
@@ -848,6 +855,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.inviteOptions
         ? { inviteOptions: overrides.inviteOptions }
+        : {}),
+      ...(overrides.memberNicknameOptions
+        ? { memberNicknameOptions: overrides.memberNicknameOptions }
         : {}),
       ...(overrides.memberRoleOptions
         ? { memberRoleOptions: overrides.memberRoleOptions }
@@ -1519,6 +1529,13 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     inviteRef: `iref_hmac_sha256_${"b".repeat(64)}`,
     operationKey,
   }, digest))
+  await captured(() => service.executeMemberNicknameChange({
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    nickname: "reviewed nickname",
+    operationKey,
+    target: { kind: "member", userId: MEMBER_USER_ID },
+  }, digest))
   await captured(() => service.executeMemberRoleChange({
     action: "add",
     auditReason: "reviewed",
@@ -1715,7 +1732,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 37)
+  assert.equal(byKind.size, 38)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -1787,6 +1804,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
+      "member-nickname-change": [{ id: MEMBER_USER_ID, kind: "member" }],
       "member-role-change": [
         { id: MEMBER_USER_ID, kind: "member" },
         { id: CREATED_ROLE_ID, kind: "role" },
@@ -1897,7 +1915,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 37)
+  assert.equal(writeCoordinator.intents.length, 38)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -4034,6 +4052,103 @@ test("service verifies identity before planning and executing exact member moder
   assert.equal(calls.user, 1)
   assert.equal(calls.removeMember, 1)
   assert.deepEqual(writeCoordinator.intents, [])
+})
+
+test("service pins identity through the narrow reviewed current-bot nickname route", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "800000000000000001"
+  let nickname: string | null = "Old private nickname"
+  let nicknameWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildMember(_guildId, userId) {
+        assert.equal(userId, BOT_ID)
+        return {
+          nick: nickname,
+          pending: false,
+          roles: [botRoleId],
+          user: bot(),
+        }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.CHANGE_NICKNAME,
+              "connector",
+            ),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
+      },
+      async modifyCurrentMemberNickname(
+        guildId,
+        expectedBotId,
+        desiredNickname,
+        auditReason,
+      ) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(expectedBotId, BOT_ID)
+        assert.equal(desiredNickname, "Reviewed bot nickname")
+        assert.equal(auditReason, "Reviewed current-bot nickname")
+        nicknameWrites += 1
+        nickname = desiredNickname
+        return { nickname, userId: BOT_ID }
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+      DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+    },
+    memberNicknameOptions: {
+      clock: () => new Date("2026-08-23T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(6),
+      randomId: () => "activity-member-nickname",
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed current-bot nickname",
+    guildId: GUILD_ID,
+    nickname: "Reviewed bot nickname",
+    operationKey: "member-nickname-attempt-0001",
+    target: { kind: "current-bot" as const },
+  }
+
+  const plan = await service.planMemberNicknameChange(request)
+  const result = await service.executeMemberNicknameChange(request, plan.digest)
+
+  assert.equal(plan.applicationId, APPLICATION_ID)
+  assert.equal(plan.botId, BOT_ID)
+  assert.equal(plan.target.id, BOT_ID)
+  assert.equal(plan.target.kind, "current-bot")
+  assert.equal(plan.permission.requiredPermission, "CHANGE_NICKNAME")
+  assert.equal(plan.hierarchy, null)
+  assert.equal(result.status, "completed")
+  assert.equal(result.observedNickname, "Reviewed bot nickname")
+  assert.equal(result.userId, BOT_ID)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(nicknameWrites, 1)
+  assert.equal(operationStore.receipt?.kind, "member-nickname-change")
+  assert.equal(operationStore.receipt?.resourceId, BOT_ID)
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.equal(calls.activityEntries.length, 2)
+  assert.doesNotMatch(
+    JSON.stringify({
+      activity: calls.activityEntries,
+      receipt: operationStore.receipt,
+    }),
+    /member-nickname-attempt|Old private|Reviewed bot nickname|Reviewed current-bot/,
+  )
 })
 
 test("service pins identity through reviewed exact member-role changes", async () => {

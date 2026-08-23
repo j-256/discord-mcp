@@ -68,7 +68,7 @@
         },
         {
           "name": "DISCORD_MCP_TOOLSETS",
-          "description": "Comma-separated risk-separated MCP toolsets: activity, announcement-crossposts, announcement-subscriptions, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, channel-ordering, connector, deletion, forum-posts, forum-tags, gateway, guild-expressions, guild-scaffolds, guild-settings, guild-templates, guilds, integrations, interactions, invites, member-roles, members, message-forwarding, messages, moderation, native-interactions, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, role-ordering, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
+          "description": "Comma-separated risk-separated MCP toolsets: activity, announcement-crossposts, announcement-subscriptions, attachments, audit-logs, automod, bans, channel-creation, channel-metadata, channel-ordering, connector, deletion, forum-posts, forum-tags, gateway, guild-expressions, guild-scaffolds, guild-settings, guild-templates, guilds, integrations, interactions, invites, member-nicknames, member-roles, members, message-forwarding, messages, moderation, native-interactions, observability, onboarding, permission-overwrites, permissions, pins, polls, role-configuration, role-creation, role-ordering, roles, scheduled-events, soundboard, stage-instances, thread-governance, threads, voice-moderation, webhooks, welcome-screen, widget-settings, or all",
           "default": "all",
           "format": "string"
         },
@@ -313,7 +313,7 @@
         },
         {
           "name": "DISCORD_MCP_PROTECTED_USER_IDS",
-          "description": "Exact user IDs that member administration, member-role changes, member voice changes, and thread-member removals must never target",
+          "description": "Exact user IDs that other-member nickname changes, member administration, member-role changes, member voice changes, and thread-member removals must never target",
           "format": "string"
         },
         {
@@ -342,6 +342,29 @@
         {
           "name": "DISCORD_MCP_BAN_AUDIT_GUILD_IDS",
           "description": "Exact guild IDs eligible for privacy-minimized ban audit",
+          "format": "string"
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_NICKNAME_CHANGES",
+          "description": "Enable reviewed current-bot nickname changes when an exact guild allowlist and pinned identities are also set",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES",
+          "description": "Enable separately gated reviewed nickname changes for other exact members",
+          "default": "false",
+          "choices": [
+            "false",
+            "true"
+          ]
+        },
+        {
+          "name": "DISCORD_MCP_NICKNAME_GUILD_IDS",
+          "description": "Exact guild IDs eligible for reviewed member nickname changes",
           "format": "string"
         },
         {

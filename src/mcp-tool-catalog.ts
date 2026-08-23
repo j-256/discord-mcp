@@ -61,6 +61,7 @@ type McpToolWorkflow =
   | "poll-end"
   | "reaction-moderation"
   | "member-moderation"
+  | "member-nickname-change"
   | "member-role-change"
   | "member-voice-change"
   | "message-deletion"
@@ -267,6 +268,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  execute_member_nickname_change: {
+    keywords: ["change", "clear", "execute", "member", "nick", "nickname", "profile"],
+    toolset: "member-nicknames",
+    workflow: "member-nickname-change",
   },
   execute_member_role_change: {
     keywords: ["add", "assign", "execute", "member", "permission", "remove", "role"],
@@ -556,6 +562,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  plan_member_nickname_change: {
+    keywords: ["change", "clear", "member", "nick", "nickname", "plan", "profile", "review"],
+    toolset: "member-nicknames",
+    workflow: "member-nickname-change",
   },
   plan_member_role_change: {
     keywords: ["add", "assign", "member", "permission", "plan", "remove", "review", "role"],

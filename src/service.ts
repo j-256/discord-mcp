@@ -310,6 +310,16 @@ import type {
 } from "./member-directory-service.js"
 import { MemberDirectoryService } from "./member-directory-service.js"
 import type {
+  MemberNicknameChangePlan,
+  MemberNicknameChangeRequest,
+  MemberNicknameChangeResult,
+  MemberNicknameServiceOptions,
+} from "./member-nickname-service.js"
+import {
+  MemberNicknameService,
+  normalizeMemberNicknameChangeRequest,
+} from "./member-nickname-service.js"
+import type {
   MemberRoleChangePlan,
   MemberRoleChangeRequest,
   MemberRoleChangeResult,
@@ -631,6 +641,8 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
+  modifyCurrentMemberNickname: DiscordClient["modifyCurrentMemberNickname"]
+  modifyGuildMemberNickname: DiscordClient["modifyGuildMemberNickname"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
   modifyThreadState: DiscordClient["modifyThreadState"]
   modifyWebhook: DiscordClient["modifyWebhook"]
@@ -770,6 +782,10 @@ export interface ConnectorServiceOptions {
   >
   memberRoleOptions?: Pick<
     MemberRoleServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  memberNicknameOptions?: Pick<
+    MemberNicknameServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   memberVoiceOptions?: Pick<
@@ -971,6 +987,7 @@ export class ConnectorService {
   readonly #messagePinService: MessagePinService
   readonly #messageForwardingService: MessageForwardingService
   readonly #memberDirectoryService: MemberDirectoryService
+  readonly #memberNicknameService: MemberNicknameService
   readonly #memberRoleService: MemberRoleService
   readonly #memberVoiceService: MemberVoiceService
   readonly #nativeInteractionCommandService: NativeInteractionCommandService
@@ -1243,6 +1260,13 @@ export class ConnectorService {
     this.#memberDirectoryService = new MemberDirectoryService({
       client: this.#client,
       policy: this.#policy,
+    })
+    this.#memberNicknameService = new MemberNicknameService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.memberNicknameOptions,
     })
     this.#memberRoleService = new MemberRoleService({
       activityStore: this.#activityStore,
@@ -2748,6 +2772,20 @@ export class ConnectorService {
     )
   }
 
+  async planMemberNicknameChange(
+    request: MemberNicknameChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<MemberNicknameChangePlan> {
+    normalizeMemberNicknameChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberNicknameService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberVoiceChange(
     request: MemberVoiceChangeRequest,
     options: RequestOptions = {},
@@ -3258,6 +3296,31 @@ export class ConnectorService {
         writeResourceTarget("role", request.roleId),
       ],
       () => this.#memberRoleService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeMemberNicknameChange(
+    request: MemberNicknameChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MemberNicknameChangeResult> {
+    const normalized = normalizeMemberNicknameChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    const userId = normalized.target.kind === "current-bot"
+      ? identity.bot.id
+      : normalized.target.userId
+    return this.#coordinateWrite(
+      "member-nickname-change",
+      normalized.operationKey,
+      planDigest,
+      [writeResourceTarget("member", userId)],
+      () => this.#memberNicknameService.execute(
         identity.application.id,
         identity.bot.id,
         request,
