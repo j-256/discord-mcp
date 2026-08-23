@@ -8,6 +8,10 @@ import {
   type DiscordCatalogCheckReport,
 } from "./catalog.js"
 import {
+  createBotInstallPlan,
+  type BotInstallPlan,
+} from "./bot-install.js"
+import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
   ENVIRONMENT_NAMES,
@@ -151,6 +155,14 @@ export type ParsedCliArguments =
   }
   | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
   | { command: "help"; topic: CliCommand | undefined }
+  | {
+    action: "install"
+    applicationId: string
+    command: "preset"
+    guildId: string
+    json: boolean
+    name: string
+  }
   | {
     action: "list"
     command: "preset"
@@ -558,8 +570,8 @@ function parsePresetCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "preset" }> {
   const action = args[0]
-  if (!action || !["list", "show"].includes(action)) {
-    throw new ConfigurationError("preset requires list or show")
+  if (!action || !["install", "list", "show"].includes(action)) {
+    throw new ConfigurationError("preset requires install, list, or show")
   }
   if (action === "list") {
     const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
@@ -567,7 +579,49 @@ function parsePresetCommand(
   }
   const name = args[1]
   if (!name || name.startsWith("--")) {
-    throw new ConfigurationError("preset show requires a preset name")
+    throw new ConfigurationError(`preset ${action} requires a preset name`)
+  }
+  if (action === "install") {
+    let applicationId: string | undefined
+    let guildId: string | undefined
+    let json = false
+    const seen = new Set<string>()
+    for (let index = 2; index < args.length; index += 1) {
+      const argument = args[index]
+      if (!argument || !["--application-id", "--guild-id", "--json"].includes(argument)) {
+        throw new ConfigurationError(`Unknown option ${argument || ""}`)
+      }
+      if (seen.has(argument)) {
+        throw new ConfigurationError(`Option ${argument} may be provided only once`)
+      }
+      seen.add(argument)
+      if (argument === "--json") {
+        json = true
+        continue
+      }
+      const value = args[index + 1]
+      if (!value || value.startsWith("--")) {
+        throw new ConfigurationError(`Option ${argument} requires a value`)
+      }
+      index += 1
+      if (argument === "--application-id") applicationId = value
+      if (argument === "--guild-id") guildId = value
+    }
+    if (!applicationId) {
+      throw new ConfigurationError("preset install requires --application-id")
+    }
+    if (!guildId) {
+      throw new ConfigurationError("preset install requires --guild-id")
+    }
+    const plan = createBotInstallPlan({ applicationId, guildId, preset: name })
+    return {
+      action: "install",
+      applicationId: plan.applicationId,
+      command: "preset",
+      guildId: plan.guildId,
+      json,
+      name: plan.preset.name,
+    }
   }
   const options = parseBooleanOptions(args.slice(2), new Set(["--json"]))
   return {
@@ -857,8 +911,9 @@ function helpText(topic: CliCommand | undefined): string {
       "Actions:",
       "  list [--json]",
       "  show NAME [--json]",
+      "  install NAME --application-id ID --guild-id ID [--json]",
       "",
-      "Inspect deterministic least-privilege setup presets without credentials or Discord access.",
+      "Inspect deterministic least-privilege setup presets or generate a callback-free, guild-locked bot installation plan without credentials or Discord access.",
     ].join("\n")
   }
   if (topic === "version") return "Usage: discord-mcp version\n\nPrint the package version."
@@ -871,7 +926,7 @@ function helpText(topic: CliCommand | undefined): string {
     "  coordination  Inspect or resolve durable reviewed-write claims",
     "  serve    Run the stdio MCP server (default)",
     "  setup    Verify the bot and generate safe client configuration",
-    "  preset   Inspect deterministic least-privilege setup presets",
+    "  preset   Inspect presets or generate an exact bot installation plan",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
     "  doctor   Diagnose environment, policy, and optional Discord access",
     "  smoke    Verify the read-only MCP path end to end",
@@ -1042,18 +1097,57 @@ interface PresetShowReport {
 }
 
 function renderPreset(preset: SetupPresetDescriptor): string {
+  const privilegedIntents = preset.requirements.privilegedIntents.length === 0
+    ? "none"
+    : preset.requirements.privilegedIntents
+      .map((intent) => `${intent.name} (${intent.status})`)
+      .join(", ")
   return [
     `${preset.name}${preset.recommended ? " (recommended)" : ""}`,
     `  ${preset.description}`,
     `  Scope: guild IDs ${preset.requirements.guildIds}; channel IDs ${preset.requirements.channelIds}`,
     `  Thread scope: ${preset.requirements.threadScope}`,
     `  Message Content intent: ${preset.requirements.messageContentIntent}`,
+    `  Bot permissions: ${preset.requirements.botPermissions.join(", ")} (${preset.requirements.botPermissionBitfield})`,
+    `  Privileged intents: ${privilegedIntents}`,
     `  Tool surface: ${preset.toolSurface}`,
     `  Toolsets: ${preset.toolsets.join(", ")}`,
     `  Tools (${preset.toolNames.length}): ${preset.toolNames.join(", ")}`,
     `  Risk classes: ${preset.riskClasses.join(", ")}`,
     "  Writes: disabled",
     "  Gateway: disabled",
+  ].join("\n")
+}
+
+function renderBotInstallPlan(report: BotInstallPlan): string {
+  const intents = report.privilegedIntents.length === 0
+    ? "none required for this preset"
+    : report.privilegedIntents
+      .map((intent) => `${intent.name} (${intent.status})`)
+      .join(", ")
+  const [setup, validate, doctor, smoke] = report.postInstall.commands
+  return [
+    `Discord MCP bot install plan: ${report.preset.name}`,
+    `Application: ${report.applicationId}`,
+    `Guild: ${report.guildId} (selection locked)`,
+    `Bot permissions: ${report.permissions.names.join(", ")} (${report.permissions.bitfield})`,
+    "Administrator: not requested",
+    `Privileged intents: ${intents}`,
+    "Authorization: guild install, bot scope only, no callback or user token",
+    "",
+    "1. In the Discord Developer Portal, enable Guild Install and keep Public Bot disabled unless you intend to share this application.",
+    `2. Review privileged intents: ${intents}.`,
+    "3. Open this callback-free, guild-locked URL and approve only the permissions listed above:",
+    report.installUrl,
+    `4. Store the bot token as ${report.postInstall.credentialVariable} in a secret-capable MCP host setting. Never put its value in the config file or command line.`,
+    `5. ${report.preset.name === "channel-reader" ? "Replace CHANNEL_ID, then " : ""}Run verified setup to create the strict non-secret policy file:`,
+    `   ${setup}`,
+    "6. Validate the file, verify Discord identity and access, then exercise the read-only MCP path:",
+    `   ${validate}`,
+    `   ${doctor}`,
+    `   ${smoke}`,
+    "",
+    "Discord was not contacted and no browser was opened. Guild roles and channel overrides determine effective access; online doctor is the post-install authority.",
   ].join("\n")
 }
 
@@ -1453,6 +1547,19 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "preset": {
+        if (parsed.action === "install") {
+          const report = createBotInstallPlan({
+            applicationId: parsed.applicationId,
+            guildId: parsed.guildId,
+            preset: parsed.name,
+          })
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderBotInstallPlan(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
         if (parsed.action === "list") {
           const report: PresetListReport = {
             presets: SETUP_PRESETS,

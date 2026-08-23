@@ -501,6 +501,7 @@ async function checkDocumentation(packageJson) {
   for (const required of [
     "[Complete reference](docs/reference.md)",
     "--preset server-observer",
+    "preset install server-observer",
     "--config ./discord-mcp.json",
     "catalog --check --json",
     "config validate ./discord-mcp.json",
@@ -509,6 +510,7 @@ async function checkDocumentation(packageJson) {
   ]) {
     invariant(readme.includes(required), `README is missing ${required}`)
   }
+  invariant(reference.includes("preset install server-observer"), "complete reference lacks preset-derived bot installation")
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")

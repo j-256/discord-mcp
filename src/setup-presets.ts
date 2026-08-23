@@ -15,6 +15,11 @@ import {
   type McpToolName,
   type McpToolRiskClass,
 } from "./observability-catalog.js"
+import {
+  DISCORD_PERMISSIONS,
+  DISCORD_PERMISSION_NAMES,
+  type DiscordPermissionName,
+} from "./permissions.js"
 
 export const SETUP_PRESET_NAMES = Object.freeze([
   "server-observer",
@@ -25,12 +30,18 @@ export type SetupPresetName = typeof SETUP_PRESET_NAMES[number]
 export type SetupPresetChannelScope = "optional" | "required"
 export type SetupPresetMessageContentIntent = "not-required" | "recommended"
 
+export interface SetupPresetPrivilegedIntent {
+  readonly name: "MESSAGE_CONTENT"
+  readonly status: "recommended"
+}
+
 const READ_ONLY_RISK_CLASSES = Object.freeze([
   "discord-read",
   "local-read",
 ] as const satisfies readonly McpToolRiskClass[])
 
 interface SetupPresetSource {
+  botPermissions: readonly DiscordPermissionName[]
   channelScope: SetupPresetChannelScope
   description: string
   messageContentIntent: SetupPresetMessageContentIntent
@@ -45,9 +56,12 @@ export interface SetupPresetDescriptor {
   readonly name: SetupPresetName
   readonly recommended: boolean
   readonly requirements: {
+    readonly botPermissionBitfield: string
+    readonly botPermissions: readonly DiscordPermissionName[]
     readonly channelIds: SetupPresetChannelScope
     readonly guildIds: "required"
     readonly messageContentIntent: SetupPresetMessageContentIntent
+    readonly privilegedIntents: readonly SetupPresetPrivilegedIntent[]
     readonly threadScope: "inherits-allowlisted-parent"
   }
   readonly riskClasses: readonly McpToolRiskClass[]
@@ -74,6 +88,7 @@ export interface ApplySetupPresetOptions extends SetupPresetSelection {
 
 const PRESET_SOURCES = Object.freeze([
   {
+    botPermissions: ["VIEW_CHANNEL"],
     channelScope: "optional",
     description: "Inspect guild metadata, roles, permissions, connector health, observability state, and content-free activity within exact guild scope.",
     messageContentIntent: "not-required",
@@ -89,6 +104,7 @@ const PRESET_SOURCES = Object.freeze([
     ],
   },
   {
+    botPermissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
     channelScope: "required",
     description: "Read and search messages within exact channel scope, including documented child-thread inheritance, while retaining bounded guild, role, permission, connector, observability, and content-free activity inspection.",
     messageContentIntent: "recommended",
@@ -122,6 +138,32 @@ function isConnectorEnvironmentName(name: string): boolean {
 function createSetupPresetDescriptor(
   source: SetupPresetSource,
 ): SetupPresetDescriptor {
+  const botPermissions = [...source.botPermissions]
+  if (new Set(botPermissions).size !== botPermissions.length) {
+    throw new Error(`Setup preset ${source.name} includes duplicate bot permissions`)
+  }
+  const canonicalBotPermissions = DISCORD_PERMISSION_NAMES.filter((name) => (
+    botPermissions.includes(name)
+  ))
+  if (
+    canonicalBotPermissions.length !== botPermissions.length
+    || canonicalBotPermissions.some((name, index) => name !== botPermissions[index])
+  ) {
+    throw new Error(`Setup preset ${source.name} must use canonical bot permissions`)
+  }
+  if (botPermissions.includes("ADMINISTRATOR")) {
+    throw new Error(`Setup preset ${source.name} cannot request Administrator`)
+  }
+  const botPermissionBitfield = botPermissions.reduce(
+    (permissions, name) => permissions | DISCORD_PERMISSIONS[name],
+    0n,
+  ).toString()
+  const privilegedIntents = source.messageContentIntent === "recommended"
+    ? [Object.freeze({
+        name: "MESSAGE_CONTENT" as const,
+        status: "recommended" as const,
+      })]
+    : []
   const toolsets = selectedMcpToolsets(new Set(source.toolsets))
   if (
     toolsets.length !== source.toolsets.length
@@ -158,9 +200,12 @@ function createSetupPresetDescriptor(
     name: source.name,
     recommended: source.recommended,
     requirements: Object.freeze({
+      botPermissionBitfield,
+      botPermissions: Object.freeze(botPermissions),
       channelIds: source.channelScope,
       guildIds: "required" as const,
       messageContentIntent: source.messageContentIntent,
+      privilegedIntents: Object.freeze(privilegedIntents),
       threadScope: "inherits-allowlisted-parent" as const,
     }),
     riskClasses: READ_ONLY_RISK_CLASSES,

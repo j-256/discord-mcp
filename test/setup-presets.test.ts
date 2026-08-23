@@ -8,6 +8,7 @@ import {
 } from "../src/constants.js"
 import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
 import { MCP_TOOL_RISK_CLASSES } from "../src/observability-catalog.js"
+import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import {
   applySetupPreset,
   getSetupPreset,
@@ -33,12 +34,26 @@ test("setup presets expose deterministic exact read-only contracts", () => {
   assert.equal(SETUP_PRESETS.filter((preset) => preset.recommended).length, 1)
   assert.equal(SETUP_PRESETS[0]?.recommended, true)
   assert.equal(SETUP_PRESETS[0]?.requirements.messageContentIntent, "not-required")
+  assert.deepEqual(SETUP_PRESETS[0]?.requirements.botPermissions, ["VIEW_CHANNEL"])
+  assert.equal(SETUP_PRESETS[0]?.requirements.botPermissionBitfield, "1024")
+  assert.deepEqual(SETUP_PRESETS[0]?.requirements.privilegedIntents, [])
   assert.equal(SETUP_PRESETS[1]?.requirements.channelIds, "required")
   assert.equal(SETUP_PRESETS[1]?.requirements.messageContentIntent, "recommended")
+  assert.deepEqual(SETUP_PRESETS[1]?.requirements.botPermissions, [
+    "VIEW_CHANNEL",
+    "READ_MESSAGE_HISTORY",
+  ])
+  assert.equal(SETUP_PRESETS[1]?.requirements.botPermissionBitfield, "66560")
+  assert.deepEqual(SETUP_PRESETS[1]?.requirements.privilegedIntents, [{
+    name: "MESSAGE_CONTENT",
+    status: "recommended",
+  }])
 
   for (const preset of SETUP_PRESETS) {
     assert.equal(Object.isFrozen(preset), true)
     assert.equal(Object.isFrozen(preset.requirements), true)
+    assert.equal(Object.isFrozen(preset.requirements.botPermissions), true)
+    assert.equal(Object.isFrozen(preset.requirements.privilegedIntents), true)
     assert.equal(Object.isFrozen(preset.riskClasses), true)
     assert.equal(Object.isFrozen(preset.toolNames), true)
     assert.equal(Object.isFrozen(preset.toolsets), true)
@@ -49,6 +64,14 @@ test("setup presets expose deterministic exact read-only contracts", () => {
     )
     assert.equal(preset.toolSurface, "full")
     assert.equal(preset.writeCapable, false)
+    assert.equal(preset.requirements.botPermissions.includes("ADMINISTRATOR"), false)
+    assert.equal(
+      preset.requirements.botPermissions.reduce(
+        (permissions, name) => permissions | DISCORD_PERMISSIONS[name],
+        0n,
+      ).toString(),
+      preset.requirements.botPermissionBitfield,
+    )
     assert.deepEqual(
       preset.toolNames,
       [

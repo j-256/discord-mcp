@@ -337,6 +337,65 @@ async function verifyCatalog(image) {
   return first
 }
 
+async function verifyBotInstallPlan(image) {
+  const command = [
+    "preset",
+    "install",
+    "channel-reader",
+    "--application-id",
+    CONFIG_APPLICATION_ID,
+    "--guild-id",
+    CONFIG_GUILD_ID,
+    "--json",
+  ]
+  const hostEnvironment = {
+    LANG: "C.UTF-8",
+    PATH: process.env.PATH || "/usr/bin:/bin",
+  }
+  const source = await run(
+    process.execPath,
+    [join(REPOSITORY_ROOT, "dist", "cli.js"), ...command],
+    { capture: true, env: hostEnvironment },
+  )
+  const first = await run(
+    "docker",
+    restrictedRunArguments(image, command),
+    { capture: true },
+  )
+  const second = await run(
+    "docker",
+    restrictedRunArguments(image, command),
+    { capture: true },
+  )
+  for (const [label, result] of [["source", source], ["container", first], ["repeated container", second]]) {
+    assertSafeText(`${result.stdout}\n${result.stderr}`, `${label} bot installation plan`)
+  }
+  assert.equal(second.stdout, first.stdout, "container bot installation plan is not deterministic")
+  assert.equal(first.stdout, source.stdout, "container bot installation plan differs from source")
+  const report = JSON.parse(first.stdout)
+  assert.deepEqual(report.authorization, {
+    callbackRequired: false,
+    guildSelectionLocked: true,
+    installContext: "guild",
+    scopes: ["bot"],
+    userTokenRequested: false,
+  })
+  assert.deepEqual(report.execution, {
+    browserOpened: false,
+    credentialsRequired: false,
+    discordContacted: false,
+  })
+  assert.deepEqual(report.permissions, {
+    administratorRequested: false,
+    bitfield: "66560",
+    names: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+  })
+  assert.equal(
+    report.installUrl,
+    `https://discord.com/oauth2/authorize?client_id=${CONFIG_APPLICATION_ID}&scope=bot&permissions=66560&guild_id=${CONFIG_GUILD_ID}&disable_guild_select=true`,
+  )
+}
+
 async function verifyMcp(image, catalog) {
   const transport = new StdioClientTransport({
     args: restrictedRunArguments(image),
@@ -444,6 +503,7 @@ try {
   const historyEntries = await inspectHistory(image)
   const runtime = await verifyRestrictedRuntime(image)
   const configuration = await verifyMountedConfiguration(image)
+  await verifyBotInstallPlan(image)
   const catalog = await verifyCatalog(image)
   const mcp = await verifyMcp(image, catalog.report)
   const missingCredential = await verifyMissingCredentialFailure(image)

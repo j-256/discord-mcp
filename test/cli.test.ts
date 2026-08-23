@@ -9,6 +9,7 @@ import {
   runCli,
   type CliDependencies,
 } from "../src/cli.js"
+import { createBotInstallPlan } from "../src/bot-install.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
 import {
   explainConnectorConfig,
@@ -507,6 +508,23 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     json: false,
     name: "server-observer",
   })
+  assert.deepEqual(parseCliArguments([
+    "preset",
+    "install",
+    "CHANNEL-READER",
+    "--application-id",
+    APPLICATION_ID,
+    "--guild-id",
+    GUILD_ID,
+    "--json",
+  ]), {
+    action: "install",
+    applicationId: APPLICATION_ID,
+    command: "preset",
+    guildId: GUILD_ID,
+    json: true,
+    name: "channel-reader",
+  })
   assert.deepEqual(parseCliArguments(["profile", "list", "--json"]), {
     action: "list",
     command: "profile",
@@ -612,7 +630,47 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     ]),
     /Setup preset must be one of/,
   )
-  assert.throws(() => parseCliArguments(["preset"]), /requires list or show/)
+  assert.throws(() => parseCliArguments(["preset"]), /requires install, list, or show/)
+  assert.throws(
+    () => parseCliArguments(["preset", "install", "server-observer"]),
+    /requires --application-id/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "preset",
+      "install",
+      "server-observer",
+      "--application-id",
+      APPLICATION_ID,
+    ]),
+    /requires --guild-id/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "preset",
+      "install",
+      "server-observer",
+      "--application-id",
+      "0",
+      "--guild-id",
+      GUILD_ID,
+    ]),
+    /Application ID must be a Discord snowflake/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "preset",
+      "install",
+      "server-observer",
+      "--application-id",
+      APPLICATION_ID,
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+    ]),
+    /Option --application-id may be provided only once/,
+  )
   assert.throws(
     () => parseCliArguments(["profile", "remove", "support-bot"]),
     /requires --confirm/,
@@ -1201,12 +1259,61 @@ test("CLI inspects presets without credentials or dependency activity", async ()
   assert.match(textOutput.value(), /server-observer \(recommended\)/)
   assert.match(textOutput.value(), /Writes: disabled/)
   assert.match(textOutput.value(), /Gateway: disabled/)
+  assert.match(textOutput.value(), /Bot permissions: VIEW_CHANNEL \(1024\)/)
   assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
   assert.deepEqual(JSON.parse(jsonOutput.value()), {
     preset: getSetupPreset("channel-reader"),
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     status: "ok",
   })
+})
+
+test("CLI generates human and JSON bot installation plans without dependencies", async () => {
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+  const unavailable = dependencies({
+    async prepareSetup() {
+      throw new Error("Bot installation planning must not run setup")
+    },
+  })
+  const args = [
+    "preset",
+    "install",
+    "channel-reader",
+    "--application-id",
+    APPLICATION_ID,
+    "--guild-id",
+    GUILD_ID,
+  ]
+
+  assert.equal(await runCli({
+    args,
+    dependencies: unavailable,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [...args, "--json"],
+    dependencies: unavailable,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: jsonOutput.stream,
+  }), 0)
+
+  assert.match(textOutput.value(), /Discord MCP bot install plan: channel-reader/)
+  assert.match(textOutput.value(), /VIEW_CHANNEL, READ_MESSAGE_HISTORY \(66560\)/)
+  assert.match(textOutput.value(), /Administrator: not requested/)
+  assert.match(textOutput.value(), /MESSAGE_CONTENT \(recommended\)/)
+  assert.match(textOutput.value(), /guild-locked/)
+  assert.match(textOutput.value(), /Discord was not contacted and no browser was opened/)
+  assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
+  assert.deepEqual(
+    JSON.parse(jsonOutput.value()),
+    createBotInstallPlan({
+      applicationId: APPLICATION_ID,
+      guildId: GUILD_ID,
+      preset: "channel-reader",
+    }),
+  )
 })
 
 test("CLI activates profiles before serve, doctor, and smoke without mutating the source", async () => {

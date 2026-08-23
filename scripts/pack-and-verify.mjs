@@ -213,6 +213,7 @@ assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
 assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
 assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
+assert.equal(typeof connector.createBotInstallPlan, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
   botId: "200000000000000001",
@@ -358,7 +359,54 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     assertSortedUniqueStrings(preset.toolNames, `installed setup preset ${preset.name} tool inventory`)
     assertSortedUniqueStrings(preset.toolsets, `installed setup preset ${preset.name} toolset inventory`)
     assert.deepEqual(preset.riskClasses, ["discord-read", "local-read"])
+    invariant(preset.requirements.botPermissions.includes("ADMINISTRATOR") === false, `installed setup preset ${preset.name} requests Administrator`)
+    invariant(/^(0|[1-9][0-9]*)$/.test(preset.requirements.botPermissionBitfield), `installed setup preset ${preset.name} has an invalid bot permission bitfield`)
   }
+  const installArguments = [
+    "preset",
+    "install",
+    "channel-reader",
+    "--application-id",
+    "100000000000000001",
+    "--guild-id",
+    "300000000000000001",
+    "--json",
+  ]
+  const installResult = await run(bin, installArguments, {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  const repeatedInstallResult = await run(bin, installArguments, {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  assert.equal(repeatedInstallResult.stdout, installResult.stdout, "installed bot plan is not deterministic")
+  const installPlan = JSON.parse(installResult.stdout)
+  invariant(installPlan.status === "ok", "installed bot planning failed")
+  assert.deepEqual(installPlan.authorization, {
+    callbackRequired: false,
+    guildSelectionLocked: true,
+    installContext: "guild",
+    scopes: ["bot"],
+    userTokenRequested: false,
+  })
+  assert.deepEqual(installPlan.execution, {
+    browserOpened: false,
+    credentialsRequired: false,
+    discordContacted: false,
+  })
+  assert.deepEqual(installPlan.permissions, {
+    administratorRequested: false,
+    bitfield: "66560",
+    names: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+  })
+  assert.equal(
+    installPlan.installUrl,
+    "https://discord.com/oauth2/authorize?client_id=100000000000000001&scope=bot&permissions=66560&guild_id=300000000000000001&disable_guild_select=true",
+  )
+  assert.doesNotMatch(installResult.stdout, /ADMINISTRATOR/)
   const catalogResult = await run(bin, ["catalog", "--check", "--json"], {
     capture: true,
     cwd: consumer,

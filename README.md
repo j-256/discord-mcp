@@ -32,7 +32,7 @@ Requirements:
 
 Each deployment uses a Discord application and bot controlled by that operator. Discord MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.
 
-Do not grant the bot `Administrator`. Start with `View Channels` and `Read Message History` only where the connector should read. The [bot setup guide](docs/reference.md#discord-bot-setup) explains optional intents and feature-specific permissions.
+Do not grant the bot `Administrator`. Generate the exact initial permission grant from a read-only preset, then narrow the installed bot role with category or channel overrides. The [bot setup guide](docs/reference.md#discord-bot-setup) explains bot ownership, optional intents, and later feature-specific permissions.
 
 ### Inspect before connecting
 
@@ -56,6 +56,18 @@ docker run --rm -i \
   --pids-limit=64 \
   ghcr.io/j-256/discord-mcp:0.1.0 catalog --check
 ```
+
+### Install your owner-managed bot
+
+Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications), copy the public Application ID and target Server ID, and generate a callback-free install link whose guild and least-privilege permission grant come from the recommended preset:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.0 preset install server-observer \
+  --application-id YOUR_APPLICATION_ID \
+  --guild-id YOUR_GUILD_ID
+```
+
+Open the printed URL while signed in as a member allowed to manage that server. It requests only `View Channel` for `server-observer`, locks the server selector to the supplied ID, requests no user token, and never sends the bot token to the connector command. Keep Public Bot disabled unless other people should be able to install your application. Use `channel-reader` instead to request `View Channel` plus `Read Message History`; its plan also identifies Message Content as the recommended Developer Portal intent.
 
 ### Create the safest first configuration
 
@@ -149,6 +161,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | --- | --- | --- |
 | `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, fixed execution guard, and stable contract plus safety digests | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
+| `discord-mcp preset install server-observer --application-id ID --guild-id ID --json` | Fixed-origin, guild-locked bot authorization URL, exact permission bitfield, intent guidance, and post-install commands | None |
 | `discord-mcp doctor` | Local Node.js, credential-variable, identity-pin, policy, scope, tool-surface, Gateway, observability, and write-gate diagnostics | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
 | `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
