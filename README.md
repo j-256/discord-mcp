@@ -107,6 +107,8 @@ The versioned file is the only policy boundary. It covers identity, read scope, 
 
 Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or migration mode. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
+Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
+
 New feature policy follows the same document shape. For example, reviewed role retirement uses `capabilities.roleDeletionAudit`, `capabilities.roleDeletions`, `scopes.roleDeletionIds`, `gateway.enabled`, and the `role-deletion` toolset. No equivalent environment-policy interface exists.
 
 Use `channel-reader` only when bounded message history and native search are needed. It requires at least one exact channel:
@@ -198,7 +200,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID --json` | Fixed-origin, guild-locked bot authorization URL, exact permission bitfield, intent guidance, and post-install commands | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
 | `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
-| `discord-mcp doctor --config FILE` | Local Node.js, credential-variable, identity-pin, policy, scope, tool-surface, Gateway, observability, and write-gate diagnostics | None |
+| `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
 | `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |

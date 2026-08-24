@@ -22,7 +22,10 @@ import {
   resolveConnectorConfigDocumentAuditFile,
   type ConnectorConfig,
 } from "./config.js"
-import type { ConnectorConfigDocument } from "./config-document.js"
+import {
+  loadConnectorConfigDocumentFile,
+  type ConnectorConfigDocument,
+} from "./config-document.js"
 import {
   explainConnectorConfig,
   initializeConnectorConfigFile,
@@ -271,6 +274,7 @@ export interface CliDependencies {
   listCoordination(activityFile: string): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
   loadConfig(environment: NodeJS.ProcessEnv): ConnectorConfig
+  loadConfigDocument(file: string): ConnectorConfigDocument
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
   applyRecipe(options: ConfigRecipeApplyOptions): Promise<ConfigRecipeApplyReport>
@@ -330,6 +334,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   },
   listProfiles,
   loadConfig: loadConnectorConfig,
+  loadConfigDocument: loadConnectorConfigDocumentFile,
   loadProfile,
   prepareSetup,
   planRecipe: planConfigRecipe,
@@ -1014,7 +1019,7 @@ function helpText(topic: CliCommand | undefined): string {
     ].join("\n")
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy. Add --online to verify Discord identity and scoped guild access. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "coordination") {
     return [
@@ -1636,6 +1641,12 @@ interface RuntimeSelection {
   environment: NodeJS.ProcessEnv
 }
 
+interface DoctorSelection {
+  document?: ConnectorConfigDocument
+  environment: NodeJS.ProcessEnv
+  selectionFailure?: unknown
+}
+
 async function runtimeSelection(
   selection: { configFile?: string; profileName?: string },
   environment: NodeJS.ProcessEnv,
@@ -1652,6 +1663,39 @@ async function runtimeSelection(
   return {
     config: dependencies.loadConfig(selected),
     environment: selected,
+  }
+}
+
+async function doctorSelection(
+  selection: { configFile?: string; profileName?: string },
+  environment: NodeJS.ProcessEnv,
+  dependencies: CliDependencies,
+): Promise<DoctorSelection> {
+  if (selection.profileName) {
+    if (environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()) {
+      throw new ConfigurationError(
+        `Option --profile conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`,
+      )
+    }
+    try {
+      return {
+        document: await dependencies.loadProfile(selection.profileName, { environment }),
+        environment,
+      }
+    } catch (error) {
+      return { environment, selectionFailure: error }
+    }
+  }
+  const selected = configSelectionEnvironment(selection.configFile, environment)
+  const file = selected[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
+  if (!file) throw new RuntimeConfigurationRequiredError(CONFIG_SELECTION_REQUIRED_MESSAGE)
+  try {
+    return {
+      document: dependencies.loadConfigDocument(file),
+      environment: selected,
+    }
+  } catch (error) {
+    return { environment: selected, selectionFailure: error }
   }
 }
 
@@ -1698,21 +1742,24 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "doctor": {
-        const runtime = await runtimeSelection(
+        const diagnostic = await doctorSelection(
           parsed,
           environment,
           dependencies,
         )
         const report = await dependencies.diagnose({
-          config: runtime.config,
-          environment: runtime.environment,
+          ...(diagnostic.document ? { document: diagnostic.document } : {}),
+          environment: diagnostic.environment,
           ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}),
           online: parsed.online,
+          ...(diagnostic.selectionFailure === undefined
+            ? {}
+            : { selectionFailure: diagnostic.selectionFailure }),
         })
         safeWrite(
           stdout,
           parsed.json ? jsonReport(report) : renderDoctor(report),
-          runtime.environment,
+          diagnostic.environment,
         )
         if (report.status === "error") return CLI_EXIT_CODES.failure
         if (report.status === "warning") return CLI_EXIT_CODES.warning

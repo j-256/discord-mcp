@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -27,7 +27,10 @@ import {
   getConfigRecipe,
   planConfigRecipe,
 } from "../src/config-recipes.js"
-import { loadConnectorConfigDocumentFile } from "../src/config-document.js"
+import {
+  createConnectorConfigDocument,
+  loadConnectorConfigDocumentFile,
+} from "../src/config-document.js"
 import { loadConnectorConfigDocument } from "../src/config.js"
 import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
@@ -308,6 +311,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
           variable: credentialVariable,
         },
       }, source)
+    },
+    loadConfigDocument() {
+      return profile
     },
     async loadProfile() {
       return profile
@@ -1124,6 +1130,88 @@ test("CLI returns diagnostic failure while preserving secret-free JSON", async (
   assert.equal(stderr.value(), "")
 })
 
+test("CLI doctor reports an unavailable selected credential without aborting diagnostics", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-doctor-missing-secret-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const configFile = join(root, "discord-mcp.json")
+  await writeConnectorConfigDocumentFile(
+    configFile,
+    createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      credentialVariable: TOKEN_ALIAS,
+      guildIds: [GUILD_ID],
+      name: "doctor-missing-secret",
+      toolsets: ["connector", "guilds"],
+      toolSurface: "full",
+    }),
+  )
+  const stdout = outputStream()
+  const stderr = outputStream()
+
+  assert.equal(await runCli({
+    args: ["doctor", "--config", configFile, "--json"],
+    environment: {},
+    nodeVersion: "22.14.0",
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+  }), 2)
+
+  const report = JSON.parse(stdout.value()) as DoctorReport
+  assert.equal(stderr.value(), "")
+  assert.equal(report.status, "error")
+  assert.equal(
+    report.checks.find((entry) => entry.id === "token")?.status,
+    "fail",
+  )
+  assert.equal(
+    report.checks.find((entry) => entry.id === "configuration")?.status,
+    "pass",
+  )
+  assert.equal("error" in report, false)
+  assert.doesNotMatch(stdout.value(), /DISCORD_MCP_DOCTOR_TOKEN|credential-unavailable/)
+})
+
+test("CLI doctor turns an unreadable selected document into a diagnostic report", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-doctor-invalid-config-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const configFile = join(root, "discord-mcp.json")
+  await writeFile(configFile, "{invalid-json}\n")
+  const stdout = outputStream()
+  const stderr = outputStream()
+
+  assert.equal(await runCli({
+    args: ["doctor", "--config", configFile, "--json"],
+    environment: {},
+    nodeVersion: "22.14.0",
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+  }), 2)
+
+  const report = JSON.parse(stdout.value()) as DoctorReport
+  assert.equal(stderr.value(), "")
+  assert.equal(report.status, "error")
+  assert.equal(
+    report.checks.find((entry) => entry.id === "token")?.status,
+    "fail",
+  )
+  assert.match(
+    report.checks.find((entry) => entry.id === "token")?.summary || "",
+    /could not be inspected/,
+  )
+  assert.equal(
+    report.checks.find((entry) => entry.id === "configuration")?.status,
+    "fail",
+  )
+  assert.equal("error" in report, false)
+  assert.match(
+    report.checks.find((entry) => entry.id === "configuration")?.summary || "",
+    /valid JSON/,
+  )
+})
+
 test("CLI distinguishes doctor warnings and renders their recovery guidance", async () => {
   const stdout = outputStream()
   const exitCode = await runCli({
@@ -1775,7 +1863,7 @@ test("CLI generates human and JSON bot installation plans without dependencies",
   )
 })
 
-test("CLI activates profiles as typed config before serve, doctor, and smoke", async () => {
+test("CLI inspects profiles without activation for doctor while serve and smoke activate", async () => {
   const source = { [TOKEN_ALIAS]: TOKEN, KEEP: "value" }
   const before = { ...source }
   const profile = connectorProfile()
@@ -1790,8 +1878,14 @@ test("CLI activates profiles as typed config before serve, doctor, and smoke", a
     async diagnose(options) {
       events.push("doctor")
       assert.equal(options.environment, source)
-      assert.equal(options.config, config)
+      assert.equal(options.config, undefined)
+      assert.equal(options.document, profile)
       return doctorReport()
+    },
+    async loadProfile(name, options) {
+      events.push(`load:${name}`)
+      assert.equal(options.environment, source)
+      return profile
     },
     serve(options) {
       events.push("serve")
@@ -1828,7 +1922,7 @@ test("CLI activates profiles as typed config before serve, doctor, and smoke", a
   assert.deepEqual(events, [
     "activate:support-bot",
     "serve",
-    "activate:support-bot",
+    "load:support-bot",
     "doctor",
     "activate:support-bot",
     "smoke",
@@ -1847,7 +1941,12 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
     async diagnose(options) {
       events.push("doctor")
       assert.equal(options.environment?.[CONFIG_FILE_ENVIRONMENT_VARIABLE], file)
+      assert.deepEqual(options.document, connectorProfile())
       return doctorReport()
+    },
+    loadConfigDocument(selected) {
+      events.push(`load-document:${selected}`)
+      return connectorProfile()
     },
     serve(options) {
       events.push("serve")
@@ -1879,7 +1978,7 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
   }), 0)
 
   assert.deepEqual(source, before)
-  assert.deepEqual(events, ["serve", "doctor", "smoke"])
+  assert.deepEqual(events, ["serve", `load-document:${file}`, "doctor", "smoke"])
 })
 
 test("CLI routes config lifecycle commands without exposing credential values", async () => {

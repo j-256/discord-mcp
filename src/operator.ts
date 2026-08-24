@@ -20,6 +20,7 @@ import {
   loadConnectorConfigDocumentFile,
   normalizeConfigName,
   parseConnectorConfigDocument,
+  resolveConnectorCredential,
   type ConnectorCredentialReference,
   type ConnectorConfigDocument,
 } from "./config-document.js"
@@ -83,6 +84,8 @@ export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
 const SETUP_BOOTSTRAP_BOT_ID = "900000000000000002"
+const DOCTOR_DIAGNOSTIC_CREDENTIAL_VARIABLE_PREFIX = "DISCORD_MCP_DOCTOR"
+const DOCTOR_DIAGNOSTIC_CREDENTIAL_VALUE = "credential-unavailable"
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
@@ -285,9 +288,11 @@ export interface StatusProvider {
 
 export interface DoctorOptions {
   config?: ConnectorConfig
+  document?: ConnectorConfigDocument
   environment?: NodeJS.ProcessEnv
   nodeVersion?: string
   online?: boolean
+  selectionFailure?: unknown
   service?: StatusProvider
 }
 
@@ -996,6 +1001,136 @@ function redactedSetupVerificationError(
   return new ConfigurationError(message)
 }
 
+interface DoctorConfigState {
+  configurationFailure?: unknown
+  credentialAvailable: boolean
+  credentialFailure?: unknown
+  inspectionConfig?: ConnectorConfig
+  operationalConfig?: ConnectorConfig
+}
+
+function diagnosticConfigDocument(
+  document: ConnectorConfigDocument,
+  variable: string,
+): ConnectorConfigDocument {
+  return {
+    ...document,
+    credential: {
+      provider: "environment",
+      variable,
+    },
+  }
+}
+
+function diagnosticCredentialVariable(environment: NodeJS.ProcessEnv): string {
+  let suffix = 0
+  while (true) {
+    const variable = suffix === 0
+      ? `${DOCTOR_DIAGNOSTIC_CREDENTIAL_VARIABLE_PREFIX}_TOKEN`
+      : `${DOCTOR_DIAGNOSTIC_CREDENTIAL_VARIABLE_PREFIX}_${suffix}_TOKEN`
+    if (!Object.hasOwn(environment, variable)) return variable
+    suffix += 1
+  }
+}
+
+function doctorConfigState(
+  options: DoctorOptions,
+  environment: NodeJS.ProcessEnv,
+): DoctorConfigState {
+  if (options.selectionFailure !== undefined) {
+    return {
+      configurationFailure: options.selectionFailure,
+      credentialAvailable: false,
+    }
+  }
+
+  if (options.config) {
+    if (options.config.token.trim()) {
+      return {
+        credentialAvailable: true,
+        inspectionConfig: options.config,
+        operationalConfig: options.config,
+      }
+    }
+    return {
+      credentialAvailable: false,
+      credentialFailure: new ConfigurationError("Selected bot credential is missing"),
+      inspectionConfig: options.config,
+    }
+  }
+
+  if (options.document) {
+    let document: ConnectorConfigDocument
+    try {
+      document = parseConnectorConfigDocument(options.document)
+    } catch (error) {
+      return {
+        configurationFailure: error,
+        credentialAvailable: false,
+      }
+    }
+
+    let credentialFailure: unknown
+    try {
+      resolveConnectorCredential(document.credential, environment)
+    } catch (error) {
+      credentialFailure = error
+    }
+
+    if (credentialFailure === undefined) {
+      try {
+        const config = loadConnectorConfigDocument(document, environment)
+        return {
+          credentialAvailable: true,
+          inspectionConfig: config,
+          operationalConfig: config,
+        }
+      } catch (error) {
+        return {
+          configurationFailure: error,
+          credentialAvailable: true,
+        }
+      }
+    }
+
+    try {
+      const diagnosticVariable = diagnosticCredentialVariable(environment)
+      const inspectionConfig = loadConnectorConfigDocument(
+        diagnosticConfigDocument(document, diagnosticVariable),
+        {
+          ...environment,
+          [diagnosticVariable]: DOCTOR_DIAGNOSTIC_CREDENTIAL_VALUE,
+        },
+      )
+      return {
+        credentialAvailable: false,
+        credentialFailure,
+        inspectionConfig,
+      }
+    } catch (error) {
+      return {
+        configurationFailure: error,
+        credentialAvailable: false,
+        credentialFailure,
+      }
+    }
+  }
+
+  try {
+    const config = loadConnectorConfig(environment)
+    return {
+      credentialAvailable: true,
+      inspectionConfig: config,
+      operationalConfig: config,
+    }
+  } catch (error) {
+    return {
+      configurationFailure: error,
+      credentialAvailable: false,
+    }
+  }
+}
+
 export async function diagnoseConnector(
   options: DoctorOptions = {},
 ): Promise<DoctorReport> {
@@ -1016,16 +1151,11 @@ export async function diagnoseConnector(
       `Node.js ${nodeVersion} does not satisfy the Node.js ${SUPPORTED_NODE_MAJOR}+ requirement`,
     ))
 
-  let config: ConnectorConfig | undefined
-  let configurationFailure: unknown
-  try {
-    config = options.config || loadConnectorConfig(environment)
-  } catch (error) {
-    configurationFailure = error
-  }
+  const configState = doctorConfigState(options, environment)
+  const config = configState.inspectionConfig
+  const operationalConfig = configState.operationalConfig
 
-  const token = config?.token.trim()
-  checks.push(token
+  checks.push(configState.credentialAvailable
     ? check(
       DOCTOR_CHECK_IDS.token,
       "pass",
@@ -1034,7 +1164,11 @@ export async function diagnoseConnector(
     : check(
       DOCTOR_CHECK_IDS.token,
       "fail",
-      "Selected bot credential is missing",
+      configState.credentialFailure === undefined
+        ? configState.configurationFailure === undefined
+          ? "Selected bot credential is missing"
+          : "Selected bot credential could not be inspected because the selected configuration is unavailable"
+        : `Selected bot credential is unavailable: ${redactedError(configState.credentialFailure, environment)}`,
     ))
 
   if (config) {
@@ -1047,7 +1181,7 @@ export async function diagnoseConnector(
     checks.push(check(
       DOCTOR_CHECK_IDS.configuration,
       "fail",
-      redactedError(configurationFailure, environment),
+      redactedError(configState.configurationFailure, environment),
     ))
   }
 
@@ -2751,15 +2885,17 @@ export async function diagnoseConnector(
 
   let identity: IdentitySummary | null = null
   if (online) {
-    if (!config) {
+    if (!config || !operationalConfig) {
       checks.push(check(
         DOCTOR_CHECK_IDS.guildAccess,
         "fail",
-        "Online verification requires valid connector configuration",
+        config
+          ? "Online verification was skipped because the selected bot credential is unavailable"
+          : "Online verification requires valid connector configuration",
       ))
     } else {
       try {
-        const service = options.service || new ConnectorService({ config })
+        const service = options.service || new ConnectorService({ config: operationalConfig })
         const status = await service.getStatus()
         identity = identitySummary(status)
         checks.push(check(
@@ -2939,7 +3075,7 @@ export async function diagnoseConnector(
         checks.push(check(
           DOCTOR_CHECK_IDS.guildAccess,
           "fail",
-          redactedError(error, environment, config.token),
+          redactedError(error, environment, operationalConfig.token),
         ))
       }
     }

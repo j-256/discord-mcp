@@ -658,6 +658,164 @@ test("doctor resolves the credential variable referenced by a selected configura
   )
 })
 
+test("doctor inspects a strict document when its declared environment credential is missing", async () => {
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "missing-environment-credential",
+    toolsets: ["connector", "guilds"],
+    toolSurface: "progressive",
+  })
+
+  const report = await diagnoseNativeConnector({
+    document,
+    environment: {},
+    nodeVersion: "22.14.0",
+  })
+
+  assert.equal(report.status, "error")
+  const token = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)
+  assert.equal(token?.status, "fail")
+  assert.match(token?.summary || "", new RegExp(TOKEN_ALIAS))
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.configuration)?.status,
+    "pass",
+  )
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.applicationIdentity)?.status,
+    "pass",
+  )
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.toolSurface)?.status,
+    "pass",
+  )
+  assert.doesNotMatch(JSON.stringify(report), /DISCORD_MCP_DOCTOR_TOKEN|credential-unavailable/)
+})
+
+test("doctor inspects a strict document when its file credential is unavailable", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-missing-file-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const credentialFile = join(root, "missing-token")
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    credentialFile,
+    guildIds: [GUILD_ID],
+    name: "missing-file-credential",
+    toolsets: ["connector"],
+    toolSurface: "full",
+  })
+
+  const report = await diagnoseNativeConnector({
+    document,
+    environment: {},
+    nodeVersion: "22.14.0",
+  })
+
+  const token = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)
+  assert.equal(token?.status, "fail")
+  assert.match(token?.summary || "", /credential file was not found/)
+  assert.doesNotMatch(token?.summary || "", new RegExp(credentialFile))
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.configuration)?.status,
+    "pass",
+  )
+})
+
+test("online doctor never contacts Discord when the selected credential is unavailable", async () => {
+  let statusCalls = 0
+  const report = await diagnoseNativeConnector({
+    document: createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      credentialVariable: TOKEN_ALIAS,
+      guildIds: [GUILD_ID],
+      name: "offline-credential",
+      toolsets: ["connector"],
+      toolSurface: "full",
+    }),
+    environment: {},
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        statusCalls += 1
+        return status()
+      },
+    },
+  })
+
+  assert.equal(statusCalls, 0)
+  const access = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.guildAccess)
+  assert.equal(access?.status, "fail")
+  assert.match(access?.summary || "", /skipped.*credential is unavailable/i)
+})
+
+test("credential-independent doctor preserves undeclared ambient policy rejection", async () => {
+  const report = await diagnoseNativeConnector({
+    document: createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      credentialVariable: TOKEN_ALIAS,
+      guildIds: [GUILD_ID],
+      name: "ambient-conflict",
+      toolsets: ["connector"],
+      toolSurface: "full",
+    }),
+    environment: {
+      [LEGACY_POLICY_ENVIRONMENT_VARIABLE]: "true",
+      [TOKEN_ALIAS]: TOKEN,
+    },
+    nodeVersion: "22.14.0",
+  })
+
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)?.status,
+    "pass",
+  )
+  const configuration = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.configuration,
+  )
+  assert.equal(configuration?.status, "fail")
+  assert.match(configuration?.summary || "", /undeclared environment variables/)
+  assert.equal(
+    report.checks.some((entry) => entry.id === DOCTOR_CHECK_IDS.toolSurface),
+    false,
+  )
+})
+
+test("credential-independent doctor never masks a colliding ambient variable", async () => {
+  const report = await diagnoseNativeConnector({
+    document: createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      credentialVariable: TOKEN_ALIAS,
+      guildIds: [GUILD_ID],
+      name: "ambient-diagnostic-collision",
+      toolsets: ["connector"],
+      toolSurface: "full",
+    }),
+    environment: {
+      DISCORD_MCP_DOCTOR_TOKEN: "hostile-policy-value",
+    },
+    nodeVersion: "22.14.0",
+  })
+
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)?.status,
+    "fail",
+  )
+  const configuration = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.configuration,
+  )
+  assert.equal(configuration?.status, "fail")
+  assert.match(configuration?.summary || "", /DISCORD_MCP_DOCTOR_TOKEN/)
+})
+
 test("doctor resolves file-backed credentials and redacts downstream failures", async (context) => {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-file-secret-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
