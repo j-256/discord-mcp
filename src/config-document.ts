@@ -304,6 +304,12 @@ function scopeDescription(documentKey: string): string {
     : `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }
 
+function storageDescription(documentKey: string): string {
+  return documentKey === "guildExpressionRoots"
+    ? "Owned local roots shared by guild-expression creation and reviewed role-icon images"
+    : `Owned local roots for ${humanizeConfigKey(documentKey)}`
+}
+
 const capabilityShape = Object.fromEntries(
   CONFIG_CAPABILITY_MAPPINGS.map((entry) => [
     entry.documentKey,
@@ -342,7 +348,7 @@ const storageShape = Object.fromEntries(
         .describe("Absolute path for the content-free activity log")
         .optional()
       : rootArraySchema
-        .describe(`Owned local roots for ${humanizeConfigKey(entry.documentKey)}`)
+        .describe(storageDescription(entry.documentKey))
         .optional(),
   ]),
 ) as Record<string, z.ZodType>
@@ -1352,7 +1358,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       defaultValue: entry.environmentKey === "auditFile" ? undefined : [],
       description: entry.environmentKey === "auditFile"
         ? "Absolute path for the content-free activity log"
-        : `Owned local roots for ${humanizeConfigKey(entry.documentKey)}`,
+        : storageDescription(entry.documentKey),
       environmentVariable: entry.environmentVariable,
       kind: (entry.environmentKey === "auditFile" ? "path" : "paths") as "path" | "paths",
       path: `$.storage.${entry.documentKey}`,

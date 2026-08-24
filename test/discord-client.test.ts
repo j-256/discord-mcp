@@ -2523,6 +2523,25 @@ test("Discord client never retries rate-limited role creation", async () => {
   assert.equal(sleeps, 0)
 })
 
+function roleIconPng(): Uint8Array {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  const u32 = (value: number) => {
+    const result = Buffer.alloc(4)
+    result.writeUInt32BE(value)
+    return result
+  }
+  const chunk = (type: string, data = Buffer.alloc(0)) => Buffer.concat([
+    u32(data.byteLength),
+    Buffer.from(type, "ascii"),
+    data,
+    Buffer.alloc(4),
+  ])
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(64, 0)
+  header.writeUInt32BE(64, 4)
+  return Buffer.concat([signature, chunk("IHDR", header), chunk("IEND")])
+}
+
 test("Discord client reads exact role-member counts and sends one narrow role PATCH", async () => {
   const requests: Array<{
     body: unknown
@@ -2600,6 +2619,36 @@ test("Discord client reads exact role-member counts and sends one narrow role PA
       reason: "Support%20%2F%20reviewed",
       url: `${API_BASE_URL}/guilds/100/roles/300`,
     },
+  ])
+})
+
+test("Discord client serializes exact mutually exclusive role icon intents", async () => {
+  const bodies: unknown[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      bodies.push(typeof init?.body === "string" ? JSON.parse(init.body) : null)
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const bytes = roleIconPng()
+  await client.modifyGuildRole("100", "300", {
+    roleIcon: { bytes, format: "png", kind: "image" },
+  }, "Reviewed image")
+  await client.modifyGuildRole("100", "300", {
+    roleIcon: { kind: "unicode", value: "🛡️" },
+  }, "Reviewed emoji")
+  await client.modifyGuildRole("100", "300", {
+    roleIcon: { kind: "clear" },
+  }, "Reviewed clear")
+  assert.deepEqual(bodies, [
+    {
+      icon: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
+      unicode_emoji: null,
+    },
+    { icon: null, unicode_emoji: "🛡️" },
+    { icon: null, unicode_emoji: null },
   ])
 })
 
@@ -3098,6 +3147,18 @@ test("Discord client rejects malformed role configuration evidence and input", a
   assert.throws(
     () => client.modifyGuildRole("100", "300", { permissions: "01" }, "reviewed"),
     /canonical decimal/,
+  )
+  assert.throws(
+    () => client.modifyGuildRole("100", "300", {
+      roleIcon: { kind: "unicode", value: "not emoji" },
+    }, "reviewed"),
+    /one NFC emoji grapheme/,
+  )
+  assert.throws(
+    () => client.modifyGuildRole("100", "300", {
+      roleIcon: { bytes: roleIconPng(), format: "jpeg", kind: "image" },
+    }, "reviewed"),
+    /format does not match/,
   )
   assert.throws(
     () => client.modifyGuildRole("invalid", "300", { hoist: false }, "reviewed"),

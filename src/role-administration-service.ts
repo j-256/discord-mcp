@@ -470,6 +470,10 @@ export function normalizeDiscordRole(
     || (role.flags as number) < 0
     || !validNullableString(role.icon ?? null)
     || !validNullableString(role.unicode_emoji ?? null)
+    || (
+      (role.icon ?? null) !== null
+      && (role.unicode_emoji ?? null) !== null
+    )
   ) {
     throw new DiscordRoleEvidenceError("Discord returned incomplete or invalid role evidence")
   }

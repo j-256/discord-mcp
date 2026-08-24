@@ -360,6 +360,15 @@ test("role inventory is bounded, current, and exposes permission evidence", () =
     () => normalizeDiscordRoleInventory([missingColor], GUILD_ID),
     /color evidence/,
   )
+  assert.throws(
+    () => normalizeDiscordRoleInventory([
+      role(GUILD_ID, "@everyone", 0n, 0, {
+        icon: "role-icon-hash",
+        unicode_emoji: "🩵",
+      }),
+    ], GUILD_ID),
+    /invalid role evidence/,
+  )
 })
 
 test("role creation plans bind complete evidence and return an exact no-op", async () => {

@@ -407,6 +407,8 @@ export const DISCORD_LIMITS = Object.freeze({
   requestTimeoutMs: 30_000,
   retries: 3,
   roleColor: 0xFF_FF_FF,
+  roleIconBytes: 256 * 1_024,
+  roleIconPixels: 64,
   roleNameCharacters: 100,
   scheduledEventCoverBytes: 8 * 1_024 * 1_024,
   scheduledEventDescriptionCharacters: 1_000,

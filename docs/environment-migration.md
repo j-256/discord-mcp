@@ -194,7 +194,7 @@ The table below documents migration inputs. Except for referenced secrets and th
 | `DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT` | For emoji or sticker inventory | Must be exactly `true` to enable privacy-safe guild-expression reads |
 | `DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES` | For emoji or sticker changes | Must be exactly `true` in addition to expression audit to enable reviewed create, update, or delete |
 | `DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS` | For expression audit or changes | Non-empty exact guild allowlist and a subset of the read guild allowlist when one exists |
-| `DISCORD_MCP_GUILD_EXPRESSION_ROOTS` | For expression creation | One absolute canonical owned directory, or a JSON array of such directories, containing eligible local emoji and sticker files; updates and deletions do not require roots |
+| `DISCORD_MCP_GUILD_EXPRESSION_ROOTS` | For expression creation or local role icons | One absolute canonical owned directory, or a JSON array of such directories, containing eligible local emoji, sticker, and reviewed 64 by 64 role-icon files; expression updates and deletions plus role metadata, clear, and Unicode icon changes do not require roots |
 | `DISCORD_MCP_ALLOW_AUTOMOD_AUDIT` | For AutoMod inventory | Must be exactly `true` to enable privacy-safe AutoMod rule reads |
 | `DISCORD_MCP_ALLOW_AUTOMOD_CHANGES` | For AutoMod changes | Must be exactly `true` in addition to AutoMod audit to enable reviewed create, update, enable, disable, or delete |
 | `DISCORD_MCP_AUTOMOD_GUILD_IDS` | For AutoMod audit or changes | Non-empty exact guild allowlist and a subset of the read guild allowlist when one exists |

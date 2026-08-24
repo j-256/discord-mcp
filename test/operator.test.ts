@@ -2589,6 +2589,7 @@ test("doctor and setup explain exact reviewed role-configuration scope", async (
   const enabled = await diagnoseConnector({
     environment: environment({
       DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
+      DISCORD_MCP_GUILD_EXPRESSION_ROOTS: process.cwd(),
       DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
     }),
     nodeVersion: "22.14.0",
@@ -2598,6 +2599,13 @@ test("doctor and setup explain exact reviewed role-configuration scope", async (
   })
   const warning = await diagnoseConnector({
     environment: warningEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const imageWarning = await diagnoseConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
+      DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
+    }),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
@@ -2619,11 +2627,24 @@ test("doctor and setup explain exact reviewed role-configuration scope", async (
   assert.equal(configuration?.status, "pass")
   assert.match(configuration?.summary || "", /1 exact roles/)
   assert.match(configuration?.summary || "", /complete readback/)
+  assert.match(configuration?.summary || "", /1 canonical local-image roots/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.roleConfigurationPolicy,
     )?.status,
     "warn",
+  )
+  assert.equal(
+    imageWarning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.roleConfigurationPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(
+    imageWarning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.roleConfigurationPolicy,
+    )?.summary || "",
+    /local-image role icons are blocked/,
   )
   assert.match(setup.warnings.join("\n"), /exact role allowlist/)
   assert.match(omitted.warnings.join("\n"), /role-configuration toolset/)

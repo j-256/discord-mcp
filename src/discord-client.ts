@@ -60,6 +60,11 @@ import type {
   EmojiFileFormat,
   StickerFileFormat,
 } from "./guild-expression-file.js"
+import {
+  inspectRoleIconBytes,
+  type RoleIconFileFormat,
+} from "./role-icon-file.js"
+import { assertRoleIconUnicodeEmoji } from "./role-icon.js"
 import type { ScheduledEventCoverFormat } from "./scheduled-event-file.js"
 import type { SoundboardFileFormat } from "./soundboard-file.js"
 import {
@@ -1151,6 +1156,10 @@ export interface ModifyGuildRoleInput {
   mentionable?: boolean
   name?: string
   permissions?: string
+  roleIcon?:
+    | { kind: "clear" }
+    | { kind: "image"; bytes: Uint8Array; format: RoleIconFileFormat }
+    | { kind: "unicode"; value: string }
 }
 
 export interface ModifyGuildRolePositionInput {
@@ -6430,6 +6439,7 @@ const MODIFY_GUILD_ROLE_KEYS: ReadonlySet<string> = new Set([
   "mentionable",
   "name",
   "permissions",
+  "roleIcon",
 ])
 const MODIFY_GUILD_ROLE_COLOR_KEYS: ReadonlySet<string> = new Set([
   "primaryColor",
@@ -6543,6 +6553,45 @@ function modifyGuildRoleBody(input: ModifyGuildRoleInput): Record<string, unknow
   ) {
     throw new RangeError("Discord role permissions must be a canonical decimal bitfield")
   }
+  let roleIcon: { icon: string | null; unicode_emoji: string | null } | undefined
+  if (input.roleIcon !== undefined) {
+    if (
+      !input.roleIcon
+      || typeof input.roleIcon !== "object"
+      || Array.isArray(input.roleIcon)
+      || !["clear", "image", "unicode"].includes(input.roleIcon.kind)
+    ) {
+      throw new RangeError("Discord role icon input must be one exact tagged intent")
+    }
+    if (input.roleIcon.kind === "clear") {
+      if (Object.keys(input.roleIcon).length !== 1) {
+        throw new RangeError("Discord role icon clear input must be exact")
+      }
+      roleIcon = { icon: null, unicode_emoji: null }
+    } else if (input.roleIcon.kind === "unicode") {
+      if (Object.keys(input.roleIcon).sort().join("\0") !== "kind\0value") {
+        throw new RangeError("Discord role icon Unicode input must be exact")
+      }
+      assertRoleIconUnicodeEmoji(input.roleIcon.value)
+      roleIcon = { icon: null, unicode_emoji: input.roleIcon.value }
+    } else {
+      if (
+        Object.keys(input.roleIcon).sort().join("\0") !== "bytes\0format\0kind"
+        || !(input.roleIcon.bytes instanceof Uint8Array)
+        || !["jpeg", "png"].includes(input.roleIcon.format)
+      ) {
+        throw new RangeError("Discord role icon image input must be exact")
+      }
+      const details = inspectRoleIconBytes(input.roleIcon.bytes)
+      if (details.format !== input.roleIcon.format) {
+        throw new RangeError("Discord role icon image format does not match its bytes")
+      }
+      roleIcon = {
+        icon: `data:${details.mediaType};base64,${Buffer.from(input.roleIcon.bytes).toString("base64")}`,
+        unicode_emoji: null,
+      }
+    }
+  }
   return {
     ...(input.colors !== undefined
       ? {
@@ -6557,6 +6606,7 @@ function modifyGuildRoleBody(input: ModifyGuildRoleInput): Record<string, unknow
     ...(input.mentionable !== undefined ? { mentionable: input.mentionable } : {}),
     ...(input.name !== undefined ? { name: input.name } : {}),
     ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+    ...roleIcon,
   }
 }
 

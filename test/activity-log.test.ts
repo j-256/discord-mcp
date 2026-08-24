@@ -299,7 +299,7 @@ function roleConfiguration(
     kind: "role-configuration",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
-    requestedFields: ["name", "grantPermissions"],
+    requestedFields: ["name", "grantPermissions", "roleIcon"],
     roleId: "350",
     schemaVersion: 1,
     status,
@@ -1560,6 +1560,9 @@ test("JSONL activity log keeps role-configuration evidence content-free", async 
     "private-role-name",
     "private-operation-key",
     "private-permission-data",
+    "/private/role-icon.png",
+    "private-role-icon-hash",
+    "🩵",
   ]
 
   await store.append(roleConfiguration("1", "pending"))
@@ -1569,6 +1572,9 @@ test("JSONL activity log keeps role-configuration evidence content-free", async 
     name: privateValues[1],
     operationKey: privateValues[2],
     permissions: privateValues[3],
+    roleIconFile: privateValues[4],
+    roleIconHash: privateValues[5],
+    unicodeEmoji: privateValues[6],
   } as RoleConfigurationActivity)
   await appendFile(
     file,

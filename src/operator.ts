@@ -545,6 +545,13 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowRoleConfiguration && config.roleConfigurationIds.size === 0) {
     warnings.push("The role-configuration toggle is enabled but role changes remain blocked because no exact role allowlist is configured")
   }
+  if (
+    config.allowRoleConfiguration
+    && config.roleConfigurationIds.size > 0
+    && config.guildExpressionRoots.length === 0
+  ) {
+    warnings.push("Reviewed role configuration is enabled, but local-image role icons remain blocked because no canonical expression roots are configured")
+  }
   if (config.allowRoleDeletionAudit && config.roleDeletionIds.size === 0) {
     warnings.push("The role-deletion audit toggle is enabled but readiness inspection remains blocked because no exact role allowlist is configured")
   }
@@ -1647,11 +1654,17 @@ export async function diagnoseConnector(
         "warn",
         "Role-configuration toggle is enabled, but the required exact role allowlist is empty",
       ))
+    } else if (config.guildExpressionRoots.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.roleConfigurationPolicy,
+        "warn",
+        `Reviewed role configuration is constrained to ${config.roleConfigurationIds.size} exact roles, but local-image role icons are blocked because canonical expression roots are empty`,
+      ))
     } else {
       checks.push(check(
         DOCTOR_CHECK_IDS.roleConfigurationPolicy,
         "pass",
-        `Reviewed role configuration is constrained to ${config.roleConfigurationIds.size} exact roles with partial updates, one-shot execution, and complete readback`,
+        `Reviewed role configuration is constrained to ${config.roleConfigurationIds.size} exact roles and ${config.guildExpressionRoots.length} canonical local-image roots with partial updates, one-shot execution, and exact or response-bound complete readback`,
       ))
     }
     if (!config.allowRoleDeletionAudit) {

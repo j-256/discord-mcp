@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { isAbsolute } from "node:path"
 
 import type {
   ActivityStore,
@@ -6,6 +7,7 @@ import type {
   RoleConfigurationActivityStatus,
 } from "./activity-log.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -54,6 +56,13 @@ import {
   ROLE_CREATION_HIGH_RISK_PERMISSIONS,
   type NormalizedDiscordRole,
 } from "./role-administration-service.js"
+import {
+  readRoleIconFileSnapshot,
+  RoleIconFileError,
+  type RoleIconFileReview,
+  type RoleIconFileSnapshot,
+} from "./role-icon-file.js"
+import { assertRoleIconUnicodeEmoji } from "./role-icon.js"
 import type {
   DiscordGuild,
   DiscordGuildMember,
@@ -68,6 +77,7 @@ export const ROLE_CONFIGURATION_REQUEST_FIELDS = [
   "name",
   "primaryColor",
   "revokePermissions",
+  "roleIcon",
   "secondaryColor",
   "tertiaryColor",
 ] as const
@@ -80,6 +90,7 @@ export const ROLE_CONFIGURATION_CHANGED_FIELDS = [
   "mentionable",
   "name",
   "permissions",
+  "roleIcon",
 ] as const
 
 export type RoleConfigurationChangedField = typeof ROLE_CONFIGURATION_CHANGED_FIELDS[number]
@@ -92,6 +103,7 @@ export const ROLE_HOLOGRAPHIC_COLORS = Object.freeze({
 
 const STATE_UNAVAILABLE = "role-configuration-state-unavailable"
 const ENHANCED_ROLE_COLORS_FEATURE = "ENHANCED_ROLE_COLORS"
+const ROLE_ICONS_FEATURE = "ROLE_ICONS"
 const GUILD_NAME_CHARACTERS = 100
 const USERNAME_CHARACTERS = 32
 const ROLE_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
@@ -105,6 +117,7 @@ const ROLE_CONFIGURATION_REQUEST_KEYS = [
   "operationKey",
   "primaryColor",
   "revokePermissions",
+  "roleIcon",
   "roleId",
   "secondaryColor",
   "tertiaryColor",
@@ -128,10 +141,28 @@ export interface RoleConfigurationRequest {
   operationKey: string
   primaryColor?: number
   revokePermissions?: readonly DiscordPermissionName[]
+  roleIcon?: RoleConfigurationIconRequest
   roleId: string
   secondaryColor?: number | null
   tertiaryColor?: number | null
 }
+
+export type RoleConfigurationIconRequest =
+  | { kind: "clear" }
+  | { filePath: string; kind: "local-image" }
+  | { kind: "unicode"; value: string }
+
+export type RoleConfigurationObservedIcon =
+  | { kind: "image"; imageHash: string }
+  | { kind: "none" }
+  | { kind: "unicode"; value: string }
+
+export type RoleConfigurationDesiredIcon =
+  | RoleConfigurationObservedIcon
+  | {
+      contentDigest: string
+      kind: "local-image"
+    }
 
 export interface NormalizedRoleConfigurationRequest extends RoleConfigurationRequest {
   grantPermissions: DiscordPermissionName[]
@@ -171,7 +202,9 @@ export interface RoleConfigurationPlan {
   changes: RoleConfigurationChange[]
   createdAt: string
   current: NormalizedDiscordRole
+  currentRoleIcon: RoleConfigurationObservedIcon
   desired: NormalizedDiscordRole
+  desiredRoleIcon: RoleConfigurationDesiredIcon
   digest: string
   grantedPermissions: DiscordPermissionName[]
   guild: {
@@ -192,6 +225,10 @@ export interface RoleConfigurationPlan {
     rawPayloads: "omitted"
     text: "transient"
   }
+  roleIconFile: {
+    contentDigest: string
+    review: RoleIconFileReview
+  } | null
   requestedFields: RoleConfigurationRequestField[]
   requestedGrantPermissions: DiscordPermissionName[]
   requestedRevokePermissions: DiscordPermissionName[]
@@ -201,6 +238,7 @@ export interface RoleConfigurationPlan {
   schemaVersion: number
   status: "already-current" | "planned"
   warnings: string[]
+  verificationMode: "exact" | "response-bound-image-hash"
   writeRequired: boolean
 }
 
@@ -235,6 +273,7 @@ export interface RoleConfigurationServiceOptions {
   activityStore: ActivityStore
   client: RoleConfigurationServiceClient
   clock?: () => Date
+  fileRoots: readonly string[]
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: Pick<ScopePolicy, "assertRoleConfigurationAllowed">
@@ -259,9 +298,10 @@ interface RoleConfigurationState {
 
 interface BuiltRoleConfigurationPlan {
   expectedCounts: DiscordGuildRoleMemberCounts
-  expectedInventory: NormalizedDiscordRole[]
+  fileSnapshot: RoleIconFileSnapshot | null
   plan: RoleConfigurationPlan
   request: NormalizedRoleConfigurationRequest
+  reviewedInventory: NormalizedDiscordRole[]
 }
 
 function onlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -327,6 +367,41 @@ function explicitPermissionNames(
   return result
 }
 
+function normalizeRoleIconRequest(
+  value: RoleConfigurationIconRequest,
+): RoleConfigurationIconRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord role icon intent must be an exact tagged object")
+  }
+  const record = value as unknown as Record<string, unknown>
+  if (
+    value.kind === "clear"
+    && Object.keys(record).sort().join("\0") === "kind"
+  ) {
+    return { kind: "clear" }
+  }
+  if (
+    value.kind === "local-image"
+    && Object.keys(record).sort().join("\0") === "filePath\0kind"
+    && typeof value.filePath === "string"
+    && value.filePath.length > 0
+    && value.filePath.length <= CONNECTOR_LIMITS.attachmentPathCharacters
+    && value.filePath.trim() === value.filePath
+    && !value.filePath.includes("\0")
+    && isAbsolute(value.filePath)
+  ) {
+    return { filePath: value.filePath, kind: "local-image" }
+  }
+  if (
+    value.kind === "unicode"
+    && Object.keys(record).sort().join("\0") === "kind\0value"
+  ) {
+    assertRoleIconUnicodeEmoji(value.value)
+    return { kind: "unicode", value: value.value }
+  }
+  throw new RangeError("Discord role icon intent is invalid")
+}
+
 export function normalizeRoleConfigurationRequest(
   request: RoleConfigurationRequest,
 ): NormalizedRoleConfigurationRequest {
@@ -368,6 +443,9 @@ export function normalizeRoleConfigurationRequest(
   if (Object.hasOwn(record, "mentionable") && typeof request.mentionable !== "boolean") {
     throw new RangeError("Discord role mentionable setting must be a boolean")
   }
+  const roleIcon = Object.hasOwn(record, "roleIcon")
+    ? normalizeRoleIconRequest(request.roleIcon as RoleConfigurationIconRequest)
+    : undefined
   const grantPermissions = explicitPermissionNames(
     request.grantPermissions,
     "Discord role permission grants",
@@ -398,6 +476,7 @@ export function normalizeRoleConfigurationRequest(
       : {}),
     requestedFields,
     revokePermissions,
+    ...(roleIcon ? { roleIcon } : {}),
     roleId: request.roleId,
     ...(Object.hasOwn(record, "secondaryColor")
       ? { secondaryColor: request.secondaryColor }
@@ -586,11 +665,47 @@ function colorsValidForGuild(
   }
 }
 
+function observedRoleIcon(role: NormalizedDiscordRole): RoleConfigurationObservedIcon {
+  if (role.icon !== null) return { imageHash: role.icon, kind: "image" }
+  if (role.unicodeEmoji !== null) return { kind: "unicode", value: role.unicodeEmoji }
+  return { kind: "none" }
+}
+
+function plannedRoleIcon(
+  current: NormalizedDiscordRole,
+  request: NormalizedRoleConfigurationRequest,
+  fileSnapshot: RoleIconFileSnapshot | null,
+): RoleConfigurationDesiredIcon {
+  if (!request.roleIcon) return observedRoleIcon(current)
+  if (request.roleIcon.kind === "clear") return { kind: "none" }
+  if (request.roleIcon.kind === "unicode") {
+    return { kind: "unicode", value: request.roleIcon.value }
+  }
+  if (!fileSnapshot) {
+    throw new RoleConfigurationEvidenceError(
+      "Discord role icon image evidence is unavailable",
+    )
+  }
+  return {
+    contentDigest: fileSnapshot.contentDigest,
+    kind: "local-image",
+  }
+}
+
 function desiredRole(
   current: NormalizedDiscordRole,
   request: NormalizedRoleConfigurationRequest,
   features: readonly string[],
 ): NormalizedDiscordRole {
+  if (
+    request.roleIcon
+    && request.roleIcon.kind !== "clear"
+    && !features.includes(ROLE_ICONS_FEATURE)
+  ) {
+    throw new RoleConfigurationEvidenceError(
+      "Discord role icons require the ROLE_ICONS guild feature",
+    )
+  }
   const colors = {
     primaryColor: request.primaryColor ?? current.colors.primaryColor,
     secondaryColor: Object.hasOwn(request, "secondaryColor")
@@ -610,6 +725,11 @@ function desiredRole(
     ...(request.hoist !== undefined ? { hoist: request.hoist } : {}),
     ...(request.mentionable !== undefined ? { mentionable: request.mentionable } : {}),
     ...(request.name !== undefined ? { name: request.name } : {}),
+    ...(request.roleIcon?.kind === "clear"
+      ? { icon: null, unicodeEmoji: null }
+      : request.roleIcon?.kind === "unicode"
+        ? { icon: null, unicodeEmoji: request.roleIcon.value }
+        : {}),
     permissionNames: discordPermissionNames(desiredBits),
     permissions: desiredBits.toString(),
   }
@@ -628,6 +748,8 @@ function permissionValue(role: NormalizedDiscordRole) {
 function roleChanges(
   current: NormalizedDiscordRole,
   desired: NormalizedDiscordRole,
+  currentIcon: RoleConfigurationObservedIcon,
+  desiredIcon: RoleConfigurationDesiredIcon,
 ): RoleConfigurationChange[] {
   const candidates: RoleConfigurationChange[] = [
     { after: desired.colors, before: current.colors, field: "colors" },
@@ -635,6 +757,7 @@ function roleChanges(
     { after: desired.mentionable, before: current.mentionable, field: "mentionable" },
     { after: desired.name, before: current.name, field: "name" },
     { after: permissionValue(desired), before: permissionValue(current), field: "permissions" },
+    { after: desiredIcon, before: currentIcon, field: "roleIcon" },
   ]
   return candidates.filter(({ after, before }) => stableString(after) !== stableString(before))
 }
@@ -696,14 +819,48 @@ function actualPermissionDelta(
 function patchInput(
   desired: NormalizedDiscordRole,
   changedFields: readonly RoleConfigurationChangedField[],
+  request: NormalizedRoleConfigurationRequest,
+  fileSnapshot: RoleIconFileSnapshot | null,
 ): ModifyGuildRoleInput {
   const fields = new Set(changedFields)
+  let roleIcon: ModifyGuildRoleInput["roleIcon"]
+  if (fields.has("roleIcon")) {
+    if (request.roleIcon?.kind === "clear") {
+      roleIcon = { kind: "clear" }
+    } else if (request.roleIcon?.kind === "unicode") {
+      roleIcon = { kind: "unicode", value: request.roleIcon.value }
+    } else if (request.roleIcon?.kind === "local-image" && fileSnapshot) {
+      roleIcon = {
+        bytes: fileSnapshot.bytes,
+        format: fileSnapshot.review.format,
+        kind: "image",
+      }
+    } else {
+      throw new RoleConfigurationEvidenceError(
+        "Discord role icon mutation evidence is unavailable",
+      )
+    }
+  }
   return {
     ...(fields.has("colors") ? { colors: desired.colors } : {}),
     ...(fields.has("hoist") ? { hoist: desired.hoist } : {}),
     ...(fields.has("mentionable") ? { mentionable: desired.mentionable } : {}),
     ...(fields.has("name") ? { name: desired.name } : {}),
     ...(fields.has("permissions") ? { permissions: desired.permissions } : {}),
+    ...(roleIcon ? { roleIcon } : {}),
+  }
+}
+
+function responseBoundDesiredRole(
+  plan: RoleConfigurationPlan,
+  response: NormalizedDiscordRole,
+): NormalizedDiscordRole | null {
+  if (plan.desiredRoleIcon.kind !== "local-image") return plan.desired
+  if (response.icon === null || response.unicodeEmoji !== null) return null
+  return {
+    ...plan.desired,
+    icon: response.icon,
+    unicodeEmoji: null,
   }
 }
 
@@ -842,6 +999,7 @@ export class RoleConfigurationService {
   readonly #activityStore: ActivityStore
   readonly #client: RoleConfigurationServiceClient
   readonly #clock: () => Date
+  readonly #fileRoots: readonly string[]
   readonly #operationStore: OperationStore
   readonly #planKey: Uint8Array
   readonly #policy: RoleConfigurationServiceOptions["policy"]
@@ -851,6 +1009,7 @@ export class RoleConfigurationService {
     this.#activityStore = options.activityStore
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#fileRoots = [...options.fileRoots]
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
@@ -992,8 +1151,22 @@ export class RoleConfigurationService {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     const state = await this.#state(botId, request, options)
+    const fileSnapshot = request.roleIcon?.kind === "local-image"
+      ? await readRoleIconFileSnapshot({
+          filePath: request.roleIcon.filePath,
+          planKey: this.#planKey,
+          roots: this.#fileRoots,
+        })
+      : null
     const desired = desiredRole(state.target, request, state.guild.features)
-    const changes = roleChanges(state.target, desired)
+    const currentRoleIcon = observedRoleIcon(state.target)
+    const desiredRoleIcon = plannedRoleIcon(state.target, request, fileSnapshot)
+    const changes = roleChanges(
+      state.target,
+      desired,
+      currentRoleIcon,
+      desiredRoleIcon,
+    )
     const changedFields = changes.map(({ field }) => field)
     const delta = actualPermissionDelta(state.target, desired)
     const nameCollisionRoleIds = state.roles
@@ -1009,14 +1182,22 @@ export class RoleConfigurationService {
     const highRiskRevokedPermissions = delta.revoked.filter((permission) => (
       HIGH_RISK_PERMISSION_SET.has(permission)
     ))
-    const expectedInventory = inventoryWithDesired(state.roles, desired)
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       botId,
       botMember: memberSnapshot(state.botMember),
       counts: state.counts,
       current: roleSnapshot(state.target),
+      currentRoleIcon,
       desired: roleSnapshot(desired),
+      desiredRoleIcon,
+      file: fileSnapshot
+        ? {
+            binding: fileSnapshot.binding,
+            contentDigest: fileSnapshot.contentDigest,
+            review: fileSnapshot.review,
+          }
+        : null,
       guild: {
         features: state.guild.features,
         id: state.guild.id,
@@ -1033,6 +1214,7 @@ export class RoleConfigurationService {
         operationKeyHash: request.operationKeyHash,
         requestedFields: request.requestedFields,
         revokePermissions: request.revokePermissions,
+        roleIcon: request.roleIcon ?? null,
         roleId: request.roleId,
       },
     })
@@ -1059,6 +1241,9 @@ export class RoleConfigurationService {
       ...(delta.granted.length > 0 || delta.revoked.length > 0
         ? ["Guild-level permission changes can alter effective channel access through existing overwrites; use the channel-role access audit for sensitive channels"]
         : []),
+      ...(fileSnapshot
+        ? ["Discord assigns the role icon hash; verification binds the exact reviewed local bytes before the write, then requires the response hash to repeat in both exact readbacks"]
+        : []),
       "Guild and role names are untrusted Discord text and are never persisted by this workflow",
       "Same-role serialization is process-local; do not run multiple connector processes with overlapping role-configuration scope",
       "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
@@ -1066,7 +1251,7 @@ export class RoleConfigurationService {
     const risks = [
       "The PATCH is not automatically retried, so an ambiguous transport outcome remains uncertain",
       "A successful response, exact role GET, complete role inventory, and holder-count readback are all checked against the reviewed state",
-      "Role deletion, reordering, icons, Unicode emoji, @everyone, managed roles, and role membership are outside this workflow",
+      "Role deletion, reordering, @everyone, managed roles, and role membership are outside this workflow",
     ]
     const plan: RoleConfigurationPlan = {
       applicationId,
@@ -1076,7 +1261,9 @@ export class RoleConfigurationService {
       changes,
       createdAt: this.#clock().toISOString(),
       current: state.target,
+      currentRoleIcon,
       desired,
+      desiredRoleIcon,
       digest,
       grantedPermissions: delta.granted,
       guild: {
@@ -1097,6 +1284,12 @@ export class RoleConfigurationService {
         rawPayloads: "omitted",
         text: "transient",
       },
+      roleIconFile: fileSnapshot
+        ? {
+            contentDigest: fileSnapshot.contentDigest,
+            review: fileSnapshot.review,
+          }
+        : null,
       requestedFields: request.requestedFields,
       requestedGrantPermissions: request.grantPermissions,
       requestedRevokePermissions: request.revokePermissions,
@@ -1106,13 +1299,15 @@ export class RoleConfigurationService {
       schemaVersion: SCHEMA_VERSION,
       status: changes.length === 0 ? "already-current" : "planned",
       warnings,
+      verificationMode: fileSnapshot ? "response-bound-image-hash" : "exact",
       writeRequired: changes.length > 0,
     }
     return {
       expectedCounts: state.counts,
-      expectedInventory,
+      fileSnapshot,
       plan,
       request,
+      reviewedInventory: state.roles,
     }
   }
 
@@ -1181,6 +1376,7 @@ export class RoleConfigurationService {
       if (
         error instanceof RoleConfigurationEvidenceError
         || error instanceof DiscordRoleEvidenceError
+        || error instanceof RoleIconFileError
         || error instanceof RangeError
         || error instanceof DiscordApiError && error.status === 404
       ) {
@@ -1188,7 +1384,12 @@ export class RoleConfigurationService {
       }
       throw error
     }
-    const { expectedCounts, expectedInventory, plan } = built
+    const {
+      expectedCounts,
+      fileSnapshot,
+      plan,
+      reviewedInventory,
+    } = built
     if (plan.digest !== expectedDigest) {
       throw new RoleConfigurationPlanChangedError(expectedDigest, plan.digest)
     }
@@ -1272,7 +1473,7 @@ export class RoleConfigurationService {
         await this.#client.modifyGuildRole(
           request.guildId,
           request.roleId,
-          patchInput(plan.desired, plan.changedFields),
+          patchInput(plan.desired, plan.changedFields, request, fileSnapshot),
           request.auditReason,
           options,
         ),
@@ -1285,7 +1486,8 @@ export class RoleConfigurationService {
         )
       }
       mutationCompleted = true
-      responseMatched = roleMatches(response, plan.desired)
+      const expectedRole = responseBoundDesiredRole(plan, response)
+      responseMatched = expectedRole !== null && roleMatches(response, expectedRole)
       const [exactValue, inventoryValue, countsValue] = await Promise.all([
         this.#client.getGuildRole(request.guildId, request.roleId, options),
         this.#client.getGuildRoles(request.guildId, options),
@@ -1302,9 +1504,14 @@ export class RoleConfigurationService {
       }
       observed = exact
       memberCount = counts[request.roleId] as number
-      readbackMatched = roleMatches(exact, plan.desired)
-        && roleMatches(inventoryTarget, plan.desired)
-      inventoryMatched = inventoryMatches(inventory, expectedInventory)
+      readbackMatched = expectedRole !== null
+        && roleMatches(exact, expectedRole)
+        && roleMatches(inventoryTarget, expectedRole)
+      inventoryMatched = expectedRole !== null
+        && inventoryMatches(
+          inventory,
+          inventoryWithDesired(reviewedInventory, expectedRole),
+        )
       memberCountsMatched = stableString(counts) === stableString(expectedCounts)
     } catch (error) {
       const status = !mutationCompleted

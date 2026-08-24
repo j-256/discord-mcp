@@ -60,6 +60,7 @@ const ROLE_CONFIGURATION_ACTIVITY_FIELDS: ReadonlySet<string> = new Set([
   "name",
   "primaryColor",
   "revokePermissions",
+  "roleIcon",
   "secondaryColor",
   "tertiaryColor",
 ])

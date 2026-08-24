@@ -1476,6 +1476,7 @@ export class ConnectorService {
     this.#roleConfigurationService = new RoleConfigurationService({
       activityStore: this.#activityStore,
       client: this.#client,
+      fileRoots: options.config.guildExpressionRoots,
       operationStore,
       policy: this.#policy,
       ...options.roleConfigurationOptions,

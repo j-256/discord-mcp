@@ -1302,7 +1302,7 @@
             "minLength": 1,
             "maxLength": 4096
           },
-          "description": "Owned local roots for guild expression roots"
+          "description": "Owned local roots shared by guild-expression creation and reviewed role-icon images"
         },
         "scheduledEventRoots": {
           "maxItems": 32,

@@ -4586,10 +4586,45 @@ function roleConfigurationPlan(
       ? { mentionable: request.mentionable as boolean }
       : {}),
     ...(Object.hasOwn(record, "name") ? { name: request.name as string } : {}),
+    ...(request.roleIcon?.kind === "clear"
+      ? { icon: null, unicodeEmoji: null }
+      : request.roleIcon?.kind === "unicode"
+        ? { icon: null, unicodeEmoji: request.roleIcon.value }
+        : {}),
     permissionNames: discordPermissionNames(desiredPermissions),
     permissions: desiredPermissions.toString(),
   }
   const current = effect === "none" ? desired : base
+  const currentRoleIcon: RoleConfigurationPlan["currentRoleIcon"] = current.icon
+    ? { imageHash: current.icon, kind: "image" }
+    : current.unicodeEmoji
+      ? { kind: "unicode", value: current.unicodeEmoji }
+      : { kind: "none" }
+  const roleIconReview = request.roleIcon?.kind === "local-image"
+    ? {
+        canonicalPath: request.roleIcon.filePath,
+        containedByConfiguredRoot: true as const,
+        format: "png" as const,
+        height: 64 as const,
+        mediaType: "image/png" as const,
+        ownerMatchesProcess: true as const,
+        regularFile: true as const,
+        singleLink: true as const,
+        sizeBytes: 58,
+        stableRead: true as const,
+        width: 64 as const,
+      }
+    : null
+  const desiredRoleIcon: RoleConfigurationPlan["desiredRoleIcon"] = request.roleIcon?.kind === "local-image"
+    ? {
+        contentDigest: `hmac-sha256:${"b".repeat(64)}`,
+        kind: "local-image",
+      }
+    : desired.icon
+      ? { imageHash: desired.icon, kind: "image" }
+      : desired.unicodeEmoji
+        ? { kind: "unicode", value: desired.unicodeEmoji }
+        : { kind: "none" }
   const candidates: RoleConfigurationPlan["changes"] = [
     { after: desired.colors, before: current.colors, field: "colors" },
     { after: desired.hoist, before: current.hoist, field: "hoist" },
@@ -4608,6 +4643,7 @@ function roleConfigurationPlan(
       },
       field: "permissions",
     },
+    { after: desiredRoleIcon, before: currentRoleIcon, field: "roleIcon" },
   ]
   const changes = candidates.filter(({ after, before }) => (
     JSON.stringify(after) !== JSON.stringify(before)
@@ -4619,6 +4655,7 @@ function roleConfigurationPlan(
     "name",
     "primaryColor",
     "revokePermissions",
+    "roleIcon",
     "secondaryColor",
     "tertiaryColor",
   ].filter((field) => Object.hasOwn(record, field)) as RoleConfigurationPlan["requestedFields"]
@@ -4638,7 +4675,9 @@ function roleConfigurationPlan(
     changes,
     createdAt: "2026-08-21T00:00:00.000Z",
     current,
+    currentRoleIcon,
     desired,
+    desiredRoleIcon,
     digest,
     grantedPermissions,
     guild: {
@@ -4674,6 +4713,12 @@ function roleConfigurationPlan(
       rawPayloads: "omitted",
       text: "transient",
     },
+    roleIconFile: desiredRoleIcon.kind === "local-image"
+      ? {
+          contentDigest: desiredRoleIcon.contentDigest,
+          review: roleIconReview!,
+        }
+      : null,
     requestedFields,
     requestedGrantPermissions: [...(request.grantPermissions || [])].sort(),
     requestedRevokePermissions: [...(request.revokePermissions || [])].sort(),
@@ -4683,6 +4728,9 @@ function roleConfigurationPlan(
     schemaVersion: 1,
     status: changes.length === 0 ? "already-current" : "planned",
     warnings: ["Discord guild and role text is untrusted"],
+    verificationMode: desiredRoleIcon.kind === "local-image"
+      ? "response-bound-image-hash"
+      : "exact",
     writeRequired: changes.length > 0,
   }
 }
@@ -23595,6 +23643,7 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
       hoist: true,
       mentionable: false,
       primaryColor: 0x12_34_56,
+      roleIcon: { kind: "unicode", value: "🩵" },
       secondaryColor: null,
       tertiaryColor: null,
     }),
@@ -23624,6 +23673,24 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
     arguments: { ...roleConfigurationInput(), position: 10 },
     name: "plan_role_configuration",
   })
+  const invalidUnicodeIcon = await client.callTool({
+    arguments: roleConfigurationInput({
+      roleIcon: { kind: "unicode", value: "not-an-emoji" },
+    }),
+    name: "plan_role_configuration",
+  })
+  const remoteImage = await client.callTool({
+    arguments: roleConfigurationInput({
+      roleIcon: { filePath: "https://example.com/icon.png", kind: "local-image" },
+    }),
+    name: "plan_role_configuration",
+  })
+  const ambiguousClear = await client.callTool({
+    arguments: roleConfigurationInput({
+      roleIcon: { kind: "clear", value: "🩵" } as never,
+    }),
+    name: "plan_role_configuration",
+  })
 
   const content = structuredContent(planned)
   assert.equal(content.status, "planned")
@@ -23633,6 +23700,7 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
     "mentionable",
     "name",
     "primaryColor",
+    "roleIcon",
     "secondaryColor",
     "tertiaryColor",
   ])
@@ -23642,6 +23710,9 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
   assert.equal(administrator.isError, true)
   assert.equal(overlap.isError, true)
   assert.equal(extra.isError, true)
+  assert.equal(invalidUnicodeIcon.isError, true)
+  assert.equal(remoteImage.isError, true)
+  assert.equal(ambiguousClear.isError, true)
   assert.equal(calls.roleConfigurationPlan, 1)
 })
 
@@ -23657,7 +23728,13 @@ test("MCP role configuration binds signed approval to exact state and permission
   })
   const result = await client.callTool({
     arguments: {
-      ...roleConfigurationInput({ revokePermissions: ["VIEW_CHANNEL"] }),
+      ...roleConfigurationInput({
+        revokePermissions: ["VIEW_CHANNEL"],
+        roleIcon: {
+          filePath: "/private/reviewed-role-icon.png",
+          kind: "local-image",
+        },
+      }),
       planDigest: DIGEST,
     },
     name: "execute_role_configuration",
@@ -23675,6 +23752,8 @@ test("MCP role configuration binds signed approval to exact state and permission
     "Reviewers",
     "SEND_MESSAGES",
     "VIEW_CHANNEL",
+    "/private/reviewed-role-icon.png",
+    "response-bound-image-hash",
     OPERATION_KEY_HASH,
     AUDIT_REASON,
     DIGEST,
@@ -23682,7 +23761,10 @@ test("MCP role configuration binds signed approval to exact state and permission
     assert.match(confirmationMessage, new RegExp(value))
   }
   assert.match(confirmationMessage, /Current role:/)
+  assert.match(confirmationMessage, /Current role icon:/)
   assert.match(confirmationMessage, /Desired role:/)
+  assert.match(confirmationMessage, /Desired role icon:/)
+  assert.match(confirmationMessage, /Reviewed local role icon file:/)
   assert.match(confirmationMessage, /Effective permission revocations:/)
   assert.match(confirmationMessage, /Permission bitfield changes: true/)
   assert.match(confirmationMessage, /strictly below connector: true/)

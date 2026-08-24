@@ -338,7 +338,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "role-creation",
   },
   execute_role_configuration: {
-    keywords: ["color", "configure", "execute", "hoist", "mentionable", "name", "permission", "role"],
+    keywords: ["color", "configure", "emoji", "execute", "hoist", "icon", "image", "mentionable", "name", "permission", "role"],
     toolset: "role-configuration",
     workflow: "role-configuration",
   },
@@ -831,7 +831,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "role-creation",
   },
   plan_role_configuration: {
-    keywords: ["color", "configure", "hoist", "mentionable", "name", "permission", "plan", "review", "role"],
+    keywords: ["color", "configure", "emoji", "hoist", "icon", "image", "mentionable", "name", "permission", "plan", "review", "role"],
     toolset: "role-configuration",
     workflow: "role-configuration",
   },

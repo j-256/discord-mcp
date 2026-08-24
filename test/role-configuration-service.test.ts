@@ -1,4 +1,12 @@
 import assert from "node:assert/strict"
+import {
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import type {
@@ -47,6 +55,35 @@ const OTHER_ROLE_ID = "550000000000000002"
 const UNCERTAIN_ROLE_ID = "550000000000000003"
 const OPERATION_KEY = "role-configuration-op-001"
 const PLAN_KEY = new Uint8Array(32).fill(12)
+const ROLE_ICON_HASH = "reviewed-role-icon-hash"
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+
+function u32(value: number): Buffer {
+  const buffer = Buffer.alloc(4)
+  buffer.writeUInt32BE(value)
+  return buffer
+}
+
+function pngChunk(type: string, data = Buffer.alloc(0)): Buffer {
+  return Buffer.concat([
+    u32(data.byteLength),
+    Buffer.from(type, "ascii"),
+    data,
+    Buffer.alloc(4),
+  ])
+}
+
+function roleIconPng(marker = 0): Buffer {
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(64, 0)
+  ihdr.writeUInt32BE(64, 4)
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", Buffer.from([marker])),
+    pngChunk("IEND"),
+  ])
+}
 
 function role(
   id: string,
@@ -240,6 +277,13 @@ class FixtureClient implements RoleConfigurationServiceClient {
       ...(input.mentionable !== undefined ? { mentionable: input.mentionable } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.permissions !== undefined ? { permissions: input.permissions } : {}),
+      ...(input.roleIcon?.kind === "clear"
+        ? { icon: null, unicode_emoji: null }
+        : input.roleIcon?.kind === "unicode"
+          ? { icon: null, unicode_emoji: input.roleIcon.value }
+          : input.roleIcon?.kind === "image"
+            ? { icon: ROLE_ICON_HASH, unicode_emoji: null }
+            : {}),
     }
     this.roles[index] = updated
     const response = cloneRole(updated)
@@ -289,6 +333,7 @@ function request(overrides: RequestOverrides = {}): RoleConfigurationRequest {
 
 function fixture(options: {
   client?: FixtureClient
+  fileRoots?: readonly string[]
   policy?: ScopePolicy
 } = {}) {
   const activityStore = new MemoryActivityStore()
@@ -298,6 +343,7 @@ function fixture(options: {
     activityStore,
     client,
     clock: () => new Date("2026-08-21T18:00:00.000Z"),
+    fileRoots: options.fileRoots || [],
     operationStore,
     planKey: PLAN_KEY,
     policy: options.policy || policy(),
@@ -372,6 +418,36 @@ test("role configuration normalization rejects ambiguous, empty, and dangerous i
     () => normalizeRoleConfigurationRequest(request({ name: "@everyone" })),
     /invalid or reserved/,
   )
+  assert.throws(
+    () => normalizeRoleConfigurationRequest(request({
+      grantPermissions: undefined,
+      name: undefined,
+      roleIcon: { kind: "unicode", value: "not-an-emoji" },
+    })),
+    /one NFC emoji grapheme/,
+  )
+  assert.throws(
+    () => normalizeRoleConfigurationRequest(request({
+      grantPermissions: undefined,
+      name: undefined,
+      roleIcon: {
+        kind: "clear",
+        value: "unexpected",
+      } as unknown as RoleConfigurationRequest["roleIcon"],
+    })),
+    /intent is invalid/,
+  )
+  assert.throws(
+    () => normalizeRoleConfigurationRequest(request({
+      grantPermissions: undefined,
+      name: undefined,
+      roleIcon: {
+        filePath: `/${"x".repeat(4_096)}`,
+        kind: "local-image",
+      },
+    })),
+    /intent is invalid/,
+  )
 })
 
 test("role configuration planning binds complete hierarchy, holder, and permission evidence", async () => {
@@ -427,6 +503,145 @@ test("role configuration enforces modern gradient and holographic color contract
     ...ROLE_HOLOGRAPHIC_COLORS,
   }))
   assert.deepEqual(plan.desired.colors, ROLE_HOLOGRAPHIC_COLORS)
+})
+
+test("role configuration binds reviewed local icon bytes and response-assigned hash", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-role-config-icon-"))
+  const root = await realpath(temporary)
+  const filePath = join(root, "icon.png")
+  try {
+    await writeFile(filePath, roleIconPng())
+    const client = new FixtureClient()
+    client.guild.features = ["ROLE_ICONS"]
+    const target = fixture({ client, fileRoots: [root] })
+    const selected = request({
+      grantPermissions: undefined,
+      name: undefined,
+      roleIcon: { filePath, kind: "local-image" },
+    })
+    const plan = await target.service.plan(APPLICATION_ID, BOT_ID, selected)
+
+    assert.deepEqual(plan.changedFields, ["roleIcon"])
+    assert.deepEqual(plan.currentRoleIcon, { kind: "none" })
+    assert.equal(plan.desiredRoleIcon.kind, "local-image")
+    assert.equal(plan.roleIconFile?.review.canonicalPath, filePath)
+    assert.equal(plan.verificationMode, "response-bound-image-hash")
+
+    const result = await target.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      selected,
+      plan.digest,
+    )
+    assert.equal(result.status, "completed")
+    assert.equal(result.observed.icon, ROLE_ICON_HASH)
+    assert.equal(result.observed.unicodeEmoji, null)
+    const iconInput = target.client.patchCalls[0]?.input.roleIcon
+    assert.equal(iconInput?.kind, "image")
+    if (iconInput?.kind === "image") {
+      assert.equal(iconInput.format, "png")
+      assert.deepEqual(Buffer.from(iconInput.bytes), roleIconPng())
+    }
+    const persisted = JSON.stringify({
+      activities: target.activityStore.entries,
+      receipts: [...target.operationStore.receipts.values()],
+    })
+    assert.doesNotMatch(
+      persisted,
+      /canonicalPath|contentDigest|icon\.png|reviewed-role-icon-hash/,
+    )
+
+    const staleClient = new FixtureClient()
+    staleClient.guild.features = ["ROLE_ICONS"]
+    const stale = fixture({ client: staleClient, fileRoots: [root] })
+    const stalePlan = await stale.service.plan(APPLICATION_ID, BOT_ID, selected)
+    await writeFile(filePath, roleIconPng(1))
+    await assert.rejects(
+      stale.service.execute(APPLICATION_ID, BOT_ID, selected, stalePlan.digest),
+      RoleConfigurationPlanChangedError,
+    )
+    assert.equal(staleClient.patchCalls.length, 0)
+
+    const driftClient = new FixtureClient()
+    driftClient.guild.features = ["ROLE_ICONS"]
+    const originalModify = driftClient.modifyGuildRole.bind(driftClient)
+    driftClient.modifyGuildRole = async (...args) => {
+      const response = await originalModify(...args)
+      const changed = driftClient.roles.find(
+        (entry) => entry.id === TARGET_ROLE_ID,
+      ) as DiscordRole
+      changed.icon = "different-readback-hash"
+      return response
+    }
+    const drift = fixture({ client: driftClient, fileRoots: [root] })
+    const driftPlan = await drift.service.plan(APPLICATION_ID, BOT_ID, selected)
+    const driftResult = await drift.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      selected,
+      driftPlan.digest,
+    )
+    assert.equal(driftResult.status, "completed-with-drift")
+    assert.equal(driftResult.responseMatched, true)
+    assert.equal(driftResult.readbackMatched, false)
+    assert.equal(driftResult.inventoryMatched, false)
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
+})
+
+test("role configuration supports exact Unicode and clear icon intents", async () => {
+  const unicodeClient = new FixtureClient()
+  unicodeClient.guild.features = ["ROLE_ICONS"]
+  const unicode = fixture({ client: unicodeClient })
+  const unicodeRequest = request({
+    grantPermissions: undefined,
+    name: undefined,
+    roleIcon: { kind: "unicode", value: "🩵" },
+  })
+  const unicodePlan = await unicode.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    unicodeRequest,
+  )
+  const unicodeResult = await unicode.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    unicodeRequest,
+    unicodePlan.digest,
+  )
+  assert.equal(unicodeResult.status, "completed")
+  assert.deepEqual(unicodeClient.patchCalls[0]?.input.roleIcon, {
+    kind: "unicode",
+    value: "🩵",
+  })
+
+  const clearClient = new FixtureClient()
+  const clearRole = clearClient.roles.find((entry) => entry.id === TARGET_ROLE_ID) as DiscordRole
+  clearRole.unicode_emoji = "🩵"
+  const clear = fixture({ client: clearClient })
+  const clearRequest = request({
+    grantPermissions: undefined,
+    name: undefined,
+    operationKey: "role-icon-clear-001",
+    roleIcon: { kind: "clear" },
+  })
+  const clearPlan = await clear.service.plan(APPLICATION_ID, BOT_ID, clearRequest)
+  assert.deepEqual(clearPlan.currentRoleIcon, { kind: "unicode", value: "🩵" })
+  assert.deepEqual(clearPlan.desiredRoleIcon, { kind: "none" })
+  const clearResult = await clear.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    clearRequest,
+    clearPlan.digest,
+  )
+  assert.equal(clearResult.status, "completed")
+  assert.deepEqual(clearClient.patchCalls[0]?.input.roleIcon, { kind: "clear" })
+
+  await assert.rejects(
+    fixture().service.plan(APPLICATION_ID, BOT_ID, unicodeRequest),
+    /ROLE_ICONS guild feature/,
+  )
 })
 
 test("role configuration fails closed on scope, management, hierarchy, and future evidence", async () => {
