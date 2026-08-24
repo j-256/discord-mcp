@@ -9,11 +9,11 @@ import {
 } from "node:path"
 
 import type { ConnectorConfig } from "./config.js"
-import { loadConnectorConfig } from "./config.js"
 import {
-  activateConnectorCredentialReference,
-  activateConnectorConfigDocument,
-  configDocumentPolicyFromEnvironment,
+  loadConnectorConfig,
+  loadConnectorConfigDocument,
+} from "./config.js"
+import {
   connectorConfigSecretEnvironmentNames,
   connectorConfigSecretFilePaths,
   createConnectorConfigDocument,
@@ -32,8 +32,10 @@ import {
   CONNECTOR_LIMITS,
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_SNOWFLAKE_PATTERN,
-  ENVIRONMENT_NAMES,
+  DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   type McpToolsetName,
@@ -78,6 +80,9 @@ import {
 
 export const OPERATOR_REPORT_SCHEMA_VERSION = 22
 export const SUPPORTED_NODE_MAJOR = 22
+
+const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
+const SETUP_BOOTSTRAP_BOT_ID = "900000000000000002"
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
@@ -277,6 +282,7 @@ export interface StatusProvider {
 }
 
 export interface DoctorOptions {
+  config?: ConnectorConfig
   environment?: NodeJS.ProcessEnv
   nodeVersion?: string
   online?: boolean
@@ -300,6 +306,7 @@ export interface SetupOptions {
 }
 
 export interface SmokeOptions {
+  config?: ConnectorConfig
   environment?: NodeJS.ProcessEnv
   service?: DiscordToolService
 }
@@ -947,8 +954,12 @@ function redactedError(
   environment: NodeJS.ProcessEnv,
   resolvedToken?: string,
 ): string {
-  const token = resolvedToken ?? environment[ENVIRONMENT_NAMES.token]
-  return redactText(errorMessage(error), [token, token?.trim()])
+  const tokens = resolvedToken
+    ? [resolvedToken, resolvedToken.trim()]
+    : Object.entries(environment)
+        .filter(([name]) => DISCORD_TOKEN_ENVIRONMENT_PATTERN.test(name))
+        .flatMap(([, token]) => [token, token?.trim()])
+  return redactText(errorMessage(error), tokens)
 }
 
 function redactedSetupVerificationError(
@@ -995,12 +1006,12 @@ export async function diagnoseConnector(
   let config: ConnectorConfig | undefined
   let configurationFailure: unknown
   try {
-    config = loadConnectorConfig(environment)
+    config = options.config || loadConnectorConfig(environment)
   } catch (error) {
     configurationFailure = error
   }
 
-  const token = config?.token.trim() || environment[ENVIRONMENT_NAMES.token]?.trim()
+  const token = config?.token.trim()
   checks.push(token
     ? check(
       DOCTOR_CHECK_IDS.token,
@@ -3044,16 +3055,16 @@ export async function prepareSetup(
     : profileName
   if (!configName) throw new ConfigurationError("Setup could not resolve a policy name")
   if (configFile) {
-    const ambientConfigFile = environment[ENVIRONMENT_NAMES.configFile]?.trim()
+    const ambientConfigFile = environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
     if (ambientConfigFile && resolveConnectorConfigFile(ambientConfigFile) !== configFile) {
       throw new ConfigurationError(
-        `Setup configuration conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+        `Setup configuration conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`,
       )
     }
   }
-  if (profileName && environment[ENVIRONMENT_NAMES.configFile]?.trim()) {
+  if (profileName && environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()) {
     throw new ConfigurationError(
-      `Setup profile ${profileName} conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+      `Setup profile ${profileName} conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`,
     )
   }
   const profileLocation = {
@@ -3094,48 +3105,59 @@ export async function prepareSetup(
   let credential: ConnectorCredentialReference
   let portableConfig: ConnectorConfigDocument | undefined
   let profile: ConnectorProfile | null = null
-  let runtimeEnvironment: NodeJS.ProcessEnv
+  let config: ConnectorConfig
   if (options.preset) {
     credential = options.credentialFile === undefined
       ? {
           provider: "environment",
-          variable: (options.credentialVariable ?? ENVIRONMENT_NAMES.token).trim(),
+          variable: (options.credentialVariable ?? DEFAULT_TOKEN_ENVIRONMENT_VARIABLE).trim(),
         }
       : {
           path: resolveConnectorSecretFile(options.credentialFile),
           provider: "file",
         }
-    const credentialEnvironment = activateConnectorCredentialReference(
-      credential,
-      environment,
-    )
     appliedPreset = applySetupPreset({
       ...(options.preset.channelIds
         ? { channelIds: options.preset.channelIds }
         : {}),
-      environment: credentialEnvironment,
       guildIds: options.preset.guildIds,
       name: options.preset.name,
     })
-    runtimeEnvironment = appliedPreset.environment
+    const bootstrapDocument = createConnectorConfigDocument({
+      applicationId: SETUP_BOOTSTRAP_APPLICATION_ID,
+      botId: SETUP_BOOTSTRAP_BOT_ID,
+      channelIds: appliedPreset.policy.channelIds,
+      ...(credential.provider === "environment"
+        ? { credentialVariable: credential.variable }
+        : { credentialFile: credential.path }),
+      gatewayEnabled: appliedPreset.policy.gatewayEnabled,
+      guildIds: appliedPreset.policy.guildIds,
+      name: configName,
+      toolsets: appliedPreset.policy.toolsets,
+      toolSurface: appliedPreset.policy.toolSurface,
+    })
+    config = {
+      ...loadConnectorConfigDocument(bootstrapDocument, environment),
+      expectedApplicationId: undefined,
+      expectedBotId: undefined,
+    }
   } else if (configFile) {
     portableConfig = loadConnectorConfigDocumentFile(configFile)
     credential = portableConfig.credential
-    runtimeEnvironment = activateConnectorConfigDocument(portableConfig, environment)
+    config = loadConnectorConfigDocument(portableConfig, environment)
   } else {
     const loadedProfile = await loadProfile(profileName || configName, profileLocation)
     portableConfig = loadedProfile
     profile = loadedProfile
     credential = loadedProfile.credential
-    runtimeEnvironment = activateConnectorConfigDocument(loadedProfile, environment)
+    config = loadConnectorConfigDocument(loadedProfile, environment)
   }
-  const config = loadConnectorConfig(runtimeEnvironment)
   const service = options.service || new ConnectorService({ config })
   let status: ConnectorStatus
   try {
     status = await service.getStatus()
   } catch (error) {
-    throw redactedSetupVerificationError(error, runtimeEnvironment, config.token)
+    throw redactedSetupVerificationError(error, environment, config.token)
   }
   if (status.guildPage.inScope < 1) {
     throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
@@ -3152,18 +3174,17 @@ export async function prepareSetup(
     portableConfig = createConnectorConfigDocument({
       applicationId: status.application.id,
       botId: status.bot.id,
-      channelIds: [...config.allowedChannelIds],
-      ...configDocumentPolicyFromEnvironment(runtimeEnvironment),
+      channelIds: appliedPreset.policy.channelIds,
       ...(credential.provider === "environment"
         ? { credentialVariable: credential.variable }
         : { credentialFile: credential.path }),
-      gatewayEnabled: config.allowGateway,
-      gatewayEventBufferSize: config.gatewayEventBufferSize,
-      guildIds: [...config.allowedGuildIds],
+      gatewayEnabled: appliedPreset.policy.gatewayEnabled,
+      guildIds: appliedPreset.policy.guildIds,
       name: configName,
-      toolsets: selectedMcpToolsets(config.mcpToolsets),
-      toolSurface: config.mcpToolSurface,
+      toolsets: appliedPreset.policy.toolsets,
+      toolSurface: appliedPreset.policy.toolSurface,
     })
+    config = loadConnectorConfigDocument(portableConfig, environment)
     profile = profileName ? portableConfig : null
   }
   if (!portableConfig) {
@@ -3305,12 +3326,13 @@ export async function smokeConnector(
   options: SmokeOptions = {},
 ): Promise<SmokeReport> {
   const environment = options.environment || process.env
-  const config = loadConnectorConfig(environment)
+  const config = options.config || loadConnectorConfig(environment)
   const service = options.service || new ConnectorService({ config })
   const gateway = smokeGateway(config)
   const selectedToolNames = selectedCanonicalMcpToolNames(config.mcpToolsets)
   const expectedToolNames = [...selectedToolNames, MCP_DISCOVERY_TOOL_NAME]
   const server = createDiscordMcpServer({
+    config,
     environment,
     ...(gateway ? { gateway } : {}),
     service,

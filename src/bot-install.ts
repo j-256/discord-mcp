@@ -2,7 +2,7 @@ import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_WEB_BASE_URL,
-  ENVIRONMENT_NAMES,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
 import type { DiscordPermissionName } from "./permissions.js"
@@ -151,7 +151,7 @@ export function createBotInstallPlan(
     }),
     postInstall: Object.freeze({
       commands,
-      credentialVariable: ENVIRONMENT_NAMES.token,
+      credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     }),
     preset: Object.freeze({
       description: preset.description,

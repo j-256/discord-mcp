@@ -11,17 +11,24 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
-  loadConnectorConfig,
-  resolveConnectorAuditFile,
+  resolveConnectorConfigDocumentAuditFile,
 } from "../src/config.js"
 import {
   CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
-import { ConfigurationError, PolicyError } from "../src/errors.js"
+import {
+  ConfigDocumentError,
+  ConfigurationError,
+  PolicyError,
+} from "../src/errors.js"
 import { ScopePolicy } from "../src/policy.js"
 import type { DiscordChannel } from "../src/types.js"
+import {
+  fixtureConfigInput,
+  loadFixtureConfig as loadConnectorConfig,
+} from "./config-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "900000000000000001"
@@ -50,24 +57,27 @@ test("configuration requires the dedicated Discord bot token", () => {
   assert.throws(
     () => loadConnectorConfig({}, { homeDirectory: "/test/home" }),
     (error: unknown) => (
-      error instanceof ConfigurationError
-      && /DISCORD_BOT_TOKEN is required/.test(error.message)
+      error instanceof ConfigDocumentError
+      && /\.credential requires DISCORD_BOT_TOKEN/.test(error.message)
     ),
   )
 })
 
 test("credential-free activity-state resolution is absolute and lexical-canonical", () => {
+  const fixture = fixtureConfigInput({})
   assert.equal(
-    resolveConnectorAuditFile(
+    resolveConnectorConfigDocumentAuditFile(
+      fixture.document,
       { XDG_STATE_HOME: "relative-state" },
       { homeDirectory: "/test/home" },
     ),
     "/test/home/.local/state/discord-mcp/activity.jsonl",
   )
   assert.equal(
-    resolveConnectorAuditFile({
-      DISCORD_MCP_AUDIT_FILE: "/test/state/../shared/activity.jsonl",
-    }),
+    loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_AUDIT_FILE: "/test/shared/activity.jsonl",
+    }).auditFile,
     "/test/shared/activity.jsonl",
   )
 })
@@ -175,7 +185,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     announcementSubscriptionSourceChannelIds: [],
     announcementSubscriptionTargetChannelIds: [],
     allowedChannelIds: [],
-    allowedGuildIds: [],
+    allowedGuildIds: [GUILD_ID],
     attachmentChannelIds: [],
     attachmentMaxBytes: 10 * 1_024 * 1_024,
     attachmentRootCount: 0,
@@ -302,7 +312,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     reactionModerationEnabled: false,
     reactionUserAuditEnabled: false,
     readChannelScope: "all-visible",
-    readGuildScope: "all-visible",
+    readGuildScope: "allowlist",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
@@ -329,9 +339,6 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
 
   for (const environment of [
     { DISCORD_MCP_TOOL_SURFACE: "hidden" },
-    { DISCORD_MCP_TOOLSETS: "messages,all" },
-    { DISCORD_MCP_TOOLSETS: "messages,unknown" },
-    { DISCORD_MCP_TOOLSETS: ",,," },
   ]) {
     assert.throws(
       () => loadConnectorConfig({
@@ -355,37 +362,13 @@ test("configuration keeps Gateway disabled and requires pinned bounded scope whe
   assert.equal(enabled.allowGateway, true)
   assert.equal(enabled.gatewayEventBufferSize, 250)
 
-  for (const environment of [
-    {
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-    },
-    {
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_APPLICATION_ID: "300000000000000001",
-    },
-    {
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_APPLICATION_ID: "300000000000000001",
-      DISCORD_MCP_BOT_ID: "300000000000000002",
-    },
-  ]) {
-    assert.throws(
-      () => loadConnectorConfig(environment, { homeDirectory: "/test/home" }),
-      ConfigurationError,
-    )
-  }
   for (const value of ["0", "1001", "1.5"]) {
     assert.throws(
       () => loadConnectorConfig({
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE: value,
       }, { homeDirectory: "/test/home" }),
-      /must be an integer between 1 and 1000/,
+      /expected number to be|expected int|must be an integer between 1 and 1000/,
     )
   }
 })
@@ -447,12 +430,6 @@ test("configuration and policy isolate native Interaction ingress and command ch
       DISCORD_MCP_APPLICATION_ID: "300000000000000001",
       DISCORD_MCP_BOT_ID: "300000000000000002",
       DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-    },
-    {
-      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
-      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
     },
     {
       DISCORD_MCP_NATIVE_COMMAND_NAME: "Not Valid",
@@ -588,7 +565,7 @@ test("configuration and policy isolate webhook audit and administration authorit
       DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
       DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_WEBHOOK_AUDIT/,
+    /requires \$\.capabilities\.webhookAudit/,
   )
   for (const toggle of [
     "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
@@ -600,7 +577,7 @@ test("configuration and policy isolate webhook audit and administration authorit
         [toggle]: "true",
         DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
       }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_ALLOW_WEBHOOK_AUDIT/,
+      /requires \$\.capabilities\.webhookAudit/,
     )
   }
   assert.throws(
@@ -609,7 +586,7 @@ test("configuration and policy isolate webhook audit and administration authorit
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_WEBHOOK_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_WEBHOOK_CHANNEL_IDS must be a subset/,
+    /\$\.scopes\.webhookChannelIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -697,7 +674,7 @@ test("configuration and policy isolate integration audit and exact-ID deletion",
       DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_INTEGRATION_AUDIT/,
+    /requires \$\.capabilities\.integrationAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -705,7 +682,7 @@ test("configuration and policy isolate integration audit and exact-ID deletion",
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INTEGRATION_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_INTEGRATION_GUILD_IDS must be a subset/,
+    /\$\.scopes\.integrationGuildIds must be a subset/,
   )
 })
 
@@ -730,6 +707,7 @@ test("configuration and policy require an exact administration guild and protect
 
   const policy = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
     DISCORD_MCP_PROTECTED_USER_IDS: USER_ID,
@@ -741,7 +719,7 @@ test("configuration and policy require an exact administration guild and protect
   policy.assertMemberAdministrationAllowed(GUILD_ID, "400000000000000002")
   assert.throws(
     () => policy.assertMemberAdministrationAllowed(
-      "999999999999999999",
+      OTHER_GUILD_ID,
       "400000000000000002",
     ),
     /outside the administration scope/,
@@ -760,7 +738,7 @@ test("configuration and policy require an exact administration guild and protect
     announcementSubscriptionSourceChannelIds: [],
     announcementSubscriptionTargetChannelIds: [],
     allowedChannelIds: [],
-    allowedGuildIds: [],
+    allowedGuildIds: [GUILD_ID, OTHER_GUILD_ID],
     attachmentChannelIds: [],
     attachmentMaxBytes: 10 * 1_024 * 1_024,
     attachmentRootCount: 0,
@@ -887,7 +865,7 @@ test("configuration and policy require an exact administration guild and protect
     reactionModerationEnabled: false,
     reactionUserAuditEnabled: false,
     readChannelScope: "all-visible",
-    readGuildScope: "all-visible",
+    readGuildScope: "allowlist",
     roleCreationEnabled: false,
     roleCreationGuildIds: [],
     roleConfigurationEnabled: false,
@@ -953,7 +931,7 @@ test("configuration and policy require an opt-in exact member-directory guild sc
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS must be a subset/,
+    /\$\.scopes\.memberDirectoryGuildIds must be a subset/,
   )
 })
 
@@ -997,7 +975,7 @@ test("configuration and policy require an opt-in exact ban-audit guild scope", (
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_BAN_AUDIT_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_BAN_AUDIT_GUILD_IDS must be a subset/,
+    /\$\.scopes\.banAuditGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1065,14 +1043,14 @@ test("configuration and policy isolate capability-safe invite audit and revocati
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_INVITE_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_INVITE_GUILD_IDS must be a subset/,
+    /\$\.scopes\.inviteGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_INVITE_AUDIT/,
+    /requires \$\.capabilities\.inviteAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1146,14 +1124,14 @@ test("configuration and policy isolate reviewed guild onboarding", () => {
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_ONBOARDING_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_ONBOARDING_GUILD_IDS must be a subset/,
+    /\$\.scopes\.onboardingGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_ONBOARDING_AUDIT/,
+    /requires \$\.capabilities\.onboardingAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1221,14 +1199,14 @@ test("configuration and policy isolate reviewed guild Welcome Screens", () => {
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS must be a subset/,
+    /\$\.scopes\.welcomeScreenGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT/,
+    /requires \$\.capabilities\.welcomeScreenAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1312,14 +1290,14 @@ test("configuration and policy isolate reviewed authenticated widget settings", 
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS must be a subset/,
+    /\$\.scopes\.widgetSettingsGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT/,
+    /requires \$\.capabilities\.widgetSettingsAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1327,7 +1305,7 @@ test("configuration and policy isolate reviewed authenticated widget settings", 
       DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
       DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES/,
+    /requires \$\.capabilities\.widgetSettingsChanges/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1399,7 +1377,7 @@ test("configuration and policy isolate reviewed guild settings", () => {
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT/,
+    /requires \$\.capabilities\.guildSettingsAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1408,7 +1386,7 @@ test("configuration and policy isolate reviewed guild settings", () => {
       DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
       DISCORD_MCP_BOT_ID: BOT_ID,
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS/,
+    /requires \$\.scopes\.guildSettingsGuildIds/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1416,15 +1394,7 @@ test("configuration and policy isolate reviewed guild settings", () => {
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS must be a subset/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
-      DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
-    }, { homeDirectory: "/test/home" }),
-    /Permission-aware guild features require/,
+    /\$\.scopes\.guildSettingsGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1489,7 +1459,7 @@ test("configuration and policy isolate reviewed guild profile text", () => {
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT/,
+    /requires \$\.capabilities\.guildProfileAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1498,7 +1468,7 @@ test("configuration and policy isolate reviewed guild profile text", () => {
       DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
       DISCORD_MCP_BOT_ID: BOT_ID,
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_GUILD_PROFILE_GUILD_IDS/,
+    /requires \$\.scopes\.guildProfileGuildIds/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1506,15 +1476,7 @@ test("configuration and policy isolate reviewed guild profile text", () => {
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_GUILD_PROFILE_GUILD_IDS must be a subset/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
-      DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
-    }, { homeDirectory: "/test/home" }),
-    /Permission-aware guild features require/,
+    /\$\.scopes\.guildProfileGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1542,22 +1504,14 @@ test("configuration and policy isolate reviewed member nickname authority", () =
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_NICKNAME_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_NICKNAME_GUILD_IDS must be a subset/,
+    /\$\.scopes\.nicknameGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES requires DISCORD_MCP_ALLOW_NICKNAME_CHANGES/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
-      DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
-    }, { homeDirectory: "/test/home" }),
-    /Nickname changes require DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+    /\$\.capabilities\.otherMemberNicknameChanges requires \$\.capabilities\.nicknameChanges/,
   )
 
   const disabled = new ScopePolicy(loadConnectorConfig({
@@ -1582,6 +1536,7 @@ test("configuration and policy isolate reviewed member nickname authority", () =
 
   const selfOnly = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
     DISCORD_MCP_BOT_ID: BOT_ID,
@@ -1639,7 +1594,7 @@ test("configuration and policy isolate exact member-role authority", () => {
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_MEMBER_ROLE_GUILD_IDS must be a subset/,
+    /\$\.scopes\.memberRoleGuildIds must be a subset/,
   )
 
   const disabled = new ScopePolicy(loadConnectorConfig({
@@ -1678,6 +1633,7 @@ test("configuration and policy isolate exact member-role authority", () => {
 
   const policy = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
     DISCORD_MCP_BOT_ID: BOT_ID,
@@ -1726,7 +1682,7 @@ test("configuration and policy isolate exact member voice audit and changes", ()
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_MEMBER_VOICE_GUILD_IDS must be a subset/,
+    /\$\.scopes\.memberVoiceGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1734,7 +1690,7 @@ test("configuration and policy isolate exact member voice audit and changes", ()
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS must be a subset/,
+    /\$\.scopes\.memberVoiceChannelIds must be a subset/,
   )
 
   const disabled = new ScopePolicy(loadConnectorConfig({
@@ -1766,6 +1722,7 @@ test("configuration and policy isolate exact member voice audit and changes", ()
 
   const enabled = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
     DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
     DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
@@ -1800,7 +1757,7 @@ test("configuration and policy isolate exact member voice audit and changes", ()
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT/,
+    /requires \$\.capabilities\.memberVoiceAudit/,
   )
 })
 
@@ -1825,12 +1782,13 @@ test("configuration and policy isolate exact channel creation authority", () => 
 
   const enabled = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
     DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" }))
   enabled.assertChannelCreationAllowed(GUILD_ID)
   assert.throws(
-    () => enabled.assertChannelCreationAllowed("999999999999999999"),
+    () => enabled.assertChannelCreationAllowed(OTHER_GUILD_ID),
     /outside the channel creation scope/,
   )
   assert.equal(enabled.describe().channelCreationEnabled, true)
@@ -1854,7 +1812,7 @@ test("configuration and policy isolate reviewed metadata changes to exact readab
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_CHANNEL_METADATA_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_CHANNEL_METADATA_IDS must be a subset/,
+    /\$\.scopes\.channelMetadataIds must be a subset/,
   )
 
   const disabledConfig = loadConnectorConfig({
@@ -1924,12 +1882,13 @@ test("configuration and policy isolate exact role creation authority", () => {
 
   const enabled = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
     DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" }))
   enabled.assertRoleCreationAllowed(GUILD_ID)
   assert.throws(
-    () => enabled.assertRoleCreationAllowed("999999999999999999"),
+    () => enabled.assertRoleCreationAllowed(OTHER_GUILD_ID),
     /outside the role creation scope/,
   )
   assert.equal(enabled.describe().roleCreationEnabled, true)
@@ -2003,7 +1962,7 @@ test("configuration and policy separate role-order audit from exact-guild change
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT/,
+    /requires \$\.capabilities\.roleOrderingAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2073,23 +2032,14 @@ test("configuration and policy separate channel-clone audit from exact-source ch
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT/,
+    /requires \$\.capabilities\.channelCloneAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS and DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
-      DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
-    }, { homeDirectory: "/test/home" }),
-    /require DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+    /requires \$\.scopes\.channelCloneGuildIds and \$\.scopes\.channelCloneSourceIds/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2167,22 +2117,14 @@ test("configuration and policy separate channel-order audit from exact-guild cha
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT/,
+    /requires \$\.capabilities\.channelOrderingAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
-      DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
-    }, { homeDirectory: "/test/home" }),
-    /require DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+    /requires \$\.scopes\.channelOrderingGuildIds/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2247,26 +2189,14 @@ test("configuration and policy separate reviewed channel-deletion audit from exe
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CHANNEL_DELETIONS: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT/,
+    /requires \$\.capabilities\.channelDeletionAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_CHANNEL_DELETION_IDS/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_APPLICATION_ID: ROLE_ID,
-      DISCORD_MCP_BOT_ID: USER_ID,
-      DISCORD_MCP_CHANNEL_DELETION_IDS: CHANNEL_ID,
-    }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOWED_GUILD_IDS/,
+    /requires \$\.scopes\.channelDeletionIds/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2275,7 +2205,7 @@ test("configuration and policy separate reviewed channel-deletion audit from exe
       DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT: "true",
       DISCORD_MCP_CHANNEL_DELETION_IDS: CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_GATEWAY/,
+    /requires \$\.gateway\.enabled/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2344,26 +2274,14 @@ test("configuration and policy separate reviewed role-deletion audit from execut
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT/,
+    /requires \$\.capabilities\.roleDeletionAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ROLE_DELETION_IDS/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-      DISCORD_MCP_BOT_ID: BOT_ID,
-      DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
-    }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOWED_GUILD_IDS/,
+    /requires \$\.scopes\.roleDeletionIds/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2374,7 +2292,7 @@ test("configuration and policy separate reviewed role-deletion audit from execut
       DISCORD_MCP_BOT_ID: BOT_ID,
       DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_GATEWAY/,
+    /requires \$\.gateway\.enabled/,
   )
 
   const auditConfig = loadConnectorConfig({
@@ -2452,12 +2370,13 @@ test("configuration and policy isolate exact guild scaffold authority", () => {
 
   const enabled = new ScopePolicy(loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
     DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
   }, { homeDirectory: "/test/home" }))
   enabled.assertGuildScaffoldAllowed(GUILD_ID)
   assert.throws(
-    () => enabled.assertGuildScaffoldAllowed("999999999999999999"),
+    () => enabled.assertGuildScaffoldAllowed(OTHER_GUILD_ID),
     /outside the guild scaffold scope/,
   )
   assert.equal(enabled.describe().guildScaffoldsEnabled, true)
@@ -2478,7 +2397,7 @@ test("configuration and policy separate capability-safe Guild Template audit fro
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT/,
+    /requires \$\.capabilities\.guildTemplateAudit/,
   )
 
   const disabled = new ScopePolicy(loadConnectorConfig({
@@ -2505,6 +2424,7 @@ test("configuration and policy separate capability-safe Guild Template audit fro
 
   const enabledConfig = loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
     DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
     DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
@@ -2586,7 +2506,7 @@ test("configuration and policy separate exact stable-forum tag audit from change
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT/,
+    /requires \$\.capabilities\.forumTagAudit/,
   )
 
   const forum = channel({ type: DISCORD_CHANNEL_TYPES.forum })
@@ -2652,7 +2572,7 @@ test("configuration and policy isolate thread creation to exact readable parents
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_THREAD_PARENT_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_THREAD_PARENT_IDS must be a subset/,
+    /\$\.scopes\.threadParentIds must be a subset/,
   )
 
   const disabled = new ScopePolicy(loadConnectorConfig({
@@ -2689,7 +2609,7 @@ test("configuration and policy isolate exact thread governance and membership", 
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_THREAD_AUDIT/,
+    /requires \$\.capabilities\.threadAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2697,7 +2617,7 @@ test("configuration and policy isolate exact thread governance and membership", 
       DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
       DISCORD_MCP_THREAD_GUILD_IDS: OTHER_GUILD_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_THREAD_GUILD_IDS must be a subset/,
+    /\$\.scopes\.threadGuildIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -2705,7 +2625,7 @@ test("configuration and policy isolate exact thread governance and membership", 
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_THREAD_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_THREAD_IDS must be a subset/,
+    /\$\.scopes\.threadIds must be a subset/,
   )
 
   const disabled = new ScopePolicy(loadConnectorConfig({
@@ -2864,18 +2784,9 @@ test("configuration and policy require exact dual scopes and separate cross-guil
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
-      DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: OTHER_CHANNEL_ID,
-    }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
-  )
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_CROSS_GUILD_MESSAGE_FORWARDING: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_MESSAGE_FORWARDING/,
+    /requires \$\.capabilities\.messageForwarding/,
   )
 
   const environment = {
@@ -2946,14 +2857,14 @@ test("configuration and policy independently scope announcement subscription aud
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS must be a subset/,
+    /\$\.scopes\.announcementSubscriptionSourceChannelIds must be a subset/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT/,
+    /requires \$\.capabilities\.announcementSubscriptionAudit/,
   )
 
   const enabledConfig = loadConnectorConfig({
@@ -3045,7 +2956,7 @@ test("configuration and policy separate poll audit, voter, creation, and ending 
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_POLL_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_POLL_CHANNEL_IDS must be a subset/,
+    /\$\.scopes\.pollChannelIds must be a subset/,
   )
   for (const environmentName of [
     "DISCORD_MCP_ALLOW_POLL_CREATION",
@@ -3057,7 +2968,7 @@ test("configuration and policy separate poll audit, voter, creation, and ending 
         DISCORD_BOT_TOKEN: TOKEN,
         [environmentName]: "true",
       }, { homeDirectory: "/test/home" }),
-      /require DISCORD_MCP_ALLOW_POLL_AUDIT/,
+      /require \$\.capabilities\.pollAudit/,
     )
   }
 
@@ -3160,7 +3071,7 @@ test("configuration rejects interaction channels outside exact read scope and in
         DISCORD_BOT_TOKEN: TOKEN,
         [name]: value,
       }, { homeDirectory: "/test/home" }),
-      /must be an integer between/,
+      /expected int|must be an integer between/,
     )
   }
   const tooManyMentionUsers = Array.from(
@@ -3196,14 +3107,14 @@ test("configuration rejects ambiguous deletion toggles and malformed IDs", () =>
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_APPLICATION_ID: "not-an-id",
     }, { homeDirectory: "/test/home" }),
-    /must contain Discord snowflake IDs/,
+    /must be a Discord snowflake/,
   )
   assert.throws(
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_BOT_ID: "not-an-id",
     }, { homeDirectory: "/test/home" }),
-    /must contain Discord snowflake IDs/,
+    /must be a Discord snowflake/,
   )
 })
 
@@ -3452,7 +3363,7 @@ test("configuration and policy isolate AutoMod audit, changes, and alert channel
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_AUTOMOD_AUDIT/,
+    /requires \$\.capabilities\.automodAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -3508,7 +3419,7 @@ test("configuration and policy isolate guild expression audit, changes, and loca
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES: "true",
       }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT/,
+      /requires \$\.capabilities\.guildExpressionAudit/,
     )
     assert.throws(
       () => loadConnectorConfig({
@@ -3561,14 +3472,7 @@ test("configuration and policy bind application emojis to pinned identity and lo
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
       }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT/,
-    )
-    assert.throws(
-      () => loadConnectorConfig({
-        DISCORD_BOT_TOKEN: TOKEN,
-        DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
-      }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
+      /requires \$\.capabilities\.applicationEmojiAudit/,
     )
     assert.throws(
       () => loadConnectorConfig({
@@ -3619,7 +3523,7 @@ test("configuration and policy isolate soundboard audit, changes, and local audi
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
       }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT/,
+      /requires \$\.capabilities\.soundboardAudit/,
     )
     assert.throws(
       () => loadConnectorConfig({
@@ -3681,14 +3585,14 @@ test("configuration and policy isolate scheduled event audit, changes, and cover
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
       }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT/,
+      /requires \$\.capabilities\.scheduledEventAudit/,
     )
     assert.throws(
       () => loadConnectorConfig({
         DISCORD_BOT_TOKEN: TOKEN,
         DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
       }, { homeDirectory: "/test/home" }),
-      /requires DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT/,
+      /requires \$\.capabilities\.scheduledEventAudit/,
     )
     assert.throws(
       () => loadConnectorConfig({
@@ -3752,7 +3656,7 @@ test("configuration and policy isolate Stage instances to exact channels", () =>
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT/,
+    /requires \$\.capabilities\.stageInstanceAudit/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -3760,7 +3664,7 @@ test("configuration and policy isolate Stage instances to exact channels", () =>
       DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
       DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
     }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES/,
+    /requires \$\.capabilities\.stageInstanceChanges/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -3924,7 +3828,7 @@ test("configuration and policy isolate reaction identities and moderation to exa
       DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
       DISCORD_MCP_REACTION_CHANNEL_IDS: OTHER_CHANNEL_ID,
     }, { homeDirectory: "/test/home" }),
-    /DISCORD_MCP_REACTION_CHANNEL_IDS must be a subset/,
+    /\$\.scopes\.reactionChannelIds must be a subset/,
   )
   for (const enabled of [
     "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
@@ -3938,14 +3842,6 @@ test("configuration and policy isolate reaction identities and moderation to exa
       /exact reaction-channel allowlist/,
     )
   }
-  assert.throws(
-    () => loadConnectorConfig({
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
-      DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
-    }, { homeDirectory: "/test/home" }),
-    /requires DISCORD_MCP_APPLICATION_ID and DISCORD_MCP_BOT_ID/,
-  )
 
   const auditConfig = loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,

@@ -141,7 +141,7 @@ import {
   GUILD_VERIFICATION_LEVELS,
   GUILD_TEMPLATE_LIMITS,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
-  ENVIRONMENT_NAMES,
+  DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   GATEWAY_DEFAULTS,
   IDEMPOTENCY_KEY_PATTERN,
   INVITE_CURSOR_PATTERN,
@@ -13538,7 +13538,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     key: options.requestStateKey || randomBytes(32),
     ttlSeconds: options.requestStateTtlSeconds || REQUEST_STATE_TTL_SECONDS,
   })
-  const secrets = [environment[ENVIRONMENT_NAMES.token], config.token]
+  const secrets = [config.token]
   const toolDiscoveryInstructions = config.mcpToolSurface === "progressive"
     ? "This server uses a progressive exact-tool surface. Call discover_discord_tools with the desired capability, then refresh tools/list and call the newly advertised canonical tool. Never guess a hidden schema. Discovery cannot expand the configured toolsets."
     : "Canonical tools are advertised directly. discover_discord_tools provides bounded local capability search and never expands the configured toolsets."
@@ -22527,7 +22527,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
   const environment = options.environment || process.env
   const stderr = options.stderr || process.stderr
   const config = options.config || loadConnectorConfig(environment)
-  const secrets = [environment[ENVIRONMENT_NAMES.token], config.token]
+  const secrets = [config.token]
   if (options.observability && options.observabilityRuntime) {
     throw new ConfigurationError(
       "MCP run options must not provide both observability and observabilityRuntime",
@@ -22745,9 +22745,10 @@ if (isMainModule(import.meta.url)) {
   try {
     runDiscordMcpServer()
   } catch (error) {
-    const message = redactText(errorMessage(error), [
-      process.env[ENVIRONMENT_NAMES.token],
-    ])
+    const secrets = Object.entries(process.env)
+      .filter(([name]) => DISCORD_TOKEN_ENVIRONMENT_PATTERN.test(name))
+      .flatMap(([, token]) => [token, token?.trim()])
+    const message = redactText(errorMessage(error), secrets)
     process.stderr.write(`[mcp] ${message}\n`)
     process.exitCode = 1
   }

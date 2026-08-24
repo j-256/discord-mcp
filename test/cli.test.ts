@@ -20,7 +20,11 @@ import {
   type ConfigValidationReport,
   type ConfigWriteReport,
 } from "../src/config-operator.js"
-import { ENVIRONMENT_NAMES } from "../src/constants.js"
+import { loadConnectorConfigDocument } from "../src/config.js"
+import {
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+} from "../src/constants.js"
 import {
   ConfigDocumentError,
   ConfigurationError,
@@ -100,7 +104,7 @@ function setupReport(): SetupReport {
     configFile,
     credential: {
       provider: "environment",
-      variable: ENVIRONMENT_NAMES.token,
+      variable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     },
     guildsAccessibleOnFirstPage: 1,
     guildsInScopeOnFirstPage: 1,
@@ -254,10 +258,10 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
   return {
     async activateProfile(_name, options) {
       return {
-        environment: {
+        config: loadConnectorConfigDocument(profile, {
           ...options.environment,
-          DISCORD_BOT_TOKEN: TOKEN,
-        },
+          [TOKEN_ALIAS]: TOKEN,
+        }),
         profile,
       }
     },
@@ -279,6 +283,22 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async listProfiles() {
       return [profile]
+    },
+    loadConfig(environment) {
+      const credentialVariable = environment[TOKEN_ALIAS]
+        ? TOKEN_ALIAS
+        : DEFAULT_TOKEN_ENVIRONMENT_VARIABLE
+      const source = {
+        ...environment,
+        [credentialVariable]: environment[credentialVariable] || TOKEN,
+      }
+      return loadConnectorConfigDocument({
+        ...profile,
+        credential: {
+          provider: "environment",
+          variable: credentialVariable,
+        },
+      }, source)
     },
     async loadProfile() {
       return profile
@@ -767,7 +787,7 @@ test("CLI defaults to the stdio server through the selected config without writi
       },
     }),
     environment: {
-      [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE,
+      [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE,
       DISCORD_BOT_TOKEN: `  ${TOKEN}  `,
     },
     stderr: stderr.stream,
@@ -992,7 +1012,7 @@ test("CLI returns diagnostic failure while preserving secret-free JSON", async (
       },
     }),
     environment: {
-      [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE,
+      [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE,
       DISCORD_BOT_TOKEN: `  ${TOKEN}  `,
     },
     stderr: stderr.stream,
@@ -1014,7 +1034,7 @@ test("CLI distinguishes doctor warnings and renders their recovery guidance", as
         return doctorReport("warning")
       },
     }),
-    environment: { [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE },
+    environment: { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE },
     stdout: stdout.stream,
   })
 
@@ -1035,7 +1055,7 @@ test("CLI emits a redacted structured failure when JSON was requested", async ()
       },
     }),
     environment: {
-      [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE,
+      [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE,
       DISCORD_BOT_TOKEN: TOKEN,
     },
     stderr: stderr.stream,
@@ -1144,7 +1164,7 @@ test("CLI preserves long-running startup failure status with recovery text", asy
         throw new Error("stdio startup failed")
       },
     }),
-    environment: { [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE },
+    environment: { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE },
     stderr: stderr.stream,
   })
 
@@ -1545,34 +1565,33 @@ test("CLI generates human and JSON bot installation plans without dependencies",
   )
 })
 
-test("CLI activates profiles before serve, doctor, and smoke without mutating the source", async () => {
+test("CLI activates profiles as typed config before serve, doctor, and smoke", async () => {
   const source = { [TOKEN_ALIAS]: TOKEN, KEEP: "value" }
   const before = { ...source }
-  const activated = {
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-    DISCORD_MCP_BOT_ID: BOT_ID,
-    KEEP: "value",
-  }
+  const profile = connectorProfile()
+  const config = loadConnectorConfigDocument(profile, source)
   const events: string[] = []
   const profiledDependencies = dependencies({
     async activateProfile(name, options) {
       events.push(`activate:${name}`)
       assert.equal(options.environment, source)
-      return { environment: activated, profile: connectorProfile() }
+      return { config, profile }
     },
     async diagnose(options) {
       events.push("doctor")
-      assert.equal(options.environment, activated)
+      assert.equal(options.environment, source)
+      assert.equal(options.config, config)
       return doctorReport()
     },
     serve(options) {
       events.push("serve")
-      assert.equal(options.environment, activated)
+      assert.equal(options.environment, source)
+      assert.equal(options.config, config)
     },
     async smoke(options) {
       events.push("smoke")
-      assert.equal(options.environment, activated)
+      assert.equal(options.environment, source)
+      assert.equal(options.config, config)
       return smokeReport()
     },
   })
@@ -1617,16 +1636,16 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
     },
     async diagnose(options) {
       events.push("doctor")
-      assert.equal(options.environment?.[ENVIRONMENT_NAMES.configFile], file)
+      assert.equal(options.environment?.[CONFIG_FILE_ENVIRONMENT_VARIABLE], file)
       return doctorReport()
     },
     serve(options) {
       events.push("serve")
-      assert.equal(options.environment[ENVIRONMENT_NAMES.configFile], file)
+      assert.equal(options.environment[CONFIG_FILE_ENVIRONMENT_VARIABLE], file)
     },
     async smoke(options) {
       events.push("smoke")
-      assert.equal(options.environment?.[ENVIRONMENT_NAMES.configFile], file)
+      assert.equal(options.environment?.[CONFIG_FILE_ENVIRONMENT_VARIABLE], file)
       return smokeReport()
     },
   })

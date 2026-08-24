@@ -1,7 +1,6 @@
 import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
-  ENVIRONMENT_NAMES,
   MCP_DISCOVERY_TOOL_NAME,
   type McpToolsetName,
 } from "./constants.js"
@@ -72,7 +71,13 @@ export interface SetupPresetDescriptor {
 }
 
 export interface AppliedSetupPreset {
-  readonly environment: NodeJS.ProcessEnv
+  readonly policy: {
+    readonly channelIds: readonly string[]
+    readonly gatewayEnabled: false
+    readonly guildIds: readonly string[]
+    readonly toolsets: readonly McpToolsetName[]
+    readonly toolSurface: "full"
+  }
   readonly preset: SetupPresetDescriptor
 }
 
@@ -83,7 +88,6 @@ export interface SetupPresetSelection {
 }
 
 export interface ApplySetupPresetOptions extends SetupPresetSelection {
-  environment?: NodeJS.ProcessEnv
 }
 
 const PRESET_SOURCES = Object.freeze([
@@ -121,19 +125,6 @@ const PRESET_SOURCES = Object.freeze([
     ],
   },
 ] as const satisfies readonly SetupPresetSource[])
-
-const PRESERVED_PRESET_ENVIRONMENT_NAMES = new Set<string>([
-  ENVIRONMENT_NAMES.applicationId,
-  ENVIRONMENT_NAMES.botId,
-  ENVIRONMENT_NAMES.token,
-])
-const CONNECTOR_ENVIRONMENT_NAMES = new Set<string>(
-  Object.values(ENVIRONMENT_NAMES),
-)
-
-function isConnectorEnvironmentName(name: string): boolean {
-  return name.startsWith("DISCORD_MCP_") || name.startsWith("OTEL_")
-}
 
 function createSetupPresetDescriptor(
   source: SetupPresetSource,
@@ -281,19 +272,14 @@ export function applySetupPreset(
     preset.requirements.channelIds === "required" ? 1 : 0,
     DISCORD_LIMITS.searchChannelIds,
   )
-  const environment = { ...(options.environment || process.env) }
-  for (const name of Object.keys(environment)) {
-    if (
-      !PRESERVED_PRESET_ENVIRONMENT_NAMES.has(name)
-      && (CONNECTOR_ENVIRONMENT_NAMES.has(name) || isConnectorEnvironmentName(name))
-    ) {
-      delete environment[name]
-    }
+  return {
+    policy: Object.freeze({
+      channelIds: Object.freeze(channelIds),
+      gatewayEnabled: false,
+      guildIds: Object.freeze(guildIds),
+      toolsets: preset.toolsets,
+      toolSurface: preset.toolSurface,
+    }),
+    preset,
   }
-  environment[ENVIRONMENT_NAMES.allowedGuildIds] = guildIds.join(",")
-  environment[ENVIRONMENT_NAMES.allowedChannelIds] = channelIds.join(",")
-  environment[ENVIRONMENT_NAMES.allowGateway] = "false"
-  environment[ENVIRONMENT_NAMES.toolSurface] = preset.toolSurface
-  environment[ENVIRONMENT_NAMES.toolsets] = preset.toolsets.join(",")
-  return { environment, preset }
 }

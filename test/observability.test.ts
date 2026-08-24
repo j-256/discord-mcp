@@ -21,16 +21,30 @@ import {
   WriteCoordinationStateError,
 } from "../src/errors.js"
 import {
-  loadObservabilityConfig,
+  loadObservabilityDocumentConfig,
   parseOtlpHeaders,
   type ObservabilityConfig,
 } from "../src/observability-config.js"
+import type { ConnectorConfigDocumentObservability } from "../src/config-document.js"
 import {
   classifyOperationalError,
   OperationalTelemetry,
 } from "../src/observability.js"
 
 const TOKEN = "test-discord-token"
+const GENERAL_HEADERS = "DISCORD_TEST_OTLP_HEADERS"
+const METRIC_HEADERS = "DISCORD_TEST_OTLP_METRIC_HEADERS"
+
+function observabilityConfig(
+  observability: ConnectorConfigDocumentObservability,
+  environment: NodeJS.ProcessEnv = {},
+): ObservabilityConfig {
+  return loadObservabilityDocumentConfig(observability, environment, [TOKEN])
+}
+
+function unsafeObservability(value: unknown): ConnectorConfigDocumentObservability {
+  return value as ConnectorConfigDocumentObservability
+}
 
 function disabledConfig(jsonLogsEnabled = false): ObservabilityConfig {
   return {
@@ -40,13 +54,15 @@ function disabledConfig(jsonLogsEnabled = false): ObservabilityConfig {
   }
 }
 
-test("observability export is double-gated and disabled configuration ignores OTEL inputs", () => {
-  const config = loadObservabilityConfig({
-    DISCORD_MCP_OBSERVABILITY_LOGS: "true",
-    OTEL_EXPORTER_OTLP_ENDPOINT: "not a URL",
-    OTEL_EXPORTER_OTLP_HEADERS: `authorization=${TOKEN}`,
-    OTEL_EXPORTER_OTLP_PROTOCOL: "grpc",
-  }, [TOKEN])
+test("observability export is double-gated and disabled configuration ignores export settings", () => {
+  const config = observabilityConfig({
+    endpoint: "not a URL",
+    headers: { provider: "environment", variable: GENERAL_HEADERS },
+    jsonLogsEnabled: true,
+    protocol: "grpc",
+  }, {
+    [GENERAL_HEADERS]: `authorization=${TOKEN}`,
+  })
 
   assert.deepEqual(config, {
     export: undefined,
@@ -56,19 +72,24 @@ test("observability export is double-gated and disabled configuration ignores OT
 })
 
 test("observability export applies secure OTLP HTTP defaults and signal overrides", () => {
-  const config = loadObservabilityConfig({
-    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-    OTEL_EXPORTER_OTLP_COMPRESSION: "gzip",
-    OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test/otel",
-    OTEL_EXPORTER_OTLP_HEADERS: "authorization=Bearer%20example,x-team=platform",
-    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "https://metrics.example.test/ingest",
-    OTEL_EXPORTER_OTLP_METRICS_HEADERS: "x-team=metrics",
-    OTEL_EXPORTER_OTLP_METRICS_TIMEOUT: "2500",
-    OTEL_EXPORTER_OTLP_TRACES_COMPRESSION: "none",
-    OTEL_SERVICE_NAME: "discord-mcp.production",
-    OTEL_TRACES_SAMPLER: "parentbased_traceidratio",
-    OTEL_TRACES_SAMPLER_ARG: "0.25",
-  }, [TOKEN])
+  const config = observabilityConfig({
+    compression: "gzip",
+    endpoint: "https://collector.example.test/otel",
+    exportEnabled: true,
+    headers: { provider: "environment", variable: GENERAL_HEADERS },
+    metrics: {
+      endpoint: "https://metrics.example.test/ingest",
+      headers: { provider: "environment", variable: METRIC_HEADERS },
+      timeoutMs: 2_500,
+    },
+    serviceName: "discord-mcp.production",
+    traceSampleRatio: 0.25,
+    traceSampler: "parentbased_traceidratio",
+    traces: { compression: "none" },
+  }, {
+    [GENERAL_HEADERS]: "authorization=Bearer%20example,x-team=platform",
+    [METRIC_HEADERS]: "x-team=metrics",
+  })
 
   assert.equal(config.exportEnabled, true)
   assert.equal(config.export?.traces.url, "https://collector.example.test/otel/v1/traces")
@@ -103,42 +124,70 @@ test("observability export permits only credential-free HTTPS or loopback HTTP c
   ]
   for (const endpoint of invalidEndpoints) {
     assert.throws(
-      () => loadObservabilityConfig({
-        DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-        OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
-      }, [TOKEN]),
+      () => observabilityConfig({
+        endpoint,
+        exportEnabled: true,
+      }),
       ConfigurationError,
     )
   }
 
-  const loopback = loadObservabilityConfig({
-    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-    OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318",
-  }, [TOKEN])
+  const loopback = observabilityConfig({
+    endpoint: "http://127.0.0.1:4318",
+    exportEnabled: true,
+  })
   assert.equal(loopback.export?.traces.url, "http://127.0.0.1:4318/v1/traces")
 })
 
 test("observability configuration rejects unsafe protocols, headers, limits, and samplers", () => {
-  const invalid: NodeJS.ProcessEnv[] = [
-    { OTEL_EXPORTER_OTLP_PROTOCOL: "grpc" },
-    { OTEL_EXPORTER_OTLP_COMPRESSION: "brotli" },
-    { OTEL_EXPORTER_OTLP_TIMEOUT: "0" },
-    { OTEL_EXPORTER_OTLP_TIMEOUT: "60001" },
-    { OTEL_EXPORTER_OTLP_HEADERS: "x=value,x=again" },
-    { OTEL_EXPORTER_OTLP_HEADERS: "x=%0D%0Aunsafe" },
-    { OTEL_EXPORTER_OTLP_HEADERS: `authorization=${encodeURIComponent(TOKEN)}` },
-    { OTEL_EXPORTER_OTLP_CLIENT_KEY: "/private/collector.key" },
-    { OTEL_SERVICE_NAME: "unsafe service name" },
-    { OTEL_SERVICE_NAME: "discord-mcp.999999999999999999" },
-    { OTEL_TRACES_SAMPLER: "remote_parent_sampled" },
-    { OTEL_TRACES_SAMPLER: "traceidratio", OTEL_TRACES_SAMPLER_ARG: "1.1" },
+  const invalid: Array<{
+    environment?: NodeJS.ProcessEnv
+    observability: ConnectorConfigDocumentObservability
+  }> = [
+    { observability: unsafeObservability({ protocol: "grpc" }) },
+    { observability: unsafeObservability({ compression: "brotli" }) },
+    { observability: { timeoutMs: 0 } },
+    { observability: { timeoutMs: 60_001 } },
+    {
+      environment: { [GENERAL_HEADERS]: "x=value,x=again" },
+      observability: {
+        headers: { provider: "environment", variable: GENERAL_HEADERS },
+      },
+    },
+    {
+      environment: { [GENERAL_HEADERS]: "x=%0D%0Aunsafe" },
+      observability: {
+        headers: { provider: "environment", variable: GENERAL_HEADERS },
+      },
+    },
+    {
+      environment: {
+        [GENERAL_HEADERS]: `authorization=${encodeURIComponent(TOKEN)}`,
+      },
+      observability: {
+        headers: { provider: "environment", variable: GENERAL_HEADERS },
+      },
+    },
+    { observability: { serviceName: "unsafe service name" } },
+    { observability: { serviceName: "discord-mcp.999999999999999999" } },
+    {
+      observability: unsafeObservability({
+        traceSampler: "remote_parent_sampled",
+      }),
+    },
+    {
+      observability: {
+        traceSampleRatio: 1.1,
+        traceSampler: "traceidratio",
+      },
+    },
   ]
-  for (const environment of invalid) {
+  for (const candidate of invalid) {
     assert.throws(
-      () => loadObservabilityConfig({
-        DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-        ...environment,
-      }, [TOKEN]),
+      () => observabilityConfig({
+        ...candidate.observability,
+        exportEnabled: true,
+      }, candidate.environment),
       ConfigurationError,
     )
   }
@@ -215,11 +264,13 @@ test("local operational telemetry keeps bounded aggregate data and fixed privacy
 })
 
 test("operational telemetry isolates exporter lifecycle and exposes only exporter health", async () => {
-  const config = loadObservabilityConfig({
-    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-    OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test/private",
-    OTEL_EXPORTER_OTLP_HEADERS: "authorization=Bearer%20private",
-  }, [TOKEN])
+  const config = observabilityConfig({
+    endpoint: "https://collector.example.test/private",
+    exportEnabled: true,
+    headers: { provider: "environment", variable: GENERAL_HEADERS },
+  }, {
+    [GENERAL_HEADERS]: "authorization=Bearer%20private",
+  })
   let flushes = 0
   let shutdowns = 0
   const telemetry = new OperationalTelemetry({
@@ -265,10 +316,10 @@ test("operational telemetry isolates exporter lifecycle and exposes only exporte
 })
 
 test("operational telemetry swallows exporter and logging failures", () => {
-  const config = loadObservabilityConfig({
-    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-    DISCORD_MCP_OBSERVABILITY_LOGS: "true",
-  }, [TOKEN])
+  const config = observabilityConfig({
+    exportEnabled: true,
+    jsonLogsEnabled: true,
+  })
   const telemetry = new OperationalTelemetry({
     config,
     otlpFactory() {
@@ -289,9 +340,7 @@ test("operational telemetry swallows exporter and logging failures", () => {
 })
 
 test("operational telemetry still shuts down after a final flush failure", async () => {
-  const config = loadObservabilityConfig({
-    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-  }, [TOKEN])
+  const config = observabilityConfig({ exportEnabled: true })
   let shutdowns = 0
   const telemetry = new OperationalTelemetry({
     config,

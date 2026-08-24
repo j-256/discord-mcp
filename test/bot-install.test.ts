@@ -5,7 +5,7 @@ import {
   BOT_INSTALL_REPORT_SCHEMA_VERSION,
   createBotInstallPlan,
 } from "../src/bot-install.js"
-import { ENVIRONMENT_NAMES } from "../src/constants.js"
+import { DEFAULT_TOKEN_ENVIRONMENT_VARIABLE } from "../src/constants.js"
 
 const APPLICATION_ID = "100000000000000001"
 const GUILD_ID = "300000000000000001"
@@ -47,7 +47,7 @@ test("bot installation plans are exact, fixed-origin, and credential-free", () =
     names: ["VIEW_CHANNEL"],
   })
   assert.deepEqual(observer.privilegedIntents, [])
-  assert.equal(observer.postInstall.credentialVariable, ENVIRONMENT_NAMES.token)
+  assert.equal(observer.postInstall.credentialVariable, DEFAULT_TOKEN_ENVIRONMENT_VARIABLE)
   assert.deepEqual(observer.postInstall.commands, [
     `discord-mcp setup --config ./discord-mcp.json --preset server-observer --guild-id ${GUILD_ID}`,
     "discord-mcp config validate ./discord-mcp.json",

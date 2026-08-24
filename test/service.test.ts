@@ -11,7 +11,7 @@ import { join } from "node:path"
 import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
-import { loadConnectorConfig } from "../src/config.js"
+import { loadFixtureConfig as loadConnectorConfig } from "./config-fixture.js"
 import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_MESSAGE_FLAGS,
@@ -900,6 +900,7 @@ function serviceFixture(overrides: {
   }
   const config = loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
     DISCORD_MCP_BOT_ID: BOT_ID,
     ...overrides.environment,

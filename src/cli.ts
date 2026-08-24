@@ -14,9 +14,14 @@ import {
 import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
-  ENVIRONMENT_NAMES,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  DISCORD_TOKEN_ENVIRONMENT_PATTERN,
 } from "./constants.js"
-import { resolveConnectorConfigDocumentAuditFile } from "./config.js"
+import {
+  loadConnectorConfig,
+  resolveConnectorConfigDocumentAuditFile,
+  type ConnectorConfig,
+} from "./config.js"
 import type { ConnectorConfigDocument } from "./config-document.js"
 import {
   explainConnectorConfig,
@@ -220,6 +225,7 @@ export interface CliDependencies {
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
   listCoordination(activityFile: string): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
+  loadConfig(environment: NodeJS.ProcessEnv): ConnectorConfig
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
   resolveCoordination(
@@ -229,6 +235,7 @@ export interface CliDependencies {
   ): Promise<WriteCoordinationResolution>
   restoreProfile(name: string, options: ProfileLocationOptions): Promise<TrashedProfile>
   serve(options: {
+    config: ConnectorConfig
     environment: NodeJS.ProcessEnv
     stderr: Pick<NodeJS.WriteStream, "write">
   }): unknown
@@ -274,6 +281,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
     ).list()
   },
   listProfiles,
+  loadConfig: loadConnectorConfig,
   loadProfile,
   prepareSetup,
   resolveCoordination: async (auditFile, claimId, confirmation) => {
@@ -1330,7 +1338,7 @@ function safeWrite(
   environment: NodeJS.ProcessEnv,
 ): void {
   const secrets = Object.entries(environment)
-    .filter(([name]) => /^DISCORD_(?:[A-Z0-9]+_)*TOKEN$/.test(name))
+    .filter(([name]) => DISCORD_TOKEN_ENVIRONMENT_PATTERN.test(name))
     .flatMap(([, token]) => [token, token?.trim()])
   stream.write(`${redactText(value, secrets)}\n`)
 }
@@ -1348,35 +1356,43 @@ function configSelectionEnvironment(
     throw new ConfigurationError("Option --config requires a valid file path")
   }
   const selected = resolve(file)
-  const ambient = environment[ENVIRONMENT_NAMES.configFile]?.trim()
+  const ambient = environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
   if (ambient && resolve(ambient) !== selected) {
     throw new ConfigurationError(
-      `Option --config conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+      `Option --config conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`,
     )
   }
   return {
     ...environment,
-    [ENVIRONMENT_NAMES.configFile]: selected,
+    [CONFIG_FILE_ENVIRONMENT_VARIABLE]: selected,
   }
 }
 
 const CONFIG_SELECTION_REQUIRED_MESSAGE =
   "Operational commands require --config FILE, --profile NAME, or DISCORD_MCP_CONFIG_FILE; create a policy with discord-mcp config init or setup --preset"
 
-async function runtimeSelectionEnvironment(
+interface RuntimeSelection {
+  config: ConnectorConfig
+  environment: NodeJS.ProcessEnv
+}
+
+async function runtimeSelection(
   selection: { configFile?: string; profileName?: string },
   environment: NodeJS.ProcessEnv,
   dependencies: CliDependencies,
-): Promise<NodeJS.ProcessEnv> {
+): Promise<RuntimeSelection> {
   if (selection.profileName) {
     const activated = await dependencies.activateProfile(selection.profileName, { environment })
-    return activated.environment
+    return { config: activated.config, environment }
   }
   const selected = configSelectionEnvironment(selection.configFile, environment)
-  if (!selected[ENVIRONMENT_NAMES.configFile]?.trim()) {
+  if (!selected[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()) {
     throw new RuntimeConfigurationRequiredError(CONFIG_SELECTION_REQUIRED_MESSAGE)
   }
-  return selected
+  return {
+    config: dependencies.loadConfig(selected),
+    environment: selected,
+  }
 }
 
 async function coordinationActivityFile(
@@ -1386,16 +1402,16 @@ async function coordinationActivityFile(
 ): Promise<string> {
   let document: ConnectorConfigDocument
   if (selection.profileName) {
-    if (environment[ENVIRONMENT_NAMES.configFile]?.trim()) {
+    if (environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()) {
       throw new ConfigurationError(
-        `Option --profile conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+        `Option --profile conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`,
       )
     }
     const profile = await dependencies.loadProfile(selection.profileName, { environment })
     document = profile
   } else {
     const selected = configSelectionEnvironment(selection.configFile, environment)
-    const file = selected[ENVIRONMENT_NAMES.configFile]?.trim()
+    const file = selected[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
     if (!file) throw new RuntimeConfigurationRequiredError(CONFIG_SELECTION_REQUIRED_MESSAGE)
     document = dependencies.showConfig(file).document
   }
@@ -1422,20 +1438,21 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "doctor": {
-        const runtimeEnvironment = await runtimeSelectionEnvironment(
+        const runtime = await runtimeSelection(
           parsed,
           environment,
           dependencies,
         )
         const report = await dependencies.diagnose({
-          environment: runtimeEnvironment,
+          config: runtime.config,
+          environment: runtime.environment,
           ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}),
           online: parsed.online,
         })
         safeWrite(
           stdout,
           parsed.json ? jsonReport(report) : renderDoctor(report),
-          runtimeEnvironment,
+          runtime.environment,
         )
         if (report.status === "error") return CLI_EXIT_CODES.failure
         if (report.status === "warning") return CLI_EXIT_CODES.warning
@@ -1618,8 +1635,10 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "serve":
+        const runtime = await runtimeSelection(parsed, environment, dependencies)
         dependencies.serve({
-          environment: await runtimeSelectionEnvironment(parsed, environment, dependencies),
+          config: runtime.config,
+          environment: runtime.environment,
           stderr,
         })
         return CLI_EXIT_CODES.success
@@ -1660,16 +1679,19 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           : CLI_EXIT_CODES.success
       }
       case "smoke": {
-        const runtimeEnvironment = await runtimeSelectionEnvironment(
+        const runtime = await runtimeSelection(
           parsed,
           environment,
           dependencies,
         )
-        const report = await dependencies.smoke({ environment: runtimeEnvironment })
+        const report = await dependencies.smoke({
+          config: runtime.config,
+          environment: runtime.environment,
+        })
         safeWrite(
           stdout,
           parsed.json ? jsonReport(report) : renderSmoke(report),
-          runtimeEnvironment,
+          runtime.environment,
         )
         return CLI_EXIT_CODES.success
       }

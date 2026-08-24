@@ -12,10 +12,9 @@ import {
 
 import {
   CONNECTOR_LIMITS,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DISCORD_LIMITS,
-  DISCORD_SNOWFLAKE_PATTERN,
-  ENVIRONMENT_NAMES,
-  GATEWAY_DEFAULTS,
+  DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   INTERACTION_DEFAULTS,
   NATIVE_INTERACTION_COMMAND_NAME_PATTERN,
   NATIVE_INTERACTION_DEFAULTS,
@@ -24,18 +23,18 @@ import {
   type McpToolSurface,
 } from "./constants.js"
 import {
-  activateConnectorConfigFile,
-  configDocumentConfigurationError,
+  connectorConfigSecretEnvironmentNames,
+  loadConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
+  resolveConnectorCredential,
+  type ConnectorConfigCapabilityName,
   type ConnectorConfigDocument,
+  type ConnectorConfigLimitName,
+  type ConnectorConfigScopeName,
 } from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 import {
-  parseMcpToolsets,
-  parseMcpToolSurface,
-} from "./mcp-tool-catalog.js"
-import {
-  loadObservabilityConfig,
+  loadObservabilityDocumentConfig,
   type ObservabilityConfig,
 } from "./observability-config.js"
 
@@ -208,92 +207,95 @@ export interface ConfigOptions {
   homeDirectory?: string
 }
 
-function parseId(value: string, name: string): string {
-  const normalized = value.trim()
-  if (!DISCORD_SNOWFLAKE_PATTERN.test(normalized)) {
-    throw new ConfigurationError(`${name} must contain Discord snowflake IDs`)
+function configPolicyPath(name: string): string {
+  if (name === "allowedChannelIds") return "$.readScope.channelIds"
+  if (name === "allowedGuildIds") return "$.readScope.guildIds"
+  if (name === "applicationId") return "$.identity.applicationId"
+  if (name === "botId") return "$.identity.botId"
+  if (name === "allowGateway") return "$.gateway.enabled"
+  if (name === "nativeCommandName") return "$.runtime.nativeCommandName"
+  if (name.startsWith("allow")) {
+    return `$.capabilities.${name.slice(5, 6).toLowerCase()}${name.slice(6)}`
   }
-  return normalized
+  return `$.scopes.${name}`
 }
 
-function parseIdSet(
-  value: string | undefined,
-  name: string,
+function assertNoAmbientPolicyEnvironment(
+  document: ConnectorConfigDocument,
+  environment: NodeJS.ProcessEnv,
+): void {
+  const permitted = new Set([
+    CONFIG_FILE_ENVIRONMENT_VARIABLE,
+    ...connectorConfigSecretEnvironmentNames(document),
+  ])
+  const conflicts = Object.keys(environment)
+    .filter((name) => (
+      !permitted.has(name)
+      && (
+        name.startsWith("DISCORD_MCP_")
+        || name.startsWith("OTEL_")
+        || DISCORD_TOKEN_ENVIRONMENT_PATTERN.test(name)
+      )
+      && environment[name]?.trim()
+    ))
+    .sort()
+  if (conflicts.length > 0) {
+    throw new ConfigurationError(
+      `Selected configuration conflicts with undeclared environment variables: ${conflicts.join(", ")}`,
+    )
+  }
+}
+
+function configScope(
+  document: ConnectorConfigDocument,
+  name: ConnectorConfigScopeName,
   maximum?: number,
 ): ReadonlySet<string> {
-  if (!value?.trim()) return new Set()
-  const values = value
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map((entry) => parseId(entry, name))
-  const result = new Set(values)
+  const result = new Set(document.scopes[name] ?? [])
   if (maximum !== undefined && result.size > maximum) {
-    throw new ConfigurationError(`${name} must contain at most ${maximum} unique IDs`)
+    throw new ConfigurationError(
+      `$.scopes.${name} must contain at most ${maximum} unique IDs`,
+    )
   }
   return result
 }
 
-function parseBoolean(value: string | undefined, name: string): boolean {
-  if (value === undefined || value.trim() === "") return false
-  const normalized = value.trim().toLowerCase()
-  if (normalized === "true") return true
-  if (normalized === "false") return false
-  throw new ConfigurationError(`${name} must be true or false`)
+function configCapability(
+  document: ConnectorConfigDocument,
+  name: ConnectorConfigCapabilityName,
+): boolean {
+  return document.capabilities[name] ?? false
 }
 
-function parseInteger(
-  value: string | undefined,
-  name: string,
+function configLimit(
+  document: ConnectorConfigDocument,
+  name: ConnectorConfigLimitName,
   defaultValue: number,
   minimum: number,
   maximum: number,
 ): number {
-  if (value === undefined || value.trim() === "") return defaultValue
-  const normalized = value.trim()
-  if (!/^[0-9]+$/.test(normalized)) {
-    throw new ConfigurationError(`${name} must be an integer between ${minimum} and ${maximum}`)
-  }
-  const result = Number(normalized)
+  const result = document.limits[name] ?? defaultValue
   if (!Number.isSafeInteger(result) || result < minimum || result > maximum) {
-    throw new ConfigurationError(`${name} must be an integer between ${minimum} and ${maximum}`)
+    throw new ConfigurationError(
+      `$.limits.${name} must be an integer between ${minimum} and ${maximum}`,
+    )
   }
   return result
 }
 
 function parseOwnedRoots(
-  value: string | undefined,
+  value: readonly string[] | undefined,
   name: string,
 ): readonly string[] {
-  if (!value?.trim()) return []
-  const normalized = value.trim()
-  let entries: unknown
-  try {
-    entries = normalized.startsWith("[")
-      ? JSON.parse(normalized)
-      : [normalized]
-  } catch (error) {
-    throw new ConfigurationError(
-      `${name} must be one absolute directory or a JSON array of absolute directories`,
-      { cause: error },
-    )
-  }
-  if (
-    !Array.isArray(entries)
-    || entries.length < 1
-    || entries.some((entry) => typeof entry !== "string" || !entry.trim())
-  ) {
-    throw new ConfigurationError(
-      `${name} must be one absolute directory or a JSON array of absolute directories`,
-    )
-  }
+  if (!value || value.length === 0) return []
   if (typeof process.getuid !== "function") {
     throw new ConfigurationError(
       `${name} requires numeric process ownership evidence on this runtime`,
     )
   }
   const processUserId = process.getuid()
-  const roots = entries.map((entry) => {
-    const candidate = (entry as string).trim()
+  const roots = value.map((entry) => {
+    const candidate = entry.trim()
     if (
       !isAbsolute(candidate)
       || candidate.includes("\0")
@@ -344,24 +346,6 @@ function auditFile(value: string | undefined, environment: NodeJS.ProcessEnv, ho
   return resolve(selected)
 }
 
-export function resolveConnectorAuditFile(
-  environment: NodeJS.ProcessEnv = process.env,
-  options: ConfigOptions = {},
-): string {
-  const activated = activateConnectorConfigFile(environment)
-  const selected = activated?.environment ?? environment
-  try {
-    return auditFile(
-      selected[ENVIRONMENT_NAMES.auditFile],
-      selected,
-      options.homeDirectory || homedir(),
-    )
-  } catch (error) {
-    if (activated) throw configDocumentConfigurationError(error)
-    throw error
-  }
-}
-
 export function resolveConnectorConfigDocumentAuditFile(
   documentValue: ConnectorConfigDocument,
   environment: NodeJS.ProcessEnv = process.env,
@@ -380,394 +364,235 @@ export function loadConnectorConfig(
   environment: NodeJS.ProcessEnv = process.env,
   options: ConfigOptions = {},
 ): ConnectorConfig {
-  const activated = activateConnectorConfigFile(environment)
-  try {
-    return loadConnectorEnvironmentConfig(
-      activated?.environment ?? environment,
-      options,
+  const file = environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
+  if (!file) {
+    throw new ConfigurationError(
+      `${CONFIG_FILE_ENVIRONMENT_VARIABLE} is required to select a configuration document`,
     )
-  } catch (error) {
-    if (activated) throw configDocumentConfigurationError(error)
-    throw error
   }
+  return loadConnectorConfigDocument(
+    loadConnectorConfigDocumentFile(file),
+    environment,
+    options,
+  )
 }
 
-function loadConnectorEnvironmentConfig(
+export function loadConnectorConfigDocument(
+  documentValue: ConnectorConfigDocument,
   environment: NodeJS.ProcessEnv,
-  options: ConfigOptions,
+  options: ConfigOptions = {},
 ): ConnectorConfig {
-  const rawToken = environment[ENVIRONMENT_NAMES.token]
-  const token = rawToken?.trim()
-  if (!token) {
-    throw new ConfigurationError(`${ENVIRONMENT_NAMES.token} is required`)
-  }
+  const document = parseConnectorConfigDocument(documentValue)
+  assertNoAmbientPolicyEnvironment(document, environment)
 
-  const allowedChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.allowedChannelIds],
-    ENVIRONMENT_NAMES.allowedChannelIds,
-  )
-  const allowedGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.allowedGuildIds],
-    ENVIRONMENT_NAMES.allowedGuildIds,
-  )
-  const automodGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.automodGuildIds],
-    ENVIRONMENT_NAMES.automodGuildIds,
-  )
-  const banAuditGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.banAuditGuildIds],
-    ENVIRONMENT_NAMES.banAuditGuildIds,
-  )
-  const adminGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.adminGuildIds],
-    ENVIRONMENT_NAMES.adminGuildIds,
-  )
-  const channelCreationGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.channelCreationGuildIds],
-    ENVIRONMENT_NAMES.channelCreationGuildIds,
-  )
-  const channelCloneGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.channelCloneGuildIds],
-    ENVIRONMENT_NAMES.channelCloneGuildIds,
+  const allowedChannelIds = new Set(document.readScope.channelIds)
+  const allowedGuildIds = new Set(document.readScope.guildIds)
+  const automodGuildIds = configScope(document, "automodGuildIds")
+  const banAuditGuildIds = configScope(document, "banAuditGuildIds")
+  const adminGuildIds = configScope(document, "adminGuildIds")
+  const channelCreationGuildIds = configScope(document, "channelCreationGuildIds")
+  const channelCloneGuildIds = configScope(
+    document,
+    "channelCloneGuildIds",
     CONNECTOR_LIMITS.channelCloneGuildAllowlist,
   )
-  const channelCloneSourceIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.channelCloneSourceIds],
-    ENVIRONMENT_NAMES.channelCloneSourceIds,
+  const channelCloneSourceIds = configScope(
+    document,
+    "channelCloneSourceIds",
     CONNECTOR_LIMITS.channelCloneSourceAllowlist,
   )
-  const channelMetadataIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.channelMetadataIds],
-    ENVIRONMENT_NAMES.channelMetadataIds,
-  )
-  const channelDeletionIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.channelDeletionIds],
-    ENVIRONMENT_NAMES.channelDeletionIds,
-    CONNECTOR_LIMITS.channelDeletionAllowlist,
-  )
-  const channelOrderingGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.channelOrderingGuildIds],
-    ENVIRONMENT_NAMES.channelOrderingGuildIds,
+  const channelMetadataIds = configScope(document, "channelMetadataIds")
+  const channelDeletionIds = configScope(document, "channelDeletionIds", CONNECTOR_LIMITS.channelDeletionAllowlist)
+  const channelOrderingGuildIds = configScope(
+    document,
+    "channelOrderingGuildIds",
     CONNECTOR_LIMITS.channelOrderingGuildAllowlist,
   )
-  const attachmentChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.attachmentChannelIds],
-    ENVIRONMENT_NAMES.attachmentChannelIds,
-  )
-  const announcementCrosspostChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.announcementCrosspostChannelIds],
-    ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
-  )
-  const messageForwardSourceChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.messageForwardSourceChannelIds],
-    ENVIRONMENT_NAMES.messageForwardSourceChannelIds,
+  const attachmentChannelIds = configScope(document, "attachmentChannelIds")
+  const announcementCrosspostChannelIds = configScope(document, "announcementCrosspostChannelIds")
+  const messageForwardSourceChannelIds = configScope(
+    document,
+    "messageForwardSourceChannelIds",
     CONNECTOR_LIMITS.messageForwardChannelAllowlist,
   )
-  const messageForwardTargetChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.messageForwardTargetChannelIds],
-    ENVIRONMENT_NAMES.messageForwardTargetChannelIds,
+  const messageForwardTargetChannelIds = configScope(
+    document,
+    "messageForwardTargetChannelIds",
     CONNECTOR_LIMITS.messageForwardChannelAllowlist,
   )
-  const announcementSubscriptionSourceChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds],
-    ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
-  )
-  const announcementSubscriptionTargetChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds],
-    ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds,
-  )
-  const automodAlertChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.automodAlertChannelIds],
-    ENVIRONMENT_NAMES.automodAlertChannelIds,
-  )
-  const deleteChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.deleteChannelIds],
-    ENVIRONMENT_NAMES.deleteChannelIds,
-  )
-  const interactionChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.interactionChannelIds],
-    ENVIRONMENT_NAMES.interactionChannelIds,
-  )
-  const pinChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.pinChannelIds],
-    ENVIRONMENT_NAMES.pinChannelIds,
-  )
-  const permissionOverwriteChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.permissionOverwriteChannelIds],
-    ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
-  )
-  const pollChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.pollChannelIds],
-    ENVIRONMENT_NAMES.pollChannelIds,
-  )
-  const reactionChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.reactionChannelIds],
-    ENVIRONMENT_NAMES.reactionChannelIds,
-    CONNECTOR_LIMITS.reactionChannelAllowlist,
-  )
-  const forumPostChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.forumPostChannelIds],
-    ENVIRONMENT_NAMES.forumPostChannelIds,
-  )
-  const forumTagChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.forumTagChannelIds],
-    ENVIRONMENT_NAMES.forumTagChannelIds,
-  )
-  const threadParentIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.threadParentIds],
-    ENVIRONMENT_NAMES.threadParentIds,
-  )
-  const threadGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.threadGuildIds],
-    ENVIRONMENT_NAMES.threadGuildIds,
-    CONNECTOR_LIMITS.threadGovernanceGuildAllowlist,
-  )
-  const threadIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.threadIds],
-    ENVIRONMENT_NAMES.threadIds,
-    CONNECTOR_LIMITS.threadGovernanceThreadAllowlist,
-  )
-  const threadMemberUserIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.threadMemberUserIds],
-    ENVIRONMENT_NAMES.threadMemberUserIds,
+  const announcementSubscriptionSourceChannelIds = configScope(document, "announcementSubscriptionSourceChannelIds")
+  const announcementSubscriptionTargetChannelIds = configScope(document, "announcementSubscriptionTargetChannelIds")
+  const automodAlertChannelIds = configScope(document, "automodAlertChannelIds")
+  const deleteChannelIds = configScope(document, "deleteChannelIds")
+  const interactionChannelIds = configScope(document, "interactionChannelIds")
+  const pinChannelIds = configScope(document, "pinChannelIds")
+  const permissionOverwriteChannelIds = configScope(document, "permissionOverwriteChannelIds")
+  const pollChannelIds = configScope(document, "pollChannelIds")
+  const reactionChannelIds = configScope(document, "reactionChannelIds", CONNECTOR_LIMITS.reactionChannelAllowlist)
+  const forumPostChannelIds = configScope(document, "forumPostChannelIds")
+  const forumTagChannelIds = configScope(document, "forumTagChannelIds")
+  const threadParentIds = configScope(document, "threadParentIds")
+  const threadGuildIds = configScope(document, "threadGuildIds", CONNECTOR_LIMITS.threadGovernanceGuildAllowlist)
+  const threadIds = configScope(document, "threadIds", CONNECTOR_LIMITS.threadGovernanceThreadAllowlist)
+  const threadMemberUserIds = configScope(
+    document,
+    "threadMemberUserIds",
     CONNECTOR_LIMITS.threadGovernanceUserAllowlist,
   )
-  const stageChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.stageChannelIds],
-    ENVIRONMENT_NAMES.stageChannelIds,
-    CONNECTOR_LIMITS.stageInstanceChannels,
-  )
-  const mentionUserIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.mentionUserIds],
-    ENVIRONMENT_NAMES.mentionUserIds,
-    CONNECTOR_LIMITS.mentionUserAllowlist,
-  )
-  const memberDirectoryGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.memberDirectoryGuildIds],
-    ENVIRONMENT_NAMES.memberDirectoryGuildIds,
-  )
-  const nicknameGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.nicknameGuildIds],
-    ENVIRONMENT_NAMES.nicknameGuildIds,
-    CONNECTOR_LIMITS.memberNicknameGuildAllowlist,
-  )
-  const memberRoleGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.memberRoleGuildIds],
-    ENVIRONMENT_NAMES.memberRoleGuildIds,
-  )
-  const memberRoleIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.memberRoleIds],
-    ENVIRONMENT_NAMES.memberRoleIds,
-    CONNECTOR_LIMITS.memberRoleAllowlist,
-  )
-  const memberVoiceChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.memberVoiceChannelIds],
-    ENVIRONMENT_NAMES.memberVoiceChannelIds,
+  const stageChannelIds = configScope(document, "stageChannelIds", CONNECTOR_LIMITS.stageInstanceChannels)
+  const mentionUserIds = configScope(document, "mentionUserIds", CONNECTOR_LIMITS.mentionUserAllowlist)
+  const memberDirectoryGuildIds = configScope(document, "memberDirectoryGuildIds")
+  const nicknameGuildIds = configScope(document, "nicknameGuildIds", CONNECTOR_LIMITS.memberNicknameGuildAllowlist)
+  const memberRoleGuildIds = configScope(document, "memberRoleGuildIds")
+  const memberRoleIds = configScope(document, "memberRoleIds", CONNECTOR_LIMITS.memberRoleAllowlist)
+  const memberVoiceChannelIds = configScope(
+    document,
+    "memberVoiceChannelIds",
     CONNECTOR_LIMITS.memberVoiceChannelAllowlist,
   )
-  const memberVoiceGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.memberVoiceGuildIds],
-    ENVIRONMENT_NAMES.memberVoiceGuildIds,
-    CONNECTOR_LIMITS.memberVoiceGuildAllowlist,
-  )
-  const nativeInteractionGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.nativeInteractionGuildIds],
-    ENVIRONMENT_NAMES.nativeInteractionGuildIds,
+  const memberVoiceGuildIds = configScope(document, "memberVoiceGuildIds", CONNECTOR_LIMITS.memberVoiceGuildAllowlist)
+  const nativeInteractionGuildIds = configScope(
+    document,
+    "nativeInteractionGuildIds",
     CONNECTOR_LIMITS.nativeInteractionGuildAllowlist,
   )
-  const nativeInteractionChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.nativeInteractionChannelIds],
-    ENVIRONMENT_NAMES.nativeInteractionChannelIds,
+  const nativeInteractionChannelIds = configScope(
+    document,
+    "nativeInteractionChannelIds",
     CONNECTOR_LIMITS.nativeInteractionChannelAllowlist,
   )
-  const nativeInteractionUserIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.nativeInteractionUserIds],
-    ENVIRONMENT_NAMES.nativeInteractionUserIds,
+  const nativeInteractionUserIds = configScope(
+    document,
+    "nativeInteractionUserIds",
     CONNECTOR_LIMITS.nativeInteractionUserAllowlist,
   )
-  const protectedUserIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.protectedUserIds],
-    ENVIRONMENT_NAMES.protectedUserIds,
-    CONNECTOR_LIMITS.protectedUserAllowlist,
-  )
-  const roleCreationGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.roleCreationGuildIds],
-    ENVIRONMENT_NAMES.roleCreationGuildIds,
-  )
-  const roleConfigurationIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.roleConfigurationIds],
-    ENVIRONMENT_NAMES.roleConfigurationIds,
+  const protectedUserIds = configScope(document, "protectedUserIds", CONNECTOR_LIMITS.protectedUserAllowlist)
+  const roleCreationGuildIds = configScope(document, "roleCreationGuildIds")
+  const roleConfigurationIds = configScope(
+    document,
+    "roleConfigurationIds",
     CONNECTOR_LIMITS.roleConfigurationAllowlist,
   )
-  const roleDeletionIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.roleDeletionIds],
-    ENVIRONMENT_NAMES.roleDeletionIds,
-    CONNECTOR_LIMITS.roleDeletionAllowlist,
-  )
-  const roleOrderingGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.roleOrderingGuildIds],
-    ENVIRONMENT_NAMES.roleOrderingGuildIds,
+  const roleDeletionIds = configScope(document, "roleDeletionIds", CONNECTOR_LIMITS.roleDeletionAllowlist)
+  const roleOrderingGuildIds = configScope(
+    document,
+    "roleOrderingGuildIds",
     CONNECTOR_LIMITS.roleOrderingGuildAllowlist,
   )
-  const guildScaffoldGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.guildScaffoldGuildIds],
-    ENVIRONMENT_NAMES.guildScaffoldGuildIds,
-  )
-  const guildExpressionGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.guildExpressionGuildIds],
-    ENVIRONMENT_NAMES.guildExpressionGuildIds,
-  )
-  const guildSettingsGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.guildSettingsGuildIds],
-    ENVIRONMENT_NAMES.guildSettingsGuildIds,
+  const guildScaffoldGuildIds = configScope(document, "guildScaffoldGuildIds")
+  const guildExpressionGuildIds = configScope(document, "guildExpressionGuildIds")
+  const guildSettingsGuildIds = configScope(
+    document,
+    "guildSettingsGuildIds",
     CONNECTOR_LIMITS.guildSettingsGuildAllowlist,
   )
-  const guildProfileGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.guildProfileGuildIds],
-    ENVIRONMENT_NAMES.guildProfileGuildIds,
+  const guildProfileGuildIds = configScope(
+    document,
+    "guildProfileGuildIds",
     CONNECTOR_LIMITS.guildProfileGuildAllowlist,
   )
-  const guildTemplateGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.guildTemplateGuildIds],
-    ENVIRONMENT_NAMES.guildTemplateGuildIds,
-  )
-  const integrationGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.integrationGuildIds],
-    ENVIRONMENT_NAMES.integrationGuildIds,
-    CONNECTOR_LIMITS.integrationGuildAllowlist,
-  )
-  const integrationIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.integrationIds],
-    ENVIRONMENT_NAMES.integrationIds,
-    CONNECTOR_LIMITS.integrationIdAllowlist,
-  )
-  const scheduledEventGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.scheduledEventGuildIds],
-    ENVIRONMENT_NAMES.scheduledEventGuildIds,
-  )
-  const soundboardGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.soundboardGuildIds],
-    ENVIRONMENT_NAMES.soundboardGuildIds,
-    CONNECTOR_LIMITS.soundboardGuildAllowlist,
-  )
-  const welcomeScreenGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.welcomeScreenGuildIds],
-    ENVIRONMENT_NAMES.welcomeScreenGuildIds,
+  const guildTemplateGuildIds = configScope(document, "guildTemplateGuildIds")
+  const integrationGuildIds = configScope(document, "integrationGuildIds", CONNECTOR_LIMITS.integrationGuildAllowlist)
+  const integrationIds = configScope(document, "integrationIds", CONNECTOR_LIMITS.integrationIdAllowlist)
+  const scheduledEventGuildIds = configScope(document, "scheduledEventGuildIds")
+  const soundboardGuildIds = configScope(document, "soundboardGuildIds", CONNECTOR_LIMITS.soundboardGuildAllowlist)
+  const welcomeScreenGuildIds = configScope(
+    document,
+    "welcomeScreenGuildIds",
     CONNECTOR_LIMITS.welcomeScreenGuildAllowlist,
   )
-  const widgetSettingsGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.widgetSettingsGuildIds],
-    ENVIRONMENT_NAMES.widgetSettingsGuildIds,
+  const widgetSettingsGuildIds = configScope(
+    document,
+    "widgetSettingsGuildIds",
     CONNECTOR_LIMITS.widgetSettingsGuildAllowlist,
   )
-  const webhookChannelIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.webhookChannelIds],
-    ENVIRONMENT_NAMES.webhookChannelIds,
-  )
-  const inviteGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.inviteGuildIds],
-    ENVIRONMENT_NAMES.inviteGuildIds,
-  )
-  const onboardingGuildIds = parseIdSet(
-    environment[ENVIRONMENT_NAMES.onboardingGuildIds],
-    ENVIRONMENT_NAMES.onboardingGuildIds,
-  )
+  const webhookChannelIds = configScope(document, "webhookChannelIds")
+  const inviteGuildIds = configScope(document, "inviteGuildIds")
+  const onboardingGuildIds = configScope(document, "onboardingGuildIds")
 
   for (const [name, guildIds] of [
-    [ENVIRONMENT_NAMES.adminGuildIds, adminGuildIds],
-    [ENVIRONMENT_NAMES.automodGuildIds, automodGuildIds],
-    [ENVIRONMENT_NAMES.banAuditGuildIds, banAuditGuildIds],
-    [ENVIRONMENT_NAMES.channelCreationGuildIds, channelCreationGuildIds],
-    [ENVIRONMENT_NAMES.channelCloneGuildIds, channelCloneGuildIds],
-    [ENVIRONMENT_NAMES.channelOrderingGuildIds, channelOrderingGuildIds],
-    [ENVIRONMENT_NAMES.guildScaffoldGuildIds, guildScaffoldGuildIds],
-    [ENVIRONMENT_NAMES.guildExpressionGuildIds, guildExpressionGuildIds],
-    [ENVIRONMENT_NAMES.guildProfileGuildIds, guildProfileGuildIds],
-    [ENVIRONMENT_NAMES.guildSettingsGuildIds, guildSettingsGuildIds],
-    [ENVIRONMENT_NAMES.guildTemplateGuildIds, guildTemplateGuildIds],
-    [ENVIRONMENT_NAMES.integrationGuildIds, integrationGuildIds],
-    [ENVIRONMENT_NAMES.inviteGuildIds, inviteGuildIds],
-    [ENVIRONMENT_NAMES.onboardingGuildIds, onboardingGuildIds],
-    [ENVIRONMENT_NAMES.memberDirectoryGuildIds, memberDirectoryGuildIds],
-    [ENVIRONMENT_NAMES.nicknameGuildIds, nicknameGuildIds],
-    [ENVIRONMENT_NAMES.memberRoleGuildIds, memberRoleGuildIds],
-    [ENVIRONMENT_NAMES.memberVoiceGuildIds, memberVoiceGuildIds],
-    [ENVIRONMENT_NAMES.nativeInteractionGuildIds, nativeInteractionGuildIds],
-    [ENVIRONMENT_NAMES.threadGuildIds, threadGuildIds],
-    [ENVIRONMENT_NAMES.roleCreationGuildIds, roleCreationGuildIds],
-    [ENVIRONMENT_NAMES.roleOrderingGuildIds, roleOrderingGuildIds],
-    [ENVIRONMENT_NAMES.scheduledEventGuildIds, scheduledEventGuildIds],
-    [ENVIRONMENT_NAMES.soundboardGuildIds, soundboardGuildIds],
-    [ENVIRONMENT_NAMES.welcomeScreenGuildIds, welcomeScreenGuildIds],
-    [ENVIRONMENT_NAMES.widgetSettingsGuildIds, widgetSettingsGuildIds],
+    [configPolicyPath("adminGuildIds"), adminGuildIds],
+    [configPolicyPath("automodGuildIds"), automodGuildIds],
+    [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
+    [configPolicyPath("channelCreationGuildIds"), channelCreationGuildIds],
+    [configPolicyPath("channelCloneGuildIds"), channelCloneGuildIds],
+    [configPolicyPath("channelOrderingGuildIds"), channelOrderingGuildIds],
+    [configPolicyPath("guildScaffoldGuildIds"), guildScaffoldGuildIds],
+    [configPolicyPath("guildExpressionGuildIds"), guildExpressionGuildIds],
+    [configPolicyPath("guildProfileGuildIds"), guildProfileGuildIds],
+    [configPolicyPath("guildSettingsGuildIds"), guildSettingsGuildIds],
+    [configPolicyPath("guildTemplateGuildIds"), guildTemplateGuildIds],
+    [configPolicyPath("integrationGuildIds"), integrationGuildIds],
+    [configPolicyPath("inviteGuildIds"), inviteGuildIds],
+    [configPolicyPath("onboardingGuildIds"), onboardingGuildIds],
+    [configPolicyPath("memberDirectoryGuildIds"), memberDirectoryGuildIds],
+    [configPolicyPath("nicknameGuildIds"), nicknameGuildIds],
+    [configPolicyPath("memberRoleGuildIds"), memberRoleGuildIds],
+    [configPolicyPath("memberVoiceGuildIds"), memberVoiceGuildIds],
+    [configPolicyPath("nativeInteractionGuildIds"), nativeInteractionGuildIds],
+    [configPolicyPath("threadGuildIds"), threadGuildIds],
+    [configPolicyPath("roleCreationGuildIds"), roleCreationGuildIds],
+    [configPolicyPath("roleOrderingGuildIds"), roleOrderingGuildIds],
+    [configPolicyPath("scheduledEventGuildIds"), scheduledEventGuildIds],
+    [configPolicyPath("soundboardGuildIds"), soundboardGuildIds],
+    [configPolicyPath("welcomeScreenGuildIds"), welcomeScreenGuildIds],
+    [configPolicyPath("widgetSettingsGuildIds"), widgetSettingsGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
-      if (allowedGuildIds.size === 0 || allowedGuildIds.has(guildId)) continue
+      if (allowedGuildIds.has(guildId)) continue
       throw new ConfigurationError(
-        `${name} must be a subset of ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+        `${name} must be a subset of ${configPolicyPath("allowedGuildIds")}`,
       )
     }
   }
 
   for (const [name, channelIds] of [
-    [ENVIRONMENT_NAMES.announcementCrosspostChannelIds, announcementCrosspostChannelIds],
-    [ENVIRONMENT_NAMES.attachmentChannelIds, attachmentChannelIds],
-    [ENVIRONMENT_NAMES.automodAlertChannelIds, automodAlertChannelIds],
-    [ENVIRONMENT_NAMES.channelMetadataIds, channelMetadataIds],
-    [ENVIRONMENT_NAMES.channelDeletionIds, channelDeletionIds],
-    [ENVIRONMENT_NAMES.channelCloneSourceIds, channelCloneSourceIds],
-    [ENVIRONMENT_NAMES.deleteChannelIds, deleteChannelIds],
-    [ENVIRONMENT_NAMES.forumPostChannelIds, forumPostChannelIds],
-    [ENVIRONMENT_NAMES.forumTagChannelIds, forumTagChannelIds],
-    [ENVIRONMENT_NAMES.interactionChannelIds, interactionChannelIds],
-    [ENVIRONMENT_NAMES.messageForwardSourceChannelIds, messageForwardSourceChannelIds],
-    [ENVIRONMENT_NAMES.messageForwardTargetChannelIds, messageForwardTargetChannelIds],
-    [ENVIRONMENT_NAMES.memberVoiceChannelIds, memberVoiceChannelIds],
-    [ENVIRONMENT_NAMES.nativeInteractionChannelIds, nativeInteractionChannelIds],
-    [ENVIRONMENT_NAMES.permissionOverwriteChannelIds, permissionOverwriteChannelIds],
-    [ENVIRONMENT_NAMES.pinChannelIds, pinChannelIds],
-    [ENVIRONMENT_NAMES.pollChannelIds, pollChannelIds],
-    [ENVIRONMENT_NAMES.reactionChannelIds, reactionChannelIds],
+    [configPolicyPath("announcementCrosspostChannelIds"), announcementCrosspostChannelIds],
+    [configPolicyPath("attachmentChannelIds"), attachmentChannelIds],
+    [configPolicyPath("automodAlertChannelIds"), automodAlertChannelIds],
+    [configPolicyPath("channelMetadataIds"), channelMetadataIds],
+    [configPolicyPath("channelDeletionIds"), channelDeletionIds],
+    [configPolicyPath("channelCloneSourceIds"), channelCloneSourceIds],
+    [configPolicyPath("deleteChannelIds"), deleteChannelIds],
+    [configPolicyPath("forumPostChannelIds"), forumPostChannelIds],
+    [configPolicyPath("forumTagChannelIds"), forumTagChannelIds],
+    [configPolicyPath("interactionChannelIds"), interactionChannelIds],
+    [configPolicyPath("messageForwardSourceChannelIds"), messageForwardSourceChannelIds],
+    [configPolicyPath("messageForwardTargetChannelIds"), messageForwardTargetChannelIds],
+    [configPolicyPath("memberVoiceChannelIds"), memberVoiceChannelIds],
+    [configPolicyPath("nativeInteractionChannelIds"), nativeInteractionChannelIds],
+    [configPolicyPath("permissionOverwriteChannelIds"), permissionOverwriteChannelIds],
+    [configPolicyPath("pinChannelIds"), pinChannelIds],
+    [configPolicyPath("pollChannelIds"), pollChannelIds],
+    [configPolicyPath("reactionChannelIds"), reactionChannelIds],
     [
-      ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
+      configPolicyPath("announcementSubscriptionSourceChannelIds"),
       announcementSubscriptionSourceChannelIds,
     ],
     [
-      ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds,
+      configPolicyPath("announcementSubscriptionTargetChannelIds"),
       announcementSubscriptionTargetChannelIds,
     ],
-    [ENVIRONMENT_NAMES.stageChannelIds, stageChannelIds],
-    [ENVIRONMENT_NAMES.threadParentIds, threadParentIds],
-    [ENVIRONMENT_NAMES.threadIds, threadIds],
-    [ENVIRONMENT_NAMES.webhookChannelIds, webhookChannelIds],
+    [configPolicyPath("stageChannelIds"), stageChannelIds],
+    [configPolicyPath("threadParentIds"), threadParentIds],
+    [configPolicyPath("threadIds"), threadIds],
+    [configPolicyPath("webhookChannelIds"), webhookChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
       if (allowedChannelIds.size === 0 || allowedChannelIds.has(channelId)) continue
       throw new ConfigurationError(
-        `${name} must be a subset of ${ENVIRONMENT_NAMES.allowedChannelIds}`,
+        `${name} must be a subset of ${configPolicyPath("allowedChannelIds")}`,
       )
     }
   }
 
-  const applicationIdValue = environment[ENVIRONMENT_NAMES.applicationId]
-  const expectedApplicationId = applicationIdValue?.trim()
-    ? parseId(applicationIdValue, ENVIRONMENT_NAMES.applicationId)
-    : undefined
-  const botIdValue = environment[ENVIRONMENT_NAMES.botId]
-  const expectedBotId = botIdValue?.trim()
-    ? parseId(botIdValue, ENVIRONMENT_NAMES.botId)
-    : undefined
-  const allowMessageForwarding = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowMessageForwarding],
-    ENVIRONMENT_NAMES.allowMessageForwarding,
-  )
-  const allowCrossGuildMessageForwarding = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding],
-    ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding,
-  )
+  const expectedApplicationId = document.identity.applicationId
+  const expectedBotId = document.identity.botId
+  const allowMessageForwarding = configCapability(document, "messageForwarding")
+  const allowCrossGuildMessageForwarding = configCapability(document, "crossGuildMessageForwarding")
   if (allowCrossGuildMessageForwarding && !allowMessageForwarding) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding} requires ${ENVIRONMENT_NAMES.allowMessageForwarding}`,
+      `${configPolicyPath("allowCrossGuildMessageForwarding")} requires ${configPolicyPath("allowMessageForwarding")}`,
     )
   }
   if (
@@ -778,47 +603,22 @@ function loadConnectorEnvironmentConfig(
     )
   ) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowMessageForwarding} requires exact source and target channel allowlists`,
+      `${configPolicyPath("allowMessageForwarding")} requires exact source and target channel allowlists`,
     )
   }
-  if (allowMessageForwarding && (!expectedApplicationId || !expectedBotId)) {
-    throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowMessageForwarding} requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  const allowReactionModeration = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowReactionModeration],
-    ENVIRONMENT_NAMES.allowReactionModeration,
-  )
-  const allowReactionUserAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowReactionUserAudit],
-    ENVIRONMENT_NAMES.allowReactionUserAudit,
-  )
+  const allowReactionModeration = configCapability(document, "reactionModeration")
+  const allowReactionUserAudit = configCapability(document, "reactionUserAudit")
   if ((allowReactionModeration || allowReactionUserAudit) && reactionChannelIds.size === 0) {
     throw new ConfigurationError(
       "Reaction audit and moderation require an exact reaction-channel allowlist",
     )
   }
-  if (allowReactionModeration && (!expectedApplicationId || !expectedBotId)) {
-    throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowReactionModeration} requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  const allowGateway = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGateway],
-    ENVIRONMENT_NAMES.allowGateway,
-  )
-  const allowChannelCloneAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowChannelCloneAudit],
-    ENVIRONMENT_NAMES.allowChannelCloneAudit,
-  )
-  const allowChannelCloning = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowChannelCloning],
-    ENVIRONMENT_NAMES.allowChannelCloning,
-  )
+  const allowGateway = document.gateway.enabled
+  const allowChannelCloneAudit = configCapability(document, "channelCloneAudit")
+  const allowChannelCloning = configCapability(document, "channelCloning")
   if (allowChannelCloning && !allowChannelCloneAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelCloning} requires ${ENVIRONMENT_NAMES.allowChannelCloneAudit}`,
+      `${configPolicyPath("allowChannelCloning")} requires ${configPolicyPath("allowChannelCloneAudit")}`,
     )
   }
   if (
@@ -826,89 +626,48 @@ function loadConnectorEnvironmentConfig(
     && (channelCloneGuildIds.size === 0 || channelCloneSourceIds.size === 0)
   ) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelCloneAudit} requires ${ENVIRONMENT_NAMES.channelCloneGuildIds} and ${ENVIRONMENT_NAMES.channelCloneSourceIds}`,
+      `${configPolicyPath("allowChannelCloneAudit")} requires `
+      + `${configPolicyPath("channelCloneGuildIds")} and `
+      + configPolicyPath("channelCloneSourceIds"),
     )
   }
-  const allowChannelOrderingAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowChannelOrderingAudit],
-    ENVIRONMENT_NAMES.allowChannelOrderingAudit,
-  )
-  const allowChannelOrderingChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowChannelOrderingChanges],
-    ENVIRONMENT_NAMES.allowChannelOrderingChanges,
-  )
+  const allowChannelOrderingAudit = configCapability(document, "channelOrderingAudit")
+  const allowChannelOrderingChanges = configCapability(document, "channelOrderingChanges")
   if (allowChannelOrderingChanges && !allowChannelOrderingAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelOrderingChanges} requires ${ENVIRONMENT_NAMES.allowChannelOrderingAudit}`,
+      `${configPolicyPath("allowChannelOrderingChanges")} requires ${configPolicyPath("allowChannelOrderingAudit")}`,
     )
   }
   if (allowChannelOrderingAudit && channelOrderingGuildIds.size === 0) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelOrderingAudit} requires ${ENVIRONMENT_NAMES.channelOrderingGuildIds}`,
+      `${configPolicyPath("allowChannelOrderingAudit")} requires ${configPolicyPath("channelOrderingGuildIds")}`,
     )
   }
-  const allowChannelDeletionAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowChannelDeletionAudit],
-    ENVIRONMENT_NAMES.allowChannelDeletionAudit,
-  )
-  const allowChannelDeletions = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowChannelDeletions],
-    ENVIRONMENT_NAMES.allowChannelDeletions,
-  )
+  const allowChannelDeletionAudit = configCapability(document, "channelDeletionAudit")
+  const allowChannelDeletions = configCapability(document, "channelDeletions")
   if (allowChannelDeletions && !allowChannelDeletionAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelDeletions} requires ${ENVIRONMENT_NAMES.allowChannelDeletionAudit}`,
+      `${configPolicyPath("allowChannelDeletions")} requires ${configPolicyPath("allowChannelDeletionAudit")}`,
     )
   }
   if (allowChannelDeletionAudit && channelDeletionIds.size === 0) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelDeletionAudit} requires ${ENVIRONMENT_NAMES.channelDeletionIds}`,
-    )
-  }
-  if (allowChannelDeletionAudit && allowedGuildIds.size === 0) {
-    throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelDeletionAudit} requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+      `${configPolicyPath("allowChannelDeletionAudit")} requires ${configPolicyPath("channelDeletionIds")}`,
     )
   }
   if (allowChannelDeletionAudit && !allowGateway) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowChannelDeletionAudit} requires ${ENVIRONMENT_NAMES.allowGateway}`,
+      `${configPolicyPath("allowChannelDeletionAudit")} requires ${configPolicyPath("allowGateway")}`,
     )
   }
-  const allowNativeCommandChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowNativeCommandChanges],
-    ENVIRONMENT_NAMES.allowNativeCommandChanges,
-  )
-  const allowNativeInteractions = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowNativeInteractions],
-    ENVIRONMENT_NAMES.allowNativeInteractions,
-  )
-  if (
-    (
-      allowGateway
-      || allowChannelCloneAudit
-      || allowChannelDeletionAudit
-      || allowChannelOrderingAudit
-      || allowNativeCommandChanges
-      || allowNativeInteractions
-    )
-    && (!expectedApplicationId || !expectedBotId)
-  ) {
-    throw new ConfigurationError(
-      `Gateway-backed and native Interaction features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  if (allowGateway && allowedGuildIds.size === 0 && allowedChannelIds.size === 0) {
-    throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGateway} requires an exact guild or channel read allowlist`,
-    )
-  }
+  const allowNativeCommandChanges = configCapability(document, "nativeCommandChanges")
+  const allowNativeInteractions = configCapability(document, "nativeInteractions")
   if (
     allowNativeCommandChanges
     && nativeInteractionGuildIds.size === 0
   ) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowNativeCommandChanges} requires ${ENVIRONMENT_NAMES.nativeInteractionGuildIds}`,
+      `${configPolicyPath("allowNativeCommandChanges")} requires ${configPolicyPath("nativeInteractionGuildIds")}`,
     )
   }
   if (allowNativeInteractions && (
@@ -917,420 +676,228 @@ function loadConnectorEnvironmentConfig(
     || nativeInteractionUserIds.size === 0
   )) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowNativeInteractions} requires exact native Interaction guild, channel, and user allowlists`,
+      `${configPolicyPath("allowNativeInteractions")} requires exact native Interaction `
+      + "guild, channel, and user allowlists",
     )
   }
-  const nativeCommandName = environment[ENVIRONMENT_NAMES.nativeCommandName]?.trim()
+  const nativeCommandName = document.runtime.nativeCommandName?.trim()
     || NATIVE_INTERACTION_DEFAULTS.commandName
   if (!NATIVE_INTERACTION_COMMAND_NAME_PATTERN.test(nativeCommandName)) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.nativeCommandName} must be 1-${NATIVE_INTERACTION_LIMITS.commandNameCharacters} lowercase ASCII letters, digits, hyphens, or underscores`,
+      `${configPolicyPath("nativeCommandName")} must be `
+      + `1-${NATIVE_INTERACTION_LIMITS.commandNameCharacters} lowercase ASCII letters, `
+      + "digits, hyphens, or underscores",
     )
   }
-  const allowAutomodAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowAutomodAudit],
-    ENVIRONMENT_NAMES.allowAutomodAudit,
-  )
-  const allowAutomodChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowAutomodChanges],
-    ENVIRONMENT_NAMES.allowAutomodChanges,
-  )
+  const allowAutomodAudit = configCapability(document, "automodAudit")
+  const allowAutomodChanges = configCapability(document, "automodChanges")
   if (allowAutomodChanges && !allowAutomodAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowAutomodChanges} requires ${ENVIRONMENT_NAMES.allowAutomodAudit}`,
+      `${configPolicyPath("allowAutomodChanges")} requires ${configPolicyPath("allowAutomodAudit")}`,
     )
   }
-  const allowWebhookAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWebhookAudit],
-    ENVIRONMENT_NAMES.allowWebhookAudit,
-  )
-  const allowWebhookChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWebhookChanges],
-    ENVIRONMENT_NAMES.allowWebhookChanges,
-  )
-  const allowWebhookCreation = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWebhookCreation],
-    ENVIRONMENT_NAMES.allowWebhookCreation,
-  )
-  const allowWebhookDeletions = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWebhookDeletions],
-    ENVIRONMENT_NAMES.allowWebhookDeletions,
-  )
+  const allowWebhookAudit = configCapability(document, "webhookAudit")
+  const allowWebhookChanges = configCapability(document, "webhookChanges")
+  const allowWebhookCreation = configCapability(document, "webhookCreation")
+  const allowWebhookDeletions = configCapability(document, "webhookDeletions")
   if (
     (allowWebhookChanges || allowWebhookCreation || allowWebhookDeletions)
     && !allowWebhookAudit
   ) {
     throw new ConfigurationError(
-      `Enabling webhook creation, changes, or deletion requires ${ENVIRONMENT_NAMES.allowWebhookAudit}`,
+      `Enabling webhook creation, changes, or deletion requires ${configPolicyPath("allowWebhookAudit")}`,
     )
   }
-  const allowAnnouncementSubscriptionAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit],
-    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit,
-  )
-  const allowAnnouncementSubscriptionChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges],
-    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges,
-  )
+  const allowAnnouncementSubscriptionAudit = configCapability(document, "announcementSubscriptionAudit")
+  const allowAnnouncementSubscriptionChanges = configCapability(document, "announcementSubscriptionChanges")
   if (allowAnnouncementSubscriptionChanges && !allowAnnouncementSubscriptionAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges} requires ${ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit}`,
+      `${configPolicyPath("allowAnnouncementSubscriptionChanges")} requires `
+      + configPolicyPath("allowAnnouncementSubscriptionAudit"),
     )
   }
-  const allowRoleOrderingAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowRoleOrderingAudit],
-    ENVIRONMENT_NAMES.allowRoleOrderingAudit,
-  )
-  const allowRoleOrderingChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowRoleOrderingChanges],
-    ENVIRONMENT_NAMES.allowRoleOrderingChanges,
-  )
+  const allowRoleOrderingAudit = configCapability(document, "roleOrderingAudit")
+  const allowRoleOrderingChanges = configCapability(document, "roleOrderingChanges")
   if (allowRoleOrderingChanges && !allowRoleOrderingAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowRoleOrderingChanges} requires ${ENVIRONMENT_NAMES.allowRoleOrderingAudit}`,
+      `${configPolicyPath("allowRoleOrderingChanges")} requires ${configPolicyPath("allowRoleOrderingAudit")}`,
     )
   }
-  const allowRoleDeletionAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowRoleDeletionAudit],
-    ENVIRONMENT_NAMES.allowRoleDeletionAudit,
-  )
-  const allowRoleDeletions = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowRoleDeletions],
-    ENVIRONMENT_NAMES.allowRoleDeletions,
-  )
+  const allowRoleDeletionAudit = configCapability(document, "roleDeletionAudit")
+  const allowRoleDeletions = configCapability(document, "roleDeletions")
   if (allowRoleDeletions && !allowRoleDeletionAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowRoleDeletions} requires ${ENVIRONMENT_NAMES.allowRoleDeletionAudit}`,
+      `${configPolicyPath("allowRoleDeletions")} requires ${configPolicyPath("allowRoleDeletionAudit")}`,
     )
   }
   if (allowRoleDeletionAudit && roleDeletionIds.size === 0) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowRoleDeletionAudit} requires ${ENVIRONMENT_NAMES.roleDeletionIds}`,
-    )
-  }
-  if (allowRoleDeletionAudit && allowedGuildIds.size === 0) {
-    throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowRoleDeletionAudit} requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
+      `${configPolicyPath("allowRoleDeletionAudit")} requires ${configPolicyPath("roleDeletionIds")}`,
     )
   }
   if (allowRoleDeletionAudit && !allowGateway) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowRoleDeletionAudit} requires ${ENVIRONMENT_NAMES.allowGateway}`,
+      `${configPolicyPath("allowRoleDeletionAudit")} requires ${configPolicyPath("allowGateway")}`,
     )
   }
-  if (allowRoleDeletionAudit && (!expectedApplicationId || !expectedBotId)) {
-    throw new ConfigurationError(
-      `Role-deletion audit requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  const allowInviteAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowInviteAudit],
-    ENVIRONMENT_NAMES.allowInviteAudit,
-  )
-  const allowInviteDeletions = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowInviteDeletions],
-    ENVIRONMENT_NAMES.allowInviteDeletions,
-  )
+  const allowInviteAudit = configCapability(document, "inviteAudit")
+  const allowInviteDeletions = configCapability(document, "inviteDeletions")
   if (allowInviteDeletions && !allowInviteAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowInviteDeletions} requires ${ENVIRONMENT_NAMES.allowInviteAudit}`,
+      `${configPolicyPath("allowInviteDeletions")} requires ${configPolicyPath("allowInviteAudit")}`,
     )
   }
-  const allowOnboardingAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowOnboardingAudit],
-    ENVIRONMENT_NAMES.allowOnboardingAudit,
-  )
-  const allowOnboardingChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowOnboardingChanges],
-    ENVIRONMENT_NAMES.allowOnboardingChanges,
-  )
+  const allowOnboardingAudit = configCapability(document, "onboardingAudit")
+  const allowOnboardingChanges = configCapability(document, "onboardingChanges")
   if (allowOnboardingChanges && !allowOnboardingAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowOnboardingChanges} requires ${ENVIRONMENT_NAMES.allowOnboardingAudit}`,
+      `${configPolicyPath("allowOnboardingChanges")} requires ${configPolicyPath("allowOnboardingAudit")}`,
     )
   }
-  const allowMemberRoleChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowMemberRoleChanges],
-    ENVIRONMENT_NAMES.allowMemberRoleChanges,
-  )
-  const allowNicknameChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowNicknameChanges],
-    ENVIRONMENT_NAMES.allowNicknameChanges,
-  )
-  const allowOtherMemberNicknameChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges],
-    ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges,
-  )
+  const allowMemberRoleChanges = configCapability(document, "memberRoleChanges")
+  const allowNicknameChanges = configCapability(document, "nicknameChanges")
+  const allowOtherMemberNicknameChanges = configCapability(document, "otherMemberNicknameChanges")
   if (allowOtherMemberNicknameChanges && !allowNicknameChanges) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges} requires ${ENVIRONMENT_NAMES.allowNicknameChanges}`,
+      `${configPolicyPath("allowOtherMemberNicknameChanges")} requires ${configPolicyPath("allowNicknameChanges")}`,
     )
   }
-  if (allowNicknameChanges && (!expectedApplicationId || !expectedBotId)) {
-    throw new ConfigurationError(
-      `Nickname changes require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  const allowGuildExpressionAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildExpressionAudit],
-    ENVIRONMENT_NAMES.allowGuildExpressionAudit,
-  )
-  const allowGuildExpressionChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildExpressionChanges],
-    ENVIRONMENT_NAMES.allowGuildExpressionChanges,
-  )
+  const allowGuildExpressionAudit = configCapability(document, "guildExpressionAudit")
+  const allowGuildExpressionChanges = configCapability(document, "guildExpressionChanges")
   if (allowGuildExpressionChanges && !allowGuildExpressionAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGuildExpressionChanges} requires ${ENVIRONMENT_NAMES.allowGuildExpressionAudit}`,
+      `${configPolicyPath("allowGuildExpressionChanges")} requires ${configPolicyPath("allowGuildExpressionAudit")}`,
     )
   }
-  const allowApplicationEmojiAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowApplicationEmojiAudit],
-    ENVIRONMENT_NAMES.allowApplicationEmojiAudit,
-  )
-  const allowApplicationEmojiChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowApplicationEmojiChanges],
-    ENVIRONMENT_NAMES.allowApplicationEmojiChanges,
-  )
+  const allowApplicationEmojiAudit = configCapability(document, "applicationEmojiAudit")
+  const allowApplicationEmojiChanges = configCapability(document, "applicationEmojiChanges")
   if (allowApplicationEmojiChanges && !allowApplicationEmojiAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowApplicationEmojiChanges} requires ${ENVIRONMENT_NAMES.allowApplicationEmojiAudit}`,
+      `${configPolicyPath("allowApplicationEmojiChanges")} requires ${configPolicyPath("allowApplicationEmojiAudit")}`,
     )
   }
-  if (allowApplicationEmojiAudit && (!expectedApplicationId || !expectedBotId)) {
-    throw new ConfigurationError(
-      `Application emoji audit requires ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  const allowGuildTemplateAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildTemplateAudit],
-    ENVIRONMENT_NAMES.allowGuildTemplateAudit,
-  )
-  const allowGuildTemplateChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildTemplateChanges],
-    ENVIRONMENT_NAMES.allowGuildTemplateChanges,
-  )
+  const allowGuildTemplateAudit = configCapability(document, "guildTemplateAudit")
+  const allowGuildTemplateChanges = configCapability(document, "guildTemplateChanges")
   if (allowGuildTemplateChanges && !allowGuildTemplateAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGuildTemplateChanges} requires ${ENVIRONMENT_NAMES.allowGuildTemplateAudit}`,
+      `${configPolicyPath("allowGuildTemplateChanges")} requires ${configPolicyPath("allowGuildTemplateAudit")}`,
     )
   }
-  const allowGuildSettingsAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildSettingsAudit],
-    ENVIRONMENT_NAMES.allowGuildSettingsAudit,
-  )
-  const allowGuildSettingsChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildSettingsChanges],
-    ENVIRONMENT_NAMES.allowGuildSettingsChanges,
-  )
+  const allowGuildSettingsAudit = configCapability(document, "guildSettingsAudit")
+  const allowGuildSettingsChanges = configCapability(document, "guildSettingsChanges")
   if (allowGuildSettingsChanges && !allowGuildSettingsAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGuildSettingsChanges} requires ${ENVIRONMENT_NAMES.allowGuildSettingsAudit}`,
+      `${configPolicyPath("allowGuildSettingsChanges")} requires ${configPolicyPath("allowGuildSettingsAudit")}`,
     )
   }
   if (allowGuildSettingsAudit && guildSettingsGuildIds.size === 0) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGuildSettingsAudit} requires ${ENVIRONMENT_NAMES.guildSettingsGuildIds}`,
+      `${configPolicyPath("allowGuildSettingsAudit")} requires ${configPolicyPath("guildSettingsGuildIds")}`,
     )
   }
-  const allowGuildProfileAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildProfileAudit],
-    ENVIRONMENT_NAMES.allowGuildProfileAudit,
-  )
-  const allowGuildProfileChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowGuildProfileChanges],
-    ENVIRONMENT_NAMES.allowGuildProfileChanges,
-  )
+  const allowGuildProfileAudit = configCapability(document, "guildProfileAudit")
+  const allowGuildProfileChanges = configCapability(document, "guildProfileChanges")
   if (allowGuildProfileChanges && !allowGuildProfileAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGuildProfileChanges} requires ${ENVIRONMENT_NAMES.allowGuildProfileAudit}`,
+      `${configPolicyPath("allowGuildProfileChanges")} requires ${configPolicyPath("allowGuildProfileAudit")}`,
     )
   }
   if (allowGuildProfileAudit && guildProfileGuildIds.size === 0) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowGuildProfileAudit} requires ${ENVIRONMENT_NAMES.guildProfileGuildIds}`,
+      `${configPolicyPath("allowGuildProfileAudit")} requires ${configPolicyPath("guildProfileGuildIds")}`,
     )
   }
-  if (
-    (
-      allowGuildProfileAudit
-      ||
-      allowGuildSettingsAudit
-      || allowGuildTemplateAudit
-      || allowMemberRoleChanges
-      || allowOnboardingAudit
-    )
-    && (!expectedApplicationId || !expectedBotId)
-  ) {
-    throw new ConfigurationError(
-      `Permission-aware guild features require ${ENVIRONMENT_NAMES.applicationId} and ${ENVIRONMENT_NAMES.botId}`,
-    )
-  }
-  const allowIntegrationAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowIntegrationAudit],
-    ENVIRONMENT_NAMES.allowIntegrationAudit,
-  )
-  const allowIntegrationDeletions = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowIntegrationDeletions],
-    ENVIRONMENT_NAMES.allowIntegrationDeletions,
-  )
+  const allowIntegrationAudit = configCapability(document, "integrationAudit")
+  const allowIntegrationDeletions = configCapability(document, "integrationDeletions")
   if (allowIntegrationDeletions && !allowIntegrationAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowIntegrationDeletions} requires ${ENVIRONMENT_NAMES.allowIntegrationAudit}`,
+      `${configPolicyPath("allowIntegrationDeletions")} requires ${configPolicyPath("allowIntegrationAudit")}`,
     )
   }
-  const allowForumTagAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowForumTagAudit],
-    ENVIRONMENT_NAMES.allowForumTagAudit,
-  )
-  const allowForumTagChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowForumTagChanges],
-    ENVIRONMENT_NAMES.allowForumTagChanges,
-  )
+  const allowForumTagAudit = configCapability(document, "forumTagAudit")
+  const allowForumTagChanges = configCapability(document, "forumTagChanges")
   if (allowForumTagChanges && !allowForumTagAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowForumTagChanges} requires ${ENVIRONMENT_NAMES.allowForumTagAudit}`,
+      `${configPolicyPath("allowForumTagChanges")} requires ${configPolicyPath("allowForumTagAudit")}`,
     )
   }
-  const allowScheduledEventAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowScheduledEventAudit],
-    ENVIRONMENT_NAMES.allowScheduledEventAudit,
-  )
-  const allowScheduledEventChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowScheduledEventChanges],
-    ENVIRONMENT_NAMES.allowScheduledEventChanges,
-  )
-  const allowScheduledEventUserAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowScheduledEventUserAudit],
-    ENVIRONMENT_NAMES.allowScheduledEventUserAudit,
-  )
+  const allowScheduledEventAudit = configCapability(document, "scheduledEventAudit")
+  const allowScheduledEventChanges = configCapability(document, "scheduledEventChanges")
+  const allowScheduledEventUserAudit = configCapability(document, "scheduledEventUserAudit")
   if (allowScheduledEventChanges && !allowScheduledEventAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowScheduledEventChanges} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
+      `${configPolicyPath("allowScheduledEventChanges")} requires ${configPolicyPath("allowScheduledEventAudit")}`,
     )
   }
   if (allowScheduledEventUserAudit && !allowScheduledEventAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowScheduledEventUserAudit} requires ${ENVIRONMENT_NAMES.allowScheduledEventAudit}`,
+      `${configPolicyPath("allowScheduledEventUserAudit")} requires ${configPolicyPath("allowScheduledEventAudit")}`,
     )
   }
-  const allowSoundboardAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowSoundboardAudit],
-    ENVIRONMENT_NAMES.allowSoundboardAudit,
-  )
-  const allowSoundboardChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowSoundboardChanges],
-    ENVIRONMENT_NAMES.allowSoundboardChanges,
-  )
+  const allowSoundboardAudit = configCapability(document, "soundboardAudit")
+  const allowSoundboardChanges = configCapability(document, "soundboardChanges")
   if (allowSoundboardChanges && !allowSoundboardAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowSoundboardChanges} requires ${ENVIRONMENT_NAMES.allowSoundboardAudit}`,
+      `${configPolicyPath("allowSoundboardChanges")} requires ${configPolicyPath("allowSoundboardAudit")}`,
     )
   }
-  const allowWelcomeScreenAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWelcomeScreenAudit],
-    ENVIRONMENT_NAMES.allowWelcomeScreenAudit,
-  )
-  const allowWelcomeScreenChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWelcomeScreenChanges],
-    ENVIRONMENT_NAMES.allowWelcomeScreenChanges,
-  )
+  const allowWelcomeScreenAudit = configCapability(document, "welcomeScreenAudit")
+  const allowWelcomeScreenChanges = configCapability(document, "welcomeScreenChanges")
   if (allowWelcomeScreenChanges && !allowWelcomeScreenAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowWelcomeScreenChanges} requires ${ENVIRONMENT_NAMES.allowWelcomeScreenAudit}`,
+      `${configPolicyPath("allowWelcomeScreenChanges")} requires ${configPolicyPath("allowWelcomeScreenAudit")}`,
     )
   }
-  const allowWidgetSettingsAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWidgetSettingsAudit],
-    ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
-  )
-  const allowWidgetSettingsChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWidgetSettingsChanges],
-    ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
-  )
+  const allowWidgetSettingsAudit = configCapability(document, "widgetSettingsAudit")
+  const allowWidgetSettingsChanges = configCapability(document, "widgetSettingsChanges")
   if (allowWidgetSettingsChanges && !allowWidgetSettingsAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowWidgetSettingsChanges} requires ${ENVIRONMENT_NAMES.allowWidgetSettingsAudit}`,
+      `${configPolicyPath("allowWidgetSettingsChanges")} requires ${configPolicyPath("allowWidgetSettingsAudit")}`,
     )
   }
-  const allowWidgetPublicExposure = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowWidgetPublicExposure],
-    ENVIRONMENT_NAMES.allowWidgetPublicExposure,
-  )
+  const allowWidgetPublicExposure = configCapability(document, "widgetPublicExposure")
   if (allowWidgetPublicExposure && !allowWidgetSettingsChanges) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowWidgetPublicExposure} requires ${ENVIRONMENT_NAMES.allowWidgetSettingsChanges}`,
+      `${configPolicyPath("allowWidgetPublicExposure")} requires ${configPolicyPath("allowWidgetSettingsChanges")}`,
     )
   }
-  const allowMemberVoiceAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowMemberVoiceAudit],
-    ENVIRONMENT_NAMES.allowMemberVoiceAudit,
-  )
-  const allowMemberVoiceChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowMemberVoiceChanges],
-    ENVIRONMENT_NAMES.allowMemberVoiceChanges,
-  )
+  const allowMemberVoiceAudit = configCapability(document, "memberVoiceAudit")
+  const allowMemberVoiceChanges = configCapability(document, "memberVoiceChanges")
   if (allowMemberVoiceChanges && !allowMemberVoiceAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowMemberVoiceChanges} requires ${ENVIRONMENT_NAMES.allowMemberVoiceAudit}`,
+      `${configPolicyPath("allowMemberVoiceChanges")} requires ${configPolicyPath("allowMemberVoiceAudit")}`,
     )
   }
-  const allowStageInstanceAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowStageInstanceAudit],
-    ENVIRONMENT_NAMES.allowStageInstanceAudit,
-  )
-  const allowStageInstanceChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowStageInstanceChanges],
-    ENVIRONMENT_NAMES.allowStageInstanceChanges,
-  )
+  const allowStageInstanceAudit = configCapability(document, "stageInstanceAudit")
+  const allowStageInstanceChanges = configCapability(document, "stageInstanceChanges")
   if (allowStageInstanceChanges && !allowStageInstanceAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowStageInstanceChanges} requires ${ENVIRONMENT_NAMES.allowStageInstanceAudit}`,
+      `${configPolicyPath("allowStageInstanceChanges")} requires ${configPolicyPath("allowStageInstanceAudit")}`,
     )
   }
-  const allowStageStartNotifications = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowStageStartNotifications],
-    ENVIRONMENT_NAMES.allowStageStartNotifications,
-  )
+  const allowStageStartNotifications = configCapability(document, "stageStartNotifications")
   if (allowStageStartNotifications && !allowStageInstanceChanges) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowStageStartNotifications} requires ${ENVIRONMENT_NAMES.allowStageInstanceChanges}`,
+      `${configPolicyPath("allowStageStartNotifications")} requires ${configPolicyPath("allowStageInstanceChanges")}`,
     )
   }
-  const allowThreadAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowThreadAudit],
-    ENVIRONMENT_NAMES.allowThreadAudit,
-  )
-  const allowThreadChanges = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowThreadChanges],
-    ENVIRONMENT_NAMES.allowThreadChanges,
-  )
+  const allowThreadAudit = configCapability(document, "threadAudit")
+  const allowThreadChanges = configCapability(document, "threadChanges")
   if (allowThreadChanges && !allowThreadAudit) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.allowThreadChanges} requires ${ENVIRONMENT_NAMES.allowThreadAudit}`,
+      `${configPolicyPath("allowThreadChanges")} requires ${configPolicyPath("allowThreadAudit")}`,
     )
   }
-  const allowPollAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowPollAudit],
-    ENVIRONMENT_NAMES.allowPollAudit,
-  )
-  const allowPollCreation = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowPollCreation],
-    ENVIRONMENT_NAMES.allowPollCreation,
-  )
-  const allowPollEnding = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowPollEnding],
-    ENVIRONMENT_NAMES.allowPollEnding,
-  )
-  const allowPollVoterAudit = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowPollVoterAudit],
-    ENVIRONMENT_NAMES.allowPollVoterAudit,
-  )
+  const allowPollAudit = configCapability(document, "pollAudit")
+  const allowPollCreation = configCapability(document, "pollCreation")
+  const allowPollEnding = configCapability(document, "pollEnding")
+  const allowPollVoterAudit = configCapability(document, "pollVoterAudit")
   if ((allowPollCreation || allowPollEnding || allowPollVoterAudit) && !allowPollAudit) {
     throw new ConfigurationError(
-      `Poll creation, ending, and voter audit require ${ENVIRONMENT_NAMES.allowPollAudit}`,
+      `Poll creation, ending, and voter audit require ${configPolicyPath("allowPollAudit")}`,
     )
   }
+  const token = resolveConnectorCredential(document.credential, environment)
 
   return {
     adminGuildIds,
@@ -1341,76 +908,43 @@ function loadConnectorEnvironmentConfig(
     announcementSubscriptionTargetChannelIds,
     allowedChannelIds,
     allowedGuildIds,
-    allowAdministration: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowAdministration],
-      ENVIRONMENT_NAMES.allowAdministration,
-    ),
+    allowAdministration: configCapability(document, "administration"),
     allowCrossGuildMessageForwarding,
-    allowAnnouncementCrossposts: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowAnnouncementCrossposts],
-      ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
-    ),
+    allowAnnouncementCrossposts: configCapability(document, "announcementCrossposts"),
     allowAnnouncementSubscriptionAudit,
     allowAnnouncementSubscriptionChanges,
-    allowAttachments: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowAttachments],
-      ENVIRONMENT_NAMES.allowAttachments,
-    ),
+    allowAttachments: configCapability(document, "attachments"),
     allowAutomodAudit,
     allowAutomodChanges,
-    allowBanAudit: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowBanAudit],
-      ENVIRONMENT_NAMES.allowBanAudit,
-    ),
+    allowBanAudit: configCapability(document, "banAudit"),
     allowChannelCloneAudit,
     allowChannelCloning,
-    allowChannelCreation: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowChannelCreation],
-      ENVIRONMENT_NAMES.allowChannelCreation,
-    ),
+    allowChannelCreation: configCapability(document, "channelCreation"),
     allowChannelDeletionAudit,
     allowChannelDeletions,
-    allowChannelMetadataChanges: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowChannelMetadataChanges],
-      ENVIRONMENT_NAMES.allowChannelMetadataChanges,
-    ),
+    allowChannelMetadataChanges: configCapability(document, "channelMetadataChanges"),
     allowChannelOrderingAudit,
     allowChannelOrderingChanges,
-    allowDeletions: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowDeletions],
-      ENVIRONMENT_NAMES.allowDeletions,
-    ),
+    allowDeletions: configCapability(document, "deletions"),
     allowGateway,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
     allowGuildProfileAudit,
     allowGuildProfileChanges,
-    allowGuildScaffolds: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowGuildScaffolds],
-      ENVIRONMENT_NAMES.allowGuildScaffolds,
-    ),
+    allowGuildScaffolds: configCapability(document, "guildScaffolds"),
     allowGuildSettingsAudit,
     allowGuildSettingsChanges,
     allowGuildTemplateAudit,
     allowGuildTemplateChanges,
     allowIntegrationAudit,
     allowIntegrationDeletions,
-    allowForumPosts: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowForumPosts],
-      ENVIRONMENT_NAMES.allowForumPosts,
-    ),
+    allowForumPosts: configCapability(document, "forumPosts"),
     allowForumTagAudit,
     allowForumTagChanges,
-    allowInteractions: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowInteractions],
-      ENVIRONMENT_NAMES.allowInteractions,
-    ),
+    allowInteractions: configCapability(document, "interactions"),
     allowInviteAudit,
     allowInviteDeletions,
-    allowMemberDirectory: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowMemberDirectory],
-      ENVIRONMENT_NAMES.allowMemberDirectory,
-    ),
+    allowMemberDirectory: configCapability(document, "memberDirectory"),
     allowNicknameChanges,
     allowOtherMemberNicknameChanges,
     allowMemberRoleChanges,
@@ -1421,28 +955,16 @@ function loadConnectorEnvironmentConfig(
     allowMessageForwarding,
     allowOnboardingAudit,
     allowOnboardingChanges,
-    allowPermissionOverwrites: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowPermissionOverwrites],
-      ENVIRONMENT_NAMES.allowPermissionOverwrites,
-    ),
-    allowPinManagement: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowPinManagement],
-      ENVIRONMENT_NAMES.allowPinManagement,
-    ),
+    allowPermissionOverwrites: configCapability(document, "permissionOverwrites"),
+    allowPinManagement: configCapability(document, "pinManagement"),
     allowPollAudit,
     allowPollCreation,
     allowPollEnding,
     allowPollVoterAudit,
     allowReactionModeration,
     allowReactionUserAudit,
-    allowRoleCreation: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowRoleCreation],
-      ENVIRONMENT_NAMES.allowRoleCreation,
-    ),
-    allowRoleConfiguration: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowRoleConfiguration],
-      ENVIRONMENT_NAMES.allowRoleConfiguration,
-    ),
+    allowRoleCreation: configCapability(document, "roleCreation"),
+    allowRoleConfiguration: configCapability(document, "roleConfiguration"),
     allowRoleDeletionAudit,
     allowRoleDeletions,
     allowRoleOrderingAudit,
@@ -1455,10 +977,7 @@ function loadConnectorEnvironmentConfig(
     allowStageInstanceAudit,
     allowStageInstanceChanges,
     allowStageStartNotifications,
-    allowThreadCreation: parseBoolean(
-      environment[ENVIRONMENT_NAMES.allowThreadCreation],
-      ENVIRONMENT_NAMES.allowThreadCreation,
-    ),
+    allowThreadCreation: configCapability(document, "threadCreation"),
     allowThreadAudit,
     allowThreadChanges,
     allowWelcomeScreenAudit,
@@ -1471,21 +990,21 @@ function loadConnectorEnvironmentConfig(
     allowWidgetSettingsAudit,
     allowWidgetSettingsChanges,
     applicationEmojiRoots: parseOwnedRoots(
-      environment[ENVIRONMENT_NAMES.applicationEmojiRoots],
-      ENVIRONMENT_NAMES.applicationEmojiRoots,
+      document.storage.applicationEmojiRoots,
+      "$.storage.applicationEmojiRoots",
     ),
-    auditFile: resolveConnectorAuditFile(environment, options),
+    auditFile: resolveConnectorConfigDocumentAuditFile(document, environment, options),
     attachmentChannelIds,
-    attachmentMaxBytes: parseInteger(
-      environment[ENVIRONMENT_NAMES.attachmentMaxBytes],
-      ENVIRONMENT_NAMES.attachmentMaxBytes,
+    attachmentMaxBytes: configLimit(
+      document,
+      "attachmentMaxBytes",
       DISCORD_LIMITS.attachmentBytes,
       1,
       DISCORD_LIMITS.attachmentBytes,
     ),
     attachmentRoots: parseOwnedRoots(
-      environment[ENVIRONMENT_NAMES.attachmentRoots],
-      ENVIRONMENT_NAMES.attachmentRoots,
+      document.storage.attachmentRoots,
+      "$.storage.attachmentRoots",
     ),
     automodAlertChannelIds,
     automodGuildIds,
@@ -1501,18 +1020,12 @@ function loadConnectorEnvironmentConfig(
     expectedBotId,
     forumPostChannelIds,
     forumTagChannelIds,
-    gatewayEventBufferSize: parseInteger(
-      environment[ENVIRONMENT_NAMES.gatewayEventBufferSize],
-      ENVIRONMENT_NAMES.gatewayEventBufferSize,
-      GATEWAY_DEFAULTS.eventBufferSize,
-      1,
-      CONNECTOR_LIMITS.gatewayEventBufferSize,
-    ),
+    gatewayEventBufferSize: document.gateway.eventBufferSize,
     guildScaffoldGuildIds,
     guildExpressionGuildIds,
     guildExpressionRoots: parseOwnedRoots(
-      environment[ENVIRONMENT_NAMES.guildExpressionRoots],
-      ENVIRONMENT_NAMES.guildExpressionRoots,
+      document.storage.guildExpressionRoots,
+      "$.storage.guildExpressionRoots",
     ),
     guildProfileGuildIds,
     guildSettingsGuildIds,
@@ -1520,16 +1033,16 @@ function loadConnectorEnvironmentConfig(
     integrationGuildIds,
     integrationIds,
     interactionChannelIds,
-    interactionMaxWritesPerMinute: parseInteger(
-      environment[ENVIRONMENT_NAMES.interactionMaxWritesPerMinute],
-      ENVIRONMENT_NAMES.interactionMaxWritesPerMinute,
+    interactionMaxWritesPerMinute: configLimit(
+      document,
+      "interactionMaxWritesPerMinute",
       INTERACTION_DEFAULTS.maxWritesPerMinute,
       1,
       CONNECTOR_LIMITS.interactionMaxWritesPerMinute,
     ),
-    interactionMinWriteIntervalMs: parseInteger(
-      environment[ENVIRONMENT_NAMES.interactionMinWriteIntervalMs],
-      ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
+    interactionMinWriteIntervalMs: configLimit(
+      document,
+      "interactionMinWriteIntervalMs",
       INTERACTION_DEFAULTS.minWriteIntervalMs,
       0,
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
@@ -1547,30 +1060,28 @@ function loadConnectorEnvironmentConfig(
     nativeCommandName,
     nativeInteractionChannelIds,
     nativeInteractionGuildIds,
-    nativeInteractionMaxPending: parseInteger(
-      environment[ENVIRONMENT_NAMES.nativeInteractionMaxPending],
-      ENVIRONMENT_NAMES.nativeInteractionMaxPending,
+    nativeInteractionMaxPending: configLimit(
+      document,
+      "nativeInteractionMaxPending",
       NATIVE_INTERACTION_DEFAULTS.maximumPending,
       1,
       CONNECTOR_LIMITS.nativeInteractionMaxPending,
     ),
-    nativeInteractionTtlSeconds: parseInteger(
-      environment[ENVIRONMENT_NAMES.nativeInteractionTtlSeconds],
-      ENVIRONMENT_NAMES.nativeInteractionTtlSeconds,
+    nativeInteractionTtlSeconds: configLimit(
+      document,
+      "nativeInteractionTtlSeconds",
       NATIVE_INTERACTION_DEFAULTS.ttlSeconds,
       NATIVE_INTERACTION_LIMITS.minimumTtlSeconds,
       NATIVE_INTERACTION_LIMITS.maximumTtlSeconds,
     ),
     nativeInteractionUserIds,
-    mcpToolsets: parseMcpToolsets(
-      environment[ENVIRONMENT_NAMES.toolsets],
-      ENVIRONMENT_NAMES.toolsets,
+    mcpToolsets: new Set(document.tools.toolsets),
+    mcpToolSurface: document.tools.surface,
+    observability: loadObservabilityDocumentConfig(
+      document.observability,
+      environment,
+      [token],
     ),
-    mcpToolSurface: parseMcpToolSurface(
-      environment[ENVIRONMENT_NAMES.toolSurface],
-      ENVIRONMENT_NAMES.toolSurface,
-    ),
-    observability: loadObservabilityConfig(environment, [rawToken || "", token]),
     onboardingGuildIds,
     permissionOverwriteChannelIds,
     protectedUserIds,
@@ -1583,13 +1094,13 @@ function loadConnectorEnvironmentConfig(
     roleOrderingGuildIds,
     scheduledEventGuildIds,
     scheduledEventRoots: parseOwnedRoots(
-      environment[ENVIRONMENT_NAMES.scheduledEventRoots],
-      ENVIRONMENT_NAMES.scheduledEventRoots,
+      document.storage.scheduledEventRoots,
+      "$.storage.scheduledEventRoots",
     ),
     soundboardGuildIds,
     soundboardRoots: parseOwnedRoots(
-      environment[ENVIRONMENT_NAMES.soundboardRoots],
-      ENVIRONMENT_NAMES.soundboardRoots,
+      document.storage.soundboardRoots,
+      "$.storage.soundboardRoots",
     ),
     stageChannelIds,
     token,

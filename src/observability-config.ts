@@ -1,8 +1,11 @@
 import {
   CONNECTOR_LIMITS,
-  ENVIRONMENT_NAMES,
   OBSERVABILITY_DEFAULTS,
 } from "./constants.js"
+import type {
+  ConnectorConfigDocumentObservability,
+  EnvironmentSecretReference,
+} from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 
 export type OtlpCompression = "gzip" | "none"
@@ -48,26 +51,6 @@ const TRACE_SAMPLERS: ReadonlySet<string> = new Set([
   "parentbased_traceidratio",
   "traceidratio",
 ])
-const UNSUPPORTED_OTLP_ENVIRONMENT_NAMES = Object.freeze([
-  "OTEL_EXPORTER_OTLP_CERTIFICATE",
-  "OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE",
-  "OTEL_EXPORTER_OTLP_CLIENT_KEY",
-  "OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE",
-  "OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE",
-  "OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY",
-  "OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE",
-  "OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE",
-  "OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY",
-])
-
-function parseBoolean(value: string | undefined, name: string): boolean {
-  if (value === undefined || value.trim() === "") return false
-  const normalized = value.trim().toLowerCase()
-  if (normalized === "true") return true
-  if (normalized === "false") return false
-  throw new ConfigurationError(`${name} must be true or false`)
-}
-
 function rejectSecret(value: string, name: string, secrets: readonly string[]): void {
   for (const secret of secrets) {
     if (secret && value.includes(secret)) {
@@ -176,6 +159,7 @@ function parseEndpoint(value: string, name: string, secrets: readonly string[]):
 
 function signalUrl(
   baseValue: string,
+  baseName: string,
   signalValue: string | undefined,
   signalName: string,
   signalPath: "v1/metrics" | "v1/traces",
@@ -184,33 +168,8 @@ function signalUrl(
   if (signalValue?.trim()) {
     return parseEndpoint(signalValue.trim(), signalName, secrets).href
   }
-  const base = parseEndpoint(baseValue, ENVIRONMENT_NAMES.otelEndpoint, secrets).href
+  const base = parseEndpoint(baseValue, baseName, secrets).href
   return `${base.endsWith("/") ? base : `${base}/`}${signalPath}`
-}
-
-function parseTimeout(
-  signalValue: string | undefined,
-  generalValue: string | undefined,
-  signalName: string,
-): number {
-  const value = signalValue?.trim() || generalValue?.trim()
-  if (!value) return OBSERVABILITY_DEFAULTS.exportTimeoutMs
-  if (!/^[0-9]+$/.test(value)) {
-    throw new ConfigurationError(
-      `${signalName} must be an integer between 1 and ${CONNECTOR_LIMITS.observabilityTimeoutMs}`,
-    )
-  }
-  const parsed = Number(value)
-  if (
-    !Number.isSafeInteger(parsed)
-    || parsed < 1
-    || parsed > CONNECTOR_LIMITS.observabilityTimeoutMs
-  ) {
-    throw new ConfigurationError(
-      `${signalName} must be an integer between 1 and ${CONNECTOR_LIMITS.observabilityTimeoutMs}`,
-    )
-  }
-  return parsed
 }
 
 function parseCompression(
@@ -234,137 +193,185 @@ function assertProtocol(
   }
 }
 
-function parseServiceName(value: string | undefined, secrets: readonly string[]): string {
+function parseServiceName(
+  value: string | undefined,
+  name: string,
+  secrets: readonly string[],
+): string {
   const normalized = value?.trim() || OBSERVABILITY_DEFAULTS.serviceName
-  rejectSecret(normalized, ENVIRONMENT_NAMES.otelServiceName, secrets)
+  rejectSecret(normalized, name, secrets)
   if (
     normalized.length > CONNECTOR_LIMITS.observabilityServiceNameCharacters
     || !SERVICE_NAME_PATTERN.test(normalized)
     || SNOWFLAKE_LIKE_PATTERN.test(normalized)
   ) {
     throw new ConfigurationError(
-      `${ENVIRONMENT_NAMES.otelServiceName} must contain 1-${CONNECTOR_LIMITS.observabilityServiceNameCharacters} safe characters without snowflake-like identifiers`,
+      `${name} must contain 1-${CONNECTOR_LIMITS.observabilityServiceNameCharacters} `
+      + "safe characters without snowflake-like identifiers",
     )
   }
   return normalized
-}
-
-function parseSampler(environment: NodeJS.ProcessEnv): {
-  ratio: number
-  sampler: OtlpTraceSampler
-} {
-  const rawSampler = environment[ENVIRONMENT_NAMES.otelTracesSampler]?.trim()
-    || "parentbased_always_on"
-  if (!TRACE_SAMPLERS.has(rawSampler)) {
-    throw new ConfigurationError(`${ENVIRONMENT_NAMES.otelTracesSampler} is not supported`)
-  }
-  const rawRatio = environment[ENVIRONMENT_NAMES.otelTracesSamplerArg]?.trim()
-  const ratio = rawRatio ? Number(rawRatio) : 1
-  if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) {
-    throw new ConfigurationError(`${ENVIRONMENT_NAMES.otelTracesSamplerArg} must be between 0 and 1`)
-  }
-  return { ratio, sampler: rawSampler as OtlpTraceSampler }
 }
 
 function mergeHeaders(
   general: Readonly<Record<string, string>>,
   signal: Readonly<Record<string, string>>,
   name: string,
+  generalName: string,
 ): Readonly<Record<string, string>> {
   const result = { ...general, ...signal }
   if (Object.keys(result).length > CONNECTOR_LIMITS.observabilityHeaders) {
     throw new ConfigurationError(
-      `${name} and ${ENVIRONMENT_NAMES.otelHeaders} must contain at most ${CONNECTOR_LIMITS.observabilityHeaders} combined headers`,
+      `${name} and ${generalName} must contain at most ${CONNECTOR_LIMITS.observabilityHeaders} combined headers`,
     )
   }
   return Object.freeze(result)
 }
 
-export function loadObservabilityConfig(
+function resolveHeaderReference(
+  reference: EnvironmentSecretReference | undefined,
+  environment: NodeJS.ProcessEnv,
+  path: string,
+): string | undefined {
+  if (!reference) return undefined
+  const value = environment[reference.variable]?.trim()
+  if (!value) {
+    throw new ConfigurationError(`${path} requires ${reference.variable}`)
+  }
+  return value
+}
+
+function documentTimeout(
+  signalValue: number | undefined,
+  generalValue: number | undefined,
+  path: string,
+): number {
+  const value = signalValue ?? generalValue ?? OBSERVABILITY_DEFAULTS.exportTimeoutMs
+  if (
+    !Number.isSafeInteger(value)
+    || value < 1
+    || value > CONNECTOR_LIMITS.observabilityTimeoutMs
+  ) {
+    throw new ConfigurationError(
+      `${path} must be an integer between 1 and ${CONNECTOR_LIMITS.observabilityTimeoutMs}`,
+    )
+  }
+  return value
+}
+
+function documentSampler(
+  observability: ConnectorConfigDocumentObservability,
+): { ratio: number; sampler: OtlpTraceSampler } {
+  const sampler = observability.traceSampler?.trim() || "parentbased_always_on"
+  if (!TRACE_SAMPLERS.has(sampler)) {
+    throw new ConfigurationError("$.observability.traceSampler is not supported")
+  }
+  const ratio = observability.traceSampleRatio ?? 1
+  if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) {
+    throw new ConfigurationError("$.observability.traceSampleRatio must be between 0 and 1")
+  }
+  return { ratio, sampler: sampler as OtlpTraceSampler }
+}
+
+export function loadObservabilityDocumentConfig(
+  observability: ConnectorConfigDocumentObservability,
   environment: NodeJS.ProcessEnv,
   secrets: readonly string[],
 ): ObservabilityConfig {
-  const exportEnabled = parseBoolean(
-    environment[ENVIRONMENT_NAMES.allowObservabilityExport],
-    ENVIRONMENT_NAMES.allowObservabilityExport,
-  )
-  const jsonLogsEnabled = parseBoolean(
-    environment[ENVIRONMENT_NAMES.observabilityLogs],
-    ENVIRONMENT_NAMES.observabilityLogs,
-  )
+  const exportEnabled = observability.exportEnabled ?? false
+  const jsonLogsEnabled = observability.jsonLogsEnabled ?? false
   if (!exportEnabled) {
     return { export: undefined, exportEnabled, jsonLogsEnabled }
   }
-  for (const name of UNSUPPORTED_OTLP_ENVIRONMENT_NAMES) {
-    if (environment[name]?.trim()) {
-      throw new ConfigurationError(`${name} is not supported`)
-    }
-  }
 
-  assertProtocol(
-    environment[ENVIRONMENT_NAMES.otelTraceProtocol],
-    environment[ENVIRONMENT_NAMES.otelProtocol],
-    ENVIRONMENT_NAMES.otelTraceProtocol,
-  )
-  assertProtocol(
-    environment[ENVIRONMENT_NAMES.otelMetricsProtocol],
-    environment[ENVIRONMENT_NAMES.otelProtocol],
-    ENVIRONMENT_NAMES.otelMetricsProtocol,
-  )
   const generalHeaders = parseOtlpHeaders(
-    environment[ENVIRONMENT_NAMES.otelHeaders],
-    ENVIRONMENT_NAMES.otelHeaders,
+    resolveHeaderReference(
+      observability.headers,
+      environment,
+      "$.observability.headers",
+    ),
+    "$.observability.headers",
     secrets,
   )
   const traceHeaders = parseOtlpHeaders(
-    environment[ENVIRONMENT_NAMES.otelTraceHeaders],
-    ENVIRONMENT_NAMES.otelTraceHeaders,
+    resolveHeaderReference(
+      observability.traces?.headers,
+      environment,
+      "$.observability.traces.headers",
+    ),
+    "$.observability.traces.headers",
     secrets,
   )
   const metricHeaders = parseOtlpHeaders(
-    environment[ENVIRONMENT_NAMES.otelMetricsHeaders],
-    ENVIRONMENT_NAMES.otelMetricsHeaders,
+    resolveHeaderReference(
+      observability.metrics?.headers,
+      environment,
+      "$.observability.metrics.headers",
+    ),
+    "$.observability.metrics.headers",
     secrets,
   )
-  const baseValue = environment[ENVIRONMENT_NAMES.otelEndpoint]?.trim()
+  const baseValue = observability.endpoint?.trim()
     || OBSERVABILITY_DEFAULTS.otlpBaseUrl
-  const sampler = parseSampler(environment)
+  assertProtocol(
+    observability.traces?.protocol,
+    observability.protocol,
+    "$.observability.traces.protocol",
+  )
+  assertProtocol(
+    observability.metrics?.protocol,
+    observability.protocol,
+    "$.observability.metrics.protocol",
+  )
+  const sampler = documentSampler(observability)
   const traces = {
     compression: parseCompression(
-      environment[ENVIRONMENT_NAMES.otelTraceCompression],
-      environment[ENVIRONMENT_NAMES.otelCompression],
-      ENVIRONMENT_NAMES.otelTraceCompression,
+      observability.traces?.compression,
+      observability.compression,
+      "$.observability.traces.compression",
     ),
-    headers: mergeHeaders(generalHeaders, traceHeaders, ENVIRONMENT_NAMES.otelTraceHeaders),
-    timeoutMs: parseTimeout(
-      environment[ENVIRONMENT_NAMES.otelTraceTimeout],
-      environment[ENVIRONMENT_NAMES.otelTimeout],
-      ENVIRONMENT_NAMES.otelTraceTimeout,
+    headers: mergeHeaders(
+      generalHeaders,
+      traceHeaders,
+      "$.observability.traces.headers",
+      "$.observability.headers",
+    ),
+    timeoutMs: documentTimeout(
+      observability.traces?.timeoutMs,
+      observability.timeoutMs,
+      "$.observability.traces.timeoutMs",
     ),
     url: signalUrl(
       baseValue,
-      environment[ENVIRONMENT_NAMES.otelTraceEndpoint],
-      ENVIRONMENT_NAMES.otelTraceEndpoint,
+      "$.observability.endpoint",
+      observability.traces?.endpoint,
+      "$.observability.traces.endpoint",
       "v1/traces",
       secrets,
     ),
   } satisfies OtlpSignalConfig
   const metrics = {
     compression: parseCompression(
-      environment[ENVIRONMENT_NAMES.otelMetricsCompression],
-      environment[ENVIRONMENT_NAMES.otelCompression],
-      ENVIRONMENT_NAMES.otelMetricsCompression,
+      observability.metrics?.compression,
+      observability.compression,
+      "$.observability.metrics.compression",
     ),
-    headers: mergeHeaders(generalHeaders, metricHeaders, ENVIRONMENT_NAMES.otelMetricsHeaders),
-    timeoutMs: parseTimeout(
-      environment[ENVIRONMENT_NAMES.otelMetricsTimeout],
-      environment[ENVIRONMENT_NAMES.otelTimeout],
-      ENVIRONMENT_NAMES.otelMetricsTimeout,
+    headers: mergeHeaders(
+      generalHeaders,
+      metricHeaders,
+      "$.observability.metrics.headers",
+      "$.observability.headers",
+    ),
+    timeoutMs: documentTimeout(
+      observability.metrics?.timeoutMs,
+      observability.timeoutMs,
+      "$.observability.metrics.timeoutMs",
     ),
     url: signalUrl(
       baseValue,
-      environment[ENVIRONMENT_NAMES.otelMetricsEndpoint],
-      ENVIRONMENT_NAMES.otelMetricsEndpoint,
+      "$.observability.endpoint",
+      observability.metrics?.endpoint,
+      "$.observability.metrics.endpoint",
       "v1/metrics",
       secrets,
     ),
@@ -373,15 +380,16 @@ export function loadObservabilityConfig(
   return {
     export: {
       endpointConfigured: Boolean(
-        environment[ENVIRONMENT_NAMES.otelEndpoint]?.trim()
-        || environment[ENVIRONMENT_NAMES.otelTraceEndpoint]?.trim()
-        || environment[ENVIRONMENT_NAMES.otelMetricsEndpoint]?.trim()
+        observability.endpoint?.trim()
+        || observability.traces?.endpoint?.trim()
+        || observability.metrics?.endpoint?.trim()
       ),
       headersConfigured: Object.keys(traces.headers).length > 0
         || Object.keys(metrics.headers).length > 0,
       metrics,
       serviceName: parseServiceName(
-        environment[ENVIRONMENT_NAMES.otelServiceName],
+        observability.serviceName,
+        "$.observability.serviceName",
         secrets,
       ),
       traceSampleRatio: sampler.ratio,

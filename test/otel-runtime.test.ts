@@ -141,10 +141,9 @@ test("OTLP runtime keeps privacy-safe protobuf export and parent context isolate
     cwd: process.cwd(),
     env: {
       ...process.env,
-      DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-      OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
-      OTEL_EXPORTER_OTLP_HEADERS: `x-test-key=${collectorHeader}`,
-      OTEL_SERVICE_NAME: "discord-mcp.integration-test",
+      TEST_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
+      TEST_OTLP_HEADERS: `x-test-key=${collectorHeader}`,
+      TEST_OTLP_SERVICE_NAME: "discord-mcp.integration-test",
       TEST_PRIVATE_TOKEN: privateToken,
       TEST_PRIVATE_VALUE: privateValue,
     },

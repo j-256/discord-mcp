@@ -23,6 +23,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DISCORD_CHANNEL_TYPES,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
@@ -380,7 +381,7 @@ import {
 } from "../src/mcp-guidance.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
-import { loadObservabilityConfig } from "../src/observability-config.js"
+import { loadObservabilityDocumentConfig } from "../src/observability-config.js"
 import { OperationalTelemetry } from "../src/observability.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import {
@@ -395,6 +396,7 @@ import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
 } from "../src/thread-creation-service.js"
+import { loadFixtureConfig } from "./config-fixture.js"
 import type {
   ThreadChangePlan,
   ThreadChangeRequest,
@@ -9695,11 +9697,13 @@ async function connectedFixture(
   } = {},
 ) {
   const serviceData = serviceFixture(options.serviceOverrides)
+  const environment = {
+    DISCORD_BOT_TOKEN: TOKEN,
+    ...options.environment,
+  }
   const server = createDiscordMcpServer({
-    environment: {
-      DISCORD_BOT_TOKEN: TOKEN,
-      ...options.environment,
-    },
+    config: loadFixtureConfig(environment),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
     ...(options.gateway ? { gateway: options.gateway } : {}),
     ...(options.nativeInteractions
       ? { nativeInteractions: options.nativeInteractions }
@@ -9807,9 +9811,10 @@ async function connectedModernStdioFixture(
   const serverInput = new PassThrough()
   const serverOutput = new PassThrough()
   const handle = runDiscordMcpServer({
+    config: loadFixtureConfig({ DISCORD_BOT_TOKEN: TOKEN }),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     observability: new OperationalTelemetry({
-      config: loadObservabilityConfig({}, [TOKEN]),
+      config: loadObservabilityDocumentConfig({}, {}, [TOKEN]),
     }),
     requestStateKey: new Uint8Array(32).fill(9),
     service: serviceData.service,
@@ -10554,6 +10559,7 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
 
   assert.throws(
     () => createDiscordMcpServer({
+      config: loadFixtureConfig(environment),
       environment,
       gateway: gateway(false, GUILD_ID),
       service,
@@ -10562,6 +10568,7 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
   )
   assert.throws(
     () => createDiscordMcpServer({
+      config: loadFixtureConfig(environment),
       environment,
       gateway: gateway(true, OTHER_GUILD_ID),
       service,
@@ -10570,6 +10577,7 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
   )
 
   const server = createDiscordMcpServer({
+    config: loadFixtureConfig(environment),
     environment,
     gateway: gateway(true, GUILD_ID),
     service,
@@ -10599,6 +10607,7 @@ test("MCP server requires an exact operational Gateway source for voice channel 
 
   assert.throws(
     () => createDiscordMcpServer({
+      config: loadFixtureConfig(environment),
       environment,
       gateway: store(0),
       service,
@@ -10607,6 +10616,7 @@ test("MCP server requires an exact operational Gateway source for voice channel 
   )
   assert.throws(
     () => createDiscordMcpServer({
+      config: loadFixtureConfig(environment),
       environment,
       gateway: store(1),
       service,
@@ -10619,7 +10629,12 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
   })
   assert.throws(
-    () => createDiscordMcpServer({ environment, gateway: disabled, service }),
+    () => createDiscordMcpServer({
+      config: loadFixtureConfig(environment),
+      environment,
+      gateway: disabled,
+      service,
+    }),
     /requires an enabled Gateway channel-info source/,
   )
 
@@ -10628,7 +10643,12 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     voiceChannelStatusEnabled: true,
     waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
   })
-  const server = createDiscordMcpServer({ environment, gateway: enabled, service })
+  const server = createDiscordMcpServer({
+    config: loadFixtureConfig(environment),
+    environment,
+    gateway: enabled,
+    service,
+  })
   await server.close()
 })
 
@@ -25787,12 +25807,26 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
 })
 
-test("MCP stdio startup fails before reporting ready when the token is absent", () => {
+test("MCP stdio startup fails before reporting ready when the referenced token is absent", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-missing-token-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const configFile = join(await realpath(temporary), "discord-mcp.json")
+  await writeConnectorConfigDocumentFile(
+    configFile,
+    createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      guildIds: [GUILD_ID],
+      name: "missing-token",
+      toolsets: ["connector"],
+      toolSurface: "full",
+    }),
+  )
   let diagnostics = ""
 
   assert.throws(
     () => runDiscordMcpServer({
-      environment: {},
+      environment: { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile },
       stderr: {
         write(value) {
           diagnostics += String(value)
@@ -25800,7 +25834,7 @@ test("MCP stdio startup fails before reporting ready when the token is absent", 
         },
       },
     }),
-    /DISCORD_BOT_TOKEN is required/,
+    /requires DISCORD_BOT_TOKEN/,
   )
   assert.equal(diagnostics, "")
 })
@@ -25808,6 +25842,7 @@ test("MCP stdio startup fails before reporting ready when the token is absent", 
 test("MCP stdio runner rejects a source-only native Interaction adapter", () => {
   assert.throws(
     () => runDiscordMcpServer({
+      config: loadFixtureConfig({ DISCORD_BOT_TOKEN: TOKEN }),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       nativeInteractions: undefined,
     } as unknown as DiscordMcpRunOptions),
@@ -25906,18 +25941,20 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     voiceChannelStatusEnabled: false,
   }
   const serviceData = serviceFixture()
+  const environment = {
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
+  }
   const handle = runDiscordMcpServer({
-    environment: {
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
-      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-      DISCORD_MCP_BOT_ID: BOT_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
-    },
+    config: loadFixtureConfig(environment),
+    environment,
     gatewayRuntime,
     nativeInteractionRuntime,
     service: serviceData.service,
@@ -25981,9 +26018,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   let flushes = 0
   let telemetryStops = 0
   const observabilityRuntime = new OperationalTelemetry({
-    config: loadObservabilityConfig({
-      DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-    }, [TOKEN]),
+    config: loadObservabilityDocumentConfig({ exportEnabled: true }, {}, [TOKEN]),
     otlpFactory(_config, sink) {
       sink.transitionExporter("running")
       return {
@@ -26001,6 +26036,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   const stdin = new PassThrough()
   const stdout = new PassThrough()
   const handle = runDiscordMcpServer({
+    config: loadFixtureConfig({ DISCORD_BOT_TOKEN: TOKEN }),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     gatewayRuntime,
     stdin,

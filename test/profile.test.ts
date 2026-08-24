@@ -15,7 +15,10 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import test from "node:test"
 
-import { CONNECTOR_LIMITS, ENVIRONMENT_NAMES } from "../src/constants.js"
+import {
+  CONNECTOR_LIMITS,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
+} from "../src/constants.js"
 import { ProfileError } from "../src/errors.js"
 import {
   activateProfile,
@@ -356,7 +359,7 @@ test("profile directory validation rejects public and linked storage", async (co
   )
 })
 
-test("profile activation clones complete policy, consumes aliases, and rejects ambient policy", async (context) => {
+test("profile activation loads complete policy and rejects ambient policy", async (context) => {
   const directory = await profileRoot(context)
   const candidate = profile({
     channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
@@ -380,34 +383,26 @@ test("profile activation clones complete policy, consumes aliases, and rejects a
 
   assert.deepEqual(source, before)
   assert.deepEqual(activated.profile, candidate)
-  assert.equal(activated.environment[ALIAS], undefined)
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.token], TOKEN)
-  assert.equal(
-    activated.environment[ENVIRONMENT_NAMES.applicationId],
-    APPLICATION_ID,
+  assert.equal(activated.config.token, TOKEN)
+  assert.equal(activated.config.expectedApplicationId, APPLICATION_ID)
+  assert.equal(activated.config.expectedBotId, BOT_ID)
+  assert.deepEqual(
+    [...activated.config.allowedGuildIds],
+    [GUILD_ID, OTHER_GUILD_ID],
   )
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.botId], BOT_ID)
-  assert.equal(
-    activated.environment[ENVIRONMENT_NAMES.allowedGuildIds],
-    `${GUILD_ID},${OTHER_GUILD_ID}`,
+  assert.deepEqual(
+    [...activated.config.allowedChannelIds],
+    [CHANNEL_ID, OTHER_CHANNEL_ID],
   )
-  assert.equal(
-    activated.environment[ENVIRONMENT_NAMES.allowedChannelIds],
-    `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
+  assert.equal(activated.config.mcpToolSurface, "progressive")
+  assert.deepEqual(
+    [...activated.config.mcpToolsets],
+    ["connector", "messages"],
   )
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.toolSurface], "progressive")
-  assert.equal(
-    activated.environment[ENVIRONMENT_NAMES.toolsets],
-    "connector,messages",
-  )
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.allowGateway], "true")
-  assert.equal(
-    activated.environment[ENVIRONMENT_NAMES.gatewayEventBufferSize],
-    "250",
-  )
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.allowDeletions], "true")
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.deleteChannelIds], CHANNEL_ID)
-  assert.equal(activated.environment.PATH, "/usr/bin")
+  assert.equal(activated.config.allowGateway, true)
+  assert.equal(activated.config.gatewayEventBufferSize, 250)
+  assert.equal(activated.config.allowDeletions, true)
+  assert.deepEqual([...activated.config.deleteChannelIds], [CHANNEL_ID])
 
   await assert.rejects(
     () => activateProfile(candidate.name, { directory, environment: {} }),
@@ -418,30 +413,30 @@ test("profile activation clones complete policy, consumes aliases, and rejects a
       directory,
       environment: {
         [ALIAS]: TOKEN,
-        [ENVIRONMENT_NAMES.token]: "different-token",
+        DISCORD_BOT_TOKEN: "different-token",
       },
     }),
-    /conflicts with policy environment variables.*DISCORD_BOT_TOKEN/,
+    /conflicts with undeclared environment variables.*DISCORD_BOT_TOKEN/,
   )
   await assert.rejects(
     () => activateProfile(candidate.name, {
       directory,
       environment: {
         [ALIAS]: TOKEN,
-        [ENVIRONMENT_NAMES.allowDeletions]: "false",
+        DISCORD_MCP_ALLOW_DELETIONS: "false",
       },
     }),
-    new RegExp(`conflicts.*${ENVIRONMENT_NAMES.allowDeletions}`),
+    /conflicts.*DISCORD_MCP_ALLOW_DELETIONS/,
   )
   await assert.rejects(
     () => activateProfile(candidate.name, {
       directory,
       environment: {
         [ALIAS]: TOKEN,
-        [ENVIRONMENT_NAMES.configFile]: "/configuration/discord-mcp.json",
+        [CONFIG_FILE_ENVIRONMENT_VARIABLE]: "/configuration/discord-mcp.json",
       },
     }),
-    new RegExp(`conflicts.*${ENVIRONMENT_NAMES.configFile}`),
+    new RegExp(`conflicts.*${CONFIG_FILE_ENVIRONMENT_VARIABLE}`),
   )
 })
 
@@ -471,14 +466,13 @@ test("profile activation resolves a file-backed credential without ambient secre
     path: credentialFile,
     provider: "file",
   })
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.token], TOKEN)
-  assert.equal(activated.environment.PATH, "/usr/bin")
+  assert.equal(activated.config.token, TOKEN)
   await assert.rejects(
     () => activateProfile(candidate.name, {
       directory,
-      environment: { [ENVIRONMENT_NAMES.token]: "ambient-token" },
+      environment: { DISCORD_BOT_TOKEN: "ambient-token" },
     }),
-    /conflicts with policy environment variables/,
+    /conflicts with undeclared environment variables/,
   )
 })
 

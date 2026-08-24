@@ -2,7 +2,7 @@ import { metrics, trace } from "@opentelemetry/api"
 import { MeterProvider } from "@opentelemetry/sdk-metrics"
 import { TracerProvider } from "@opentelemetry/sdk-trace"
 
-import { loadObservabilityConfig } from "../../src/observability-config.js"
+import { loadObservabilityDocumentConfig } from "../../src/observability-config.js"
 import { OperationalTelemetry } from "../../src/observability.js"
 
 const preloadedTracerProvider = new TracerProvider()
@@ -13,7 +13,19 @@ metrics.setGlobalMeterProvider(preloadedMeterProvider)
 const privateValue = process.env.TEST_PRIVATE_VALUE || "private-value"
 const privateToken = process.env.TEST_PRIVATE_TOKEN || "private-token"
 const telemetry = new OperationalTelemetry({
-  config: loadObservabilityConfig(process.env, [privateToken]),
+  config: loadObservabilityDocumentConfig({
+    ...(process.env.TEST_OTLP_ENDPOINT
+      ? { endpoint: process.env.TEST_OTLP_ENDPOINT }
+      : {}),
+    exportEnabled: true,
+    headers: {
+      provider: "environment",
+      variable: "TEST_OTLP_HEADERS",
+    },
+    ...(process.env.TEST_OTLP_SERVICE_NAME
+      ? { serviceName: process.env.TEST_OTLP_SERVICE_NAME }
+      : {}),
+  }, process.env, [privateToken]),
 })
 
 try {

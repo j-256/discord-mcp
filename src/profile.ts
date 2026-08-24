@@ -20,12 +20,15 @@ import {
 
 import {
   CONNECTOR_LIMITS,
-  ENVIRONMENT_NAMES,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
 import {
-  activateConnectorConfigDocument,
+  loadConnectorConfigDocument,
+  type ConnectorConfig,
+} from "./config.js"
+import {
   createConnectorConfigDocument,
   parseConnectorConfigDocument,
   parseStrictConfigJson,
@@ -55,7 +58,7 @@ export interface SaveProfileOptions extends ProfileLocationOptions {
 }
 
 export interface ActivatedProfile {
-  environment: NodeJS.ProcessEnv
+  config: ConnectorConfig
   profile: ConnectorProfile
 }
 
@@ -597,13 +600,13 @@ export async function activateProfile(
 ): Promise<ActivatedProfile> {
   const profile = await loadProfile(name, options)
   const source = options.environment || process.env
-  if (source[ENVIRONMENT_NAMES.configFile]?.trim()) {
+  if (source[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()) {
     throw new ProfileError(
-      `Profile ${profile.name} conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+      `Profile ${profile.name} conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`,
     )
   }
   return {
-    environment: activateConnectorConfigDocument(profile, source),
+    config: loadConnectorConfigDocument(profile, source),
     profile,
   }
 }

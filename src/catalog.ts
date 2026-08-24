@@ -14,11 +14,12 @@ import {
   CATALOG_ONLY_RECOVERY,
   CATALOG_ONLY_STATUS,
 } from "./catalog-contract.js"
-import { loadConnectorConfig } from "./config.js"
+import { loadConnectorConfigDocument } from "./config.js"
+import { createConnectorConfigDocument } from "./config-document.js"
 import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
-  ENVIRONMENT_NAMES,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   SCHEMA_VERSION,
@@ -51,6 +52,9 @@ export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 
 const CATALOG_HOME_DIRECTORY = "/discord-mcp-catalog"
 const CATALOG_TOKEN_PLACEHOLDER = "catalog-only-placeholder"
+const CATALOG_APPLICATION_ID = "900000000000000001"
+const CATALOG_BOT_ID = "900000000000000002"
+const CATALOG_GUILD_ID = "900000000000000003"
 const CATALOG_PROBE_TOOL_NAME = "read_messages"
 const CATALOG_UNKNOWN_TOOL_NAME = "catalog_only_unknown_probe"
 const REQUIRED_ANNOTATIONS = [
@@ -61,13 +65,22 @@ const REQUIRED_ANNOTATIONS = [
 ] as const
 
 const CATALOG_ENVIRONMENT: NodeJS.ProcessEnv = Object.freeze({
-  [ENVIRONMENT_NAMES.auditFile]: `${CATALOG_HOME_DIRECTORY}/activity.jsonl`,
-  [ENVIRONMENT_NAMES.token]: CATALOG_TOKEN_PLACEHOLDER,
-  [ENVIRONMENT_NAMES.toolSurface]: "full",
-  [ENVIRONMENT_NAMES.toolsets]: "all",
+  [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: CATALOG_TOKEN_PLACEHOLDER,
 })
 
-const CATALOG_CONFIG = loadConnectorConfig(CATALOG_ENVIRONMENT, {
+const CATALOG_DOCUMENT = createConnectorConfigDocument({
+  applicationId: CATALOG_APPLICATION_ID,
+  botId: CATALOG_BOT_ID,
+  guildIds: [CATALOG_GUILD_ID],
+  name: "catalog",
+  storage: {
+    auditFile: `${CATALOG_HOME_DIRECTORY}/activity.jsonl`,
+  },
+  toolsets: MCP_TOOLSET_NAMES,
+  toolSurface: "full",
+})
+
+const CATALOG_CONFIG = loadConnectorConfigDocument(CATALOG_DOCUMENT, CATALOG_ENVIRONMENT, {
   homeDirectory: CATALOG_HOME_DIRECTORY,
 })
 const CATALOG_POLICY = new ScopePolicy(CATALOG_CONFIG).describe()

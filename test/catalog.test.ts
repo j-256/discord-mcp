@@ -21,7 +21,7 @@ import {
   createDiscordCatalogServer,
 } from "../src/catalog.js"
 import {
-  ENVIRONMENT_NAMES,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
@@ -243,14 +243,14 @@ test("catalog self-check ignores hostile ambient credentials, policy, Gateway, t
   const activityFile = join(temporaryDirectory, "activity.jsonl")
   const ambientSecret = "ambient-catalog-secret"
   const overrides = new Map<string, string>([
-    [ENVIRONMENT_NAMES.token, ambientSecret],
-    [ENVIRONMENT_NAMES.allowGateway, "true"],
-    [ENVIRONMENT_NAMES.applicationId, "invalid"],
-    [ENVIRONMENT_NAMES.toolsets, "connector"],
-    [ENVIRONMENT_NAMES.toolSurface, "progressive"],
-    [ENVIRONMENT_NAMES.allowObservabilityExport, "true"],
-    [ENVIRONMENT_NAMES.otelEndpoint, "not-a-url"],
-    [ENVIRONMENT_NAMES.auditFile, activityFile],
+    [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE, ambientSecret],
+    ["DISCORD_MCP_ALLOW_GATEWAY", "true"],
+    ["DISCORD_MCP_APPLICATION_ID", "invalid"],
+    ["DISCORD_MCP_TOOLSETS", "connector"],
+    ["DISCORD_MCP_TOOL_SURFACE", "progressive"],
+    ["DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT", "true"],
+    ["OTEL_EXPORTER_OTLP_ENDPOINT", "not-a-url"],
+    ["DISCORD_MCP_AUDIT_FILE", activityFile],
   ])
   const before = new Map(
     [...overrides].map(([name]) => [name, process.env[name]] as const),

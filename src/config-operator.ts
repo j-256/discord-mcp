@@ -13,11 +13,9 @@ import {
   resolve,
 } from "node:path"
 
-import { loadConnectorConfig } from "./config.js"
+import { loadConnectorConfigDocument } from "./config.js"
 import {
   CONFIG_DOCUMENT_SCHEMA_ID,
-  activateConnectorConfigDocument,
-  configDocumentConfigurationError,
   connectorConfigFields,
   connectorConfigJsonSchema,
   connectorConfigSecretEnvironmentNames,
@@ -29,7 +27,7 @@ import {
   type ConnectorCredentialReference,
   type ConnectorConfigDocument,
 } from "./config-document.js"
-import { ENVIRONMENT_NAMES } from "./constants.js"
+import { DEFAULT_TOKEN_ENVIRONMENT_VARIABLE } from "./constants.js"
 import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import { getSetupPreset } from "./setup-presets.js"
 
@@ -172,7 +170,7 @@ function validationDocument(
     ...document,
     credential: {
       provider: "environment",
-      variable: ENVIRONMENT_NAMES.token,
+      variable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     },
   }
 }
@@ -182,14 +180,18 @@ export function validateConnectorConfigDocumentPolicy(
 ): ConnectorConfigDocument {
   const document = parseConnectorConfigDocument(documentValue)
   const placeholderDocument = validationDocument(document)
-  const environment = activateConnectorConfigDocument(
-    placeholderDocument,
-    validationEnvironment(placeholderDocument),
-  )
+  const environment = validationEnvironment(placeholderDocument)
   try {
-    loadConnectorConfig(environment)
+    loadConnectorConfigDocument(
+      placeholderDocument,
+      environment,
+    )
   } catch (error) {
-    throw configDocumentConfigurationError(error)
+    if (error instanceof ConfigDocumentError) throw error
+    if (error instanceof ConfigurationError) {
+      throw new ConfigDocumentError(error.message, { cause: error })
+    }
+    throw error
   }
   return document
 }

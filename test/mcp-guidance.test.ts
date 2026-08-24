@@ -34,6 +34,7 @@ import type {
   DiscordMessage,
   DiscordRole,
 } from "../src/types.js"
+import { loadFixtureConfig } from "./config-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "500000000000000001"
@@ -2594,12 +2595,14 @@ async function connectedFixture(
   options: Parameters<typeof guidanceService>[0] = {},
 ) {
   const fixture = guidanceService(options)
+  const environment = {
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+  }
   const server = createDiscordMcpServer({
-    environment: {
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    },
+    config: loadFixtureConfig(environment),
+    environment,
     service: fixture.service,
   })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { loadConnectorConfig } from "../src/config.js"
+import { loadFixtureConfig as loadConnectorConfig } from "./config-fixture.js"
 import { DiscordApiError } from "../src/errors.js"
 import { PermissionService } from "../src/permission-service.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"

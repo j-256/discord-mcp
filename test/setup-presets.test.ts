@@ -3,7 +3,6 @@ import test from "node:test"
 
 import {
   DISCORD_LIMITS,
-  ENVIRONMENT_NAMES,
   MCP_DISCOVERY_TOOL_NAME,
 } from "../src/constants.js"
 import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
@@ -17,9 +16,6 @@ import {
   SETUP_PRESET_NAMES,
 } from "../src/setup-presets.js"
 
-const TOKEN = "test-discord-token"
-const APPLICATION_ID = "100000000000000001"
-const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const SECOND_GUILD_ID = "300000000000000002"
 const CHANNEL_ID = "400000000000000001"
@@ -102,58 +98,22 @@ test("setup preset names normalize and reject unknown values", () => {
   )
 })
 
-test("server observer materializes exact scope and removes ambient authority", () => {
-  const source = {
-    [ENVIRONMENT_NAMES.token]: TOKEN,
-    [ENVIRONMENT_NAMES.applicationId]: APPLICATION_ID,
-    [ENVIRONMENT_NAMES.botId]: BOT_ID,
-    [ENVIRONMENT_NAMES.allowedGuildIds]: "999999999999999999",
-    [ENVIRONMENT_NAMES.allowedChannelIds]: "999999999999999998",
-    [ENVIRONMENT_NAMES.allowDeletions]: "true",
-    [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-    [ENVIRONMENT_NAMES.allowGateway]: "true",
-    [ENVIRONMENT_NAMES.auditFile]: "/private/activity.jsonl",
-    [ENVIRONMENT_NAMES.allowObservabilityExport]: "true",
-    [ENVIRONMENT_NAMES.otelEndpoint]: "https://telemetry.invalid",
-    DISCORD_MCP_FUTURE_WRITE_POLICY: "true",
-    OTEL_EXPORTER_OTLP_CERTIFICATE: "/private/certificate.pem",
-    UNRELATED_VALUE: "preserved",
-  }
-  const before = { ...source }
+test("server observer materializes an immutable exact policy fragment", () => {
   const result = applySetupPreset({
     channelIds: [SECOND_CHANNEL_ID, CHANNEL_ID],
-    environment: source,
     guildIds: [SECOND_GUILD_ID, GUILD_ID],
     name: "server-observer",
   })
 
-  assert.deepEqual(source, before)
   assert.equal(result.preset.name, "server-observer")
-  assert.equal(
-    result.environment[ENVIRONMENT_NAMES.allowedGuildIds],
-    `${GUILD_ID},${SECOND_GUILD_ID}`,
-  )
-  assert.equal(
-    result.environment[ENVIRONMENT_NAMES.allowedChannelIds],
-    `${CHANNEL_ID},${SECOND_CHANNEL_ID}`,
-  )
-  assert.equal(result.environment[ENVIRONMENT_NAMES.allowGateway], "false")
-  assert.equal(result.environment[ENVIRONMENT_NAMES.toolSurface], "full")
-  assert.equal(
-    result.environment[ENVIRONMENT_NAMES.toolsets],
-    result.preset.toolsets.join(","),
-  )
-  assert.equal(result.environment[ENVIRONMENT_NAMES.token], TOKEN)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.applicationId], APPLICATION_ID)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.botId], BOT_ID)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.allowDeletions], undefined)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.deleteChannelIds], undefined)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.auditFile], undefined)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.allowObservabilityExport], undefined)
-  assert.equal(result.environment[ENVIRONMENT_NAMES.otelEndpoint], undefined)
-  assert.equal(result.environment.DISCORD_MCP_FUTURE_WRITE_POLICY, undefined)
-  assert.equal(result.environment.OTEL_EXPORTER_OTLP_CERTIFICATE, undefined)
-  assert.equal(result.environment.UNRELATED_VALUE, "preserved")
+  assert.deepEqual(result.policy.guildIds, [GUILD_ID, SECOND_GUILD_ID])
+  assert.deepEqual(result.policy.channelIds, [CHANNEL_ID, SECOND_CHANNEL_ID])
+  assert.equal(result.policy.gatewayEnabled, false)
+  assert.equal(result.policy.toolSurface, "full")
+  assert.deepEqual(result.policy.toolsets, result.preset.toolsets)
+  assert.equal(Object.isFrozen(result.policy), true)
+  assert.equal(Object.isFrozen(result.policy.guildIds), true)
+  assert.equal(Object.isFrozen(result.policy.channelIds), true)
 })
 
 test("preset scope validation rejects missing, duplicate, invalid, and excessive IDs", () => {

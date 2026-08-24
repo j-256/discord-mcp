@@ -19,16 +19,17 @@ import { z } from "zod"
 
 import {
   CONNECTOR_LIMITS,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
-  ENVIRONMENT_NAMES,
+  DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   GATEWAY_DEFAULTS,
   MCP_TOOLSET_NAMES,
   MCP_TOOL_SURFACES,
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
-import { ConfigDocumentError, ConfigurationError } from "./errors.js"
+import { ConfigDocumentError } from "./errors.js"
 
 export const CONFIG_DOCUMENT_SCHEMA_VERSION = 2
 export const CONFIG_DOCUMENT_SCHEMA_ID =
@@ -36,16 +37,12 @@ export const CONFIG_DOCUMENT_SCHEMA_ID =
 
 const CONFIG_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/
-const TOKEN_ENVIRONMENT_PATTERN = /^DISCORD_(?:[A-Z0-9]+_)*TOKEN$/
 const HEADER_ENVIRONMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,118}_HEADERS$/
 const CONFIG_JSON_MAX_DEPTH = 64
 const CREDENTIAL_FILE_OVERFLOW_PROBE_BYTES = 1
 const CONFIG_STRING_CHARACTERS = 4_096
 const CONFIG_SCOPE_ENTRIES = 1_000
 const CONFIG_ROOT_ENTRIES = 32
-
-type EnvironmentKey = keyof typeof ENVIRONMENT_NAMES
-type ConfigScalar = boolean | number | string | readonly string[]
 
 export interface EnvironmentSecretReference {
   provider: "environment"
@@ -86,7 +83,7 @@ export interface ConnectorConfigDocumentObservability {
 
 export interface ConnectorConfigDocument {
   $schema?: typeof CONFIG_DOCUMENT_SCHEMA_ID
-  capabilities: Readonly<Record<string, boolean>>
+  capabilities: Readonly<Partial<Record<ConnectorConfigCapabilityName, boolean>>>
   credential: ConnectorCredentialReference
   gateway: {
     enabled: boolean
@@ -96,30 +93,21 @@ export interface ConnectorConfigDocument {
     applicationId: string
     botId: string
   }
-  limits: Readonly<Record<string, number>>
+  limits: Readonly<Partial<Record<ConnectorConfigLimitName, number>>>
   name: string
   observability: ConnectorConfigDocumentObservability
   readScope: {
     channelIds: readonly string[]
     guildIds: readonly string[]
   }
-  runtime: Readonly<Record<string, string>>
+  runtime: Readonly<Partial<Record<ConnectorConfigRuntimeName, string>>>
   schemaVersion: 2
-  scopes: Readonly<Record<string, readonly string[]>>
-  storage: Readonly<Record<string, string | readonly string[]>>
+  scopes: Readonly<Partial<Record<ConnectorConfigScopeName, readonly string[]>>>
+  storage: ConnectorConfigDocumentStorage
   tools: {
     surface: McpToolSurface
     toolsets: readonly McpToolsetName[]
   }
-}
-
-export interface ConnectorConfigDocumentPolicy {
-  capabilities: Readonly<Record<string, boolean>>
-  limits: Readonly<Record<string, number>>
-  observability: ConnectorConfigDocumentObservability
-  runtime: Readonly<Record<string, string>>
-  scopes: Readonly<Record<string, readonly string[]>>
-  storage: Readonly<Record<string, string | readonly string[]>>
 }
 
 export interface ConfigDocumentField {
@@ -130,70 +118,6 @@ export interface ConfigDocumentField {
   required: boolean
 }
 
-interface ConfigSectionMapping {
-  documentKey: string
-  environmentKey: EnvironmentKey
-  environmentVariable: string
-}
-
-const RESERVED_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
-  "allowedChannelIds",
-  "allowedGuildIds",
-  "allowGateway",
-  "allowObservabilityExport",
-  "applicationId",
-  "botId",
-  "configFile",
-  "gatewayEventBufferSize",
-  "observabilityLogs",
-  "otelCompression",
-  "otelEndpoint",
-  "otelHeaders",
-  "otelMetricsCompression",
-  "otelMetricsEndpoint",
-  "otelMetricsHeaders",
-  "otelMetricsProtocol",
-  "otelMetricsTimeout",
-  "otelProtocol",
-  "otelServiceName",
-  "otelTimeout",
-  "otelTraceCompression",
-  "otelTraceEndpoint",
-  "otelTraceHeaders",
-  "otelTraceProtocol",
-  "otelTraceTimeout",
-  "otelTracesSampler",
-  "otelTracesSamplerArg",
-  "token",
-  "toolSurface",
-  "toolsets",
-])
-
-const LIMIT_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
-  "attachmentMaxBytes",
-  "interactionMaxWritesPerMinute",
-  "interactionMinWriteIntervalMs",
-  "nativeInteractionMaxPending",
-  "nativeInteractionTtlSeconds",
-])
-
-const STORAGE_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
-  "applicationEmojiRoots",
-  "attachmentRoots",
-  "auditFile",
-  "guildExpressionRoots",
-  "scheduledEventRoots",
-  "soundboardRoots",
-])
-
-const RUNTIME_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
-  "nativeCommandName",
-])
-
-function lowerInitial(value: string): string {
-  return `${value.slice(0, 1).toLowerCase()}${value.slice(1)}`
-}
-
 function humanizeConfigKey(value: string): string {
   return value
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -201,53 +125,185 @@ function humanizeConfigKey(value: string): string {
     .toLowerCase()
 }
 
-function sectionMappings(
-  matches: (key: EnvironmentKey) => boolean,
-  documentKey: (key: EnvironmentKey) => string = (key) => key,
-): readonly ConfigSectionMapping[] {
-  return (Object.entries(ENVIRONMENT_NAMES) as [EnvironmentKey, string][])
-    .filter(([key]) => !RESERVED_ENVIRONMENT_KEYS.has(key) && matches(key))
-    .map(([environmentKey, environmentVariable]) => ({
-      documentKey: documentKey(environmentKey),
-      environmentKey,
-      environmentVariable,
-    }))
-}
+export const CONFIG_CAPABILITY_NAMES = Object.freeze([
+  "administration",
+  "applicationEmojiAudit",
+  "applicationEmojiChanges",
+  "announcementCrossposts",
+  "announcementSubscriptionAudit",
+  "announcementSubscriptionChanges",
+  "attachments",
+  "automodAudit",
+  "automodChanges",
+  "banAudit",
+  "channelCreation",
+  "channelDeletionAudit",
+  "channelDeletions",
+  "channelCloneAudit",
+  "channelCloning",
+  "channelMetadataChanges",
+  "channelOrderingAudit",
+  "channelOrderingChanges",
+  "deletions",
+  "forumPosts",
+  "forumTagAudit",
+  "forumTagChanges",
+  "guildExpressionAudit",
+  "guildExpressionChanges",
+  "guildProfileAudit",
+  "guildProfileChanges",
+  "guildScaffolds",
+  "guildSettingsAudit",
+  "guildSettingsChanges",
+  "guildTemplateAudit",
+  "guildTemplateChanges",
+  "integrationAudit",
+  "integrationDeletions",
+  "interactions",
+  "inviteAudit",
+  "inviteDeletions",
+  "memberDirectory",
+  "nicknameChanges",
+  "otherMemberNicknameChanges",
+  "memberRoleChanges",
+  "memberVoiceAudit",
+  "memberVoiceChanges",
+  "messageForwarding",
+  "crossGuildMessageForwarding",
+  "nativeCommandChanges",
+  "nativeInteractions",
+  "onboardingAudit",
+  "onboardingChanges",
+  "pinManagement",
+  "permissionOverwrites",
+  "pollAudit",
+  "pollCreation",
+  "pollEnding",
+  "pollVoterAudit",
+  "reactionModeration",
+  "reactionUserAudit",
+  "roleCreation",
+  "roleConfiguration",
+  "roleDeletionAudit",
+  "roleDeletions",
+  "roleOrderingAudit",
+  "roleOrderingChanges",
+  "scheduledEventAudit",
+  "scheduledEventUserAudit",
+  "scheduledEventChanges",
+  "soundboardAudit",
+  "soundboardChanges",
+  "stageInstanceAudit",
+  "stageInstanceChanges",
+  "stageStartNotifications",
+  "threadCreation",
+  "threadAudit",
+  "threadChanges",
+  "welcomeScreenAudit",
+  "welcomeScreenChanges",
+  "webhookAudit",
+  "webhookChanges",
+  "webhookCreation",
+  "webhookDeletions",
+  "widgetPublicExposure",
+  "widgetSettingsAudit",
+  "widgetSettingsChanges",
+] as const)
 
-export const CONFIG_CAPABILITY_MAPPINGS = Object.freeze(sectionMappings(
-  (key) => key.startsWith("allow"),
-  (key) => lowerInitial(key.slice("allow".length)),
-))
+export const CONFIG_SCOPE_NAMES = Object.freeze([
+  "adminGuildIds",
+  "announcementCrosspostChannelIds",
+  "announcementSubscriptionSourceChannelIds",
+  "announcementSubscriptionTargetChannelIds",
+  "attachmentChannelIds",
+  "automodAlertChannelIds",
+  "automodGuildIds",
+  "banAuditGuildIds",
+  "channelCreationGuildIds",
+  "channelDeletionIds",
+  "channelCloneGuildIds",
+  "channelCloneSourceIds",
+  "channelMetadataIds",
+  "channelOrderingGuildIds",
+  "deleteChannelIds",
+  "forumPostChannelIds",
+  "forumTagChannelIds",
+  "guildScaffoldGuildIds",
+  "guildExpressionGuildIds",
+  "guildProfileGuildIds",
+  "guildSettingsGuildIds",
+  "guildTemplateGuildIds",
+  "integrationGuildIds",
+  "integrationIds",
+  "interactionChannelIds",
+  "inviteGuildIds",
+  "mentionUserIds",
+  "memberDirectoryGuildIds",
+  "nicknameGuildIds",
+  "memberRoleGuildIds",
+  "memberRoleIds",
+  "memberVoiceChannelIds",
+  "memberVoiceGuildIds",
+  "messageForwardSourceChannelIds",
+  "messageForwardTargetChannelIds",
+  "nativeInteractionChannelIds",
+  "nativeInteractionGuildIds",
+  "nativeInteractionUserIds",
+  "onboardingGuildIds",
+  "protectedUserIds",
+  "pinChannelIds",
+  "pollChannelIds",
+  "reactionChannelIds",
+  "permissionOverwriteChannelIds",
+  "roleCreationGuildIds",
+  "roleConfigurationIds",
+  "roleDeletionIds",
+  "roleOrderingGuildIds",
+  "scheduledEventGuildIds",
+  "soundboardGuildIds",
+  "stageChannelIds",
+  "threadParentIds",
+  "threadGuildIds",
+  "threadIds",
+  "threadMemberUserIds",
+  "welcomeScreenGuildIds",
+  "webhookChannelIds",
+  "widgetSettingsGuildIds",
+] as const)
 
-export const CONFIG_SCOPE_MAPPINGS = Object.freeze(sectionMappings(
-  (key) => key.endsWith("Ids"),
-))
+export const CONFIG_LIMIT_NAMES = Object.freeze([
+  "attachmentMaxBytes",
+  "interactionMaxWritesPerMinute",
+  "interactionMinWriteIntervalMs",
+  "nativeInteractionMaxPending",
+  "nativeInteractionTtlSeconds",
+] as const)
 
-export const CONFIG_LIMIT_MAPPINGS = Object.freeze(sectionMappings(
-  (key) => LIMIT_ENVIRONMENT_KEYS.has(key),
-))
+export const CONFIG_STORAGE_NAMES = Object.freeze([
+  "applicationEmojiRoots",
+  "attachmentRoots",
+  "auditFile",
+  "guildExpressionRoots",
+  "scheduledEventRoots",
+  "soundboardRoots",
+] as const)
 
-export const CONFIG_STORAGE_MAPPINGS = Object.freeze(sectionMappings(
-  (key) => STORAGE_ENVIRONMENT_KEYS.has(key),
-))
+export const CONFIG_RUNTIME_NAMES = Object.freeze([
+  "nativeCommandName",
+] as const)
 
-export const CONFIG_RUNTIME_MAPPINGS = Object.freeze(sectionMappings(
-  (key) => RUNTIME_ENVIRONMENT_KEYS.has(key),
-))
+export type ConnectorConfigCapabilityName = (typeof CONFIG_CAPABILITY_NAMES)[number]
+export type ConnectorConfigLimitName = (typeof CONFIG_LIMIT_NAMES)[number]
+export type ConnectorConfigRuntimeName = (typeof CONFIG_RUNTIME_NAMES)[number]
+export type ConnectorConfigScopeName = (typeof CONFIG_SCOPE_NAMES)[number]
 
-const MAPPED_ENVIRONMENT_KEYS = new Set<EnvironmentKey>([
-  ...CONFIG_CAPABILITY_MAPPINGS.map((entry) => entry.environmentKey),
-  ...CONFIG_SCOPE_MAPPINGS.map((entry) => entry.environmentKey),
-  ...CONFIG_LIMIT_MAPPINGS.map((entry) => entry.environmentKey),
-  ...CONFIG_STORAGE_MAPPINGS.map((entry) => entry.environmentKey),
-  ...CONFIG_RUNTIME_MAPPINGS.map((entry) => entry.environmentKey),
-])
-
-const UNMAPPED_ENVIRONMENT_KEYS = (Object.keys(ENVIRONMENT_NAMES) as EnvironmentKey[])
-  .filter((key) => !RESERVED_ENVIRONMENT_KEYS.has(key) && !MAPPED_ENVIRONMENT_KEYS.has(key))
-
-if (UNMAPPED_ENVIRONMENT_KEYS.length > 0) {
-  throw new Error(`Connector configuration fields are unmapped: ${UNMAPPED_ENVIRONMENT_KEYS.join(", ")}`)
+export interface ConnectorConfigDocumentStorage {
+  applicationEmojiRoots?: readonly string[]
+  attachmentRoots?: readonly string[]
+  auditFile?: string
+  guildExpressionRoots?: readonly string[]
+  scheduledEventRoots?: readonly string[]
+  soundboardRoots?: readonly string[]
 }
 
 function canonicalArray<T extends string>(
@@ -291,7 +347,7 @@ const tokenReferenceSchema = z.strictObject({
   provider: z.literal("environment"),
   variable: z.string()
     .max(128)
-    .regex(TOKEN_ENVIRONMENT_PATTERN, "must name an uppercase Discord token environment variable"),
+    .regex(DISCORD_TOKEN_ENVIRONMENT_PATTERN, "must name an uppercase Discord token environment variable"),
 })
 
 const credentialFileReferenceSchema = z.strictObject({
@@ -336,55 +392,55 @@ function storageDescription(documentKey: string): string {
 }
 
 const capabilityShape = Object.fromEntries(
-  CONFIG_CAPABILITY_MAPPINGS.map((entry) => [
-    entry.documentKey,
+  CONFIG_CAPABILITY_NAMES.map((name) => [
+    name,
     z.boolean()
-      .describe(capabilityDescription(entry.documentKey))
+      .describe(capabilityDescription(name))
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodBoolean>>
 
 const scopeShape = Object.fromEntries(
-  CONFIG_SCOPE_MAPPINGS.map((entry) => [
-    entry.documentKey,
+  CONFIG_SCOPE_NAMES.map((name) => [
+    name,
     snowflakeArraySchema(0, CONFIG_SCOPE_ENTRIES)
-      .describe(scopeDescription(entry.documentKey))
+      .describe(scopeDescription(name))
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodType<string[]>>>
 
 const limitShape = Object.fromEntries(
-  CONFIG_LIMIT_MAPPINGS.map((entry) => [
-    entry.documentKey,
+  CONFIG_LIMIT_NAMES.map((name) => [
+    name,
     z.number()
       .int()
       .min(0)
       .max(Number.MAX_SAFE_INTEGER)
-      .describe(`Numeric policy limit for ${humanizeConfigKey(entry.documentKey)}`)
+      .describe(`Numeric policy limit for ${humanizeConfigKey(name)}`)
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodNumber>>
 
 const storageShape = Object.fromEntries(
-  CONFIG_STORAGE_MAPPINGS.map((entry) => [
-    entry.documentKey,
-    entry.environmentKey === "auditFile"
+  CONFIG_STORAGE_NAMES.map((name) => [
+    name,
+    name === "auditFile"
       ? absolutePathSchema
         .describe("Absolute path for the content-free activity log")
         .optional()
       : rootArraySchema
-        .describe(storageDescription(entry.documentKey))
+        .describe(storageDescription(name))
         .optional(),
   ]),
 ) as Record<string, z.ZodType>
 
 const runtimeShape = Object.fromEntries(
-  CONFIG_RUNTIME_MAPPINGS.map((entry) => [
-    entry.documentKey,
+  CONFIG_RUNTIME_NAMES.map((name) => [
+    name,
     z.string()
       .min(1)
       .max(CONFIG_STRING_CHARACTERS)
-      .describe(`Runtime setting for ${humanizeConfigKey(entry.documentKey)}`)
+      .describe(`Runtime setting for ${humanizeConfigKey(name)}`)
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodString>>
@@ -527,36 +583,17 @@ export function normalizeConfigName(value: string): string {
   return result.data
 }
 
-function assertSecretReferenceDoesNotConflict(
-  reference: EnvironmentSecretReference,
-  allowedCanonicalTarget: string,
-  path: string,
-): void {
-  const recognized = new Set<string>(Object.values(ENVIRONMENT_NAMES))
-  if (
-    reference.variable !== allowedCanonicalTarget
-    && recognized.has(reference.variable)
-  ) {
-    throw new ConfigDocumentError(
-      `Configuration document ${path}.variable conflicts with connector policy`,
-    )
-  }
-}
-
 function environmentSecretReferences(document: ConnectorConfigDocument): readonly {
   path: string
   reference: EnvironmentSecretReference
-  target: string
 }[] {
   const result: {
     path: string
     reference: EnvironmentSecretReference
-    target: string
   }[] = []
   if (document.credential.provider === "environment") result.push({
     path: "$.credential",
     reference: document.credential,
-    target: ENVIRONMENT_NAMES.token,
   })
   const common = document.observability.headers
   const traces = document.observability.traces?.headers
@@ -564,17 +601,14 @@ function environmentSecretReferences(document: ConnectorConfigDocument): readonl
   if (common) result.push({
     path: "$.observability.headers",
     reference: common,
-    target: ENVIRONMENT_NAMES.otelHeaders,
   })
   if (traces) result.push({
     path: "$.observability.traces.headers",
     reference: traces,
-    target: ENVIRONMENT_NAMES.otelTraceHeaders,
   })
   if (metrics) result.push({
     path: "$.observability.metrics.headers",
     reference: metrics,
-    target: ENVIRONMENT_NAMES.otelMetricsHeaders,
   })
   return result
 }
@@ -612,28 +646,25 @@ export function parseConnectorConfigDocument(
   if (expectedName !== undefined && document.name !== normalizeConfigName(expectedName)) {
     throw new ConfigDocumentError("Configuration name does not match its filename")
   }
-  for (const secret of environmentSecretReferences(document)) {
-    assertSecretReferenceDoesNotConflict(secret.reference, secret.target, secret.path)
-  }
   return document
 }
 
 export function createConnectorConfigDocument(options: {
   applicationId: string
   botId: string
-  capabilities?: Readonly<Record<string, boolean>>
+  capabilities?: ConnectorConfigDocument["capabilities"]
   channelIds?: readonly string[]
   credentialFile?: string
   credentialVariable?: string
   gatewayEnabled?: boolean
   gatewayEventBufferSize?: number
   guildIds: readonly string[]
-  limits?: Readonly<Record<string, number>>
+  limits?: ConnectorConfigDocument["limits"]
   name: string
   observability?: ConnectorConfigDocumentObservability
-  runtime?: Readonly<Record<string, string>>
-  scopes?: Readonly<Record<string, readonly string[]>>
-  storage?: Readonly<Record<string, string | readonly string[]>>
+  runtime?: ConnectorConfigDocument["runtime"]
+  scopes?: ConnectorConfigDocument["scopes"]
+  storage?: ConnectorConfigDocumentStorage
   toolsets: readonly McpToolsetName[]
   toolSurface: McpToolSurface
 }): ConnectorConfigDocument {
@@ -648,7 +679,7 @@ export function createConnectorConfigDocument(options: {
     credential: options.credentialFile === undefined
       ? {
           provider: "environment",
-          variable: options.credentialVariable ?? ENVIRONMENT_NAMES.token,
+          variable: options.credentialVariable ?? DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
         }
       : {
           path: options.credentialFile,
@@ -678,178 +709,6 @@ export function createConnectorConfigDocument(options: {
       toolsets: MCP_TOOLSET_NAMES.filter((entry) => options.toolsets.includes(entry)),
     },
   })
-}
-
-function canonicalEnvironmentList(value: string): string[] {
-  return [...new Set(value.split(/[\s,]+/).filter(Boolean))].sort()
-}
-
-function canonicalEnvironmentRoots(value: string): string[] {
-  const normalized = value.trim()
-  const entries = normalized.startsWith("[")
-    ? JSON.parse(normalized) as unknown
-    : [normalized]
-  if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string")) {
-    throw new ConfigDocumentError("Validated storage roots could not be normalized")
-  }
-  return [...new Set(entries.map((entry) => entry.trim()))].sort()
-}
-
-function presentEnvironmentValue(
-  environment: NodeJS.ProcessEnv,
-  name: string,
-): string | undefined {
-  const value = environment[name]?.trim()
-  return value ? value : undefined
-}
-
-function environmentSecretReference(
-  environment: NodeJS.ProcessEnv,
-  variable: string,
-): EnvironmentSecretReference | undefined {
-  return presentEnvironmentValue(environment, variable)
-    ? { provider: "environment", variable }
-    : undefined
-}
-
-export function configDocumentPolicyFromEnvironment(
-  environment: NodeJS.ProcessEnv,
-): ConnectorConfigDocumentPolicy {
-  const capabilities: Record<string, boolean> = {}
-  for (const mapping of CONFIG_CAPABILITY_MAPPINGS) {
-    const value = presentEnvironmentValue(environment, mapping.environmentVariable)
-    if (value !== undefined) capabilities[mapping.documentKey] = value.toLowerCase() === "true"
-  }
-
-  const scopes: Record<string, string[]> = {}
-  for (const mapping of CONFIG_SCOPE_MAPPINGS) {
-    const value = presentEnvironmentValue(environment, mapping.environmentVariable)
-    if (value !== undefined) scopes[mapping.documentKey] = canonicalEnvironmentList(value)
-  }
-
-  const limits: Record<string, number> = {}
-  for (const mapping of CONFIG_LIMIT_MAPPINGS) {
-    const value = presentEnvironmentValue(environment, mapping.environmentVariable)
-    if (value !== undefined) limits[mapping.documentKey] = Number(value)
-  }
-
-  const storage: Record<string, string | string[]> = {}
-  for (const mapping of CONFIG_STORAGE_MAPPINGS) {
-    const value = presentEnvironmentValue(environment, mapping.environmentVariable)
-    if (value === undefined) continue
-    storage[mapping.documentKey] = mapping.environmentKey === "auditFile"
-      ? resolve(value)
-      : canonicalEnvironmentRoots(value)
-  }
-
-  const runtime: Record<string, string> = {}
-  for (const mapping of CONFIG_RUNTIME_MAPPINGS) {
-    const value = presentEnvironmentValue(environment, mapping.environmentVariable)
-    if (value !== undefined) runtime[mapping.documentKey] = value
-  }
-
-  const traceHeaders = environmentSecretReference(
-    environment,
-    ENVIRONMENT_NAMES.otelTraceHeaders,
-  )
-  const metricHeaders = environmentSecretReference(
-    environment,
-    ENVIRONMENT_NAMES.otelMetricsHeaders,
-  )
-  const traceCompression = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelTraceCompression,
-  )
-  const traceEndpoint = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelTraceEndpoint,
-  )
-  const traceProtocol = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelTraceProtocol,
-  )
-  const traceTimeout = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelTraceTimeout,
-  )
-  const traces = {
-    ...(traceCompression ? { compression: traceCompression } : {}),
-    ...(traceEndpoint ? { endpoint: traceEndpoint } : {}),
-    ...(traceHeaders ? { headers: traceHeaders } : {}),
-    ...(traceProtocol ? { protocol: traceProtocol } : {}),
-    ...(traceTimeout ? { timeoutMs: Number(traceTimeout) } : {}),
-  }
-  const metricCompression = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelMetricsCompression,
-  )
-  const metricEndpoint = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelMetricsEndpoint,
-  )
-  const metricProtocol = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelMetricsProtocol,
-  )
-  const metricTimeout = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelMetricsTimeout,
-  )
-  const metrics = {
-    ...(metricCompression ? { compression: metricCompression } : {}),
-    ...(metricEndpoint ? { endpoint: metricEndpoint } : {}),
-    ...(metricHeaders ? { headers: metricHeaders } : {}),
-    ...(metricProtocol ? { protocol: metricProtocol } : {}),
-    ...(metricTimeout ? { timeoutMs: Number(metricTimeout) } : {}),
-  }
-  const commonHeaders = environmentSecretReference(
-    environment,
-    ENVIRONMENT_NAMES.otelHeaders,
-  )
-  const generalCompression = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelCompression,
-  )
-  const endpoint = presentEnvironmentValue(environment, ENVIRONMENT_NAMES.otelEndpoint)
-  const exportEnabled = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.allowObservabilityExport,
-  )
-  const jsonLogsEnabled = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.observabilityLogs,
-  )
-  const protocol = presentEnvironmentValue(environment, ENVIRONMENT_NAMES.otelProtocol)
-  const serviceName = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelServiceName,
-  )
-  const timeout = presentEnvironmentValue(environment, ENVIRONMENT_NAMES.otelTimeout)
-  const traceSampleRatio = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelTracesSamplerArg,
-  )
-  const traceSampler = presentEnvironmentValue(
-    environment,
-    ENVIRONMENT_NAMES.otelTracesSampler,
-  )
-  const observability: ConnectorConfigDocumentObservability = {
-    ...(generalCompression ? { compression: generalCompression } : {}),
-    ...(endpoint ? { endpoint } : {}),
-    ...(exportEnabled ? { exportEnabled: exportEnabled.toLowerCase() === "true" } : {}),
-    ...(commonHeaders ? { headers: commonHeaders } : {}),
-    ...(jsonLogsEnabled
-      ? { jsonLogsEnabled: jsonLogsEnabled.toLowerCase() === "true" }
-      : {}),
-    ...(Object.keys(metrics).length > 0 ? { metrics } : {}),
-    ...(protocol ? { protocol } : {}),
-    ...(serviceName ? { serviceName } : {}),
-    ...(timeout ? { timeoutMs: Number(timeout) } : {}),
-    ...(traceSampleRatio ? { traceSampleRatio: Number(traceSampleRatio) } : {}),
-    ...(traceSampler ? { traceSampler } : {}),
-    ...(Object.keys(traces).length > 0 ? { traces } : {}),
-  }
-  return { capabilities, limits, observability, runtime, scopes, storage }
 }
 
 class JsonCursor {
@@ -1211,7 +1070,7 @@ export function loadConnectorCredentialFile(
   }
 }
 
-function resolveConnectorCredential(
+export function resolveConnectorCredential(
   referenceValue: ConnectorCredentialReference,
   source: NodeJS.ProcessEnv,
 ): string {
@@ -1226,252 +1085,6 @@ function resolveConnectorCredential(
     )
   }
   return value
-}
-
-export function activateConnectorCredentialReference(
-  referenceValue: ConnectorCredentialReference,
-  source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-  const reference = parseConnectorCredentialReference(referenceValue)
-  const canonical = nonEmptyEnvironmentValue(source, ENVIRONMENT_NAMES.token)
-  if (reference.provider === "file" && canonical) {
-    throw new ConfigDocumentError(
-      `Configuration credential file conflicts with ${ENVIRONMENT_NAMES.token}`,
-    )
-  }
-  const credential = resolveConnectorCredential(reference, source)
-  if (
-    reference.provider === "environment"
-    && reference.variable !== ENVIRONMENT_NAMES.token
-    && canonical
-    && canonical !== credential
-  ) {
-    throw new ConfigDocumentError(
-      `Credential ${reference.variable} conflicts with ${ENVIRONMENT_NAMES.token}`,
-    )
-  }
-  const environment = { ...source }
-  if (reference.provider === "environment" && reference.variable !== ENVIRONMENT_NAMES.token) {
-    delete environment[reference.variable]
-  }
-  environment[ENVIRONMENT_NAMES.token] = credential
-  return environment
-}
-
-function setEnvironmentValue(
-  environment: NodeJS.ProcessEnv,
-  name: string,
-  value: ConfigScalar | undefined,
-): void {
-  if (value === undefined) return
-  environment[name] = Array.isArray(value)
-    ? value.join(",")
-    : String(value)
-}
-
-function sectionEnvironment(
-  target: NodeJS.ProcessEnv,
-  section: Readonly<Record<string, ConfigScalar>>,
-  mappings: readonly ConfigSectionMapping[],
-): void {
-  for (const mapping of mappings) {
-    const value = section[mapping.documentKey]
-    if (value === undefined) continue
-    if (
-      mapping.environmentKey.endsWith("Roots")
-      && Array.isArray(value)
-    ) {
-      target[mapping.environmentVariable] = JSON.stringify(value)
-      continue
-    }
-    setEnvironmentValue(target, mapping.environmentVariable, value)
-  }
-}
-
-function setObservabilityEnvironment(
-  target: NodeJS.ProcessEnv,
-  observability: ConnectorConfigDocumentObservability,
-): void {
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.allowObservabilityExport, observability.exportEnabled)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.observabilityLogs, observability.jsonLogsEnabled)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelEndpoint, observability.endpoint)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelProtocol, observability.protocol)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelCompression, observability.compression)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTimeout, observability.timeoutMs)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelServiceName, observability.serviceName)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTracesSampler, observability.traceSampler)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTracesSamplerArg, observability.traceSampleRatio)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTraceEndpoint, observability.traces?.endpoint)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTraceProtocol, observability.traces?.protocol)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTraceCompression, observability.traces?.compression)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelTraceTimeout, observability.traces?.timeoutMs)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelMetricsEndpoint, observability.metrics?.endpoint)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelMetricsProtocol, observability.metrics?.protocol)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelMetricsCompression, observability.metrics?.compression)
-  setEnvironmentValue(target, ENVIRONMENT_NAMES.otelMetricsTimeout, observability.metrics?.timeoutMs)
-}
-
-export function activateConnectorConfigDocument(
-  documentValue: ConnectorConfigDocument,
-  source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-  const document = parseConnectorConfigDocument(documentValue)
-  const secrets = environmentSecretReferences(document)
-  const recognized = new Set<string>(Object.values(ENVIRONMENT_NAMES))
-  const permitted = new Set<string>([
-    ENVIRONMENT_NAMES.configFile,
-    ...secrets.map((entry) => entry.reference.variable),
-  ])
-  const conflicts = Object.keys(source)
-    .filter((name) => (
-      !permitted.has(name)
-      && (
-        recognized.has(name)
-        || name.startsWith("DISCORD_MCP_")
-        || name.startsWith("OTEL_")
-      )
-      && nonEmptyEnvironmentValue(source, name) !== undefined
-    ))
-    .sort()
-  if (conflicts.length > 0) {
-    throw new ConfigDocumentError(
-      `Selected configuration conflicts with policy environment variables: ${conflicts.join(", ")}`,
-    )
-  }
-
-  const resolvedSecrets = new Map<string, string>()
-  if (document.credential.provider === "file") {
-    resolvedSecrets.set(
-      ENVIRONMENT_NAMES.token,
-      resolveConnectorCredential(document.credential, source),
-    )
-  }
-  for (const secret of secrets) {
-    const value = nonEmptyEnvironmentValue(source, secret.reference.variable)
-    if (!value) {
-      throw new ConfigDocumentError(
-        `Configuration document ${secret.path} requires ${secret.reference.variable}`,
-      )
-    }
-    resolvedSecrets.set(secret.target, value)
-  }
-
-  const environment = { ...source }
-  for (const name of Object.keys(environment)) {
-    if (
-      recognized.has(name)
-      || name.startsWith("DISCORD_MCP_")
-      || name.startsWith("OTEL_")
-    ) delete environment[name]
-  }
-  for (const secret of secrets) {
-    if (!(Object.values(ENVIRONMENT_NAMES) as string[]).includes(secret.reference.variable)) {
-      delete environment[secret.reference.variable]
-    }
-  }
-  for (const [target, value] of resolvedSecrets) environment[target] = value
-
-  environment[ENVIRONMENT_NAMES.applicationId] = document.identity.applicationId
-  environment[ENVIRONMENT_NAMES.botId] = document.identity.botId
-  environment[ENVIRONMENT_NAMES.allowedGuildIds] = document.readScope.guildIds.join(",")
-  environment[ENVIRONMENT_NAMES.allowedChannelIds] = document.readScope.channelIds.join(",")
-  environment[ENVIRONMENT_NAMES.toolSurface] = document.tools.surface
-  environment[ENVIRONMENT_NAMES.toolsets] = document.tools.toolsets.join(",")
-  environment[ENVIRONMENT_NAMES.allowGateway] = String(document.gateway.enabled)
-  environment[ENVIRONMENT_NAMES.gatewayEventBufferSize] = String(
-    document.gateway.eventBufferSize,
-  )
-  sectionEnvironment(environment, document.capabilities, CONFIG_CAPABILITY_MAPPINGS)
-  sectionEnvironment(environment, document.scopes, CONFIG_SCOPE_MAPPINGS)
-  sectionEnvironment(environment, document.limits, CONFIG_LIMIT_MAPPINGS)
-  sectionEnvironment(environment, document.storage, CONFIG_STORAGE_MAPPINGS)
-  sectionEnvironment(environment, document.runtime, CONFIG_RUNTIME_MAPPINGS)
-  setObservabilityEnvironment(environment, document.observability)
-  return environment
-}
-
-export function activateConnectorConfigFile(
-  source: NodeJS.ProcessEnv = process.env,
-): {
-  document: ConnectorConfigDocument
-  environment: NodeJS.ProcessEnv
-  file: string
-} | undefined {
-  const file = nonEmptyEnvironmentValue(source, ENVIRONMENT_NAMES.configFile)
-  if (!file) return undefined
-  const document = loadConnectorConfigDocumentFile(file)
-  return {
-    document,
-    environment: activateConnectorConfigDocument(document, source),
-    file,
-  }
-}
-
-const OBSERVABILITY_ENVIRONMENT_PATHS = Object.freeze(new Map<string, string>([
-  [ENVIRONMENT_NAMES.allowObservabilityExport, "$.observability.exportEnabled"],
-  [ENVIRONMENT_NAMES.observabilityLogs, "$.observability.jsonLogsEnabled"],
-  [ENVIRONMENT_NAMES.otelCompression, "$.observability.compression"],
-  [ENVIRONMENT_NAMES.otelEndpoint, "$.observability.endpoint"],
-  [ENVIRONMENT_NAMES.otelHeaders, "$.observability.headers"],
-  [ENVIRONMENT_NAMES.otelMetricsCompression, "$.observability.metrics.compression"],
-  [ENVIRONMENT_NAMES.otelMetricsEndpoint, "$.observability.metrics.endpoint"],
-  [ENVIRONMENT_NAMES.otelMetricsHeaders, "$.observability.metrics.headers"],
-  [ENVIRONMENT_NAMES.otelMetricsProtocol, "$.observability.metrics.protocol"],
-  [ENVIRONMENT_NAMES.otelMetricsTimeout, "$.observability.metrics.timeoutMs"],
-  [ENVIRONMENT_NAMES.otelProtocol, "$.observability.protocol"],
-  [ENVIRONMENT_NAMES.otelServiceName, "$.observability.serviceName"],
-  [ENVIRONMENT_NAMES.otelTimeout, "$.observability.timeoutMs"],
-  [ENVIRONMENT_NAMES.otelTraceCompression, "$.observability.traces.compression"],
-  [ENVIRONMENT_NAMES.otelTraceEndpoint, "$.observability.traces.endpoint"],
-  [ENVIRONMENT_NAMES.otelTraceHeaders, "$.observability.traces.headers"],
-  [ENVIRONMENT_NAMES.otelTraceProtocol, "$.observability.traces.protocol"],
-  [ENVIRONMENT_NAMES.otelTraceTimeout, "$.observability.traces.timeoutMs"],
-  [ENVIRONMENT_NAMES.otelTracesSampler, "$.observability.traceSampler"],
-  [ENVIRONMENT_NAMES.otelTracesSamplerArg, "$.observability.traceSampleRatio"],
-]))
-
-export const CONFIG_DOCUMENT_ENVIRONMENT_PATHS = Object.freeze(new Map<string, string>([
-  [ENVIRONMENT_NAMES.token, "$.credential"],
-  [ENVIRONMENT_NAMES.applicationId, "$.identity.applicationId"],
-  [ENVIRONMENT_NAMES.botId, "$.identity.botId"],
-  [ENVIRONMENT_NAMES.allowedGuildIds, "$.readScope.guildIds"],
-  [ENVIRONMENT_NAMES.allowedChannelIds, "$.readScope.channelIds"],
-  [ENVIRONMENT_NAMES.toolSurface, "$.tools.surface"],
-  [ENVIRONMENT_NAMES.toolsets, "$.tools.toolsets"],
-  [ENVIRONMENT_NAMES.allowGateway, "$.gateway.enabled"],
-  [ENVIRONMENT_NAMES.gatewayEventBufferSize, "$.gateway.eventBufferSize"],
-  ...CONFIG_CAPABILITY_MAPPINGS.map((entry) => [
-    entry.environmentVariable,
-    `$.capabilities.${entry.documentKey}`,
-  ] as const),
-  ...CONFIG_SCOPE_MAPPINGS.map((entry) => [
-    entry.environmentVariable,
-    `$.scopes.${entry.documentKey}`,
-  ] as const),
-  ...CONFIG_LIMIT_MAPPINGS.map((entry) => [
-    entry.environmentVariable,
-    `$.limits.${entry.documentKey}`,
-  ] as const),
-  ...CONFIG_STORAGE_MAPPINGS.map((entry) => [
-    entry.environmentVariable,
-    `$.storage.${entry.documentKey}`,
-  ] as const),
-  ...CONFIG_RUNTIME_MAPPINGS.map((entry) => [
-    entry.environmentVariable,
-    `$.runtime.${entry.documentKey}`,
-  ] as const),
-  ...OBSERVABILITY_ENVIRONMENT_PATHS,
-]))
-
-export function configDocumentConfigurationError(error: unknown): unknown {
-  if (!(error instanceof ConfigurationError) || error instanceof ConfigDocumentError) {
-    return error
-  }
-  let message = error.message
-  const entries = [...CONFIG_DOCUMENT_ENVIRONMENT_PATHS]
-    .sort(([left], [right]) => right.length - left.length)
-  for (const [name, path] of entries) message = message.replaceAll(name, path)
-  return new ConfigDocumentError(message, { cause: error })
 }
 
 export function connectorConfigJsonSchema(): Record<string, unknown> {
@@ -1568,54 +1181,68 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       path: "$.gateway.eventBufferSize",
       required: true,
     },
-    ...CONFIG_CAPABILITY_MAPPINGS.map((entry) => ({
+    ...CONFIG_CAPABILITY_NAMES.map((name) => ({
       defaultValue: false,
-      description: capabilityDescription(entry.documentKey),
+      description: capabilityDescription(name),
       kind: "boolean" as const,
-      path: `$.capabilities.${entry.documentKey}`,
+      path: `$.capabilities.${name}`,
       required: false,
     })),
-    ...CONFIG_SCOPE_MAPPINGS.map((entry) => ({
+    ...CONFIG_SCOPE_NAMES.map((name) => ({
       defaultValue: [],
-      description: scopeDescription(entry.documentKey),
+      description: scopeDescription(name),
       kind: "snowflakes" as const,
-      path: `$.scopes.${entry.documentKey}`,
+      path: `$.scopes.${name}`,
       required: false,
     })),
-    ...CONFIG_LIMIT_MAPPINGS.map((entry) => ({
+    ...CONFIG_LIMIT_NAMES.map((name) => ({
       defaultValue: undefined,
-      description: `Numeric policy limit for ${humanizeConfigKey(entry.documentKey)}`,
+      description: `Numeric policy limit for ${humanizeConfigKey(name)}`,
       kind: "integer" as const,
-      path: `$.limits.${entry.documentKey}`,
+      path: `$.limits.${name}`,
       required: false,
     })),
-    ...CONFIG_STORAGE_MAPPINGS.map((entry) => ({
-      defaultValue: entry.environmentKey === "auditFile" ? undefined : [],
-      description: entry.environmentKey === "auditFile"
+    ...CONFIG_STORAGE_NAMES.map((name) => ({
+      defaultValue: name === "auditFile" ? undefined : [],
+      description: name === "auditFile"
         ? "Absolute path for the content-free activity log"
-        : storageDescription(entry.documentKey),
-      kind: (entry.environmentKey === "auditFile" ? "path" : "paths") as "path" | "paths",
-      path: `$.storage.${entry.documentKey}`,
+        : storageDescription(name),
+      kind: (name === "auditFile" ? "path" : "paths") as "path" | "paths",
+      path: `$.storage.${name}`,
       required: false,
     })),
-    ...CONFIG_RUNTIME_MAPPINGS.map((entry) => ({
+    ...CONFIG_RUNTIME_NAMES.map((name) => ({
       defaultValue: undefined,
-      description: `Runtime setting for ${humanizeConfigKey(entry.documentKey)}`,
+      description: `Runtime setting for ${humanizeConfigKey(name)}`,
       kind: "string" as const,
-      path: `$.runtime.${entry.documentKey}`,
+      path: `$.runtime.${name}`,
       required: false,
     })),
-    ...[...OBSERVABILITY_ENVIRONMENT_PATHS].map(([environmentVariable, path]) => ({
+    ...([
+      ["$.observability.compression", "string"],
+      ["$.observability.endpoint", "string"],
+      ["$.observability.exportEnabled", "boolean"],
+      ["$.observability.headers", "secret-reference"],
+      ["$.observability.jsonLogsEnabled", "boolean"],
+      ["$.observability.metrics.compression", "string"],
+      ["$.observability.metrics.endpoint", "string"],
+      ["$.observability.metrics.headers", "secret-reference"],
+      ["$.observability.metrics.protocol", "string"],
+      ["$.observability.metrics.timeoutMs", "number"],
+      ["$.observability.protocol", "string"],
+      ["$.observability.serviceName", "string"],
+      ["$.observability.timeoutMs", "number"],
+      ["$.observability.traceSampleRatio", "number"],
+      ["$.observability.traceSampler", "string"],
+      ["$.observability.traces.compression", "string"],
+      ["$.observability.traces.endpoint", "string"],
+      ["$.observability.traces.headers", "secret-reference"],
+      ["$.observability.traces.protocol", "string"],
+      ["$.observability.traces.timeoutMs", "number"],
+    ] as const).map(([path, kind]) => ({
       defaultValue: undefined,
       description: `Observability setting for ${humanizeConfigKey(path.split(".").at(-1) || path)}`,
-      kind: environmentVariable.endsWith("_HEADERS")
-        ? "secret-reference" as const
-        : environmentVariable.endsWith("_TIMEOUT")
-          || environmentVariable === ENVIRONMENT_NAMES.otelTracesSamplerArg
-          ? "number" as const
-          : environmentVariable.startsWith("DISCORD_MCP_")
-            ? "boolean" as const
-            : "string" as const,
+      kind,
       path,
       required: false,
     })),

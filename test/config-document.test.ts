@@ -13,14 +13,12 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
-  CONFIG_CAPABILITY_MAPPINGS,
-  CONFIG_DOCUMENT_ENVIRONMENT_PATHS,
+  CONFIG_CAPABILITY_NAMES,
   CONFIG_DOCUMENT_SCHEMA_ID,
-  CONFIG_LIMIT_MAPPINGS,
-  CONFIG_RUNTIME_MAPPINGS,
-  CONFIG_SCOPE_MAPPINGS,
-  CONFIG_STORAGE_MAPPINGS,
-  activateConnectorConfigDocument,
+  CONFIG_LIMIT_NAMES,
+  CONFIG_RUNTIME_NAMES,
+  CONFIG_SCOPE_NAMES,
+  CONFIG_STORAGE_NAMES,
   connectorConfigFields,
   connectorConfigJsonSchema,
   connectorConfigSecretEnvironmentNames,
@@ -32,8 +30,14 @@ import {
   parseConnectorConfigJson,
   type ConnectorConfigDocument,
 } from "../src/config-document.js"
-import { loadConnectorConfig } from "../src/config.js"
-import { CONNECTOR_LIMITS, ENVIRONMENT_NAMES } from "../src/constants.js"
+import {
+  loadConnectorConfig,
+  loadConnectorConfigDocument,
+} from "../src/config.js"
+import {
+  CONNECTOR_LIMITS,
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
+} from "../src/constants.js"
 import { ConfigDocumentError } from "../src/errors.js"
 
 const APPLICATION_ID = "300000000000000001"
@@ -120,7 +124,13 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
         variable: `DISCORD_${"A".repeat(121)}_TOKEN`,
       },
     },
-    { ...valid, credential: { provider: "environment", variable: ENVIRONMENT_NAMES.allowDeletions } },
+    {
+      ...valid,
+      credential: {
+        provider: "environment",
+        variable: "DISCORD_MCP_ALLOW_DELETIONS",
+      },
+    },
     { ...valid, credential: { path: "relative-token", provider: "file" } },
     { ...valid, credential: { path: "/run/secrets/token\n", provider: "file" } },
     {
@@ -133,6 +143,11 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     },
     { ...valid, readScope: { ...valid.readScope, guildIds: [] } },
     { ...valid, readScope: { ...valid.readScope, channelIds: [CHANNEL_ID, CHANNEL_ID] } },
+    { ...valid, identity: { applicationId: APPLICATION_ID } },
+    { ...valid, identity: { botId: BOT_ID } },
+    { ...valid, tools: { ...valid.tools, toolsets: [] } },
+    { ...valid, tools: { ...valid.tools, toolsets: ["messages", "all"] } },
+    { ...valid, tools: { ...valid.tools, toolsets: ["messages", "unknown"] } },
     { ...valid, tools: { ...valid.tools, toolsets: ["messages", "connector"] } },
     { ...valid, capabilities: { ...valid.capabilities, deletion: true } },
     { ...valid, scopes: { ...valid.scopes, attachmentChannelIds: CHANNEL_ID } },
@@ -140,9 +155,16 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     {
       ...valid,
       observability: {
+        ...valid.observability,
+        clientKey: "/private/collector.key",
+      },
+    },
+    {
+      ...valid,
+      observability: {
         headers: {
           provider: "environment",
-          variable: ENVIRONMENT_NAMES.allowGateway,
+          variable: "DISCORD_MCP_ALLOW_GATEWAY",
         },
       },
     },
@@ -171,7 +193,8 @@ test("configuration JSON rejects duplicate keys, truncation, NULs, and deep nest
   )
 })
 
-test("configuration activation allows only referenced secrets and maps typed policy", () => {
+test("native configuration loads only referenced secrets and rejects ambient policy", async (context) => {
+  const applicationEmojiRoot = await configRoot(context)
   const source: NodeJS.ProcessEnv = {
     [TOKEN_ALIAS]: ` ${TOKEN} `,
     [HEADER_ALIAS]: "x-api-key=telemetry-secret",
@@ -195,44 +218,44 @@ test("configuration activation allows only referenced secrets and maps typed pol
       interactionChannelIds: [CHANNEL_ID],
     },
     storage: {
-      applicationEmojiRoots: ["/srv/discord-application-emojis"],
+      applicationEmojiRoots: [applicationEmojiRoot],
     },
   })
 
-  const environment = activateConnectorConfigDocument(configured, source)
+  const config = loadConnectorConfigDocument(configured, source)
   assert.deepEqual(source, before)
-  assert.equal(environment[TOKEN_ALIAS], undefined)
-  assert.equal(environment[HEADER_ALIAS], undefined)
-  assert.equal(environment[ENVIRONMENT_NAMES.token], TOKEN)
-  assert.equal(environment[ENVIRONMENT_NAMES.otelHeaders], "x-api-key=telemetry-secret")
-  assert.equal(environment[ENVIRONMENT_NAMES.allowAttachments], "true")
-  assert.equal(environment[ENVIRONMENT_NAMES.allowApplicationEmojiAudit], "true")
-  assert.equal(environment[ENVIRONMENT_NAMES.allowApplicationEmojiChanges], "true")
-  assert.equal(
-    environment[ENVIRONMENT_NAMES.applicationEmojiRoots],
-    '["/srv/discord-application-emojis"]',
+  assert.equal(config.token, TOKEN)
+  assert.equal(config.allowAttachments, true)
+  assert.equal(config.allowApplicationEmojiAudit, true)
+  assert.equal(config.allowApplicationEmojiChanges, true)
+  assert.deepEqual(
+    config.applicationEmojiRoots,
+    [applicationEmojiRoot],
   )
-  assert.equal(environment[ENVIRONMENT_NAMES.attachmentChannelIds], CHANNEL_ID)
-  assert.equal(environment[ENVIRONMENT_NAMES.attachmentMaxBytes], "1024")
-  assert.equal(environment[ENVIRONMENT_NAMES.allowedGuildIds], GUILD_ID)
-  assert.equal(environment.PATH, "/usr/bin")
+  assert.deepEqual([...config.attachmentChannelIds], [CHANNEL_ID])
+  assert.equal(config.attachmentMaxBytes, 1_024)
+  assert.deepEqual([...config.allowedGuildIds], [GUILD_ID])
+  assert.deepEqual(
+    config.observability.export?.traces.headers,
+    { "x-api-key": "telemetry-secret" },
+  )
 
   assert.throws(
-    () => activateConnectorConfigDocument(configured, {
+    () => loadConnectorConfigDocument(configured, {
       ...source,
-      [ENVIRONMENT_NAMES.allowDeletions]: "false",
+      DISCORD_MCP_ALLOW_DELETIONS: "false",
     }),
-    new RegExp(`conflicts.*${ENVIRONMENT_NAMES.allowDeletions}`),
+    /conflicts.*DISCORD_MCP_ALLOW_DELETIONS/,
   )
   assert.throws(
-    () => activateConnectorConfigDocument(configured, {
+    () => loadConnectorConfigDocument(configured, {
       ...source,
       DISCORD_MCP_ALLOW_DELETION: "true",
     }),
     /conflicts.*DISCORD_MCP_ALLOW_DELETION/,
   )
   assert.throws(
-    () => activateConnectorConfigDocument(configured, {
+    () => loadConnectorConfigDocument(configured, {
       [TOKEN_ALIAS]: TOKEN,
     }),
     new RegExp(`requires ${HEADER_ALIAS}`),
@@ -259,15 +282,14 @@ test("file-backed credentials activate without ambient secret delivery", async (
   assert.deepEqual(connectorConfigSecretEnvironmentNames(configured), [])
   assert.deepEqual(connectorConfigSecretFilePaths(configured), [tokenFile])
   assert.equal(loadConnectorCredentialFile(tokenFile), TOKEN)
-  const activated = activateConnectorConfigDocument(configured, source)
+  const config = loadConnectorConfigDocument(configured, source)
   assert.deepEqual(source, before)
-  assert.equal(activated[ENVIRONMENT_NAMES.token], TOKEN)
-  assert.equal(activated.PATH, "/usr/bin")
+  assert.equal(config.token, TOKEN)
   assert.throws(
-    () => activateConnectorConfigDocument(configured, {
-      [ENVIRONMENT_NAMES.token]: "ambient-token",
+    () => loadConnectorConfigDocument(configured, {
+      DISCORD_BOT_TOKEN: "ambient-token",
     }),
-    new RegExp(`conflicts with policy environment variables: ${ENVIRONMENT_NAMES.token}`),
+    /conflicts with undeclared environment variables: DISCORD_BOT_TOKEN/,
   )
 })
 
@@ -324,7 +346,7 @@ test("configuration file loading is canonical, bounded, and usable by the connec
   const file = await writeConfig(context)
   assert.deepEqual(loadConnectorConfigDocumentFile(file), document())
   const config = loadConnectorConfig({
-    [ENVIRONMENT_NAMES.configFile]: file,
+    [CONFIG_FILE_ENVIRONMENT_VARIABLE]: file,
     [TOKEN_ALIAS]: TOKEN,
   })
   assert.equal(config.token, TOKEN)
@@ -378,7 +400,7 @@ test("configuration file is the complete role-deletion policy surface", async (c
   })
   const file = await writeConfig(context, configured)
   const config = loadConnectorConfig({
-    [ENVIRONMENT_NAMES.configFile]: file,
+    [CONFIG_FILE_ENVIRONMENT_VARIABLE]: file,
     [TOKEN_ALIAS]: TOKEN,
   })
 
@@ -388,29 +410,31 @@ test("configuration file is the complete role-deletion policy surface", async (c
   assert.equal(config.allowGateway, true)
   assert.deepEqual([...config.mcpToolsets], ["connector", "gateway", "role-deletion"])
 
-  const activated = activateConnectorConfigDocument(configured, {
-    [TOKEN_ALIAS]: TOKEN,
-  })
-  assert.equal(activated[ENVIRONMENT_NAMES.allowRoleDeletionAudit], "true")
-  assert.equal(activated[ENVIRONMENT_NAMES.allowRoleDeletions], "true")
-  assert.equal(activated[ENVIRONMENT_NAMES.roleDeletionIds], ROLE_ID)
 })
 
 test("configuration metadata covers every runtime field and emits a strict schema", () => {
-  const mapped = new Set(CONFIG_DOCUMENT_ENVIRONMENT_PATHS.keys())
-  const expected = Object.values(ENVIRONMENT_NAMES)
-    .filter((name) => name !== ENVIRONMENT_NAMES.configFile)
-  assert.deepEqual([...mapped].sort(), [...expected].sort())
-  assert.equal(connectorConfigFields().length, expected.length + 3)
+  const fields = connectorConfigFields()
+  const paths = new Set(fields.map((field) => field.path))
+  assert.equal(paths.size, fields.length)
   assert.equal(
-    connectorConfigFields().every((field) => field.description.length > 0),
+    fields.every((field) => field.description.length > 0),
     true,
   )
-  assert.equal(CONFIG_CAPABILITY_MAPPINGS.length > 0, true)
-  assert.equal(CONFIG_SCOPE_MAPPINGS.length > 0, true)
-  assert.equal(CONFIG_LIMIT_MAPPINGS.length > 0, true)
-  assert.equal(CONFIG_STORAGE_MAPPINGS.length > 0, true)
-  assert.equal(CONFIG_RUNTIME_MAPPINGS.length > 0, true)
+  for (const name of CONFIG_CAPABILITY_NAMES) {
+    assert.equal(paths.has(`$.capabilities.${name}`), true)
+  }
+  for (const name of CONFIG_SCOPE_NAMES) {
+    assert.equal(paths.has(`$.scopes.${name}`), true)
+  }
+  for (const name of CONFIG_LIMIT_NAMES) {
+    assert.equal(paths.has(`$.limits.${name}`), true)
+  }
+  for (const name of CONFIG_STORAGE_NAMES) {
+    assert.equal(paths.has(`$.storage.${name}`), true)
+  }
+  for (const name of CONFIG_RUNTIME_NAMES) {
+    assert.equal(paths.has(`$.runtime.${name}`), true)
+  }
 
   const schema = connectorConfigJsonSchema()
   assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema")

@@ -16,7 +16,7 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 | Read safety | Bounded requests, strict response validation, privacy-tiered projections, untrusted-content handling, and no hidden direct-message access |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence before mutation, one non-retried write, exact readback, durable coordination, and quarantine after ambiguity |
-| Privacy | Tokens stay in the caller's environment; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
+| Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
 
 The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and known limitation.
@@ -28,7 +28,7 @@ Requirements:
 - Node.js 22 or newer
 - A Discord application with a bot user
 - One strict non-secret JSON policy file
-- The bot token available only through an environment variable
+- The bot token available through an environment variable or protected file
 - Only the Discord permissions needed for the selected read or reviewed-write scope
 
 Each deployment uses a Discord application and bot controlled by that operator. Discord MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.

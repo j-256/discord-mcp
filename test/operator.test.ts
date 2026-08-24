@@ -5,18 +5,16 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_APPLICATION_FLAGS,
-  ENVIRONMENT_NAMES,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
 import {
   projectApplicationPosture,
   type ApplicationPostureResult,
 } from "../src/application-posture.js"
-import { loadConnectorConfig } from "../src/config.js"
 import {
-  configDocumentPolicyFromEnvironment,
-  connectorConfigSecretEnvironmentNames,
   createConnectorConfigDocument,
   loadConnectorConfigDocumentFile,
 } from "../src/config-document.js"
@@ -24,12 +22,12 @@ import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
 import type { DiscordToolService } from "../src/mcp.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import {
-  diagnoseConnector,
+  diagnoseConnector as diagnoseNativeConnector,
   DOCTOR_CHECK_IDS,
   createStdioLaunchDescriptor,
   OPERATOR_REPORT_SCHEMA_VERSION,
   prepareSetup as prepareConfigSetup,
-  smokeConnector,
+  smokeConnector as smokeNativeConnector,
   type SetupOptions,
   type SetupReport,
   type StatusProvider,
@@ -38,10 +36,13 @@ import {
   createConnectorProfile,
   loadProfile,
 } from "../src/profile.js"
-import { selectedMcpToolsets } from "../src/mcp-tool-catalog.js"
 import { getSetupPreset } from "../src/setup-presets.js"
 import type { ConnectorService } from "../src/service.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
+import {
+  fixtureConfigInput,
+  loadFixtureConfig,
+} from "./config-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
@@ -52,6 +53,36 @@ const SOURCE_CHANNEL_ID = "400000000000000002"
 const ROLE_ID = "500000000000000001"
 const INTEGRATION_ID = "600000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
+
+const FIXTURE_ENVIRONMENT_NAMES = Object.freeze({
+  allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
+  allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
+  allowGuildProfileAudit: "DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT",
+  allowGuildProfileChanges: "DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES",
+  allowGuildSettingsAudit: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT",
+  allowGuildSettingsChanges: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES",
+  allowIntegrationAudit: "DISCORD_MCP_ALLOW_INTEGRATION_AUDIT",
+  allowIntegrationDeletions: "DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS",
+  allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
+  allowWidgetPublicExposure: "DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE",
+  allowWidgetSettingsAudit: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT",
+  allowWidgetSettingsChanges: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES",
+  allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
+  allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
+  auditFile: "DISCORD_MCP_AUDIT_FILE",
+  configFile: CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
+  gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
+  guildProfileGuildIds: "DISCORD_MCP_GUILD_PROFILE_GUILD_IDS",
+  guildSettingsGuildIds: "DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS",
+  integrationGuildIds: "DISCORD_MCP_INTEGRATION_GUILD_IDS",
+  integrationIds: "DISCORD_MCP_INTEGRATION_IDS",
+  otelEndpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",
+  token: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+  toolSurface: "DISCORD_MCP_TOOL_SURFACE",
+  toolsets: "DISCORD_MCP_TOOLSETS",
+  widgetSettingsGuildIds: "DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS",
+})
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -67,38 +98,53 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 async function prepareSetup(options: SetupOptions): Promise<SetupReport> {
   if (options.configFile || options.profileName) return prepareConfigSetup(options)
   const source = options.environment || process.env
-  const config = loadConnectorConfig(source)
-  if (!config.expectedApplicationId || !config.expectedBotId) {
-    throw new Error("Test setup requires pinned identity")
-  }
-  const document = createConnectorConfigDocument({
-    applicationId: config.expectedApplicationId,
-    botId: config.expectedBotId,
-    channelIds: [...config.allowedChannelIds],
-    ...configDocumentPolicyFromEnvironment(source),
-    gatewayEnabled: config.allowGateway,
-    gatewayEventBufferSize: config.gatewayEventBufferSize,
-    guildIds: [...config.allowedGuildIds],
-    name: "test-policy",
-    toolsets: selectedMcpToolsets(config.mcpToolsets),
-    toolSurface: config.mcpToolSurface,
-  })
+  const fixture = fixtureConfigInput(source)
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-policy-"))
   const configFile = join(await realpath(temporary), "discord-mcp.json")
-  const secretEnvironment: NodeJS.ProcessEnv = {}
-  for (const name of connectorConfigSecretEnvironmentNames(document)) {
-    secretEnvironment[name] = source[name]
-  }
   try {
-    await writeConnectorConfigDocumentFile(configFile, document)
+    await writeConnectorConfigDocumentFile(configFile, fixture.document)
     return await prepareConfigSetup({
       ...options,
       configFile,
-      environment: secretEnvironment,
+      environment: fixture.environment,
     })
   } finally {
     await rm(temporary, { force: true, recursive: true })
   }
+}
+
+function diagnoseConnector(
+  options: Parameters<typeof diagnoseNativeConnector>[0] = {},
+) {
+  const source = options.environment || process.env
+  if (
+    options.config
+    || source[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
+    || !source[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]?.trim()
+  ) {
+    return diagnoseNativeConnector(options)
+  }
+  return diagnoseNativeConnector({
+    ...options,
+    config: loadFixtureConfig(source),
+  })
+}
+
+function smokeConnector(
+  options: Parameters<typeof smokeNativeConnector>[0] = {},
+) {
+  const source = options.environment || process.env
+  if (
+    options.config
+    || source[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
+    || !source[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]?.trim()
+  ) {
+    return smokeNativeConnector(options)
+  }
+  return smokeNativeConnector({
+    ...options,
+    config: loadFixtureConfig(source),
+  })
 }
 
 function status(
@@ -583,7 +629,7 @@ test("doctor resolves the credential variable referenced by a selected configura
 
   const report = await diagnoseConnector({
     environment: {
-      [ENVIRONMENT_NAMES.configFile]: configFile,
+      [FIXTURE_ENVIRONMENT_NAMES.configFile]: configFile,
       [TOKEN_ALIAS]: TOKEN,
     },
     nodeVersion: "22.14.0",
@@ -620,7 +666,7 @@ test("doctor resolves file-backed credentials and redacts downstream failures", 
   )
 
   const report = await diagnoseConnector({
-    environment: { [ENVIRONMENT_NAMES.configFile]: configFile },
+    environment: { [FIXTURE_ENVIRONMENT_NAMES.configFile]: configFile },
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -640,12 +686,12 @@ test("doctor resolves file-backed credentials and redacts downstream failures", 
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 })
 
-test("doctor distinguishes valid scoped configuration from safe warnings", async () => {
+test("doctor distinguishes complete scope from a missing channel boundary", async () => {
   const scoped = await diagnoseConnector({
     environment: environment(),
     nodeVersion: "22.14.0",
   })
-  const open = await diagnoseConnector({
+  const guildOnly = await diagnoseConnector({
     environment: {
       DISCORD_BOT_TOKEN: TOKEN,
     },
@@ -656,20 +702,12 @@ test("doctor distinguishes valid scoped configuration from safe warnings", async
   assert.equal(scoped.checks.every((entry) => entry.status === "pass"), true)
   assert.equal(scoped.checks.every((entry) => !("action" in entry)), true)
   assert.equal(scoped.checks.every((entry) => !("reference" in entry)), true)
-  assert.equal(open.status, "warning")
+  assert.equal(guildOnly.status, "warning")
   assert.equal(
-    open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.applicationIdentity)?.status,
+    guildOnly.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.status,
     "warn",
   )
-  assert.equal(
-    open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.guildScope)?.status,
-    "warn",
-  )
-  assert.equal(
-    open.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.status,
-    "warn",
-  )
-  for (const entry of open.checks.filter((candidate) => candidate.status !== "pass")) {
+  for (const entry of guildOnly.checks.filter((candidate) => candidate.status !== "pass")) {
     assert.ok(entry.action)
     assert.equal(entry.reference, "docs/reference.md#operator-cli")
   }
@@ -1669,10 +1707,10 @@ test("doctor and setup explain privacy-safe integration audit and deletion", asy
   assert.match(setup.warnings.join("\n"), /integration-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /integrations toolset/)
   for (const name of [
-    ENVIRONMENT_NAMES.allowIntegrationAudit,
-    ENVIRONMENT_NAMES.allowIntegrationDeletions,
-    ENVIRONMENT_NAMES.integrationGuildIds,
-    ENVIRONMENT_NAMES.integrationIds,
+    FIXTURE_ENVIRONMENT_NAMES.allowIntegrationAudit,
+    FIXTURE_ENVIRONMENT_NAMES.allowIntegrationDeletions,
+    FIXTURE_ENVIRONMENT_NAMES.integrationGuildIds,
+    FIXTURE_ENVIRONMENT_NAMES.integrationIds,
   ]) {
     assert.equal(setup.launch.environment.forward.includes(name), false)
   }
@@ -1923,10 +1961,10 @@ test("doctor and setup explain authenticated reviewed widget settings", async ()
   assert.match(setup.warnings.join("\n"), /widget public-exposure toggle/)
   assert.match(omitted.warnings.join("\n"), /widget-settings toolset/)
   for (const name of [
-    ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
-    ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
-    ENVIRONMENT_NAMES.allowWidgetPublicExposure,
-    ENVIRONMENT_NAMES.widgetSettingsGuildIds,
+    FIXTURE_ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
+    FIXTURE_ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
+    FIXTURE_ENVIRONMENT_NAMES.allowWidgetPublicExposure,
+    FIXTURE_ENVIRONMENT_NAMES.widgetSettingsGuildIds,
   ]) {
     assert.equal(setup.launch.environment.forward.includes(name), false)
   }
@@ -1980,9 +2018,9 @@ test("doctor and setup explain privacy-minimized reviewed guild settings", async
   )
   assert.match(omitted.warnings.join("\n"), /guild-settings toolset/)
   for (const name of [
-    ENVIRONMENT_NAMES.allowGuildSettingsAudit,
-    ENVIRONMENT_NAMES.allowGuildSettingsChanges,
-    ENVIRONMENT_NAMES.guildSettingsGuildIds,
+    FIXTURE_ENVIRONMENT_NAMES.allowGuildSettingsAudit,
+    FIXTURE_ENVIRONMENT_NAMES.allowGuildSettingsChanges,
+    FIXTURE_ENVIRONMENT_NAMES.guildSettingsGuildIds,
   ]) {
     assert.equal(setup.launch.environment.forward.includes(name), false)
   }
@@ -2037,9 +2075,9 @@ test("doctor and setup explain transient reviewed guild profile text", async () 
   )
   assert.match(omitted.warnings.join("\n"), /guild-profile toolset/)
   for (const name of [
-    ENVIRONMENT_NAMES.allowGuildProfileAudit,
-    ENVIRONMENT_NAMES.allowGuildProfileChanges,
-    ENVIRONMENT_NAMES.guildProfileGuildIds,
+    FIXTURE_ENVIRONMENT_NAMES.allowGuildProfileAudit,
+    FIXTURE_ENVIRONMENT_NAMES.allowGuildProfileChanges,
+    FIXTURE_ENVIRONMENT_NAMES.guildProfileGuildIds,
   ]) {
     assert.equal(setup.launch.environment.forward.includes(name), false)
   }
@@ -3468,7 +3506,7 @@ test("doctor and setup report Message Content intent needed by native search", a
   })
   const withoutMessages = await prepareSetup({
     environment: environment({
-      [ENVIRONMENT_NAMES.toolsets]: "connector",
+      [FIXTURE_ENVIRONMENT_NAMES.toolsets]: "connector",
     }),
     service: {
       async getStatus() {
@@ -3628,7 +3666,7 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
     channelIds: [CHANNEL_ID],
-    credentialVariable: ENVIRONMENT_NAMES.token,
+    credentialVariable: FIXTURE_ENVIRONMENT_NAMES.token,
     guildIds: [GUILD_ID],
     name: "team-discord",
     toolsets: ["connector"],
@@ -3647,7 +3685,7 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
     args: ["serve", "--config", file],
     command: "/opt/Discord MCP/bin/discord-mcp",
     environment: {
-      forward: [ENVIRONMENT_NAMES.token],
+      forward: [FIXTURE_ENVIRONMENT_NAMES.token],
       set: {},
     },
     requirements: {
@@ -3656,7 +3694,7 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
       toolApproval: "writes",
     },
     secrets: {
-      environmentVariables: [ENVIRONMENT_NAMES.token],
+      environmentVariables: [FIXTURE_ENVIRONMENT_NAMES.token],
       files: [],
     },
     serverName: "team-discord",
@@ -3748,19 +3786,19 @@ test("stdio launch descriptor makes a saved profile the complete non-overridable
   ])
   assert.deepEqual(result.environment.set, {})
   assert.equal(result.environment.forward.includes(TOKEN_ALIAS), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.token), false)
+  assert.equal(result.environment.forward.includes(FIXTURE_ENVIRONMENT_NAMES.token), false)
   for (const variable of [
-    ENVIRONMENT_NAMES.allowedChannelIds,
-    ENVIRONMENT_NAMES.allowedGuildIds,
-    ENVIRONMENT_NAMES.allowGateway,
-    ENVIRONMENT_NAMES.gatewayEventBufferSize,
-    ENVIRONMENT_NAMES.toolSurface,
-    ENVIRONMENT_NAMES.toolsets,
+    FIXTURE_ENVIRONMENT_NAMES.allowedChannelIds,
+    FIXTURE_ENVIRONMENT_NAMES.allowedGuildIds,
+    FIXTURE_ENVIRONMENT_NAMES.allowGateway,
+    FIXTURE_ENVIRONMENT_NAMES.gatewayEventBufferSize,
+    FIXTURE_ENVIRONMENT_NAMES.toolSurface,
+    FIXTURE_ENVIRONMENT_NAMES.toolsets,
   ]) {
     assert.equal(result.environment.forward.includes(variable), false)
   }
   assert.equal(
-    result.environment.forward.includes(ENVIRONMENT_NAMES.allowDeletions),
+    result.environment.forward.includes(FIXTURE_ENVIRONMENT_NAMES.allowDeletions),
     false,
   )
   assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
@@ -3860,7 +3898,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.equal(report.launch.command, "/usr/bin/node")
   assert.equal(report.launch.serverName, "discord-safe")
   assert.deepEqual(report.launch.environment, {
-    forward: [ENVIRONMENT_NAMES.token],
+    forward: [FIXTURE_ENVIRONMENT_NAMES.token],
     set: {},
   })
   assert.equal(report.preset, null)
@@ -3881,18 +3919,7 @@ test("preset setup saves resolved read-only authority and forwards only its cred
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-preset-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const profileDirectory = join(await realpath(temporary), "profiles")
-  const source = environment({
-    [ENVIRONMENT_NAMES.token]: undefined,
-    [TOKEN_ALIAS]: TOKEN,
-    [ENVIRONMENT_NAMES.allowDeletions]: "true",
-    [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-    [ENVIRONMENT_NAMES.allowGateway]: "true",
-    [ENVIRONMENT_NAMES.auditFile]: join(temporary, "activity.jsonl"),
-    [ENVIRONMENT_NAMES.allowObservabilityExport]: "true",
-    [ENVIRONMENT_NAMES.otelEndpoint]: "https://telemetry.invalid",
-    [ENVIRONMENT_NAMES.toolSurface]: "progressive",
-    [ENVIRONMENT_NAMES.toolsets]: "all",
-  })
+  const source = { [TOKEN_ALIAS]: TOKEN }
   const before = { ...source }
 
   const observer = await prepareSetup({
@@ -3972,16 +3999,7 @@ test("setup creates and verifies a preset-backed profile without persisting or r
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-profile-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const profileDirectory = join(await realpath(temporary), "profiles")
-  const source = environment({
-    [ENVIRONMENT_NAMES.token]: undefined,
-    [TOKEN_ALIAS]: TOKEN,
-    [ENVIRONMENT_NAMES.allowGateway]: "true",
-    [ENVIRONMENT_NAMES.allowDeletions]: "true",
-    [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-    [ENVIRONMENT_NAMES.gatewayEventBufferSize]: "250",
-    [ENVIRONMENT_NAMES.toolSurface]: "progressive",
-    [ENVIRONMENT_NAMES.toolsets]: "connector,messages",
-  })
+  const source = { [TOKEN_ALIAS]: TOKEN }
   const before = { ...source }
 
   const report = await prepareSetup({
@@ -4089,14 +4107,7 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-config-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const configFile = join(await realpath(temporary), "discord.json")
-  const source = environment({
-    [ENVIRONMENT_NAMES.token]: undefined,
-    [TOKEN_ALIAS]: TOKEN,
-    [ENVIRONMENT_NAMES.allowGateway]: "true",
-    [ENVIRONMENT_NAMES.gatewayEventBufferSize]: "250",
-    [ENVIRONMENT_NAMES.toolSurface]: "progressive",
-    [ENVIRONMENT_NAMES.toolsets]: "connector,messages",
-  })
+  const source = { [TOKEN_ALIAS]: TOKEN }
   const before = { ...source }
 
   const report = await prepareSetup({
@@ -4320,22 +4331,22 @@ test("setup requires one schema-v2 target and rejects ambient policy or implicit
       configFile,
       environment: {
         [TOKEN_ALIAS]: TOKEN,
-        [ENVIRONMENT_NAMES.allowDeletions]: "true",
+        [FIXTURE_ENVIRONMENT_NAMES.allowDeletions]: "true",
       },
       service: statusProvider(),
     }),
-    /conflicts with policy environment variables/,
+    /conflicts with undeclared environment variables/,
   )
   await assert.rejects(
     () => prepareConfigSetup({
       configFile,
       environment: {
-        [ENVIRONMENT_NAMES.configFile]: join(root, "other.json"),
+        [FIXTURE_ENVIRONMENT_NAMES.configFile]: join(root, "other.json"),
         [TOKEN_ALIAS]: TOKEN,
       },
       service: statusProvider(),
     }),
-    new RegExp(`conflicts with ${ENVIRONMENT_NAMES.configFile}`),
+    new RegExp(`conflicts with ${FIXTURE_ENVIRONMENT_NAMES.configFile}`),
   )
   const profileDirectory = join(root, "profiles")
   await prepareConfigSetup({
@@ -4352,14 +4363,14 @@ test("setup requires one schema-v2 target and rejects ambient policy or implicit
   await assert.rejects(
     () => prepareConfigSetup({
       environment: {
-        [ENVIRONMENT_NAMES.configFile]: configFile,
+        [FIXTURE_ENVIRONMENT_NAMES.configFile]: configFile,
         [TOKEN_ALIAS]: TOKEN,
       },
       profileDirectory,
       profileName: "observer",
       service: statusProvider(),
     }),
-    new RegExp(`conflicts with ${ENVIRONMENT_NAMES.configFile}`),
+    new RegExp(`conflicts with ${FIXTURE_ENVIRONMENT_NAMES.configFile}`),
   )
 })
 
