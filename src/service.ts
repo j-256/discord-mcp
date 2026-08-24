@@ -1519,6 +1519,7 @@ export class ConnectorService {
     })
     this.#guildBlueprintService = new GuildBlueprintService({
       domains: {
+        onboarding: this.#onboardingService,
         profile: this.#guildProfileService,
         scaffold: this.#guildScaffoldService,
         settings: this.#guildSettingsService,
@@ -3993,6 +3994,13 @@ export class ConnectorService {
       request,
       planDigest,
       {
+        executeOnboarding: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeOnboardingChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
         executeProfile: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeGuildProfileChange(
             nestedRequest,

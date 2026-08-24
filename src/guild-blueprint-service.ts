@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto"
 import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
+  ONBOARDING_LIMITS,
   SCHEMA_VERSION,
   WELCOME_SCREEN_LIMITS,
 } from "./constants.js"
@@ -26,6 +27,12 @@ import {
   normalizeGuildSettingsChangeRequest,
 } from "./guild-settings-service.js"
 import { stableString } from "./normalize.js"
+import {
+  type OnboardingChangePlan,
+  type OnboardingChangeRequest,
+  type OnboardingChangeResult,
+  normalizeOnboardingChangeRequest,
+} from "./onboarding-service.js"
 import { operationKeyHash } from "./operation-store.js"
 import {
   createReviewedPlanKey,
@@ -44,6 +51,7 @@ const BLUEPRINT_REQUEST_DIGEST_PREFIX = "hmac-sha256:"
 const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "auditReason",
   "guildId",
+  "onboarding",
   "operationKey",
   "profile",
   "scaffold",
@@ -93,12 +101,36 @@ const BLUEPRINT_WELCOME_SCREEN_CHANNEL_KEYS = Object.freeze([
   "description",
   "emoji",
 ] as const)
+const BLUEPRINT_ONBOARDING_KEYS = Object.freeze([
+  "defaultChannels",
+  "enabled",
+  "mode",
+  "prompts",
+] as const)
+const BLUEPRINT_ONBOARDING_PROMPT_KEYS = Object.freeze([
+  "inOnboarding",
+  "options",
+  "promptId",
+  "required",
+  "singleSelect",
+  "title",
+  "type",
+] as const)
+const BLUEPRINT_ONBOARDING_OPTION_KEYS = Object.freeze([
+  "channels",
+  "description",
+  "emoji",
+  "optionId",
+  "roles",
+  "title",
+] as const)
 
 export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "structure",
   "profile",
   "settings",
   "welcome-screen",
+  "onboarding",
 ] as const)
 
 export type GuildBlueprintPhase = typeof GUILD_BLUEPRINT_PHASES[number]
@@ -117,6 +149,20 @@ export interface GuildBlueprintScaffoldChannelReference {
 export type GuildBlueprintChannelReference =
   | GuildBlueprintExactChannelReference
   | GuildBlueprintScaffoldChannelReference
+
+export interface GuildBlueprintExactRoleReference {
+  kind: "exact"
+  roleId: string
+}
+
+export interface GuildBlueprintScaffoldRoleReference {
+  key: string
+  kind: "scaffold"
+}
+
+export type GuildBlueprintRoleReference =
+  | GuildBlueprintExactRoleReference
+  | GuildBlueprintScaffoldRoleReference
 
 export type GuildBlueprintScaffoldInput = Omit<
   GuildScaffoldRequest,
@@ -154,9 +200,33 @@ export type GuildBlueprintWelcomeScreenInput = Omit<
   channels: readonly GuildBlueprintWelcomeScreenChannelInput[]
 }
 
+export interface GuildBlueprintOnboardingOptionInput extends Omit<
+  OnboardingChangeRequest["prompts"][number]["options"][number],
+  "channelIds" | "roleIds"
+> {
+  channels: readonly GuildBlueprintChannelReference[]
+  roles: readonly GuildBlueprintRoleReference[]
+}
+
+export interface GuildBlueprintOnboardingPromptInput extends Omit<
+  OnboardingChangeRequest["prompts"][number],
+  "options"
+> {
+  options: readonly GuildBlueprintOnboardingOptionInput[]
+}
+
+export type GuildBlueprintOnboardingInput = Omit<
+  OnboardingChangeRequest,
+  "auditReason" | "defaultChannelIds" | "guildId" | "operationKey" | "prompts"
+> & {
+  defaultChannels: readonly GuildBlueprintChannelReference[]
+  prompts: readonly GuildBlueprintOnboardingPromptInput[]
+}
+
 export interface GuildBlueprintRequest {
   auditReason: string
   guildId: string
+  onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
   profile?: GuildBlueprintProfileInput
   scaffold: GuildBlueprintScaffoldInput
@@ -176,6 +246,7 @@ interface NormalizedGuildBlueprintSettingsInput extends Omit<
 export interface NormalizedGuildBlueprintRequest {
   auditReason: string
   guildId: string
+  onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
   operationKeyHash: string
   profile?: GuildBlueprintProfileInput
@@ -195,7 +266,7 @@ const AFK_CHANNEL_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>()
 const SYSTEM_CHANNEL_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "text",
 ])
-const WELCOME_SCREEN_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
+const TEXT_OR_FORUM_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "forum",
   "text",
 ])
@@ -209,6 +280,11 @@ export interface GuildBlueprintPlanStep {
 }
 
 export type GuildBlueprintFrontier =
+  | {
+      kind: "onboarding"
+      plan: OnboardingChangePlan
+      writeRequired: true
+    }
   | {
       kind: "profile"
       plan: GuildProfileChangePlan
@@ -257,6 +333,7 @@ export interface GuildBlueprintPlan {
 }
 
 export type GuildBlueprintNestedResult =
+  | OnboardingChangeResult
   | GuildProfileChangeResult
   | GuildScaffoldResult
   | GuildSettingsChangeResult
@@ -300,6 +377,14 @@ export interface GuildBlueprintVerification {
 }
 
 export interface GuildBlueprintDomainServices {
+  onboarding: {
+    plan(
+      applicationId: string,
+      botId: string,
+      request: OnboardingChangeRequest,
+      options?: RequestOptions,
+    ): Promise<OnboardingChangePlan>
+  }
   profile: {
     plan(
       applicationId: string,
@@ -335,6 +420,11 @@ export interface GuildBlueprintDomainServices {
 }
 
 export interface GuildBlueprintExecutors {
+  executeOnboarding(
+    request: OnboardingChangeRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<OnboardingChangeResult>
   executeProfile(
     request: GuildProfileChangeRequest,
     planDigest: string,
@@ -364,6 +454,10 @@ export interface GuildBlueprintServiceOptions {
 }
 
 type GuildBlueprintFrontierRequest =
+  | {
+      kind: "onboarding"
+      request: OnboardingChangeRequest
+    }
   | {
       kind: "profile"
       request: GuildProfileChangeRequest
@@ -439,7 +533,7 @@ function normalizeChannelReference(
 ): GuildBlueprintChannelReference | null {
   if (value === null) return null
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new RangeError(`${description} must be null or one exact reference`)
+    throw new RangeError(`${description} must be null or one channel reference`)
   }
   const record = value as Record<string, unknown>
   if (record.kind === "exact") {
@@ -465,6 +559,89 @@ function normalizeChannelReference(
     return { key, kind: "scaffold" }
   }
   throw new RangeError(`${description} kind is invalid`)
+}
+
+function normalizeRoleReference(
+  value: unknown,
+  scaffoldRoleKeys: ReadonlySet<string>,
+  description: string,
+): GuildBlueprintRoleReference {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError(`${description} must be one role reference`)
+  }
+  const record = value as Record<string, unknown>
+  if (record.kind === "exact") {
+    exactObject(record, ["kind", "roleId"], `${description} exact reference is invalid`)
+    return {
+      kind: "exact",
+      roleId: positiveSnowflake(record.roleId, description),
+    }
+  }
+  if (record.kind === "scaffold") {
+    exactObject(record, ["key", "kind"], `${description} scaffold reference is invalid`)
+    if (typeof record.key !== "string" || !scaffoldRoleKeys.has(record.key)) {
+      throw new RangeError(`${description} scaffold key does not reference a requested role`)
+    }
+    return { key: record.key, kind: "scaffold" }
+  }
+  throw new RangeError(`${description} kind is invalid`)
+}
+
+function channelReferenceKey(reference: GuildBlueprintChannelReference): string {
+  return reference.kind === "exact"
+    ? `exact:${reference.channelId}`
+    : `scaffold:${reference.key}`
+}
+
+function roleReferenceKey(reference: GuildBlueprintRoleReference): string {
+  return reference.kind === "exact"
+    ? `exact:${reference.roleId}`
+    : `scaffold:${reference.key}`
+}
+
+function canonicalChannelReferences(
+  value: unknown,
+  maximum: number,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+  scaffoldKinds: ReadonlySet<GuildBlueprintBinding["kind"]>,
+  description: string,
+): GuildBlueprintChannelReference[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new RangeError(`${description} are invalid`)
+  }
+  const seen = new Set<string>()
+  return value.map((item) => {
+    const reference = normalizeChannelReference(
+      item,
+      channelKinds,
+      scaffoldKinds,
+      description,
+    )
+    if (reference === null) throw new RangeError(`${description} must not contain null`)
+    const key = channelReferenceKey(reference)
+    if (seen.has(key)) throw new RangeError(`${description} must be unique`)
+    seen.add(key)
+    return reference
+  })
+}
+
+function canonicalRoleReferences(
+  value: unknown,
+  maximum: number,
+  scaffoldRoleKeys: ReadonlySet<string>,
+  description: string,
+): GuildBlueprintRoleReference[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new RangeError(`${description} are invalid`)
+  }
+  const seen = new Set<string>()
+  return value.map((item) => {
+    const reference = normalizeRoleReference(item, scaffoldRoleKeys, description)
+    const key = roleReferenceKey(reference)
+    if (seen.has(key)) throw new RangeError(`${description} must be unique`)
+    seen.add(key)
+    return reference
+  })
 }
 
 function canonicalScaffoldRequest(
@@ -683,7 +860,7 @@ function canonicalWelcomeScreenInput(
     const reference = normalizeChannelReference(
       entry.channel,
       channelKinds,
-      WELCOME_SCREEN_SCAFFOLD_KINDS,
+      TEXT_OR_FORUM_SCAFFOLD_KINDS,
       "Discord guild blueprint Welcome Screen channel",
     )
     if (reference === null) {
@@ -752,6 +929,178 @@ function canonicalWelcomeScreenInput(
   }
 }
 
+function canonicalOnboardingInput(
+  request: GuildBlueprintRequest,
+  operationKey: string,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+  scaffoldRoleKeys: ReadonlySet<string>,
+): GuildBlueprintOnboardingInput | undefined {
+  if (request.onboarding === undefined) return undefined
+  exactObject(
+    request.onboarding,
+    BLUEPRINT_ONBOARDING_KEYS,
+    "Discord guild blueprint onboarding must be an exact object",
+  )
+  const onboarding = request.onboarding as GuildBlueprintOnboardingInput
+  const defaultChannels = canonicalChannelReferences(
+    onboarding.defaultChannels,
+    ONBOARDING_LIMITS.defaultChannels,
+    channelKinds,
+    TEXT_OR_FORUM_SCAFFOLD_KINDS,
+    "Discord guild blueprint onboarding default channel references",
+  )
+  if (
+    !Array.isArray(onboarding.prompts)
+    || onboarding.prompts.length > ONBOARDING_LIMITS.prompts
+  ) {
+    throw new RangeError("Discord guild blueprint onboarding prompts are invalid")
+  }
+  const prompts = onboarding.prompts.map((promptValue) => {
+    exactObject(
+      promptValue,
+      BLUEPRINT_ONBOARDING_PROMPT_KEYS,
+      "Discord guild blueprint onboarding prompt must be an exact object",
+    )
+    const prompt = promptValue as unknown as GuildBlueprintOnboardingPromptInput
+    if (
+      !Array.isArray(prompt.options)
+      || prompt.options.length > ONBOARDING_LIMITS.optionsPerPrompt
+    ) {
+      throw new RangeError("Discord guild blueprint onboarding prompt options are invalid")
+    }
+    return {
+      inOnboarding: prompt.inOnboarding,
+      options: prompt.options.map((optionValue) => {
+        exactObject(
+          optionValue,
+          BLUEPRINT_ONBOARDING_OPTION_KEYS,
+          "Discord guild blueprint onboarding option must be an exact object",
+        )
+        const option = optionValue as unknown as GuildBlueprintOnboardingOptionInput
+        return {
+          channels: canonicalChannelReferences(
+            option.channels,
+            ONBOARDING_LIMITS.optionReferences,
+            channelKinds,
+            TEXT_OR_FORUM_SCAFFOLD_KINDS,
+            "Discord guild blueprint onboarding option channel references",
+          ),
+          description: option.description,
+          emoji: option.emoji ?? null,
+          ...(option.optionId === undefined
+            ? {}
+            : { optionId: option.optionId }),
+          roles: canonicalRoleReferences(
+            option.roles,
+            ONBOARDING_LIMITS.optionReferences,
+            scaffoldRoleKeys,
+            "Discord guild blueprint onboarding option role references",
+          ),
+          title: option.title,
+        }
+      }),
+      ...(prompt.promptId === undefined
+        ? {}
+        : { promptId: prompt.promptId }),
+      required: prompt.required,
+      singleSelect: prompt.singleSelect,
+      title: prompt.title,
+      type: prompt.type,
+    }
+  })
+  const usedIds = new Set<string>([request.guildId])
+  for (const reference of [
+    ...defaultChannels,
+    ...prompts.flatMap((prompt) => prompt.options.flatMap((option) => option.channels)),
+  ]) {
+    if (reference.kind === "exact") usedIds.add(reference.channelId)
+  }
+  for (const reference of prompts.flatMap((prompt) => (
+    prompt.options.flatMap((option) => option.roles)
+  ))) {
+    if (reference.kind === "exact") usedIds.add(reference.roleId)
+  }
+  const temporaryIds = new Map<string, string>()
+  let temporaryId = DISCORD_SNOWFLAKE_MAX
+  function nextTemporaryId(key: string): string {
+    const existing = temporaryIds.get(key)
+    if (existing !== undefined) return existing
+    while (usedIds.has(temporaryId.toString())) temporaryId -= 1n
+    const result = temporaryId.toString()
+    usedIds.add(result)
+    temporaryIds.set(key, result)
+    temporaryId -= 1n
+    return result
+  }
+  function temporaryChannelId(reference: GuildBlueprintChannelReference): string {
+    return reference.kind === "exact"
+      ? reference.channelId
+      : nextTemporaryId(`channel:${reference.key}`)
+  }
+  function temporaryRoleId(reference: GuildBlueprintRoleReference): string {
+    return reference.kind === "exact"
+      ? reference.roleId
+      : nextTemporaryId(`role:${reference.key}`)
+  }
+  const normalized = normalizeOnboardingChangeRequest({
+    auditReason: request.auditReason,
+    defaultChannelIds: defaultChannels.map(temporaryChannelId),
+    enabled: onboarding.enabled,
+    guildId: request.guildId,
+    mode: onboarding.mode,
+    operationKey,
+    prompts: prompts.map((prompt) => ({
+      inOnboarding: prompt.inOnboarding,
+      options: prompt.options.map((option) => ({
+        channelIds: option.channels.map(temporaryChannelId),
+        description: option.description,
+        emoji: option.emoji ?? null,
+        ...(option.optionId === undefined ? {} : { optionId: option.optionId }),
+        roleIds: option.roles.map(temporaryRoleId),
+        title: option.title,
+      })),
+      ...(prompt.promptId === undefined ? {} : { promptId: prompt.promptId }),
+      required: prompt.required,
+      singleSelect: prompt.singleSelect,
+      title: prompt.title,
+      type: prompt.type,
+    })),
+  })
+  return {
+    defaultChannels,
+    enabled: normalized.enabled,
+    mode: normalized.mode,
+    prompts: normalized.prompts.map((prompt, promptIndex) => {
+      const sourcePrompt = prompts[promptIndex]
+      if (sourcePrompt === undefined) {
+        throw new RangeError("Discord guild blueprint onboarding prompt is missing")
+      }
+      return {
+        inOnboarding: prompt.inOnboarding,
+        options: prompt.options.map((option, optionIndex) => {
+          const sourceOption = sourcePrompt.options[optionIndex]
+          if (sourceOption === undefined) {
+            throw new RangeError("Discord guild blueprint onboarding option is missing")
+          }
+          return {
+            channels: sourceOption.channels,
+            description: option.description,
+            emoji: option.emoji,
+            ...(option.optionId === null ? {} : { optionId: option.optionId }),
+            roles: sourceOption.roles,
+            title: option.title,
+          }
+        }),
+        ...(prompt.promptId === null ? {} : { promptId: prompt.promptId }),
+        required: prompt.required,
+        singleSelect: prompt.singleSelect,
+        title: prompt.title,
+        type: prompt.type,
+      }
+    }),
+  }
+}
+
 export function normalizeGuildBlueprintRequest(
   request: GuildBlueprintRequest,
 ): NormalizedGuildBlueprintRequest {
@@ -767,12 +1116,13 @@ export function normalizeGuildBlueprintRequest(
   ) throw new RangeError("Discord guild blueprint request is invalid")
   positiveSnowflake(request.guildId, "Discord guild blueprint guild ID")
   if (
-    request.profile === undefined
+    request.onboarding === undefined
+    && request.profile === undefined
     && request.settings === undefined
     && request.welcomeScreen === undefined
   ) {
     throw new RangeError(
-      "Discord guild blueprint requires a profile, settings, or Welcome Screen phase after the scaffold",
+      "Discord guild blueprint requires a profile, settings, Welcome Screen, or onboarding phase after the scaffold",
     )
   }
   const operationKeyHashValue = operationKeyHash(request.operationKey)
@@ -780,6 +1130,13 @@ export function normalizeGuildBlueprintRequest(
   const scaffold = canonicalScaffoldRequest(request, structureOperationKey)
   const channelKinds = new Map(
     scaffold.channels.map((channel) => [channel.key, channel.kind] as const),
+  )
+  const scaffoldRoleKeys = new Set(scaffold.roles.map((role) => role.key))
+  const onboarding = canonicalOnboardingInput(
+    request,
+    derivedOperationKey(request.operationKey, "onboarding"),
+    channelKinds,
+    scaffoldRoleKeys,
   )
   const profile = canonicalProfileRequest(
     request,
@@ -798,6 +1155,7 @@ export function normalizeGuildBlueprintRequest(
   return {
     auditReason: scaffold.auditReason,
     guildId: scaffold.guildId,
+    ...(onboarding === undefined ? {} : { onboarding }),
     operationKey: request.operationKey,
     operationKeyHash: operationKeyHashValue,
     ...(profile === undefined
@@ -822,6 +1180,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
   return {
     auditReason: request.auditReason,
     guildId: request.guildId,
+    ...(request.onboarding === undefined ? {} : { onboarding: request.onboarding }),
     operationKeyHash: request.operationKeyHash,
     ...(request.profile === undefined ? {} : { profile: request.profile }),
     scaffold: request.scaffold,
@@ -834,7 +1193,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v2\0")
+    .update("discord-mcp-guild-blueprint-request.v3\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -876,6 +1235,19 @@ function resolveChannelReference(
   if (reference.kind === "exact") return reference.channelId
   const binding = bindings.get(reference.key)
   if (binding === undefined || binding.kind === "role") {
+    throw new RangeError(`${description} scaffold reference is unresolved`)
+  }
+  return binding.resourceId
+}
+
+function resolveRoleReference(
+  reference: GuildBlueprintRoleReference,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+  description: string,
+): string {
+  if (reference.kind === "exact") return reference.roleId
+  const binding = bindings.get(reference.key)
+  if (binding === undefined || binding.kind !== "role") {
     throw new RangeError(`${description} scaffold reference is unresolved`)
   }
   return binding.resourceId
@@ -963,6 +1335,90 @@ function welcomeScreenRequest(
   }
   normalizeWelcomeScreenChangeRequest(resolved)
   return resolved
+}
+
+function onboardingRequest(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+): OnboardingChangeRequest | undefined {
+  if (request.onboarding === undefined) return undefined
+  const resolved: OnboardingChangeRequest = {
+    auditReason: request.auditReason,
+    defaultChannelIds: request.onboarding.defaultChannels.map((reference) => {
+      const channelId = resolveChannelReference(
+        reference,
+        bindings,
+        "Discord guild blueprint onboarding default channel",
+      )
+      if (typeof channelId !== "string") {
+        throw new RangeError(
+          "Discord guild blueprint onboarding default channel reference is unresolved",
+        )
+      }
+      return channelId
+    }),
+    enabled: request.onboarding.enabled,
+    guildId: request.guildId,
+    mode: request.onboarding.mode,
+    operationKey: derivedOperationKey(request.operationKey, "onboarding"),
+    prompts: request.onboarding.prompts.map((prompt) => ({
+      inOnboarding: prompt.inOnboarding,
+      options: prompt.options.map((option) => ({
+        channelIds: option.channels.map((reference) => {
+          const channelId = resolveChannelReference(
+            reference,
+            bindings,
+            "Discord guild blueprint onboarding option channel",
+          )
+          if (typeof channelId !== "string") {
+            throw new RangeError(
+              "Discord guild blueprint onboarding option channel reference is unresolved",
+            )
+          }
+          return channelId
+        }),
+        description: option.description,
+        emoji: option.emoji ?? null,
+        ...(option.optionId === undefined ? {} : { optionId: option.optionId }),
+        roleIds: option.roles.map((reference) => resolveRoleReference(
+          reference,
+          bindings,
+          "Discord guild blueprint onboarding option role",
+        )),
+        title: option.title,
+      })),
+      ...(prompt.promptId === undefined ? {} : { promptId: prompt.promptId }),
+      required: prompt.required,
+      singleSelect: prompt.singleSelect,
+      title: prompt.title,
+      type: prompt.type,
+    })),
+  }
+  const normalized = normalizeOnboardingChangeRequest(resolved)
+  return {
+    auditReason: normalized.auditReason,
+    defaultChannelIds: normalized.defaultChannelIds,
+    enabled: normalized.enabled,
+    guildId: normalized.guildId,
+    mode: normalized.mode,
+    operationKey: normalized.operationKey,
+    prompts: normalized.prompts.map((prompt) => ({
+      inOnboarding: prompt.inOnboarding,
+      options: prompt.options.map((option) => ({
+        channelIds: option.channelIds,
+        description: option.description,
+        emoji: option.emoji,
+        ...(option.optionId === null ? {} : { optionId: option.optionId }),
+        roleIds: option.roleIds,
+        title: option.title,
+      })),
+      ...(prompt.promptId === null ? {} : { promptId: prompt.promptId }),
+      required: prompt.required,
+      singleSelect: prompt.singleSelect,
+      title: prompt.title,
+      type: prompt.type,
+    })),
+  }
 }
 
 function phaseOperationKeyHash(
@@ -1145,6 +1601,9 @@ export class GuildBlueprintService {
       if (request.welcomeScreen !== undefined) {
         steps.push(waitingStep(request, "welcome-screen"))
       }
+      if (request.onboarding !== undefined) {
+        steps.push(waitingStep(request, "onboarding"))
+      }
     } else {
       bindings = exactScaffoldBindings(request, structurePlan)
       const requestedProfile = profileRequest(request)
@@ -1171,6 +1630,9 @@ export class GuildBlueprintService {
           if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
           if (request.welcomeScreen !== undefined) {
             steps.push(waitingStep(request, "welcome-screen"))
+          }
+          if (request.onboarding !== undefined) {
+            steps.push(waitingStep(request, "onboarding"))
           }
         }
       }
@@ -1199,6 +1661,9 @@ export class GuildBlueprintService {
             frontierRequest = { kind: "settings", request: requestedSettings }
             if (request.welcomeScreen !== undefined) {
               steps.push(waitingStep(request, "welcome-screen"))
+            }
+            if (request.onboarding !== undefined) {
+              steps.push(waitingStep(request, "onboarding"))
             }
           }
         }
@@ -1244,6 +1709,45 @@ export class GuildBlueprintService {
               kind: "welcome-screen",
               request: requestedWelcomeScreen,
             }
+            if (request.onboarding !== undefined) {
+              steps.push(waitingStep(request, "onboarding"))
+            }
+          }
+        }
+      }
+
+      if (frontier === null) {
+        const requestedOnboarding = onboardingRequest(
+          request,
+          bindingMap(bindings),
+        )
+        if (requestedOnboarding !== undefined) {
+          const onboardingPlan = await this.#domains.onboarding.plan(
+            applicationId,
+            botId,
+            requestedOnboarding,
+            options,
+          )
+          assertNestedIdentity(applicationId, botId, request.guildId, onboardingPlan)
+          assertNestedPlanBinding(requestedOnboarding.operationKey, onboardingPlan)
+          const onboardingSatisfied = !onboardingPlan.writeRequired
+          steps.push({
+            kind: "onboarding",
+            nestedPlanDigest: onboardingPlan.digest,
+            operationKeyHash: onboardingPlan.operationKeyHash,
+            state: onboardingSatisfied ? "satisfied" : "ready",
+            writeRequired: !onboardingSatisfied,
+          })
+          if (!onboardingSatisfied) {
+            frontier = {
+              kind: "onboarding",
+              plan: onboardingPlan,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              kind: "onboarding",
+              request: requestedOnboarding,
+            }
           }
         }
       }
@@ -1263,7 +1767,7 @@ export class GuildBlueprintService {
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v2",
+      version: "guild-blueprint-plan.v3",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -1349,8 +1853,14 @@ export class GuildBlueprintService {
         built.plan.frontier.plan.digest,
         options,
       )
-    } else {
+    } else if (built.frontierRequest.kind === "welcome-screen") {
       nestedResult = await executors.executeWelcomeScreen(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else {
+      nestedResult = await executors.executeOnboarding(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,

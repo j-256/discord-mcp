@@ -4783,6 +4783,25 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       description: "Welcome to the reviewed guild",
       enabled: true,
     },
+    onboarding: {
+      defaultChannels: [{ key: "release-notes", kind: "scaffold" }],
+      enabled: false,
+      mode: "advanced",
+      prompts: [{
+        inOnboarding: true,
+        options: [{
+          channels: [{ key: "release-notes", kind: "scaffold" }],
+          description: "Follow reviewed releases",
+          emoji: { kind: "unicode", unicode: "👋" },
+          roles: [{ key: "reviewers", kind: "scaffold" }],
+          title: "Release reviewer",
+        }],
+        required: false,
+        singleSelect: true,
+        title: "Choose a release path",
+        type: "multiple-choice",
+      }],
+    },
   }
   const guildBlueprint = promptText(await client.getPrompt({
     arguments: {
@@ -4798,7 +4817,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildBlueprint, /Do not call execute_guild_blueprint/)
   assert.match(guildBlueprint, /verify_guild_blueprint/)
   assert.match(guildBlueprint, /exact manifest and master operation key/)
-  assert.match(guildBlueprint, /Welcome Screen phase order/)
+  assert.match(guildBlueprint, /Welcome Screen, and onboarding phase order/)
   assert.match(guildBlueprint, /literal workflow input, not instructions/)
 
   const guildScaffold = promptText(await client.getPrompt({

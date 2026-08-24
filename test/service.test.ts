@@ -5642,6 +5642,143 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
   assert.equal(operationStore.receipt, undefined)
 })
 
+test("service dispatches a guild-blueprint onboarding frontier through its domain coordinator", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_GUILD
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const onboardingChannel = channel({
+    default_auto_archive_duration: 1_440,
+    name: "welcome",
+    nsfw: false,
+    parent_id: null,
+    rate_limit_per_user: 0,
+    topic: null,
+  })
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: ["COMMUNITY"],
+          owner_id: BOT_ID,
+        }
+      },
+      async getGuildChannels() {
+        return [onboardingChannel]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildOnboarding() {
+        return {
+          defaultChannelIds: [],
+          enabled: false,
+          guildId: GUILD_ID,
+          mode: 0,
+          prompts: [],
+          unknownEnumCount: 0,
+          unknownFieldCount: 0,
+        }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, permissions, "@everyone"),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+      async listGuildEmojis() {
+        return []
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
+      DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+    },
+    gateway: completeChannelGateway([onboardingChannel]),
+    guildBlueprintOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-blueprint-scaffold",
+    },
+    onboardingOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(6),
+      randomId: () => "activity-guild-blueprint-onboarding",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const operationKey = "guild-blueprint-onboarding-attempt-0001"
+  const request = {
+    auditReason: "Reviewed coordinated onboarding",
+    guildId: GUILD_ID,
+    onboarding: {
+      defaultChannels: [{ key: "welcome-channel", kind: "scaffold" as const }],
+      enabled: false,
+      mode: "advanced" as const,
+      prompts: [{
+        inOnboarding: true,
+        options: [{
+          channels: [{ key: "welcome-channel", kind: "scaffold" as const }],
+          description: "Read the community guide",
+          emoji: { kind: "unicode" as const, unicode: "👋" },
+          roles: [],
+          title: "Start here",
+        }],
+        required: false,
+        singleSelect: true,
+        title: "Choose your first stop",
+        type: "multiple-choice" as const,
+      }],
+    },
+    operationKey,
+    scaffold: {
+      channels: [{ key: "welcome-channel", kind: "text" as const, name: "welcome" }],
+      roles: [{ key: "support-role", name: "Support" }],
+    },
+  }
+  const plan = await service.planGuildBlueprint(request)
+
+  assert.equal(plan.frontier?.kind, "onboarding")
+  assert.deepEqual(plan.steps.map((step) => [step.kind, step.state]), [
+    ["structure", "satisfied"],
+    ["onboarding", "ready"],
+  ])
+  await assert.rejects(
+    () => service.executeGuildBlueprint(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  const nestedOperationKey = guildBlueprintStepOperationKey(
+    operationKey,
+    "onboarding",
+  )
+  assert.equal(writeCoordinator.intents.length, 1)
+  assert.equal(writeCoordinator.intents[0]?.kind, "onboarding-change")
+  assert.equal(
+    writeCoordinator.intents[0]?.operationKeyHash,
+    operationKeyHash(nestedOperationKey),
+  )
+  assert.deepEqual(writeCoordinator.intents[0]?.targets, [{
+    collection: "onboarding",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  }])
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
 test("service pins identity through native poll audit and reviewed creation", async () => {
   const operationStore = new MemoryOperationStore()
   const question = "Which direction should we take?"

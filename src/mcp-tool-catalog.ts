@@ -234,7 +234,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "thread-governance-change",
   },
   execute_guild_blueprint: {
-    keywords: ["blueprint", "build", "configure", "execute", "guild", "profile", "scaffold", "screen", "settings", "welcome"],
+    keywords: ["blueprint", "build", "configure", "execute", "guild", "onboarding", "profile", "scaffold", "screen", "settings", "welcome"],
     toolset: "guild-blueprints",
     workflow: "guild-blueprint",
   },
@@ -742,12 +742,12 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "thread-governance-change",
   },
   plan_guild_blueprint: {
-    keywords: ["blueprint", "build", "configure", "guild", "plan", "profile", "review", "scaffold", "screen", "settings", "welcome"],
+    keywords: ["blueprint", "build", "configure", "guild", "onboarding", "plan", "profile", "review", "scaffold", "screen", "settings", "welcome"],
     toolset: "guild-blueprints",
     workflow: "guild-blueprint",
   },
   verify_guild_blueprint: {
-    keywords: ["blueprint", "completion", "evidence", "guild", "profile", "scaffold", "screen", "settings", "verify", "welcome"],
+    keywords: ["blueprint", "completion", "evidence", "guild", "onboarding", "profile", "scaffold", "screen", "settings", "verify", "welcome"],
     toolset: "guild-blueprints",
     workflow: "guild-blueprint",
   },

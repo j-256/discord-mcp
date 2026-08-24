@@ -28,6 +28,11 @@ import type {
 } from "../src/guild-settings-service.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import type {
+  OnboardingChangePlan,
+  OnboardingChangeRequest,
+  OnboardingChangeResult,
+} from "../src/onboarding-service.js"
+import type {
   WelcomeScreenChangePlan,
   WelcomeScreenChangeRequest,
   WelcomeScreenChangeResult,
@@ -40,10 +45,15 @@ const OWNER_ID = "400000000000000001"
 const ROLE_ID = "500000000000000001"
 const CATEGORY_ID = "600000000000000001"
 const CHANNEL_ID = "700000000000000001"
+const ONBOARDING_PROMPT_ID = "800000000000000001"
+const ONBOARDING_OPTION_ID = "900000000000000001"
 const OPERATION_KEY = "guild-blueprint-operation-0001"
 const AUDIT_REASON = "Private blueprint audit reason"
 const WELCOME_DESCRIPTION = "Private Welcome Screen description"
 const WELCOME_CHANNEL_DESCRIPTION = "Private welcome channel description"
+const ONBOARDING_PROMPT_TITLE = "Private onboarding prompt title"
+const ONBOARDING_OPTION_TITLE = "Private onboarding option title"
+const ONBOARDING_OPTION_DESCRIPTION = "Private onboarding option description"
 const NOW = "2026-08-24T12:00:00.000Z"
 const PLAN_KEY = new Uint8Array(32).fill(17)
 
@@ -104,6 +114,28 @@ function welcomeScreen(): NonNullable<GuildBlueprintRequest["welcomeScreen"]> {
     }],
     description: WELCOME_DESCRIPTION,
     enabled: true,
+  }
+}
+
+function onboarding(): NonNullable<GuildBlueprintRequest["onboarding"]> {
+  return {
+    defaultChannels: [{ key: "private-system-channel", kind: "scaffold" }],
+    enabled: false,
+    mode: "advanced",
+    prompts: [{
+      inOnboarding: true,
+      options: [{
+        channels: [{ key: "private-system-channel", kind: "scaffold" }],
+        description: ONBOARDING_OPTION_DESCRIPTION,
+        emoji: { kind: "unicode", unicode: "\u{1F3AE}" },
+        roles: [{ key: "private-role", kind: "scaffold" }],
+        title: ONBOARDING_OPTION_TITLE,
+      }],
+      required: false,
+      singleSelect: true,
+      title: ONBOARDING_PROMPT_TITLE,
+      type: "multiple-choice",
+    }],
   }
 }
 
@@ -229,7 +261,23 @@ function welcomeScreenPlan(
   } as WelcomeScreenChangePlan
 }
 
+function onboardingPlan(
+  value: OnboardingChangeRequest,
+  writeRequired: boolean,
+): OnboardingChangePlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    digest: `hmac-sha256:${(writeRequired ? "d" : "e").repeat(64)}`,
+    guild: { id: GUILD_ID, name: "Private Guild" },
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as OnboardingChangePlan
+}
+
 interface FixtureOptions {
+  onboardingWrite?: boolean
   profileWrite?: boolean
   scaffoldTransform?: (plan: GuildScaffoldPlan) => GuildScaffoldPlan
   scaffoldStatus?: GuildScaffoldPlan["status"]
@@ -239,9 +287,17 @@ interface FixtureOptions {
 
 function fixture(options: FixtureOptions = {}) {
   const calls: string[] = []
+  let resolvedOnboarding: OnboardingChangeRequest | null = null
   let resolvedSettings: GuildSettingsChangeRequest | null = null
   let resolvedWelcomeScreen: WelcomeScreenChangeRequest | null = null
   const domains: GuildBlueprintDomainServices = {
+    onboarding: {
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-onboarding")
+        resolvedOnboarding = value
+        return onboardingPlan(value, options.onboardingWrite ?? false)
+      },
+    },
     profile: {
       async plan(_applicationId, _botId, value) {
         calls.push("plan-profile")
@@ -277,6 +333,9 @@ function fixture(options: FixtureOptions = {}) {
   })
   return {
     calls,
+    get resolvedOnboarding() {
+      return resolvedOnboarding
+    },
     get resolvedSettings() {
       return resolvedSettings
     },
@@ -289,6 +348,18 @@ function fixture(options: FixtureOptions = {}) {
 
 function executors(calls: string[]): GuildBlueprintExecutors {
   return {
+    async executeOnboarding(value, planDigest) {
+      calls.push(`execute-onboarding:${planDigest}`)
+      return {
+        activityId: "activity-onboarding",
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        verification: "match",
+      } as OnboardingChangeResult
+    },
     async executeProfile(value, planDigest) {
       calls.push(`execute-profile:${planDigest}`)
       return {
@@ -374,7 +445,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   delete noPostPhase.settings
   assert.throws(
     () => normalizeGuildBlueprintRequest(noPostPhase),
-    /requires a profile, settings, or Welcome Screen phase/u,
+    /requires a profile, settings, Welcome Screen, or onboarding phase/u,
   )
   const unknownReference = request({
     settings: {
@@ -493,12 +564,124 @@ test("guild blueprint accepts Welcome Screen as its only post-scaffold phase", (
   )
 })
 
+test("guild blueprint accepts onboarding as its only post-scaffold phase", () => {
+  const manifest = request({ onboarding: onboarding() })
+  delete manifest.profile
+  delete manifest.settings
+  const normalized = normalizeGuildBlueprintRequest(manifest)
+  assert.equal(normalized.profile, undefined)
+  assert.equal(normalized.settings, undefined)
+  assert.deepEqual(normalized.onboarding?.defaultChannels, [
+    { key: "private-system-channel", kind: "scaffold" },
+  ])
+  assert.deepEqual(normalized.onboarding?.prompts[0]?.options[0]?.roles, [
+    { key: "private-role", kind: "scaffold" },
+  ])
+  assert.notEqual(
+    guildBlueprintStepOperationKey(OPERATION_KEY, "onboarding"),
+    guildBlueprintStepOperationKey(OPERATION_KEY, "welcome-screen"),
+  )
+  const changedManifest = request({
+    onboarding: {
+      ...onboarding(),
+      prompts: [{
+        ...onboarding().prompts[0]!,
+        title: "Different private onboarding prompt title",
+      }],
+    },
+  })
+  delete changedManifest.profile
+  delete changedManifest.settings
+  assert.notEqual(
+    guildBlueprintRequestDigest(manifest),
+    guildBlueprintRequestDigest(changedManifest),
+  )
+
+  const retained = onboarding()
+  retained.prompts = [{
+    ...retained.prompts[0]!,
+    options: [{
+      ...retained.prompts[0]!.options[0]!,
+      optionId: ONBOARDING_OPTION_ID,
+    }],
+    promptId: ONBOARDING_PROMPT_ID,
+  }]
+  const retainedManifest = request({ onboarding: retained })
+  delete retainedManifest.profile
+  delete retainedManifest.settings
+  const normalizedRetained = normalizeGuildBlueprintRequest(retainedManifest)
+  assert.equal(
+    normalizedRetained.onboarding?.prompts[0]?.promptId,
+    ONBOARDING_PROMPT_ID,
+  )
+  assert.equal(
+    normalizedRetained.onboarding?.prompts[0]?.options[0]?.optionId,
+    ONBOARDING_OPTION_ID,
+  )
+
+  const desired = onboarding()
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      onboarding: {
+        ...desired,
+        defaultChannels: [{ key: "private-category", kind: "scaffold" }],
+      },
+    })),
+    /onboarding default channel references scaffold key is not a compatible requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      onboarding: {
+        ...desired,
+        prompts: [{
+          ...desired.prompts[0]!,
+          options: [{
+            ...desired.prompts[0]!.options[0]!,
+            roles: [{ key: "missing-role", kind: "scaffold" }],
+          }],
+        }],
+      },
+    })),
+    /does not reference a requested role/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      onboarding: {
+        ...desired,
+        defaultChannels: [
+          ...desired.defaultChannels,
+          ...desired.defaultChannels,
+        ],
+      },
+    })),
+    /onboarding default channel references must be unique/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      onboarding: {
+        ...desired,
+        prompts: [{
+          ...desired.prompts[0]!,
+          options: [{
+            ...desired.prompts[0]!.options[0]!,
+            roles: [
+              ...desired.prompts[0]!.options[0]!.roles,
+              ...desired.prompts[0]!.options[0]!.roles,
+            ],
+          }],
+        }],
+      },
+    })),
+    /onboarding option role references must be unique/u,
+  )
+})
+
 test("guild blueprint exposes only the structure frontier before later planning", async () => {
   const state = fixture({ scaffoldStatus: "planned" })
   const plan = await state.service.plan(
     APPLICATION_ID,
     BOT_ID,
-    request({ welcomeScreen: welcomeScreen() }),
+    request({ onboarding: onboarding(), welcomeScreen: welcomeScreen() }),
   )
   assert.equal(plan.status, "planned")
   assert.equal(plan.frontier?.kind, "structure")
@@ -510,6 +693,7 @@ test("guild blueprint exposes only the structure frontier before later planning"
       ["profile", "waiting"],
       ["settings", "waiting"],
       ["welcome-screen", "waiting"],
+      ["onboarding", "waiting"],
     ],
   )
   assert.deepEqual(plan.bindings, [])
@@ -520,7 +704,7 @@ test("guild blueprint stops at profile before planning settings", async () => {
   const plan = await state.service.plan(
     APPLICATION_ID,
     BOT_ID,
-    request({ welcomeScreen: welcomeScreen() }),
+    request({ onboarding: onboarding(), welcomeScreen: welcomeScreen() }),
   )
   assert.equal(plan.frontier?.kind, "profile")
   assert.deepEqual(state.calls, ["plan-structure", "plan-profile"])
@@ -532,6 +716,7 @@ test("guild blueprint stops at profile before planning settings", async () => {
       ["profile", "ready"],
       ["settings", "waiting"],
       ["welcome-screen", "waiting"],
+      ["onboarding", "waiting"],
     ],
   )
 })
@@ -541,7 +726,7 @@ test("guild blueprint resolves settings only from exact scaffold evidence", asyn
   const plan = await state.service.plan(
     APPLICATION_ID,
     BOT_ID,
-    request({ welcomeScreen: welcomeScreen() }),
+    request({ onboarding: onboarding(), welcomeScreen: welcomeScreen() }),
   )
   assert.equal(plan.frontier?.kind, "settings")
   assert.deepEqual(state.calls, ["plan-structure", "plan-profile", "plan-settings"])
@@ -557,6 +742,7 @@ test("guild blueprint resolves settings only from exact scaffold evidence", asyn
       ["profile", "satisfied"],
       ["settings", "ready"],
       ["welcome-screen", "waiting"],
+      ["onboarding", "waiting"],
     ],
   )
   assert.equal(state.resolvedWelcomeScreen, null)
@@ -564,7 +750,10 @@ test("guild blueprint resolves settings only from exact scaffold evidence", asyn
 
 test("guild blueprint resolves and plans Welcome Screen only after earlier phases", async () => {
   const state = fixture({ welcomeScreenWrite: true })
-  const manifest = request({ welcomeScreen: welcomeScreen() })
+  const manifest = request({
+    onboarding: onboarding(),
+    welcomeScreen: welcomeScreen(),
+  })
   const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
   assert.equal(plan.frontier?.kind, "welcome-screen")
   assert.deepEqual(state.calls, [
@@ -585,8 +774,10 @@ test("guild blueprint resolves and plans Welcome Screen only after earlier phase
       ["profile", "satisfied"],
       ["settings", "satisfied"],
       ["welcome-screen", "ready"],
+      ["onboarding", "waiting"],
     ],
   )
+  assert.equal(state.resolvedOnboarding, null)
 })
 
 test("guild blueprint rejects Welcome Screen references that resolve to one channel", async () => {
@@ -607,6 +798,81 @@ test("guild blueprint rejects Welcome Screen references that resolve to one chan
       },
     })),
     /Welcome Screen channel IDs must be unique/u,
+  )
+})
+
+test("guild blueprint resolves and plans onboarding only after earlier phases", async () => {
+  const state = fixture({ onboardingWrite: true })
+  const manifest = request({
+    onboarding: onboarding(),
+    welcomeScreen: welcomeScreen(),
+  })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(plan.frontier?.kind, "onboarding")
+  assert.deepEqual(state.calls, [
+    "plan-structure",
+    "plan-profile",
+    "plan-settings",
+    "plan-welcome-screen",
+    "plan-onboarding",
+  ])
+  assert.deepEqual(state.resolvedOnboarding?.defaultChannelIds, [CHANNEL_ID])
+  assert.deepEqual(
+    state.resolvedOnboarding?.prompts[0]?.options[0]?.channelIds,
+    [CHANNEL_ID],
+  )
+  assert.deepEqual(
+    state.resolvedOnboarding?.prompts[0]?.options[0]?.roleIds,
+    [ROLE_ID],
+  )
+  assert.equal(
+    state.resolvedOnboarding?.operationKey,
+    guildBlueprintStepOperationKey(OPERATION_KEY, "onboarding"),
+  )
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "satisfied"],
+      ["profile", "satisfied"],
+      ["settings", "satisfied"],
+      ["welcome-screen", "satisfied"],
+      ["onboarding", "ready"],
+    ],
+  )
+})
+
+test("guild blueprint rejects onboarding references that resolve to one resource", async () => {
+  const state = fixture()
+  const desired = onboarding()
+  await assert.rejects(
+    () => state.service.plan(APPLICATION_ID, BOT_ID, request({
+      onboarding: {
+        ...desired,
+        defaultChannels: [
+          ...desired.defaultChannels,
+          { channelId: CHANNEL_ID, kind: "exact" },
+        ],
+      },
+    })),
+    /default channel IDs must be unique/u,
+  )
+  await assert.rejects(
+    () => state.service.plan(APPLICATION_ID, BOT_ID, request({
+      onboarding: {
+        ...desired,
+        prompts: [{
+          ...desired.prompts[0]!,
+          options: [{
+            ...desired.prompts[0]!.options[0]!,
+            roles: [
+              ...desired.prompts[0]!.options[0]!.roles,
+              { kind: "exact", roleId: ROLE_ID },
+            ],
+          }],
+        }],
+      },
+    })),
+    /role IDs must be unique/u,
   )
 })
 
@@ -653,7 +919,7 @@ test("guild blueprint verification is live and content-free", async () => {
   const result = await state.service.verify(
     APPLICATION_ID,
     BOT_ID,
-    request({ welcomeScreen: welcomeScreen() }),
+    request({ onboarding: onboarding(), welcomeScreen: welcomeScreen() }),
   )
   assert.equal(result.status, "verified")
   assert.equal(result.resources.length, 3)
@@ -670,6 +936,10 @@ test("guild blueprint verification is live and content-free", async () => {
     WELCOME_DESCRIPTION,
     WELCOME_CHANNEL_DESCRIPTION,
     "\u{1F44B}",
+    ONBOARDING_PROMPT_TITLE,
+    ONBOARDING_OPTION_TITLE,
+    ONBOARDING_OPTION_DESCRIPTION,
+    "\u{1F3AE}",
   ]) assert.equal(serialized.includes(privateValue), false)
 })
 
@@ -711,6 +981,23 @@ test("guild blueprint execution dispatches one Welcome Screen frontier", async (
   assert.equal(result.executedPhase, "welcome-screen")
   assert.equal(state.calls.filter((call) => call.startsWith("execute-")).length, 1)
   assert.match(state.calls.at(-1) as string, /^execute-welcome-screen:/u)
+})
+
+test("guild blueprint execution dispatches one onboarding frontier", async () => {
+  const state = fixture({ onboardingWrite: true })
+  const manifest = request({ onboarding: onboarding() })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  state.calls.length = 0
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(state.calls),
+  )
+  assert.equal(result.executedPhase, "onboarding")
+  assert.equal(state.calls.filter((call) => call.startsWith("execute-")).length, 1)
+  assert.match(state.calls.at(-1) as string, /^execute-onboarding:/u)
 })
 
 test("guild blueprint execution rejects a changed aggregate plan", async () => {
