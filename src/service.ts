@@ -1524,6 +1524,7 @@ export class ConnectorService {
     })
     this.#guildBlueprintService = new GuildBlueprintService({
       domains: {
+        component: this.#componentMessageService,
         onboarding: this.#onboardingService,
         profile: this.#guildProfileService,
         scaffold: this.#guildScaffoldService,
@@ -3284,6 +3285,7 @@ export class ConnectorService {
     return this.#guildBlueprintService.plan(
       identity.application.id,
       identity.bot.id,
+      applicationMessageContentIntent(identity.application),
       request,
       options,
     )
@@ -3297,6 +3299,7 @@ export class ConnectorService {
     return this.#guildBlueprintService.verify(
       identity.application.id,
       identity.bot.id,
+      applicationMessageContentIntent(identity.application),
       request,
       options,
     )
@@ -4010,9 +4013,17 @@ export class ConnectorService {
     return this.#guildBlueprintService.execute(
       identity.application.id,
       identity.bot.id,
+      applicationMessageContentIntent(identity.application),
       request,
       planDigest,
       {
+        executeComponent: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeComponentMessage(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
         executeOnboarding: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeOnboardingChange(
             nestedRequest,

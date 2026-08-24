@@ -2,8 +2,16 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { GuildBlueprintPlanChangedError } from "../src/errors.js"
+import type {
+  ComponentMessagePlan,
+  ComponentMessageRequest,
+  ComponentMessageResult,
+  ComponentMessageVerificationResult,
+} from "../src/component-message-service.js"
+import { CONNECTOR_LIMITS } from "../src/constants.js"
 import {
   GuildBlueprintService,
+  guildBlueprintPublicationOperationKey,
   guildBlueprintRequestDigest,
   guildBlueprintStepOperationKey,
   normalizeGuildBlueprintRequest,
@@ -45,6 +53,9 @@ const OWNER_ID = "400000000000000001"
 const ROLE_ID = "500000000000000001"
 const CATEGORY_ID = "600000000000000001"
 const CHANNEL_ID = "700000000000000001"
+const PUBLICATION_CHANNEL_ID = "700000000000000002"
+const PUBLICATION_MESSAGE_ID = "700000000000000003"
+const NOTIFICATION_USER_ID = "700000000000000004"
 const ONBOARDING_PROMPT_ID = "800000000000000001"
 const ONBOARDING_OPTION_ID = "900000000000000001"
 const OPERATION_KEY = "guild-blueprint-operation-0001"
@@ -54,8 +65,11 @@ const WELCOME_CHANNEL_DESCRIPTION = "Private welcome channel description"
 const ONBOARDING_PROMPT_TITLE = "Private onboarding prompt title"
 const ONBOARDING_OPTION_TITLE = "Private onboarding option title"
 const ONBOARDING_OPTION_DESCRIPTION = "Private onboarding option description"
+const PUBLICATION_KEY = "private-publication"
+const PUBLICATION_TEXT = `Private publication component text <@${NOTIFICATION_USER_ID}>`
 const NOW = "2026-08-24T12:00:00.000Z"
 const PLAN_KEY = new Uint8Array(32).fill(17)
+const MESSAGE_CONTENT_INTENT = "enabled" as const
 
 function request(
   overrides: Partial<GuildBlueprintRequest> = {},
@@ -137,6 +151,16 @@ function onboarding(): NonNullable<GuildBlueprintRequest["onboarding"]> {
       type: "multiple-choice",
     }],
   }
+}
+
+function publications(): NonNullable<GuildBlueprintRequest["publications"]> {
+  return [{
+    action: "create",
+    channel: { key: "private-system-channel", kind: "scaffold" },
+    components: [{ content: PUBLICATION_TEXT, kind: "text" }],
+    key: PUBLICATION_KEY,
+    notifyUserIds: [NOTIFICATION_USER_ID],
+  }]
 }
 
 function scaffoldPlan(
@@ -276,7 +300,111 @@ function onboardingPlan(
   } as OnboardingChangePlan
 }
 
+function componentPlan(
+  value: ComponentMessageRequest,
+  writeRequired: boolean,
+): ComponentMessagePlan {
+  return {
+    action: value.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: value.channelId,
+      parentId: null,
+      type: 0,
+    },
+    digest: `hmac-sha256:${(writeRequired ? "f" : "0").repeat(64)}`,
+    guild: { id: GUILD_ID, name: "Private Guild" },
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    target: {
+      messageId: value.action === "edit" ? value.messageId as string : null,
+    },
+    writeRequired,
+  } as ComponentMessagePlan
+}
+
+function componentVerification(
+  value: ComponentMessageRequest,
+  status: ComponentMessageVerificationResult["status"] = "not-found",
+): ComponentMessageVerificationResult {
+  const verified = status === "verified"
+  const blocked = status === "blocked"
+  const drifted = status === "drifted"
+  return {
+    action: value.action,
+    activityId: verified || drifted ? "activity-publication" : null,
+    channelId: value.channelId,
+    guildId: verified || drifted ? GUILD_ID : null,
+    messageId: verified || drifted ? PUBLICATION_MESSAGE_ID : null,
+    operationKeyHash: operationKeyHash(value.operationKey),
+    planDigest: verified || drifted
+      ? `hmac-sha256:${"f".repeat(64)}`
+      : null,
+    readbackMatched: verified,
+    reason: verified
+      ? null
+      : blocked
+        ? "request-mismatch"
+        : drifted
+          ? "message-state-mismatch"
+          : "operation-not-found",
+    receiptStatus: verified || drifted ? "completed" : blocked ? "pending" : null,
+    requestMatched: verified || drifted,
+    schemaVersion: 1,
+    status,
+    timestamp: verified || drifted ? NOW : null,
+    url: verified
+      ? `https://discord.com/channels/${GUILD_ID}/${value.channelId}/${PUBLICATION_MESSAGE_ID}`
+      : null,
+  }
+}
+
+function componentReceiptBlocker(
+  value: ComponentMessageRequest,
+  reason: Exclude<
+    ComponentMessageVerificationResult["reason"],
+    "operation-not-found" | "request-mismatch" | null
+  >,
+): ComponentMessageVerificationResult {
+  const drifted = reason === "message-missing" || reason === "message-state-mismatch"
+  const receiptStatus = reason === "operation-pending"
+    ? "pending" as const
+    : reason === "operation-failed"
+      ? "failed" as const
+      : reason === "operation-uncertain"
+        ? "uncertain" as const
+        : "completed" as const
+  return {
+    ...componentVerification(value, drifted ? "drifted" : "blocked"),
+    activityId: "activity-publication",
+    guildId: GUILD_ID,
+    messageId: reason === "operation-pending" || reason === "operation-failed"
+      ? null
+      : reason === "receipt-target-mismatch"
+        ? "malformed-target"
+        : PUBLICATION_MESSAGE_ID,
+    planDigest: `hmac-sha256:${"f".repeat(64)}`,
+    reason,
+    receiptStatus,
+    requestMatched: true,
+    status: drifted ? "drifted" : "blocked",
+    timestamp: NOW,
+  }
+}
+
 interface FixtureOptions {
+  componentPlanTransform?: (
+    plan: ComponentMessagePlan,
+    request: ComponentMessageRequest,
+    index: number,
+  ) => ComponentMessagePlan
+  componentVerification?: (
+    request: ComponentMessageRequest,
+    index: number,
+  ) => ComponentMessageVerificationResult
+  componentWrite?: boolean
   onboardingWrite?: boolean
   profileWrite?: boolean
   scaffoldTransform?: (plan: GuildScaffoldPlan) => GuildScaffoldPlan
@@ -288,9 +416,35 @@ interface FixtureOptions {
 function fixture(options: FixtureOptions = {}) {
   const calls: string[] = []
   let resolvedOnboarding: OnboardingChangeRequest | null = null
+  const resolvedPublications: ComponentMessageRequest[] = []
   let resolvedSettings: GuildSettingsChangeRequest | null = null
   let resolvedWelcomeScreen: WelcomeScreenChangeRequest | null = null
   const domains: GuildBlueprintDomainServices = {
+    component: {
+      async plan(_applicationId, _botId, intent, value) {
+        calls.push("plan-publication")
+        if (intent !== MESSAGE_CONTENT_INTENT) {
+          throw new RangeError(
+            "Discord component-message planning requires confirmed Message Content intent",
+          )
+        }
+        const index = resolvedPublications.findIndex((request) => request === value)
+        const plan = componentPlan(value, options.componentWrite ?? true)
+        return options.componentPlanTransform?.(plan, value, index) ?? plan
+      },
+      async verify(_applicationId, _botId, intent, value) {
+        calls.push("verify-publication")
+        if (intent !== MESSAGE_CONTENT_INTENT) {
+          throw new RangeError(
+            "Discord component-message verification requires confirmed Message Content intent",
+          )
+        }
+        const index = resolvedPublications.length
+        resolvedPublications.push(value)
+        return options.componentVerification?.(value, index)
+          ?? componentVerification(value)
+      },
+    },
     onboarding: {
       async plan(_applicationId, _botId, value) {
         calls.push("plan-onboarding")
@@ -326,15 +480,53 @@ function fixture(options: FixtureOptions = {}) {
       },
     },
   }
-  const service = new GuildBlueprintService({
+  const blueprintService = new GuildBlueprintService({
     clock: () => new Date(NOW),
     domains,
     planKey: PLAN_KEY,
   })
+  const service = {
+    execute(
+      applicationId: string,
+      botId: string,
+      value: GuildBlueprintRequest,
+      planDigest: string,
+      domainExecutors: GuildBlueprintExecutors,
+    ) {
+      return blueprintService.execute(
+        applicationId,
+        botId,
+        MESSAGE_CONTENT_INTENT,
+        value,
+        planDigest,
+        domainExecutors,
+      )
+    },
+    plan(applicationId: string, botId: string, value: GuildBlueprintRequest) {
+      return blueprintService.plan(
+        applicationId,
+        botId,
+        MESSAGE_CONTENT_INTENT,
+        value,
+      )
+    },
+    verify(applicationId: string, botId: string, value: GuildBlueprintRequest) {
+      return blueprintService.verify(
+        applicationId,
+        botId,
+        MESSAGE_CONTENT_INTENT,
+        value,
+      )
+    },
+  }
   return {
+    blueprintService,
     calls,
     get resolvedOnboarding() {
       return resolvedOnboarding
+    },
+    get resolvedPublications() {
+      return resolvedPublications
     },
     get resolvedSettings() {
       return resolvedSettings
@@ -348,6 +540,25 @@ function fixture(options: FixtureOptions = {}) {
 
 function executors(calls: string[]): GuildBlueprintExecutors {
   return {
+    async executeComponent(value, planDigest) {
+      calls.push("execute-publication")
+      return {
+        action: value.action,
+        activityId: "activity-publication",
+        channelId: value.channelId,
+        guildId: GUILD_ID,
+        messageId: value.action === "edit"
+          ? value.messageId as string
+          : PUBLICATION_MESSAGE_ID,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${value.channelId}/${PUBLICATION_MESSAGE_ID}`,
+      } as ComponentMessageResult
+    },
     async executeOnboarding(value, planDigest) {
       calls.push(`execute-onboarding:${planDigest}`)
       return {
@@ -445,7 +656,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   delete noPostPhase.settings
   assert.throws(
     () => normalizeGuildBlueprintRequest(noPostPhase),
-    /requires a profile, settings, Welcome Screen, or onboarding phase/u,
+    /requires a profile, settings, Welcome Screen, onboarding, or publication phase/u,
   )
   const unknownReference = request({
     settings: {
@@ -509,6 +720,364 @@ test("guild blueprint validation is strict and binds deterministic phase identit
     } as GuildBlueprintRequest),
     /must be an exact object/u,
   )
+})
+
+test("guild blueprint publications normalize one strict bounded manifest contract", () => {
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const manifest: GuildBlueprintRequest = {
+    ...base,
+    publications: publications(),
+  }
+  const normalized = normalizeGuildBlueprintRequest(manifest)
+  assert.equal(normalized.publications?.[0]?.key, PUBLICATION_KEY)
+  assert.deepEqual(normalized.publications?.[0]?.components, [{
+    content: PUBLICATION_TEXT,
+    kind: "text",
+  }])
+  const publicationKey = guildBlueprintPublicationOperationKey(
+    OPERATION_KEY,
+    PUBLICATION_KEY,
+  )
+  assert.equal(
+    publicationKey,
+    guildBlueprintPublicationOperationKey(OPERATION_KEY, PUBLICATION_KEY),
+  )
+  assert.notEqual(
+    publicationKey,
+    guildBlueprintPublicationOperationKey(OPERATION_KEY, "another-publication"),
+  )
+  assert.notEqual(
+    publicationKey,
+    guildBlueprintStepOperationKey(OPERATION_KEY, "structure"),
+  )
+  const reorderedPublications = [
+    ...publications(),
+    { ...publications()[0]!, key: "another-publication" },
+  ]
+  assert.notEqual(
+    guildBlueprintRequestDigest({ ...manifest, publications: reorderedPublications }),
+    guildBlueprintRequestDigest({
+      ...manifest,
+      publications: [...reorderedPublications].reverse(),
+    }),
+  )
+  assert.deepEqual(
+    reorderedPublications.map((publication) => (
+      guildBlueprintPublicationOperationKey(OPERATION_KEY, publication.key)
+    )).sort(),
+    [...reorderedPublications].reverse().map((publication) => (
+      guildBlueprintPublicationOperationKey(OPERATION_KEY, publication.key)
+    )).sort(),
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({ ...manifest, publications: [] }),
+    /publications are invalid/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...manifest,
+      publications: [...publications(), ...publications()],
+    }),
+    /publication keys must be unique/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...manifest,
+      publications: [{
+        ...publications()[0]!,
+        channel: { key: "private-category", kind: "scaffold" },
+      }],
+    }),
+    /not a compatible requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...manifest,
+      publications: Array.from(
+        { length: CONNECTOR_LIMITS.guildBlueprintPublications + 1 },
+        (_, index) => ({
+          ...publications()[0]!,
+          key: `publication-${index}`,
+        }),
+      ),
+    }),
+    /publications are invalid/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...manifest,
+      publications: [{
+        ...publications()[0]!,
+        messageId: PUBLICATION_MESSAGE_ID,
+      } as GuildBlueprintRequest["publications"] extends readonly (infer Entry)[]
+        ? Entry
+        : never],
+    }),
+    /create shape is invalid/u,
+  )
+})
+
+test("guild blueprint publications recover in order and expose one exact frontier", async () => {
+  const state = fixture({
+    componentVerification(value, index) {
+      return componentVerification(value, index === 0 ? "verified" : "not-found")
+    },
+  })
+  const desired: NonNullable<GuildBlueprintRequest["publications"]> = [
+    {
+      ...publications()[0]!,
+      channel: { channelId: PUBLICATION_CHANNEL_ID, kind: "exact" },
+    },
+    {
+      ...publications()[0]!,
+      key: "second-publication",
+    },
+  ]
+  const plan = await state.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request({ publications: desired }),
+  )
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.frontier?.kind, "publication")
+  if (plan.frontier?.kind !== "publication") {
+    throw new Error("Expected a publication frontier")
+  }
+  assert.equal(plan.frontier.index, 1)
+  assert.equal(plan.frontier.key, "second-publication")
+  assert.deepEqual(state.calls.slice(-3), [
+    "verify-publication",
+    "verify-publication",
+    "plan-publication",
+  ])
+  const publicationSteps = plan.steps.filter((step) => step.kind === "publication")
+  assert.deepEqual(
+    publicationSteps.map((step) => [
+      step.index,
+      step.key,
+      step.state,
+      step.messageId,
+      step.verificationStatus,
+    ]),
+    [
+      [0, PUBLICATION_KEY, "satisfied", PUBLICATION_MESSAGE_ID, "verified"],
+      [1, "second-publication", "ready", null, "not-found"],
+    ],
+  )
+  assert.equal(state.resolvedPublications[0]?.channelId, PUBLICATION_CHANNEL_ID)
+  assert.equal(state.resolvedPublications[1]?.channelId, CHANNEL_ID)
+  assert.equal(
+    state.resolvedPublications[1]?.operationKey,
+    guildBlueprintPublicationOperationKey(OPERATION_KEY, "second-publication"),
+  )
+})
+
+test("guild blueprint publication blockers stop without planning or writing", async () => {
+  const state = fixture({
+    componentVerification(value) {
+      return componentVerification(value, "blocked")
+    },
+  })
+  const manifest = request({
+    publications: [
+      ...publications(),
+      { ...publications()[0]!, key: "later-publication" },
+    ],
+  })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(plan.status, "blocked")
+  assert.equal(plan.frontier, null)
+  assert.equal(plan.blocker?.index, 0)
+  assert.equal(plan.blocker?.verificationStatus, "blocked")
+  assert.equal(state.calls.includes("plan-publication"), false)
+  assert.deepEqual(
+    plan.steps.filter((step) => step.kind === "publication")
+      .map((step) => step.state),
+    ["blocked", "waiting"],
+  )
+  state.calls.length = 0
+  const executionCalls: string[] = []
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(executionCalls),
+  )
+  assert.equal(result.status, "blocked")
+  assert.equal(result.nextAction, "inspect")
+  assert.equal(result.blocker?.verificationReason, "request-mismatch")
+  assert.deepEqual(executionCalls, [])
+  assert.equal(state.calls.includes("plan-publication"), false)
+})
+
+test("guild blueprint publications preserve every receipt and readback blocker", async () => {
+  const reasons = [
+    "operation-pending",
+    "operation-failed",
+    "operation-uncertain",
+    "receipt-target-mismatch",
+    "message-missing",
+    "message-state-mismatch",
+  ] as const
+  for (const reason of reasons) {
+    const state = fixture({
+      componentVerification(value) {
+        return componentReceiptBlocker(value, reason)
+      },
+    })
+    const plan = await state.service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({ publications: publications() }),
+    )
+    assert.equal(plan.status, "blocked", reason)
+    assert.equal(plan.frontier, null, reason)
+    assert.equal(plan.blocker?.verificationReason, reason)
+    assert.equal(
+      plan.blocker?.verificationStatus,
+      reason === "message-missing" || reason === "message-state-mismatch"
+        ? "drifted"
+        : "blocked",
+      reason,
+    )
+    assert.equal(
+      plan.blocker?.messageId,
+      reason === "receipt-target-mismatch"
+        || reason === "operation-pending"
+        || reason === "operation-failed"
+        ? null
+        : PUBLICATION_MESSAGE_ID,
+      reason,
+    )
+    assert.equal(state.calls.includes("plan-publication"), false, reason)
+  }
+})
+
+test("guild blueprint publications fail closed on intent and nested identity changes", async () => {
+  const intentState = fixture()
+  await assert.rejects(
+    intentState.blueprintService.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      "disabled",
+      request({ publications: publications() }),
+    ),
+    /requires confirmed Message Content intent/u,
+  )
+
+  for (const changedIdentity of [
+    { applicationId: "100000000000000002" },
+    { botId: "300000000000000002" },
+  ]) {
+    const state = fixture({
+      componentPlanTransform(plan) {
+        return { ...plan, ...changedIdentity }
+      },
+    })
+    await assert.rejects(
+      state.service.plan(
+        APPLICATION_ID,
+        BOT_ID,
+        request({ publications: publications() }),
+      ),
+      /nested plan identity changed/u,
+    )
+  }
+})
+
+test("guild blueprint publications reject inconsistent verifier evidence", async () => {
+  const transforms: Array<(
+    value: ComponentMessageRequest,
+  ) => ComponentMessageVerificationResult> = [
+    (value) => ({
+      ...componentVerification(value),
+      operationKeyHash: operationKeyHash("different-publication-operation-key"),
+    }),
+    (value) => ({
+      ...componentVerification(value, "verified"),
+      receiptStatus: "pending",
+    }),
+    (value) => ({
+      ...componentReceiptBlocker(value, "operation-pending"),
+      reason: "operation-failed",
+    }),
+    (value) => ({
+      ...componentReceiptBlocker(value, "message-missing"),
+      messageId: null,
+    }),
+  ]
+  for (const transform of transforms) {
+    const state = fixture({ componentVerification: transform })
+    await assert.rejects(
+      state.service.plan(
+        APPLICATION_ID,
+        BOT_ID,
+        request({ publications: publications() }),
+      ),
+      /component .* (binding|evidence) changed/u,
+    )
+  }
+})
+
+test("guild blueprint accepts an exact already-current publication edit", async () => {
+  const state = fixture({ componentWrite: false })
+  const manifest = request({
+    publications: [{
+      action: "edit",
+      channel: { channelId: PUBLICATION_CHANNEL_ID, kind: "exact" },
+      components: [{ content: PUBLICATION_TEXT, kind: "text" }],
+      key: PUBLICATION_KEY,
+      messageId: PUBLICATION_MESSAGE_ID,
+    }],
+  })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.frontier, null)
+  const publicationStep = plan.steps.find((step) => step.kind === "publication")
+  assert.equal(publicationStep?.state, "satisfied")
+  assert.equal(publicationStep?.messageId, PUBLICATION_MESSAGE_ID)
+  assert.equal(publicationStep?.verificationStatus, "not-found")
+})
+
+test("guild blueprint publication verification omits caller content and keys", async () => {
+  const state = fixture({
+    componentVerification(value) {
+      return componentVerification(value, "verified")
+    },
+  })
+  const manifest = request({ publications: publications() })
+  const result = await state.service.verify(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(result.status, "verified")
+  assert.equal(result.steps.at(-1)?.kind, "publication")
+  assert.equal(result.steps.at(-1)?.messageId, PUBLICATION_MESSAGE_ID)
+  const serialized = JSON.stringify(result)
+  for (const privateValue of [
+    PUBLICATION_KEY,
+    PUBLICATION_TEXT,
+    NOTIFICATION_USER_ID,
+    OPERATION_KEY,
+  ]) assert.equal(serialized.includes(privateValue), false)
+})
+
+test("guild blueprint executes one publication through the component executor", async () => {
+  const state = fixture()
+  const manifest = request({ publications: publications() })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(plan.frontier?.kind, "publication")
+  state.calls.length = 0
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(state.calls),
+  )
+  assert.equal(result.status, "frontier-executed")
+  assert.equal(result.executedPhase, "publication")
+  assert.equal(result.executedPublicationIndex, 0)
+  assert.equal(result.nestedResult?.status, "completed")
+  assert.equal(state.calls.filter((call) => call === "execute-publication").length, 1)
 })
 
 test("guild blueprint accepts Welcome Screen as its only post-scaffold phase", () => {

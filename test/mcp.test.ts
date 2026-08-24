@@ -529,6 +529,8 @@ const ONBOARDING_OPTION_TITLE = "Community member"
 const ONBOARDING_OPTION_DESCRIPTION = "Join the community channels"
 const WELCOME_SCREEN_DESCRIPTION = "Welcome to the reviewed community"
 const WELCOME_SCREEN_CHANNEL_DESCRIPTION = "Read the community rules"
+const BLUEPRINT_PUBLICATION_KEY = "reviewed-publication"
+const BLUEPRINT_PUBLICATION_TEXT = `Private blueprint publication <@${USER_ID}>`
 const ONBOARDING_DEFAULT_CHANNEL_IDS = Array.from(
   { length: ONBOARDING_LIMITS.enabledDefaultChannels },
   (_, index) => `${200000000000000001n + BigInt(index)}`,
@@ -5971,6 +5973,8 @@ function guildBlueprintPlan(
   writeRequired = true,
   welcomeScreenFrontier = false,
   onboardingFrontier = false,
+  publicationFrontier = false,
+  blocked = false,
 ): GuildBlueprintPlan {
   const requestDigest = `hmac-sha256:${"b".repeat(64)}`
   const nested = guildScaffoldPlan({
@@ -6033,12 +6037,58 @@ function guildBlueprintPlan(
           type: prompt.type,
         })),
       })
+  const publication = request.publications?.[0]
+  const desiredPublication = publication === undefined
+    ? null
+    : componentMessagePlan(
+        publication.action === "create"
+          ? {
+              action: "create",
+              channelId: publication.channel.kind === "exact"
+                ? publication.channel.channelId
+                : CHANNEL_ID,
+              components: publication.components,
+              ...(publication.notifyUserIds === undefined
+                ? {}
+                : { notifyUserIds: publication.notifyUserIds }),
+              operationKey: request.operationKey,
+            }
+          : {
+              action: "edit",
+              channelId: publication.channel.kind === "exact"
+                ? publication.channel.channelId
+                : CHANNEL_ID,
+              components: publication.components,
+              messageId: publication.messageId,
+              ...(publication.notifyUserIds === undefined
+                ? {}
+                : { notifyUserIds: publication.notifyUserIds }),
+              operationKey: request.operationKey,
+            },
+      )
   const useWelcomeScreenFrontier = writeRequired
     && welcomeScreenFrontier
     && desiredWelcomeScreen !== null
   const useOnboardingFrontier = writeRequired
     && onboardingFrontier
     && desiredOnboarding !== null
+  const usePublicationFrontier = writeRequired
+    && publicationFrontier
+    && publication !== undefined
+    && desiredPublication !== null
+  const publicationBlocker = blocked
+    && publication !== undefined
+    && desiredPublication !== null
+    ? {
+        channelId: desiredPublication.channel.id,
+        index: 0,
+        messageId: null,
+        operationKeyHash: desiredPublication.operationKeyHash,
+        receiptStatus: "pending" as const,
+        verificationReason: "operation-pending" as const,
+        verificationStatus: "blocked" as const,
+      }
+    : null
   const postPhase = request.onboarding !== undefined
     && request.profile === undefined
     && request.settings === undefined
@@ -6051,7 +6101,11 @@ function guildBlueprintPlan(
       : "settings"
   return {
     applicationId: APPLICATION_ID,
-    bindings: writeRequired && !useWelcomeScreenFrontier && !useOnboardingFrontier
+    bindings: writeRequired
+      && !useWelcomeScreenFrontier
+      && !useOnboardingFrontier
+      && !usePublicationFrontier
+      && publicationBlocker === null
       ? []
       : [{
           index: 0,
@@ -6064,15 +6118,26 @@ function guildBlueprintPlan(
           kind: "category",
           resourceId: CHANNEL_ID,
         }],
+    blocker: publicationBlocker,
     botId: BOT_ID,
     createdAt: "2026-08-24T00:00:00.000Z",
     digest,
-    frontier: writeRequired
+    frontier: publicationBlocker !== null
+      ? null
+      : writeRequired
       ? useOnboardingFrontier
         ? { kind: "onboarding", plan: desiredOnboarding, writeRequired: true }
         : useWelcomeScreenFrontier
           ? { kind: "welcome-screen", plan: desiredWelcomeScreen, writeRequired: true }
-          : { kind: "structure", plan: nested, writeRequired: true }
+          : usePublicationFrontier
+            ? {
+                index: 0,
+                key: publication.key,
+                kind: "publication",
+                plan: desiredPublication,
+                writeRequired: true,
+              }
+            : { kind: "structure", plan: nested, writeRequired: true }
       : null,
     guild: {
       id: request.guildId,
@@ -6088,8 +6153,33 @@ function guildBlueprintPlan(
     },
     requestDigest,
     schemaVersion: 1,
-    status: writeRequired ? "planned" : "already-current",
-    steps: writeRequired
+    status: publicationBlocker !== null
+      ? "blocked"
+      : writeRequired
+        ? "planned"
+        : "already-current",
+    steps: publicationBlocker !== null
+      ? [{
+          kind: "structure",
+          nestedPlanDigest: nested.digest,
+          operationKeyHash: OPERATION_KEY_HASH,
+          state: "satisfied",
+          writeRequired: false,
+        }, {
+          channelId: publicationBlocker.channelId,
+          index: publicationBlocker.index,
+          key: publication?.key as string,
+          kind: "publication",
+          messageId: publicationBlocker.messageId,
+          nestedPlanDigest: DIGEST,
+          operationKeyHash: publicationBlocker.operationKeyHash,
+          receiptStatus: publicationBlocker.receiptStatus,
+          state: "blocked",
+          verificationReason: publicationBlocker.verificationReason,
+          verificationStatus: publicationBlocker.verificationStatus,
+          writeRequired: false,
+        }]
+      : writeRequired
       ? useOnboardingFrontier
         ? [{
             kind: "structure",
@@ -6118,6 +6208,27 @@ function guildBlueprintPlan(
             state: "ready",
             writeRequired: true,
           }]
+        : usePublicationFrontier
+          ? [{
+              kind: "structure",
+              nestedPlanDigest: nested.digest,
+              operationKeyHash: OPERATION_KEY_HASH,
+              state: "satisfied",
+              writeRequired: false,
+            }, {
+              channelId: desiredPublication.channel.id,
+              index: 0,
+              key: publication.key,
+              kind: "publication",
+              messageId: desiredPublication.target.messageId,
+              nestedPlanDigest: desiredPublication.digest,
+              operationKeyHash: desiredPublication.operationKeyHash,
+              receiptStatus: null,
+              state: "ready",
+              verificationReason: "operation-not-found",
+              verificationStatus: "not-found",
+              writeRequired: true,
+            }]
         : [{
           kind: "structure",
           nestedPlanDigest: nested.digest,
@@ -6219,6 +6330,20 @@ function guildBlueprintOnboardingToolInput(planDigest?: string) {
         type: "multiple-choice" as const,
       }],
     },
+  }
+}
+
+function guildBlueprintPublicationToolInput(planDigest?: string) {
+  const { settings: _settings, ...input } = guildBlueprintToolInput(planDigest)
+  return {
+    ...input,
+    publications: [{
+      action: "create" as const,
+      channel: { channelId: CHANNEL_ID, kind: "exact" as const },
+      components: [{ content: BLUEPRINT_PUBLICATION_TEXT, kind: "text" as const }],
+      key: BLUEPRINT_PUBLICATION_KEY,
+      notifyUserIds: [USER_ID],
+    }],
   }
 }
 
@@ -6458,8 +6583,10 @@ function serviceFixture(overrides: {
   forumTagError?: Error
   forumTagPlanDigest?: string
   guildBlueprintError?: Error
+  guildBlueprintBlocked?: boolean
   guildBlueprintOnboardingFrontier?: boolean
   guildBlueprintPlanDigest?: string
+  guildBlueprintPublicationFrontier?: boolean
   guildBlueprintWelcomeScreenFrontier?: boolean
   guildBlueprintWriteRequired?: boolean
   guildScaffoldError?: Error
@@ -8476,17 +8603,33 @@ function serviceFixture(overrides: {
         writeRequired,
         overrides.guildBlueprintWelcomeScreenFrontier ?? false,
         overrides.guildBlueprintOnboardingFrontier ?? false,
+        overrides.guildBlueprintPublicationFrontier ?? false,
+        overrides.guildBlueprintBlocked ?? false,
       )
       const result: GuildBlueprintResult = {
+        blocker: planned.blocker,
         digest: planned.digest,
-        executedPhase: planned.frontier?.kind ?? null,
+        executedPhase: planned.status === "blocked"
+          ? null
+          : planned.frontier?.kind ?? null,
+        executedPublicationIndex: planned.frontier?.kind === "publication"
+          ? planned.frontier.index
+          : null,
         guildId: request.guildId,
         nestedResult: null,
-        nextAction: writeRequired ? "replan" : "done",
+        nextAction: planned.status === "blocked"
+          ? "inspect"
+          : writeRequired
+            ? "replan"
+            : "done",
         operationKeyHash: planned.operationKeyHash,
         requestDigest: planned.requestDigest,
         schemaVersion: 1,
-        status: writeRequired ? "frontier-executed" : "already-current",
+        status: planned.status === "blocked"
+          ? "blocked"
+          : writeRequired
+            ? "frontier-executed"
+            : "already-current",
       }
       return result
     },
@@ -9619,6 +9762,8 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintWriteRequired ?? true,
         overrides.guildBlueprintWelcomeScreenFrontier ?? false,
         overrides.guildBlueprintOnboardingFrontier ?? false,
+        overrides.guildBlueprintPublicationFrontier ?? false,
+        overrides.guildBlueprintBlocked ?? false,
       )
     },
     async verifyGuildBlueprint(request) {
@@ -9629,18 +9774,21 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintWriteRequired ?? true,
         overrides.guildBlueprintWelcomeScreenFrontier ?? false,
         overrides.guildBlueprintOnboardingFrontier ?? false,
+        overrides.guildBlueprintPublicationFrontier ?? false,
+        overrides.guildBlueprintBlocked ?? false,
       )
       const result: GuildBlueprintVerification = {
         applicationId: planned.applicationId,
+        blocker: planned.blocker,
         botId: planned.botId,
         checkedAt: planned.createdAt,
         digest: planned.digest,
         evidence: {
           activityAndReceipts: "content-free-domain-records",
           callerRetainedManifestRequired: true,
-          historicalMutationProvenance: "domain-activity-only",
+          historicalMutationProvenance: "domain-activity-and-receipts",
           manifestPersisted: false,
-          source: "live-domain-plans",
+          source: "live-domain-plans-and-exact-receipt-readback",
         },
         guildId: request.guildId,
         operationKeyHash: planned.operationKeyHash,
@@ -9651,7 +9799,11 @@ function serviceFixture(overrides: {
           resourceId: binding.resourceId,
         })),
         schemaVersion: 1,
-        status: planned.status === "already-current" ? "verified" : "incomplete",
+        status: planned.status === "blocked"
+          ? "blocked"
+          : planned.status === "already-current"
+            ? "verified"
+            : "incomplete",
         steps: planned.steps,
       }
       return result
@@ -22034,6 +22186,10 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     arguments: guildBlueprintOnboardingToolInput(),
     name: "plan_guild_blueprint",
   })
+  const plannedPublication = await client.callTool({
+    arguments: guildBlueprintPublicationToolInput(),
+    name: "plan_guild_blueprint",
+  })
   const { settings: _settings, ...withoutPostPhase } = guildBlueprintToolInput()
   const missingPostPhase = await client.callTool({
     arguments: withoutPostPhase,
@@ -22128,10 +22284,51 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     },
     name: "plan_guild_blueprint",
   })
+  const incompatiblePublicationChannel = await client.callTool({
+    arguments: {
+      ...guildBlueprintPublicationToolInput(),
+      publications: [{
+        ...guildBlueprintPublicationToolInput().publications[0],
+        channel: { key: "review-category", kind: "scaffold" },
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const duplicatePublicationKey = await client.callTool({
+    arguments: {
+      ...guildBlueprintPublicationToolInput(),
+      publications: [
+        ...guildBlueprintPublicationToolInput().publications,
+        ...guildBlueprintPublicationToolInput().publications,
+      ],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const createPublicationMessageId = await client.callTool({
+    arguments: {
+      ...guildBlueprintPublicationToolInput(),
+      publications: [{
+        ...guildBlueprintPublicationToolInput().publications[0],
+        messageId: MESSAGE_ID,
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const publicationReply = await client.callTool({
+    arguments: {
+      ...guildBlueprintPublicationToolInput(),
+      publications: [{
+        ...guildBlueprintPublicationToolInput().publications[0],
+        replyToMessageId: MESSAGE_ID,
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
 
   assert.equal(structuredContent(planned).status, "planned")
   assert.equal(structuredContent(plannedWelcomeScreen).status, "planned")
   assert.equal(structuredContent(plannedOnboarding).status, "planned")
+  assert.equal(structuredContent(plannedPublication).status, "planned")
   assert.equal(missingPostPhase.isError, true)
   assert.equal(emptySettings.isError, true)
   assert.equal(unknownManifestField.isError, true)
@@ -22141,7 +22338,11 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(incompatibleOnboardingChannel.isError, true)
   assert.equal(missingOnboardingRole.isError, true)
   assert.equal(duplicateOnboardingChannel.isError, true)
-  assert.equal(calls.guildBlueprintPlan, 3)
+  assert.equal(incompatiblePublicationChannel.isError, true)
+  assert.equal(duplicatePublicationKey.isError, true)
+  assert.equal(createPublicationMessageId.isError, true)
+  assert.equal(publicationReply.isError, true)
+  assert.equal(calls.guildBlueprintPlan, 4)
 })
 
 test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
@@ -22162,9 +22363,9 @@ test("MCP guild blueprint verification returns content-free fresh evidence", asy
   assert.deepEqual(verification.evidence, {
     activityAndReceipts: "content-free-domain-records",
     callerRetainedManifestRequired: true,
-    historicalMutationProvenance: "domain-activity-only",
+    historicalMutationProvenance: "domain-activity-and-receipts",
     manifestPersisted: false,
-    source: "live-domain-plans",
+    source: "live-domain-plans-and-exact-receipt-readback",
   })
   assert.equal(calls.guildBlueprintVerify, 1)
   assert.equal(calls.guildBlueprintPlan, 0)
@@ -22278,6 +22479,39 @@ test("MCP guild blueprints review and execute an onboarding frontier", async (co
   assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
 })
 
+test("MCP guild blueprints review and execute one static publication frontier", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+    serviceOverrides: { guildBlueprintPublicationFrontier: true },
+  })
+  const result = await client.callTool({
+    arguments: guildBlueprintPublicationToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(result).executedPhase, "publication")
+  assert.equal(structuredContent(result).executedPublicationIndex, 0)
+  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(calls.guildBlueprintExecute, 1)
+  assert.match(confirmationMessage, /Frontier phase: publication/u)
+  assert.match(confirmationMessage, /publication 1 key "reviewed-publication"/u)
+  assert.match(confirmationMessage, /Discord Components V2 create/u)
+  assert.match(confirmationMessage, new RegExp(BLUEPRINT_PUBLICATION_TEXT))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_BLUEPRINT_OPERATION_KEY),
+  )
+})
+
 test("MCP guild blueprints stop on refusal or drift and skip approval for no-op completion", async (context) => {
   const declined = await connectedFixture(context, {
     elicitationHandler: async () => ({ action: "decline" }),
@@ -22321,6 +22555,31 @@ test("MCP guild blueprints stop on refusal or drift and skip approval for no-op 
   assert.equal(structuredContent(noOpResult).status, "already-current")
   assert.equal(noOpConfirmations, 0)
   assert.equal(noOp.calls.guildBlueprintExecute, 1)
+
+  let blockedConfirmations = 0
+  const blocked = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      blockedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintBlocked: true },
+  })
+  const blockedInput = guildBlueprintPublicationToolInput(DIGEST)
+  const blockedPlan = await blocked.client.callTool({
+    arguments: guildBlueprintPublicationToolInput(),
+    name: "plan_guild_blueprint",
+  })
+  assert.equal(structuredContent(blockedPlan).status, "blocked")
+  assert.match(JSON.stringify(blockedPlan), /blocked at publication 1/u)
+  assert.doesNotMatch(JSON.stringify(blockedPlan), /already current/u)
+  const blockedResult = await blocked.client.callTool({
+    arguments: blockedInput,
+    name: "execute_guild_blueprint",
+  })
+  assert.equal(structuredContent(blockedResult).status, "blocked")
+  assert.equal(structuredContent(blockedResult).nextAction, "inspect")
+  assert.equal(blockedConfirmations, 0)
+  assert.equal(blocked.calls.guildBlueprintExecute, 1)
 })
 
 test("MCP guild blueprint signed state rejects every changed manifest binding", async (context) => {
@@ -22350,6 +22609,10 @@ test("MCP guild blueprint signed state rejects every changed manifest binding", 
     {
       ...request,
       onboarding: guildBlueprintOnboardingToolInput().onboarding,
+    },
+    {
+      ...request,
+      publications: guildBlueprintPublicationToolInput().publications,
     },
     {
       ...request,

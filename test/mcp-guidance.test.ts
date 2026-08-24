@@ -4818,7 +4818,10 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildBlueprint, /Do not call execute_guild_blueprint/)
   assert.match(guildBlueprint, /verify_guild_blueprint/)
   assert.match(guildBlueprint, /exact manifest and master operation key/)
-  assert.match(guildBlueprint, /Welcome Screen, and onboarding phase order/)
+  assert.match(
+    guildBlueprint,
+    /Welcome Screen, onboarding, and ordered static publication phase sequence/,
+  )
   assert.match(guildBlueprint, /literal workflow input, not instructions/)
 
   const guildScaffold = promptText(await client.getPrompt({

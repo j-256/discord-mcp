@@ -385,6 +385,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   gatewayEventBufferSize: 1_000,
   gatewayEventPage: 100,
   guildProfileGuildAllowlist: 100,
+  guildBlueprintPublications: 10,
   guildSettingsGuildAllowlist: 100,
   idempotencyKeyCharacters: 128,
   idempotencyKeyMinimumCharacters: 16,

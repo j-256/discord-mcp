@@ -196,7 +196,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - MCP host write approval, signed MCP elicitation, a final fresh plan match, a durable one-shot content-free receipt, pending activity journaling, and exact post-write readback all surround channel creation
 - Visible channel inventory is explicitly treated as visibility-bounded, and a reserved operation key cannot be reused after a failed or uncertain attempt
 - Guild scaffolds are disabled unless a separate toggle and non-empty exact guild allowlist are both configured
-- Guild blueprints add no authority of their own: structure, profile, settings, Welcome Screen, and onboarding frontiers each require their corresponding existing capability and exact scope
+- Guild blueprints add no authority of their own: structure, profile, settings, Welcome Screen, onboarding, and static publication frontiers each require their corresponding existing capability, exact scope, intent, and message-interaction controls
 - The exact blueprint manifest remains caller-retained; only keyed request and process-bound plan digests enter signed confirmation state, and no blueprint content or master operation key is persisted
 - One blueprint execution can dispatch only one fresh fixed-order domain frontier, preserving that domain's existing approval, reservation, pending-audit, non-retry, readback, conflict, and uncertainty-quarantine behavior
 - A scaffold accepts only additive roles, categories, text channels, and forum channels in one bounded symbolic graph; it never edits, assigns, moves, reorders, deletes, rolls back, or creates permission overwrites
@@ -710,9 +710,9 @@ Voice-channel status follows the same progressive safety rule: discovering eithe
 | `execute_thread_creation` | Discord write | Confirm, revalidate, reserve the one-shot key, journal, create once without retry, and read back the exact thread, with deterministic anchored recovery and no standalone guesswork |
 | `plan_thread_change` | Discord read | Verify one exact thread rename, lifecycle, metadata, invitation-policy, or membership action against identity, exact scope, minimized state, membership, complete inherited permissions, action-specific authority, protected targets, and one-shot evidence and produce a keyed digest |
 | `execute_thread_change` | Destructive Discord write | Confirm, revalidate, reserve the one-shot key, journal, send one non-retried single-field PATCH or exact member PUT or DELETE, and verify exact state or membership while quarantining ambiguous same-thread outcomes |
-| `plan_guild_blueprint` | Discord read | Build the next fixed-order structure, profile, settings, Welcome Screen, or onboarding frontier from one exact caller-retained manifest, returning the full transient nested domain plan plus keyed request and aggregate plan digests without persisting blueprint content |
-| `execute_guild_blueprint` | Destructive Discord write | Confirm one fresh aggregate frontier with digest-only signed state, derive a phase-separated operation key, and dispatch exactly one existing hardened domain executor before requiring another plan |
-| `verify_guild_blueprint` | Discord read | Rebuild one caller-retained manifest against fresh domain evidence and return content-free identities, hashes, phase states, exact resource IDs without symbolic keys, and a fresh aggregate digest |
+| `plan_guild_blueprint` | Discord read | Build the next fixed-order structure, profile, settings, Welcome Screen, onboarding, or ordered static Components V2 publication frontier from one exact caller-retained manifest, returning the full transient nested domain plan or content-free publication blocker plus keyed request and aggregate plan digests without persisting blueprint content |
+| `execute_guild_blueprint` | Destructive Discord write | Confirm one fresh aggregate frontier with digest-only signed state, derive a phase- or publication-key-separated operation key, and dispatch exactly one existing hardened domain executor before requiring another plan; blockers return without elicitation or a write |
+| `verify_guild_blueprint` | Discord read | Rebuild one caller-retained manifest against fresh domain evidence and exact receipt-bound publication reads, then return content-free identities, hashes, phase states, exact resource and message IDs without symbolic keys, blocker codes, and a fresh aggregate digest without scanning message history |
 | `plan_guild_scaffold` | Discord read | Verify one bounded additive role and channel graph against identity, scope, collision, hierarchy, permission, capacity, dependency, and durable-checkpoint evidence and produce a keyed frontier digest |
 | `execute_guild_scaffold` | Discord write | Confirm, revalidate, claim both guild role and channel collections, durably bind and resume the exact request, execute only the reviewed ready frontier with non-retried writes and exact readbacks, and pause for a fresh plan at dependencies or the step limit |
 | `verify_guild_scaffold` | Discord read | Re-read one exact caller-retained scaffold request and its content-free receipts, then return completion status, identities, hashes, counts, step kinds, states, resource IDs, and a fresh keyed digest without reserving or persisting intent |
@@ -900,7 +900,7 @@ The voice-channel-status prompt accepts one strict request JSON object containin
 | `review_widget_settings_change` | Build and review one exact complete authenticated widget-settings replacement plan with action-sensitive public-exposure authorization and privacy evidence, then stop before execution |
 | `review_guild_profile_change` | Build and review one exact sparse guild name or description plan with complete permission, media-presence, privacy, and one-shot evidence, then stop before execution |
 | `review_guild_settings_change` | Build and review one exact sparse named guild-settings plan with field effects, exact channel evidence, unknown-bit safety, and privacy evidence, then stop before execution |
-| `review_guild_blueprint` | Build and review only the next fixed-order frontier of one exact caller-retained structure, profile, settings, Welcome Screen, and onboarding manifest, then stop before execution |
+| `review_guild_blueprint` | Build and review only the next fixed-order frontier or publication blocker of one exact caller-retained structure, profile, settings, Welcome Screen, onboarding, and ordered static publication manifest, then stop before execution |
 | `review_channel_permission_overwrite` | Build and review one exact named-delta update or explicit overwrite-deletion plan, then stop before execution |
 | `review_member_moderation` | Build and review one exact keyed moderation plan, then stop before execution |
 
@@ -1818,11 +1818,13 @@ Activity and operation records contain only the exact guild, target, and anchor 
 
 ## Caller-retained declarative guild blueprints
 
-Guild blueprints provide a high-level outcome workflow without adding a broad reconciliation engine or bypassing domain safety. Include `guild-blueprints` in `tools.toolsets` when selecting toolsets. There is no blueprint capability toggle or blueprint allowlist: every structure frontier still requires `capabilities.guildScaffolds: true` and an exact `scopes.guildScaffoldGuildIds` match, every profile frontier still requires `capabilities.guildProfileChanges: true` and an exact `scopes.guildProfileGuildIds` match, every settings frontier still requires `capabilities.guildSettingsChanges: true` and an exact `scopes.guildSettingsGuildIds` match, every Welcome Screen frontier still requires `capabilities.welcomeScreenChanges: true` and an exact `scopes.welcomeScreenGuildIds` match, and every onboarding frontier still requires `capabilities.onboardingChanges: true` and an exact `scopes.onboardingGuildIds` match. The underlying `guild-scaffolds`, `guild-profile`, `guild-settings`, `welcome-screen`, and `onboarding` toolsets do not need to be exposed for the coordinator to enforce those policies.
+Guild blueprints provide a high-level outcome workflow without adding a broad reconciliation engine or bypassing domain safety. Include `guild-blueprints` in `tools.toolsets` when selecting toolsets. There is no blueprint capability toggle or blueprint allowlist: every structure frontier still requires `capabilities.guildScaffolds: true` and an exact `scopes.guildScaffoldGuildIds` match, every profile frontier still requires `capabilities.guildProfileChanges: true` and an exact `scopes.guildProfileGuildIds` match, every settings frontier still requires `capabilities.guildSettingsChanges: true` and an exact `scopes.guildSettingsGuildIds` match, every Welcome Screen frontier still requires `capabilities.welcomeScreenChanges: true` and an exact `scopes.welcomeScreenGuildIds` match, every onboarding frontier still requires `capabilities.onboardingChanges: true` and an exact `scopes.onboardingGuildIds` match, and every publication frontier still requires `capabilities.interactions: true`, an exact `scopes.interactionChannelIds` match, configured notification-user scope where used, confirmed Message Content intent, and the component domain's complete channel, thread, and permission evidence. The underlying `guild-scaffolds`, `guild-profile`, `guild-settings`, `welcome-screen`, `onboarding`, and `interactions` toolsets do not need to be exposed for the coordinator to enforce those policies.
 
-The strict manifest always contains one bounded additive scaffold plus at least one profile, settings, Welcome Screen, or onboarding phase. The coordinator uses the fixed order `structure`, `profile`, `settings`, `welcome-screen`, then `onboarding`, skipping an omitted phase. Profile accepts only a complete desired guild name and/or nullable description. Settings accepts the existing named sparse settings. `afkChannel` can be `null` or an exact `{ "kind": "exact", "channelId": "..." }` reference to an existing voice channel because scaffolds do not create voice channels. `systemChannel` can additionally be a `{ "kind": "scaffold", "key": "..." }` reference to a requested text channel. A Welcome Screen phase is the existing complete ordered replacement shape, except each entry uses a `channel` reference instead of `channelId`; it can target an exact existing channel or a requested scaffold text or forum channel.
+The strict manifest always contains one bounded additive scaffold plus at least one profile, settings, Welcome Screen, onboarding, or publication phase. The coordinator uses the fixed order `structure`, `profile`, `settings`, `welcome-screen`, `onboarding`, then ordered `publication` steps, skipping an omitted phase. Profile accepts only a complete desired guild name and/or nullable description. Settings accepts the existing named sparse settings. `afkChannel` can be `null` or an exact `{ "kind": "exact", "channelId": "..." }` reference to an existing voice channel because scaffolds do not create voice channels. `systemChannel` can additionally be a `{ "kind": "scaffold", "key": "..." }` reference to a requested text channel. A Welcome Screen phase is the existing complete ordered replacement shape, except each entry uses a `channel` reference instead of `channelId`; it can target an exact existing channel or a requested scaffold text or forum channel.
 
 An onboarding phase is the existing complete replacement shape with symbolic reference support. `defaultChannels` and each option's `channels` accept exact channel IDs or requested scaffold text or forum keys. Each option's `roles` accepts exact role IDs or requested scaffold role keys. Optional `promptId` and `optionId` fields remain exact Discord IDs: include them only to retain those exact existing items, and omit them to request new items. Prompt and option titles are never used for matching. Symbolic references resolve only after the scaffold planner proves every exact requested resource binding. Duplicate raw references and duplicate resolved Discord IDs are rejected. The onboarding planner still proves direct `@everyone`-visible channels, zero-authority self-assignable roles below the connector, complete guild features and permissions, safe emoji evidence, full-replacement deletions, and the conservative enabled-state default-channel constraints.
+
+`publications` contains at most 10 ordered static Components V2 create or exact-ID edit requests. Every entry has a unique stable lowercase `key`, an exact channel or active-thread reference or a requested scaffold text-channel reference, a strict bounded `components` layout, and optional `notifyUserIds`. Create omits `messageId`; edit requires it. Replies and reply-author notification are deliberately excluded. The component domain suppresses notifications by default and permits an exact user notification only when that ID is separately allowlisted and visibly mentioned in the component text. Exact channel references retain the component domain's supported-channel and active-thread checks, while scaffold references are text-channel only.
 
 ```json
 {
@@ -1924,7 +1926,39 @@ An onboarding phase is the existing complete replacement shape with symbolic ref
         ]
       }
     ]
-  }
+  },
+  "publications": [
+    {
+      "action": "create",
+      "key": "launch-message",
+      "channel": {
+        "kind": "scaffold",
+        "key": "announcements"
+      },
+      "components": [
+        {
+          "kind": "container",
+          "accentColor": 5793266,
+          "components": [
+            {
+              "kind": "text",
+              "content": "# Welcome\nStart with the community news above."
+            },
+            {
+              "kind": "separator",
+              "spacing": "small",
+              "divider": true
+            },
+            {
+              "kind": "text",
+              "content": "Use the onboarding choices to personalize your experience."
+            }
+          ]
+        }
+      ],
+      "notifyUserIds": []
+    }
+  ]
 }
 ```
 
@@ -1932,14 +1966,16 @@ An onboarding phase is the existing complete replacement shape with symbolic ref
 2. Call `plan_guild_blueprint` and review the aggregate identity, phase states, caller-retained request digest, warnings, and complete nested plan for the first frontier that needs action.
 3. Call `execute_guild_blueprint` with the identical manifest plus the aggregate plan digest. Approve only the displayed frontier.
 4. Review the nested result, retain the manifest unchanged, and call `plan_guild_blueprint` again. One execution call never advances into a second phase.
-5. Repeat the plan, review, and execute loop until planning returns `already-current` with no frontier.
-6. Call `verify_guild_blueprint` with the same manifest. Treat only `verified` as fresh completion evidence.
+5. Repeat the plan, review, and execute loop until planning returns `already-current` with no frontier. If planning returns `blocked`, inspect the content-free publication verifier status and exact IDs before choosing a new reviewed intent and key; execution performs no write for a blocker.
+6. Call `verify_guild_blueprint` with the same manifest. Treat only `verified` as fresh completion evidence; `blocked` means a publication receipt conflicts, remains unsettled, or no longer matches exact live message state.
 
-The master operation key is never forwarded to a domain. The coordinator derives a deterministic HMAC-separated key for each phase, so structure, profile, settings, Welcome Screen, and onboarding operations cannot collide while intentional replanning addresses the same nested operation. The keyed request digest binds the complete normalized manifest without revealing it; the aggregate process-bound plan digest additionally binds the exact nested frontier and verified resource bindings. Signed MCP request state contains only those two digests. A changed manifest, key, phase, Discord snapshot, nested digest, or connector process requires a new review.
+The master operation key is never forwarded to a domain. The coordinator derives a deterministic HMAC-separated key for each singleton phase and a separate key from each stable publication key, so structure, profile, settings, Welcome Screen, onboarding, and individual publication operations cannot collide while intentional replanning addresses the same nested operation. Reordering publications changes the manifest digest but preserves each publication's operation identity. Changing a publication's content under the same master and publication key correctly produces a request-mismatch blocker rather than repurposing a spent key. The keyed request digest binds the complete normalized manifest without revealing it; the aggregate process-bound plan digest additionally binds the exact nested frontier, verifier codes, blocker, and verified resource bindings. Signed MCP request state contains only those two digests. A changed manifest, key, phase, Discord snapshot, nested digest, or connector process requires a new review.
 
-Planning evaluates satisfied phases until it reaches the first required write, then marks later phases `waiting`. Execution recomputes the whole aggregate frontier and delegates exactly one nested request to the existing scaffold, profile, settings, Welcome Screen, or onboarding executor. The nested workflow retains its own durable coordination, one-shot reservation, pending content-free activity, non-retried mutation, exact readback, drift reporting, and uncertainty quarantine. The coordinator creates no blueprint receipt or checkpoint of its own; verification projects only identities, hashes, phase states, exact resource IDs without symbolic keys, and existing content-free domain evidence. Guild, role, and channel names, topics, profile and Welcome Screen descriptions, onboarding prompt and option titles and descriptions, Unicode emoji, audit reasons, symbolic keys, and the master operation key remain transient and are never included in verification.
+Planning evaluates satisfied phases until it reaches the first required write, then marks later phases `waiting`. For each reached publication it first invokes the restart-safe component verifier. A matching completed receipt triggers one exact receipt-bound message GET and marks the publication satisfied. A missing receipt falls through to the component planner, allowing either one create or edit frontier or a record-free already-current edit. A request mismatch, pending, failed, uncertain, malformed-target, missing-message, or live-state-mismatch result becomes a content-free `blocked` or `drifted` blueprint step and stops later publications. It never trusts a caller-supplied create result, searches message history, embeds a managed marker, or persists a content-bearing checkpoint.
 
-The coordinator deliberately covers additive structure, sparse profile, named settings, complete ordered Welcome Screen replacement, and complete onboarding replacement only. Permission overwrites, ordering, AutoMod, components, and other administration remain separate reviewed workflows until their domain planners can be composed without weakening scope, privacy, identity, or uncertainty handling. In particular, safe AutoMod creation remains disabled until a separate reviewed enable operation, so the blueprint does not guess or persist rule identities across those frontiers. The connector does not translate prose into a fixed theme, infer a community type, import remote templates, or persist a portable content-bearing plan token. A model or human may help author the strict manifest, but the manifest itself is the reviewed source of truth.
+Execution recomputes the whole aggregate frontier and delegates exactly one nested request to the existing scaffold, profile, settings, Welcome Screen, onboarding, or component-message executor. The nested workflow retains its own durable coordination, shared interaction limiter where applicable, one-shot reservation, pending content-free activity, non-retried mutation, exact readback, drift reporting, and uncertainty quarantine. The coordinator creates no blueprint receipt or checkpoint of its own. Verification projects only identities, hashes, phase states, exact resource and publication message IDs without symbolic keys, fixed verifier and receipt status codes, and existing content-free domain evidence. Guild, role, and channel names, topics, profile and Welcome Screen descriptions, onboarding prompt and option titles and descriptions, component trees and text, notification user IDs, Unicode emoji, audit reasons, symbolic and publication keys, and the master operation key remain transient and are never included in verification.
+
+The coordinator deliberately covers additive structure, sparse profile, named settings, complete ordered Welcome Screen replacement, complete onboarding replacement, and bounded static Components V2 publications only. Permission overwrites, ordering, AutoMod, interactive components, attachments, replies, and other administration remain separate reviewed workflows until their domain planners can be composed without weakening scope, privacy, identity, or uncertainty handling. In particular, safe AutoMod creation remains disabled until a separate reviewed enable operation, so the blueprint does not guess or persist rule identities across those frontiers. The connector does not translate prose into a fixed theme, infer a community type, import remote templates, search for managed markers, or persist a portable content-bearing plan token. A model or human may help author the strict manifest, but the manifest itself is the reviewed source of truth.
 
 ## Reviewed resumable guild scaffolds
 

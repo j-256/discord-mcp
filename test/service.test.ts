@@ -43,7 +43,10 @@ import {
   InteractionRateLimitError,
   PolicyError,
 } from "../src/errors.js"
-import { guildBlueprintStepOperationKey } from "../src/guild-blueprint-service.js"
+import {
+  guildBlueprintPublicationOperationKey,
+  guildBlueprintStepOperationKey,
+} from "../src/guild-blueprint-service.js"
 import { GatewayChannelLayoutStore } from "../src/gateway-channel-layout.js"
 import type {
   GatewayVoiceChannelStatusSnapshot,
@@ -139,6 +142,29 @@ class MemoryOperationStore implements OperationStore {
   async reserve(receipt: OperationReceipt) {
     if (this.receipt) return { created: false, receipt: this.receipt }
     this.receipt = receipt
+    return { created: true, receipt }
+  }
+}
+
+class KeyedMemoryOperationStore implements OperationStore {
+  receipt: OperationReceipt | undefined
+  readonly receipts = new Map<string, OperationReceipt>()
+
+  async finish(receipt: OperationReceipt): Promise<void> {
+    this.receipt = receipt
+    this.receipts.set(`${receipt.kind}:${receipt.operationKeyHash}`, receipt)
+  }
+
+  async get(kind: OperationReceipt["kind"], operationKeyHash: string) {
+    return this.receipts.get(`${kind}:${operationKeyHash}`)
+  }
+
+  async reserve(receipt: OperationReceipt) {
+    const key = `${receipt.kind}:${receipt.operationKeyHash}`
+    const existing = this.receipts.get(key)
+    if (existing) return { created: false, receipt: existing }
+    this.receipt = receipt
+    this.receipts.set(key, receipt)
     return { created: true, receipt }
   }
 }
@@ -5806,6 +5832,265 @@ test("service dispatches a guild-blueprint onboarding frontier through its domai
   }])
   assert.equal(calls.activityEntries.length, 0)
   assert.equal(operationStore.receipt, undefined)
+})
+
+test("service dispatches one guild-blueprint publication through component coordination", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const publicationChannel = channel({
+    default_auto_archive_duration: 1_440,
+    name: "announcements",
+    nsfw: false,
+    parent_id: null,
+    rate_limit_per_user: 0,
+    topic: null,
+  })
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildChannels() {
+        return [publicationChannel]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, permissions, "@everyone"),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+    },
+    componentMessageOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(10),
+      randomId: () => "activity-guild-blueprint-publication",
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    },
+    guildBlueprintOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-blueprint-scaffold",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const operationKey = "guild-blueprint-publication-attempt-0001"
+  const publicationKey = "launch-message"
+  const request = {
+    auditReason: "Reviewed coordinated publication",
+    guildId: GUILD_ID,
+    operationKey,
+    publications: [{
+      action: "create" as const,
+      channel: { key: "announcements", kind: "scaffold" as const },
+      components: [{ content: "Reviewed launch", kind: "text" as const }],
+      key: publicationKey,
+    }],
+    scaffold: {
+      channels: [{ key: "announcements", kind: "text" as const, name: "announcements" }],
+      roles: [{ key: "support-role", name: "Support" }],
+    },
+  }
+  const plan = await service.planGuildBlueprint(request)
+
+  assert.equal(plan.frontier?.kind, "publication")
+  assert.deepEqual(plan.steps.map((step) => [step.kind, step.state]), [
+    ["structure", "satisfied"],
+    ["publication", "ready"],
+  ])
+  if (plan.frontier?.kind !== "publication") {
+    throw new Error("Expected a component publication frontier")
+  }
+  const nestedOperationKey = guildBlueprintPublicationOperationKey(
+    operationKey,
+    publicationKey,
+  )
+  assert.equal(
+    plan.frontier.plan.operationKeyHash,
+    operationKeyHash(nestedOperationKey),
+  )
+  await assert.rejects(
+    () => service.executeGuildBlueprint(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "component-message",
+    operationKeyHash: operationKeyHash(nestedOperationKey),
+    planDigest: plan.frontier.plan.digest,
+    targets: [{ id: CHANNEL_ID, kind: "channel" }],
+  }])
+  assert.equal(calls.createComponentMessage, 0)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service verifies a completed guild-blueprint publication after restart", async () => {
+  const operationStore = new KeyedMemoryOperationStore()
+  let created: DiscordMessage | undefined
+  let createCalls = 0
+  const initialPermissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const publicationChannel = channel({
+    default_auto_archive_duration: 1_440,
+    name: "announcements",
+    nsfw: false,
+    parent_id: null,
+    rate_limit_per_user: 0,
+    topic: null,
+  })
+  const environment = {
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+  }
+  const serviceOptions = {
+    client: {
+      async createComponentMessage(_channelId: string, input: {
+        nonce: string
+      }) {
+        createCalls += 1
+        created = message({
+          attachments: [],
+          author: bot(),
+          channel_id: CHANNEL_ID,
+          components: [{ content: "Reviewed launch", id: 1, type: 10 }],
+          content: "",
+          edited_timestamp: null,
+          embeds: [],
+          flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+          mention_everyone: false,
+          mention_roles: [],
+          mentions: [],
+          nonce: input.nonce,
+          pinned: false,
+          sticker_items: [],
+          tts: false,
+          type: 0,
+        })
+        return created
+      },
+      async getGuildChannels() {
+        return [publicationChannel]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, initialPermissions, "@everyone"),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+      async getMessage() {
+        assert.ok(created)
+        return created
+      },
+    },
+    componentMessageOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(10),
+      randomId: () => "activity-guild-blueprint-publication",
+    },
+    environment,
+    guildBlueprintOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-blueprint-scaffold",
+    },
+    operationStore,
+  }
+  const first = serviceFixture(serviceOptions)
+  const operationKey = "guild-blueprint-restart-publication-0001"
+  const request = {
+    auditReason: "Reviewed restart-safe publication",
+    guildId: GUILD_ID,
+    operationKey,
+    publications: [{
+      action: "create" as const,
+      channel: { key: "announcements", kind: "scaffold" as const },
+      components: [{ content: "Reviewed launch", kind: "text" as const }],
+      key: "launch-message",
+    }],
+    scaffold: {
+      channels: [{ key: "announcements", kind: "text" as const, name: "announcements" }],
+      roles: [{ key: "support-role", name: "Support" }],
+    },
+  }
+  const plan = await first.service.planGuildBlueprint(request)
+  const result = await first.service.executeGuildBlueprint(request, plan.digest)
+
+  assert.equal(result.status, "frontier-executed")
+  assert.equal(result.executedPhase, "publication")
+  assert.equal(createCalls, 1)
+  assert.equal(operationStore.receipt?.kind, "component-message")
+  assert.equal(operationStore.receipt?.status, "completed")
+
+  const restarted = serviceFixture({
+    ...serviceOptions,
+    client: {
+      async createComponentMessage() {
+        throw new Error("Restart verification must not create a message")
+      },
+      async getGuildChannels() {
+        return [publicationChannel]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(
+            GUILD_ID,
+            initialPermissions & ~DISCORD_PERMISSIONS.SEND_MESSAGES,
+            "@everyone",
+          ),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+      async getMessage() {
+        assert.ok(created)
+        return created
+      },
+    },
+  })
+  const verification = await restarted.service.verifyGuildBlueprint(request)
+
+  assert.equal(verification.status, "verified")
+  assert.equal(verification.steps.at(-1)?.verificationStatus, "verified")
+  assert.equal(verification.steps.at(-1)?.messageId, MESSAGE_ID)
+  assert.equal(createCalls, 1)
+  const persisted = JSON.stringify(operationStore.receipt)
+  assert.equal(persisted.includes("Reviewed launch"), false)
+  assert.equal(persisted.includes(operationKey), false)
 })
 
 test("service pins identity through native poll audit and reviewed creation", async () => {

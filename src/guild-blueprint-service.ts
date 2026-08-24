@@ -1,12 +1,27 @@
 import { createHmac } from "node:crypto"
 
 import {
+  CONNECTOR_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
+  GUILD_SCAFFOLD_SYMBOL_PATTERN,
   ONBOARDING_LIMITS,
   SCHEMA_VERSION,
   WELCOME_SCREEN_LIMITS,
 } from "./constants.js"
+import type {
+  ComponentLayoutInput,
+  NormalizedComponentLayout,
+} from "./component-layout.js"
+import {
+  type ComponentMessageContentIntentStatus,
+  type ComponentMessagePlan,
+  type ComponentMessageRequest,
+  type ComponentMessageResult,
+  type ComponentMessageVerificationReason,
+  type ComponentMessageVerificationResult,
+  normalizeComponentMessageRequest,
+} from "./component-message-service.js"
 import { GuildBlueprintPlanChangedError } from "./errors.js"
 import {
   type GuildProfileChangePlan,
@@ -54,6 +69,7 @@ const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "onboarding",
   "operationKey",
   "profile",
+  "publications",
   "scaffold",
   "settings",
   "welcomeScreen",
@@ -124,6 +140,17 @@ const BLUEPRINT_ONBOARDING_OPTION_KEYS = Object.freeze([
   "roles",
   "title",
 ] as const)
+const BLUEPRINT_PUBLICATION_CREATE_KEYS = Object.freeze([
+  "action",
+  "channel",
+  "components",
+  "key",
+  "notifyUserIds",
+] as const)
+const BLUEPRINT_PUBLICATION_EDIT_KEYS = Object.freeze([
+  ...BLUEPRINT_PUBLICATION_CREATE_KEYS,
+  "messageId",
+] as const)
 
 export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "structure",
@@ -131,10 +158,15 @@ export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "settings",
   "welcome-screen",
   "onboarding",
+  "publication",
 ] as const)
 
 export type GuildBlueprintPhase = typeof GUILD_BLUEPRINT_PHASES[number]
-export type GuildBlueprintPhaseState = "ready" | "satisfied" | "waiting"
+export type GuildBlueprintSingletonPhase = Exclude<GuildBlueprintPhase, "publication">
+export type GuildBlueprintPhaseState = "blocked" | "ready" | "satisfied" | "waiting"
+const GUILD_BLUEPRINT_SINGLETON_PHASES: ReadonlySet<string> = new Set(
+  GUILD_BLUEPRINT_PHASES.filter((phase) => phase !== "publication"),
+)
 
 export interface GuildBlueprintExactChannelReference {
   channelId: string
@@ -223,12 +255,35 @@ export type GuildBlueprintOnboardingInput = Omit<
   prompts: readonly GuildBlueprintOnboardingPromptInput[]
 }
 
+interface GuildBlueprintPublicationBaseInput {
+  channel: GuildBlueprintChannelReference
+  components: readonly ComponentLayoutInput[]
+  key: string
+  notifyUserIds?: readonly string[]
+}
+
+export interface GuildBlueprintCreatePublicationInput
+  extends GuildBlueprintPublicationBaseInput {
+  action: "create"
+}
+
+export interface GuildBlueprintEditPublicationInput
+  extends GuildBlueprintPublicationBaseInput {
+  action: "edit"
+  messageId: string
+}
+
+export type GuildBlueprintPublicationInput =
+  | GuildBlueprintCreatePublicationInput
+  | GuildBlueprintEditPublicationInput
+
 export interface GuildBlueprintRequest {
   auditReason: string
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
   profile?: GuildBlueprintProfileInput
+  publications?: readonly GuildBlueprintPublicationInput[]
   scaffold: GuildBlueprintScaffoldInput
   settings?: GuildBlueprintSettingsInput
   welcomeScreen?: GuildBlueprintWelcomeScreenInput
@@ -243,6 +298,16 @@ interface NormalizedGuildBlueprintSettingsInput extends Omit<
   >
 }
 
+export type NormalizedGuildBlueprintPublicationInput = {
+  channel: GuildBlueprintChannelReference
+  components: ComponentLayoutInput[]
+  key: string
+  notifyUserIds: string[]
+} & (
+  | { action: "create" }
+  | { action: "edit"; messageId: string }
+)
+
 export interface NormalizedGuildBlueprintRequest {
   auditReason: string
   guildId: string
@@ -250,6 +315,7 @@ export interface NormalizedGuildBlueprintRequest {
   operationKey: string
   operationKeyHash: string
   profile?: GuildBlueprintProfileInput
+  publications?: NormalizedGuildBlueprintPublicationInput[]
   scaffold: GuildBlueprintScaffoldInput & { stepLimit: number }
   settings?: NormalizedGuildBlueprintSettingsInput
   welcomeScreen?: GuildBlueprintWelcomeScreenInput
@@ -271,12 +337,40 @@ const TEXT_OR_FORUM_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "text",
 ])
 
-export interface GuildBlueprintPlanStep {
-  kind: GuildBlueprintPhase
+interface GuildBlueprintPlanStepBase {
   nestedPlanDigest: string | null
   operationKeyHash: string
   state: GuildBlueprintPhaseState
   writeRequired: boolean
+}
+
+export interface GuildBlueprintSingletonPlanStep extends GuildBlueprintPlanStepBase {
+  kind: GuildBlueprintSingletonPhase
+}
+
+export interface GuildBlueprintPublicationPlanStep extends GuildBlueprintPlanStepBase {
+  channelId: string | null
+  index: number
+  key: string
+  kind: "publication"
+  messageId: string | null
+  receiptStatus: ComponentMessageVerificationResult["receiptStatus"]
+  verificationReason: ComponentMessageVerificationReason | null
+  verificationStatus: ComponentMessageVerificationResult["status"] | null
+}
+
+export type GuildBlueprintPlanStep =
+  | GuildBlueprintPublicationPlanStep
+  | GuildBlueprintSingletonPlanStep
+
+export interface GuildBlueprintPublicationBlocker {
+  channelId: string
+  index: number
+  messageId: string | null
+  operationKeyHash: string
+  receiptStatus: ComponentMessageVerificationResult["receiptStatus"]
+  verificationReason: ComponentMessageVerificationReason
+  verificationStatus: "blocked" | "drifted"
 }
 
 export type GuildBlueprintFrontier =
@@ -288,6 +382,13 @@ export type GuildBlueprintFrontier =
   | {
       kind: "profile"
       plan: GuildProfileChangePlan
+      writeRequired: true
+    }
+  | {
+      index: number
+      key: string
+      kind: "publication"
+      plan: ComponentMessagePlan
       writeRequired: true
     }
   | {
@@ -309,6 +410,7 @@ export type GuildBlueprintFrontier =
 export interface GuildBlueprintPlan {
   applicationId: string
   bindings: GuildBlueprintBinding[]
+  blocker: GuildBlueprintPublicationBlocker | null
   botId: string
   createdAt: string
   digest: string
@@ -327,12 +429,13 @@ export interface GuildBlueprintPlan {
   }
   requestDigest: string
   schemaVersion: number
-  status: "already-current" | "planned"
+  status: "already-current" | "blocked" | "planned"
   steps: GuildBlueprintPlanStep[]
   warnings: string[]
 }
 
 export type GuildBlueprintNestedResult =
+  | ComponentMessageResult
   | OnboardingChangeResult
   | GuildProfileChangeResult
   | GuildScaffoldResult
@@ -340,28 +443,45 @@ export type GuildBlueprintNestedResult =
   | WelcomeScreenChangeResult
 
 export interface GuildBlueprintResult {
+  blocker: GuildBlueprintPublicationBlocker | null
   digest: string
   executedPhase: GuildBlueprintPhase | null
+  executedPublicationIndex: number | null
   guildId: string
   nestedResult: GuildBlueprintNestedResult | null
-  nextAction: "done" | "replan"
+  nextAction: "done" | "inspect" | "replan"
   operationKeyHash: string
   requestDigest: string
   schemaVersion: number
-  status: "already-current" | "frontier-executed"
+  status: "already-current" | "blocked" | "frontier-executed"
+}
+
+export interface GuildBlueprintVerificationStep {
+  channelId?: string | null
+  index?: number
+  kind: GuildBlueprintPhase
+  messageId?: string | null
+  nestedPlanDigest: string | null
+  operationKeyHash: string
+  receiptStatus?: ComponentMessageVerificationResult["receiptStatus"]
+  state: GuildBlueprintPhaseState
+  verificationReason?: ComponentMessageVerificationReason | null
+  verificationStatus?: ComponentMessageVerificationResult["status"] | null
+  writeRequired: boolean
 }
 
 export interface GuildBlueprintVerification {
   applicationId: string
+  blocker: GuildBlueprintPublicationBlocker | null
   botId: string
   checkedAt: string
   digest: string
   evidence: {
     activityAndReceipts: "content-free-domain-records"
     callerRetainedManifestRequired: true
-    historicalMutationProvenance: "domain-activity-only"
+    historicalMutationProvenance: "domain-activity-and-receipts"
     manifestPersisted: false
-    source: "live-domain-plans"
+    source: "live-domain-plans-and-exact-receipt-readback"
   }
   guildId: string
   operationKeyHash: string
@@ -372,11 +492,27 @@ export interface GuildBlueprintVerification {
     resourceId: string
   }>
   schemaVersion: number
-  status: "incomplete" | "verified"
-  steps: GuildBlueprintPlanStep[]
+  status: "blocked" | "incomplete" | "verified"
+  steps: GuildBlueprintVerificationStep[]
 }
 
 export interface GuildBlueprintDomainServices {
+  component: {
+    plan(
+      applicationId: string,
+      botId: string,
+      intent: ComponentMessageContentIntentStatus,
+      request: ComponentMessageRequest,
+      options?: RequestOptions,
+    ): Promise<ComponentMessagePlan>
+    verify(
+      applicationId: string,
+      botId: string,
+      intent: ComponentMessageContentIntentStatus,
+      request: ComponentMessageRequest,
+      options?: RequestOptions,
+    ): Promise<ComponentMessageVerificationResult>
+  }
   onboarding: {
     plan(
       applicationId: string,
@@ -420,6 +556,11 @@ export interface GuildBlueprintDomainServices {
 }
 
 export interface GuildBlueprintExecutors {
+  executeComponent(
+    request: ComponentMessageRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<ComponentMessageResult>
   executeOnboarding(
     request: OnboardingChangeRequest,
     planDigest: string,
@@ -463,6 +604,11 @@ type GuildBlueprintFrontierRequest =
       request: GuildProfileChangeRequest
     }
   | {
+      index: number
+      kind: "publication"
+      request: ComponentMessageRequest
+    }
+  | {
       kind: "settings"
       request: GuildSettingsChangeRequest
     }
@@ -497,17 +643,41 @@ function own(value: object, key: PropertyKey): boolean {
   return Object.hasOwn(value, key)
 }
 
+function canonicalComponentLayoutInput(
+  layout: NormalizedComponentLayout,
+): ComponentLayoutInput[] {
+  return layout.map((component) => {
+    if (component.kind === "text") return { ...component }
+    if (component.kind === "separator") return { ...component }
+    return {
+      ...(component.accentColor === null
+        ? {}
+        : { accentColor: component.accentColor }),
+      components: component.components.map((child) => ({ ...child })),
+      kind: "container",
+      spoiler: component.spoiler,
+    }
+  })
+}
+
+function isPositiveSnowflake(value: unknown): value is string {
+  return typeof value === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(value)
+    && BigInt(value) >= 1n
+    && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+}
+
 function positiveSnowflake(value: unknown, description: string): string {
   if (
-    typeof value !== "string"
-    || !DISCORD_SNOWFLAKE_PATTERN.test(value)
-    || BigInt(value) < 1n
-    || BigInt(value) > DISCORD_SNOWFLAKE_MAX
+    !isPositiveSnowflake(value)
   ) throw new RangeError(`${description} must be a positive Discord snowflake`)
   return value
 }
 
-function derivedOperationKey(operationKey: string, phase: GuildBlueprintPhase): string {
+function derivedOperationKey(
+  operationKey: string,
+  phase: GuildBlueprintSingletonPhase,
+): string {
   return `blueprint:${createHmac("sha256", operationKey)
     .update("discord-mcp-guild-blueprint-step.v1\0")
     .update(phase)
@@ -516,13 +686,35 @@ function derivedOperationKey(operationKey: string, phase: GuildBlueprintPhase): 
 
 export function guildBlueprintStepOperationKey(
   operationKey: string,
-  phase: GuildBlueprintPhase,
+  phase: GuildBlueprintSingletonPhase,
 ): string {
   operationKeyHash(operationKey)
-  if (!GUILD_BLUEPRINT_PHASES.includes(phase)) {
+  if (!GUILD_BLUEPRINT_SINGLETON_PHASES.has(phase)) {
     throw new RangeError("Discord guild blueprint phase is invalid")
   }
   return derivedOperationKey(operationKey, phase)
+}
+
+function derivedPublicationOperationKey(operationKey: string, key: string): string {
+  return `blueprint-publication:${createHmac("sha256", operationKey)
+    .update("discord-mcp-guild-blueprint-publication.v1\0")
+    .update(key)
+    .digest("hex")}`
+}
+
+export function guildBlueprintPublicationOperationKey(
+  operationKey: string,
+  key: string,
+): string {
+  operationKeyHash(operationKey)
+  if (
+    typeof key !== "string"
+    || key.length > CONNECTOR_LIMITS.scaffoldSymbolCharacters
+    || !GUILD_SCAFFOLD_SYMBOL_PATTERN.test(key)
+  ) {
+    throw new RangeError("Discord guild blueprint publication key is invalid")
+  }
+  return derivedPublicationOperationKey(operationKey, key)
 }
 
 function normalizeChannelReference(
@@ -1101,6 +1293,107 @@ function canonicalOnboardingInput(
   }
 }
 
+function canonicalPublicationInputs(
+  request: GuildBlueprintRequest,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+): NormalizedGuildBlueprintPublicationInput[] | undefined {
+  if (request.publications === undefined) return undefined
+  if (
+    !Array.isArray(request.publications)
+    || request.publications.length < 1
+    || request.publications.length > CONNECTOR_LIMITS.guildBlueprintPublications
+  ) {
+    throw new RangeError("Discord guild blueprint publications are invalid")
+  }
+  const keys = new Set<string>()
+  return request.publications.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new RangeError(
+        `Discord guild blueprint publication ${index} must be an exact object`,
+      )
+    }
+    const publication = value as GuildBlueprintPublicationInput
+    if (publication.action === "create") {
+      exactObject(
+        publication,
+        BLUEPRINT_PUBLICATION_CREATE_KEYS,
+        `Discord guild blueprint publication ${index} create shape is invalid`,
+      )
+    } else if (publication.action === "edit") {
+      exactObject(
+        publication,
+        BLUEPRINT_PUBLICATION_EDIT_KEYS,
+        `Discord guild blueprint publication ${index} edit shape is invalid`,
+      )
+    } else {
+      throw new RangeError(`Discord guild blueprint publication ${index} action is invalid`)
+    }
+    const key = publication.key
+    if (
+      typeof key !== "string"
+      || key.length > CONNECTOR_LIMITS.scaffoldSymbolCharacters
+      || !GUILD_SCAFFOLD_SYMBOL_PATTERN.test(key)
+    ) {
+      throw new RangeError(`Discord guild blueprint publication ${index} key is invalid`)
+    }
+    if (keys.has(key)) {
+      throw new RangeError("Discord guild blueprint publication keys must be unique")
+    }
+    keys.add(key)
+    const channel = normalizeChannelReference(
+      publication.channel,
+      channelKinds,
+      SYSTEM_CHANNEL_SCAFFOLD_KINDS,
+      `Discord guild blueprint publication ${index} channel`,
+    )
+    if (channel === null) {
+      throw new RangeError(
+        `Discord guild blueprint publication ${index} requires one channel reference`,
+      )
+    }
+    const operationKey = derivedPublicationOperationKey(request.operationKey, key)
+    const channelId = channel.kind === "exact" ? channel.channelId : request.guildId
+    const normalized = normalizeComponentMessageRequest(
+      publication.action === "create"
+        ? {
+            action: "create",
+            channelId,
+            components: publication.components,
+            ...(publication.notifyUserIds === undefined
+              ? {}
+              : { notifyUserIds: publication.notifyUserIds }),
+            operationKey,
+          }
+        : {
+            action: "edit",
+            channelId,
+            components: publication.components,
+            messageId: publication.messageId,
+            ...(publication.notifyUserIds === undefined
+              ? {}
+              : { notifyUserIds: publication.notifyUserIds }),
+            operationKey,
+          },
+    )
+    return normalized.action === "create"
+      ? {
+          action: "create",
+          channel,
+          components: canonicalComponentLayoutInput(normalized.components),
+          key,
+          notifyUserIds: normalized.notifyUserIds,
+        }
+      : {
+          action: "edit",
+          channel,
+          components: canonicalComponentLayoutInput(normalized.components),
+          key,
+          messageId: normalized.messageId as string,
+          notifyUserIds: normalized.notifyUserIds,
+        }
+  })
+}
+
 export function normalizeGuildBlueprintRequest(
   request: GuildBlueprintRequest,
 ): NormalizedGuildBlueprintRequest {
@@ -1118,11 +1411,12 @@ export function normalizeGuildBlueprintRequest(
   if (
     request.onboarding === undefined
     && request.profile === undefined
+    && request.publications === undefined
     && request.settings === undefined
     && request.welcomeScreen === undefined
   ) {
     throw new RangeError(
-      "Discord guild blueprint requires a profile, settings, Welcome Screen, or onboarding phase after the scaffold",
+      "Discord guild blueprint requires a profile, settings, Welcome Screen, onboarding, or publication phase after the scaffold",
     )
   }
   const operationKeyHashValue = operationKeyHash(request.operationKey)
@@ -1142,6 +1436,7 @@ export function normalizeGuildBlueprintRequest(
     request,
     derivedOperationKey(request.operationKey, "profile"),
   )
+  const publications = canonicalPublicationInputs(request, channelKinds)
   const settings = canonicalSettingsInput(
     request,
     derivedOperationKey(request.operationKey, "settings"),
@@ -1166,6 +1461,7 @@ export function normalizeGuildBlueprintRequest(
             ...(own(profile, "name") ? { name: profile.name } : {}),
           },
         }),
+    ...(publications === undefined ? {} : { publications }),
     scaffold: {
       channels: scaffold.channels,
       roles: scaffold.roles,
@@ -1183,6 +1479,9 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
     ...(request.onboarding === undefined ? {} : { onboarding: request.onboarding }),
     operationKeyHash: request.operationKeyHash,
     ...(request.profile === undefined ? {} : { profile: request.profile }),
+    ...(request.publications === undefined
+      ? {}
+      : { publications: request.publications }),
     scaffold: request.scaffold,
     ...(request.settings === undefined ? {} : { settings: request.settings }),
     ...(request.welcomeScreen === undefined
@@ -1193,7 +1492,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v3\0")
+    .update("discord-mcp-guild-blueprint-request.v4\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -1421,23 +1720,113 @@ function onboardingRequest(
   }
 }
 
+function publicationRequest(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+  index: number,
+): ComponentMessageRequest {
+  const publication = request.publications?.[index]
+  if (publication === undefined) {
+    throw new RangeError("Discord guild blueprint publication is missing")
+  }
+  const channelId = resolveChannelReference(
+    publication.channel,
+    bindings,
+    `Discord guild blueprint publication ${index} channel`,
+  )
+  if (typeof channelId !== "string") {
+    throw new RangeError(
+      `Discord guild blueprint publication ${index} channel is unresolved`,
+    )
+  }
+  const operationKey = derivedPublicationOperationKey(
+    request.operationKey,
+    publication.key,
+  )
+  return publication.action === "create"
+    ? {
+        action: "create",
+        channelId,
+        components: publication.components,
+        notifyUserIds: publication.notifyUserIds,
+        operationKey,
+      }
+    : {
+        action: "edit",
+        channelId,
+        components: publication.components,
+        messageId: publication.messageId,
+        notifyUserIds: publication.notifyUserIds,
+        operationKey,
+      }
+}
+
 function phaseOperationKeyHash(
   request: NormalizedGuildBlueprintRequest,
-  phase: GuildBlueprintPhase,
+  phase: GuildBlueprintSingletonPhase,
 ): string {
   return operationKeyHash(derivedOperationKey(request.operationKey, phase))
 }
 
 function waitingStep(
   request: NormalizedGuildBlueprintRequest,
-  kind: GuildBlueprintPhase,
-): GuildBlueprintPlanStep {
+  kind: GuildBlueprintSingletonPhase,
+): GuildBlueprintSingletonPlanStep {
   return {
     kind,
     nestedPlanDigest: null,
     operationKeyHash: phaseOperationKeyHash(request, kind),
     state: "waiting",
     writeRequired: false,
+  }
+}
+
+function publicationOperationKeyHash(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): string {
+  const publication = request.publications?.[index]
+  if (publication === undefined) {
+    throw new RangeError("Discord guild blueprint publication is missing")
+  }
+  return operationKeyHash(
+    derivedPublicationOperationKey(request.operationKey, publication.key),
+  )
+}
+
+function waitingPublicationStep(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): GuildBlueprintPublicationPlanStep {
+  const publication = request.publications?.[index]
+  if (publication === undefined) {
+    throw new RangeError("Discord guild blueprint publication is missing")
+  }
+  return {
+    channelId: publication.channel.kind === "exact"
+      ? publication.channel.channelId
+      : null,
+    index,
+    key: publication.key,
+    kind: "publication",
+    messageId: publication.action === "edit" ? publication.messageId : null,
+    nestedPlanDigest: null,
+    operationKeyHash: publicationOperationKeyHash(request, index),
+    receiptStatus: null,
+    state: "waiting",
+    verificationReason: null,
+    verificationStatus: null,
+    writeRequired: false,
+  }
+}
+
+function appendWaitingPublications(
+  request: NormalizedGuildBlueprintRequest,
+  steps: GuildBlueprintPlanStep[],
+  startIndex = 0,
+): void {
+  for (let index = startIndex; index < (request.publications?.length ?? 0); index += 1) {
+    steps.push(waitingPublicationStep(request, index))
   }
 }
 
@@ -1533,14 +1922,180 @@ function assertNestedPlanBinding(
   }
 }
 
+function assertComponentVerificationBinding(
+  guildId: string,
+  request: ComponentMessageRequest,
+  verification: ComponentMessageVerificationResult,
+): void {
+  if (
+    verification.action !== request.action
+    || verification.channelId !== request.channelId
+    || verification.operationKeyHash !== operationKeyHash(request.operationKey)
+    || verification.schemaVersion !== SCHEMA_VERSION
+  ) {
+    throw new RangeError(
+      "Discord guild blueprint component verification binding changed",
+    )
+  }
+  if (verification.status === "verified") {
+    if (
+      verification.guildId !== guildId
+      || !isPositiveSnowflake(verification.messageId)
+      || verification.planDigest === null
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(verification.planDigest)
+      || !verification.readbackMatched
+      || !verification.requestMatched
+      || verification.reason !== null
+      || verification.receiptStatus !== "completed"
+    ) {
+      throw new RangeError(
+        "Discord guild blueprint component verification evidence changed",
+      )
+    }
+    return
+  }
+  if (verification.status === "not-found") {
+    if (
+      verification.reason !== "operation-not-found"
+      || verification.receiptStatus !== null
+      || verification.requestMatched
+      || verification.readbackMatched
+      || verification.guildId !== null
+      || verification.messageId !== null
+      || verification.planDigest !== null
+    ) {
+      throw new RangeError(
+        "Discord guild blueprint component absence evidence changed",
+      )
+    }
+    return
+  }
+  if (verification.status === "drifted") {
+    if (
+      verification.guildId !== guildId
+      || !isPositiveSnowflake(verification.messageId)
+      || verification.planDigest === null
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(verification.planDigest)
+      || verification.readbackMatched
+      || !verification.requestMatched
+      || verification.receiptStatus !== "completed"
+      || !["message-missing", "message-state-mismatch"].includes(
+        verification.reason as string,
+      )
+    ) {
+      throw new RangeError(
+        "Discord guild blueprint component drift evidence changed",
+      )
+    }
+    return
+  }
+  if (verification.status === "blocked") {
+    if (verification.reason === "request-mismatch") {
+      if (
+        verification.guildId !== null
+        || verification.messageId !== null
+        || verification.planDigest !== null
+        || verification.readbackMatched
+        || verification.requestMatched
+        || verification.receiptStatus === null
+      ) {
+        throw new RangeError(
+          "Discord guild blueprint component blocker evidence changed",
+        )
+      }
+      return
+    }
+    const expectedReceiptStatus = verification.reason === "operation-pending"
+      ? "pending"
+      : verification.reason === "operation-failed"
+        ? "failed"
+        : verification.reason === "operation-uncertain"
+          ? "uncertain"
+          : verification.reason === "receipt-target-mismatch"
+            ? "completed"
+            : null
+    if (
+      expectedReceiptStatus === null
+      || !isPositiveSnowflake(verification.guildId)
+      || verification.planDigest === null
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(verification.planDigest)
+      || verification.readbackMatched
+      || !verification.requestMatched
+      || verification.receiptStatus !== expectedReceiptStatus
+      || verification.messageId !== null
+        && verification.reason !== "receipt-target-mismatch"
+        && !isPositiveSnowflake(verification.messageId)
+    ) {
+      throw new RangeError(
+        "Discord guild blueprint component blocker evidence changed",
+      )
+    }
+    return
+  }
+  throw new RangeError(
+    "Discord guild blueprint component verification status changed",
+  )
+}
+
+function projectedComponentMessageId(
+  verification: ComponentMessageVerificationResult,
+): string | null {
+  if (verification.messageId === null) return null
+  if (!isPositiveSnowflake(verification.messageId)) {
+    if (
+      verification.status === "blocked"
+      && verification.reason === "receipt-target-mismatch"
+    ) return null
+    throw new RangeError(
+      "Discord guild blueprint component message identity changed",
+    )
+  }
+  return verification.messageId
+}
+
 function digestStep(step: GuildBlueprintPlanStep) {
-  return {
+  const base = {
     kind: step.kind,
     nestedPlanDigest: step.nestedPlanDigest,
     operationKeyHash: step.operationKeyHash,
     state: step.state,
     writeRequired: step.writeRequired,
   }
+  return step.kind === "publication"
+    ? {
+        ...base,
+        channelId: step.channelId,
+        index: step.index,
+        key: step.key,
+        messageId: step.messageId,
+        receiptStatus: step.receiptStatus,
+        verificationReason: step.verificationReason,
+        verificationStatus: step.verificationStatus,
+      }
+    : base
+}
+
+function verificationStep(
+  step: GuildBlueprintPlanStep,
+): GuildBlueprintVerificationStep {
+  const base: GuildBlueprintVerificationStep = {
+    kind: step.kind,
+    nestedPlanDigest: step.nestedPlanDigest,
+    operationKeyHash: step.operationKeyHash,
+    state: step.state,
+    writeRequired: step.writeRequired,
+  }
+  return step.kind === "publication"
+    ? {
+        ...base,
+        channelId: step.channelId,
+        index: step.index,
+        messageId: step.messageId,
+        receiptStatus: step.receiptStatus,
+        verificationReason: step.verificationReason,
+        verificationStatus: step.verificationStatus,
+      }
+    : base
 }
 
 export class GuildBlueprintService {
@@ -1557,6 +2112,7 @@ export class GuildBlueprintService {
   async #build(
     applicationId: string,
     botId: string,
+    intent: ComponentMessageContentIntentStatus,
     requestInput: GuildBlueprintRequest,
     options: RequestOptions,
   ): Promise<BuiltGuildBlueprintPlan> {
@@ -1577,6 +2133,7 @@ export class GuildBlueprintService {
 
     const steps: GuildBlueprintPlanStep[] = []
     let bindings: GuildBlueprintBinding[] = []
+    let blocker: GuildBlueprintPublicationBlocker | null = null
     let frontier: GuildBlueprintFrontier | null = null
     let frontierRequest: GuildBlueprintFrontierRequest | null = null
     const structureSatisfied = ["already-current", "completed"].includes(
@@ -1604,6 +2161,7 @@ export class GuildBlueprintService {
       if (request.onboarding !== undefined) {
         steps.push(waitingStep(request, "onboarding"))
       }
+      appendWaitingPublications(request, steps)
     } else {
       bindings = exactScaffoldBindings(request, structurePlan)
       const requestedProfile = profileRequest(request)
@@ -1634,6 +2192,7 @@ export class GuildBlueprintService {
           if (request.onboarding !== undefined) {
             steps.push(waitingStep(request, "onboarding"))
           }
+          appendWaitingPublications(request, steps)
         }
       }
 
@@ -1665,6 +2224,7 @@ export class GuildBlueprintService {
             if (request.onboarding !== undefined) {
               steps.push(waitingStep(request, "onboarding"))
             }
+            appendWaitingPublications(request, steps)
           }
         }
       }
@@ -1712,6 +2272,7 @@ export class GuildBlueprintService {
             if (request.onboarding !== undefined) {
               steps.push(waitingStep(request, "onboarding"))
             }
+            appendWaitingPublications(request, steps)
           }
         }
       }
@@ -1748,6 +2309,128 @@ export class GuildBlueprintService {
               kind: "onboarding",
               request: requestedOnboarding,
             }
+            appendWaitingPublications(request, steps)
+          }
+        }
+      }
+
+      if (frontier === null && request.publications !== undefined) {
+        const bindingsByKey = bindingMap(bindings)
+        for (const [index, publication] of request.publications.entries()) {
+          const requestedPublication = publicationRequest(
+            request,
+            bindingsByKey,
+            index,
+          )
+          const verification = await this.#domains.component.verify(
+            applicationId,
+            botId,
+            intent,
+            requestedPublication,
+            options,
+          )
+          assertComponentVerificationBinding(
+            request.guildId,
+            requestedPublication,
+            verification,
+          )
+          const messageId = projectedComponentMessageId(verification)
+          if (verification.status === "verified") {
+            steps.push({
+              channelId: requestedPublication.channelId,
+              index,
+              key: publication.key,
+              kind: "publication",
+              messageId,
+              nestedPlanDigest: verification.planDigest,
+              operationKeyHash: verification.operationKeyHash,
+              receiptStatus: verification.receiptStatus,
+              state: "satisfied",
+              verificationReason: null,
+              verificationStatus: "verified",
+              writeRequired: false,
+            })
+            continue
+          }
+          if (verification.status === "blocked" || verification.status === "drifted") {
+            blocker = {
+              channelId: requestedPublication.channelId,
+              index,
+              messageId,
+              operationKeyHash: verification.operationKeyHash,
+              receiptStatus: verification.receiptStatus,
+              verificationReason: verification.reason as ComponentMessageVerificationReason,
+              verificationStatus: verification.status,
+            }
+            steps.push({
+              channelId: requestedPublication.channelId,
+              index,
+              key: publication.key,
+              kind: "publication",
+              messageId,
+              nestedPlanDigest: verification.planDigest,
+              operationKeyHash: verification.operationKeyHash,
+              receiptStatus: verification.receiptStatus,
+              state: "blocked",
+              verificationReason: verification.reason,
+              verificationStatus: verification.status,
+              writeRequired: false,
+            })
+            appendWaitingPublications(request, steps, index + 1)
+            break
+          }
+          const publicationPlan = await this.#domains.component.plan(
+            applicationId,
+            botId,
+            intent,
+            requestedPublication,
+            options,
+          )
+          assertNestedIdentity(
+            applicationId,
+            botId,
+            request.guildId,
+            publicationPlan,
+          )
+          assertNestedPlanBinding(requestedPublication.operationKey, publicationPlan)
+          if (
+            publicationPlan.action !== requestedPublication.action
+            || publicationPlan.channel.id !== requestedPublication.channelId
+          ) {
+            throw new RangeError(
+              "Discord guild blueprint component plan target changed",
+            )
+          }
+          const publicationSatisfied = !publicationPlan.writeRequired
+          steps.push({
+            channelId: requestedPublication.channelId,
+            index,
+            key: publication.key,
+            kind: "publication",
+            messageId: publicationPlan.target.messageId,
+            nestedPlanDigest: publicationPlan.digest,
+            operationKeyHash: publicationPlan.operationKeyHash,
+            receiptStatus: verification.receiptStatus,
+            state: publicationSatisfied ? "satisfied" : "ready",
+            verificationReason: verification.reason,
+            verificationStatus: verification.status,
+            writeRequired: !publicationSatisfied,
+          })
+          if (!publicationSatisfied) {
+            frontier = {
+              index,
+              key: publication.key,
+              kind: "publication",
+              plan: publicationPlan,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              index,
+              kind: "publication",
+              request: requestedPublication,
+            }
+            appendWaitingPublications(request, steps, index + 1)
+            break
           }
         }
       }
@@ -1756,22 +2439,25 @@ export class GuildBlueprintService {
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       bindings,
+      blocker,
       botId,
       frontier: frontier === null
         ? null
         : {
             kind: frontier.kind,
             nestedPlanDigest: frontier.plan.digest,
+            ...(frontier.kind === "publication" ? { index: frontier.index } : {}),
             writeRequired: frontier.writeRequired,
           },
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v3",
+      version: "guild-blueprint-plan.v4",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
       bindings,
+      blocker,
       botId,
       createdAt: this.#clock().toISOString(),
       digest,
@@ -1786,12 +2472,17 @@ export class GuildBlueprintService {
       },
       requestDigest,
       schemaVersion: SCHEMA_VERSION,
-      status: frontier === null ? "already-current" : "planned",
+      status: blocker !== null
+        ? "blocked"
+        : frontier === null
+          ? "already-current"
+          : "planned",
       steps,
       warnings: [
         "The exact blueprint manifest and master operation key remain caller-retained and are not persisted by the connector",
         "One execution call can run only this fresh reviewed frontier; plan again before any later phase",
         "A failed, drifting, or uncertain nested operation remains quarantined under its existing domain workflow",
+        "Publication recovery uses only exact receipt-bound message reads and never scans channel history",
       ],
     }
     return { frontierRequest, plan }
@@ -1800,15 +2491,17 @@ export class GuildBlueprintService {
   async plan(
     applicationId: string,
     botId: string,
+    intent: ComponentMessageContentIntentStatus,
     request: GuildBlueprintRequest,
     options: RequestOptions = {},
   ): Promise<GuildBlueprintPlan> {
-    return (await this.#build(applicationId, botId, request, options)).plan
+    return (await this.#build(applicationId, botId, intent, request, options)).plan
   }
 
   async execute(
     applicationId: string,
     botId: string,
+    intent: ComponentMessageContentIntentStatus,
     request: GuildBlueprintRequest,
     planDigest: string,
     executors: GuildBlueprintExecutors,
@@ -1817,14 +2510,31 @@ export class GuildBlueprintService {
     if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
       throw new RangeError("Discord guild blueprint plan digest is invalid")
     }
-    const built = await this.#build(applicationId, botId, request, options)
+    const built = await this.#build(applicationId, botId, intent, request, options)
     if (built.plan.digest !== planDigest) {
       throw new GuildBlueprintPlanChangedError(planDigest, built.plan.digest)
     }
-    if (built.plan.frontier === null || built.frontierRequest === null) {
+    if (built.plan.blocker !== null) {
       return {
+        blocker: built.plan.blocker,
         digest: built.plan.digest,
         executedPhase: null,
+        executedPublicationIndex: null,
+        guildId: built.plan.guild.id,
+        nestedResult: null,
+        nextAction: "inspect",
+        operationKeyHash: built.plan.operationKeyHash,
+        requestDigest: built.plan.requestDigest,
+        schemaVersion: SCHEMA_VERSION,
+        status: "blocked",
+      }
+    }
+    if (built.plan.frontier === null || built.frontierRequest === null) {
+      return {
+        blocker: null,
+        digest: built.plan.digest,
+        executedPhase: null,
+        executedPublicationIndex: null,
         guildId: built.plan.guild.id,
         nestedResult: null,
         nextAction: "done",
@@ -1859,16 +2569,26 @@ export class GuildBlueprintService {
         built.plan.frontier.plan.digest,
         options,
       )
-    } else {
+    } else if (built.frontierRequest.kind === "onboarding") {
       nestedResult = await executors.executeOnboarding(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else {
+      nestedResult = await executors.executeComponent(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,
       )
     }
     return {
+      blocker: null,
       digest: built.plan.digest,
       executedPhase: built.frontierRequest.kind,
+      executedPublicationIndex: built.frontierRequest.kind === "publication"
+        ? built.frontierRequest.index
+        : null,
       guildId: built.plan.guild.id,
       nestedResult,
       nextAction: "replan",
@@ -1882,21 +2602,23 @@ export class GuildBlueprintService {
   async verify(
     applicationId: string,
     botId: string,
+    intent: ComponentMessageContentIntentStatus,
     request: GuildBlueprintRequest,
     options: RequestOptions = {},
   ): Promise<GuildBlueprintVerification> {
-    const plan = await this.plan(applicationId, botId, request, options)
+    const plan = await this.plan(applicationId, botId, intent, request, options)
     return {
       applicationId: plan.applicationId,
+      blocker: plan.blocker,
       botId: plan.botId,
       checkedAt: this.#clock().toISOString(),
       digest: plan.digest,
       evidence: {
         activityAndReceipts: "content-free-domain-records",
         callerRetainedManifestRequired: true,
-        historicalMutationProvenance: "domain-activity-only",
+        historicalMutationProvenance: "domain-activity-and-receipts",
         manifestPersisted: false,
-        source: "live-domain-plans",
+        source: "live-domain-plans-and-exact-receipt-readback",
       },
       guildId: plan.guild.id,
       operationKeyHash: plan.operationKeyHash,
@@ -1907,8 +2629,12 @@ export class GuildBlueprintService {
         resourceId: binding.resourceId,
       })),
       schemaVersion: SCHEMA_VERSION,
-      status: plan.status === "already-current" ? "verified" : "incomplete",
-      steps: plan.steps.map(digestStep),
+      status: plan.status === "blocked"
+        ? "blocked"
+        : plan.status === "already-current"
+          ? "verified"
+          : "incomplete",
+      steps: plan.steps.map(verificationStep),
     }
   }
 }
