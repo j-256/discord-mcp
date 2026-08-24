@@ -36,6 +36,7 @@
   "files": [
     "dist",
     "discord-mcp.config.schema.json",
+    "docs/environment-migration.md",
     "docs/reference.md",
     "docs/releasing.md",
     "LICENSE",

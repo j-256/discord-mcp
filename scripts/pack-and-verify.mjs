@@ -46,6 +46,7 @@ const REQUIRED_FILES = [
   "dist/cli.js",
   "dist/index.d.ts",
   "dist/index.js",
+  "docs/environment-migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "package.json",
@@ -56,6 +57,7 @@ const STATIC_FILES = new Set([
   "README.md",
   "SECURITY.md",
   "discord-mcp.config.schema.json",
+  "docs/environment-migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "package.json",
@@ -221,7 +223,7 @@ await connector.saveProfile(connector.createConnectorProfile({
   credentialVariable: PROFILE_TOKEN_VARIABLE,
   guildIds: ["300000000000000001"],
   name: PROFILE_NAME,
-  toolsets: ["connector", "messages"],
+  toolsets: ["deletion"],
   toolSurface: "progressive",
 }))
 const catalogTransport = new StdioClientTransport({
@@ -258,15 +260,15 @@ try {
 } finally {
   await catalogClient.close().catch(() => undefined)
 }
+const operationalEnvironment = {
+  ...getDefaultEnvironment(),
+  [PROFILE_TOKEN_VARIABLE]: "${DUMMY_TOKEN}",
+}
+delete operationalEnvironment.DISCORD_BOT_TOKEN
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [entrypoint, "serve"],
-  env: {
-    ...getDefaultEnvironment(),
-    DISCORD_BOT_TOKEN: "${DUMMY_TOKEN}",
-    DISCORD_MCP_TOOLSETS: "deletion",
-    DISCORD_MCP_TOOL_SURFACE: "progressive",
-  },
+  args: [entrypoint, "serve", "--profile", PROFILE_NAME],
+  env: operationalEnvironment,
 })
 const client = new Client({ name: "installed-package-verifier", version: "1.0.0" }, { capabilities: {} })
 try {
@@ -464,7 +466,35 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     catalog.restOperationCount,
     "installed REST method counts",
   )
-  const doctorResult = await run(process.execPath, [entrypoint, "doctor", "--json"], {
+  const configFile = join(consumer, "discord-mcp.json")
+  const configResult = await run(bin, [
+    "config",
+    "init",
+    configFile,
+    "--name",
+    "installed-config",
+    "--application-id",
+    "100000000000000001",
+    "--bot-id",
+    "200000000000000001",
+    "--guild-id",
+    "300000000000000001",
+    "--preset",
+    "server-observer",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  invariant(JSON.parse(configResult.stdout).status === "ok", "installed config initialization failed")
+  const doctorResult = await run(process.execPath, [
+    entrypoint,
+    "doctor",
+    "--config",
+    configFile,
+    "--json",
+  ], {
     allowedExitCodes: [0, 1],
     capture: true,
     cwd: consumer,

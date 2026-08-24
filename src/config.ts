@@ -26,6 +26,8 @@ import {
 import {
   activateConnectorConfigFile,
   configDocumentConfigurationError,
+  parseConnectorConfigDocument,
+  type ConnectorConfigDocument,
 } from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 import {
@@ -358,6 +360,20 @@ export function resolveConnectorAuditFile(
     if (activated) throw configDocumentConfigurationError(error)
     throw error
   }
+}
+
+export function resolveConnectorConfigDocumentAuditFile(
+  documentValue: ConnectorConfigDocument,
+  environment: NodeJS.ProcessEnv = process.env,
+  options: ConfigOptions = {},
+): string {
+  const document = parseConnectorConfigDocument(documentValue)
+  const configured = document.storage.auditFile
+  return auditFile(
+    typeof configured === "string" ? configured : undefined,
+    environment,
+    options.homeDirectory || homedir(),
+  )
 }
 
 export function loadConnectorConfig(

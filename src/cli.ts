@@ -16,7 +16,11 @@ import {
   CONNECTOR_VERSION,
   ENVIRONMENT_NAMES,
 } from "./constants.js"
-import { resolveConnectorAuditFile } from "./config.js"
+import { resolveConnectorConfigDocumentAuditFile } from "./config.js"
+import {
+  CONFIG_DOCUMENT_SCHEMA_VERSION,
+  type ConnectorConfigDocument,
+} from "./config-document.js"
 import {
   explainConnectorConfig,
   initializeConnectorConfigFile,
@@ -30,7 +34,11 @@ import {
   type ConfigValidationReport,
   type ConfigWriteReport,
 } from "./config-operator.js"
-import { ConfigurationError, redactText } from "./errors.js"
+import {
+  ConfigurationError,
+  redactText,
+  RuntimeConfigurationRequiredError,
+} from "./errors.js"
 import { isMainModule } from "./entrypoint.js"
 import { runDiscordMcpServer } from "./mcp.js"
 import {
@@ -144,14 +152,18 @@ export type ParsedCliArguments =
   | {
     action: "list"
     command: "coordination"
+    configFile?: string
     json: boolean
+    profileName?: string
   }
   | {
     action: "resolve"
     claimId: string
     command: "coordination"
+    configFile?: string
     confirmation: string
     json: boolean
+    profileName?: string
   }
   | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
   | { command: "help"; topic: CliCommand | undefined }
@@ -219,13 +231,13 @@ export interface CliDependencies {
   diagnose(options: DoctorOptions): Promise<DoctorReport>
   explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
-  listCoordination(environment: NodeJS.ProcessEnv): Promise<WriteCoordinationList>
+  listCoordination(activityFile: string): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   migrateConfig(options: ConfigMigrateOptions): Promise<ConfigWriteReport>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
   resolveCoordination(
-    environment: NodeJS.ProcessEnv,
+    activityFile: string,
     claimId: string,
     confirmation: string,
   ): Promise<WriteCoordinationResolution>
@@ -269,8 +281,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   diagnose: diagnoseConnector,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
-  listCoordination: async (environment) => {
-    const auditFile = resolveConnectorAuditFile(environment)
+  listCoordination: async (auditFile) => {
     return new FileWriteCoordinator(
       writeCoordinationDirectory(auditFile),
       new FileOperationStore(operationReceiptDirectory(auditFile)),
@@ -280,8 +291,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   loadProfile,
   migrateConfig: migrateConnectorConfigFile,
   prepareSetup,
-  resolveCoordination: async (environment, claimId, confirmation) => {
-    const auditFile = resolveConnectorAuditFile(environment)
+  resolveCoordination: async (auditFile, claimId, confirmation) => {
     return new FileWriteCoordinator(
       writeCoordinationDirectory(auditFile),
       new FileOperationStore(operationReceiptDirectory(auditFile)),
@@ -375,20 +385,11 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
   if (configFile && profileName) {
     throw new ConfigurationError("Options --config and --profile are mutually exclusive")
   }
-  if (
-    !configFile
-    && !profileName
-    && (
-      credentialVariable !== undefined
-      || overwrite
-      || presetName !== undefined
-      || guildIds.length > 0
-      || channelIds.length > 0
-    )
-  ) {
-    throw new ConfigurationError(
-      "--token-env, --force, --preset, --guild-id, and --channel-id require --config or --profile",
-    )
+  if (!configFile && !profileName) {
+    throw new ConfigurationError("Setup requires --config FILE or --profile NAME")
+  }
+  if (!presetName && (credentialVariable !== undefined || overwrite)) {
+    throw new ConfigurationError("--token-env and --force require --preset")
   }
   if (!presetName && (guildIds.length > 0 || channelIds.length > 0)) {
     throw new ConfigurationError("--guild-id and --channel-id require --preset")
@@ -735,19 +736,32 @@ function parseCoordinationCommand(
     throw new ConfigurationError("coordination requires list or resolve")
   }
   if (action === "list") {
-    const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
-    return { action, command: "coordination", json: options.has("--json") }
+    const options = parseRuntimeSelectionOptions(args.slice(1), new Set(["--json"]))
+    return {
+      action,
+      command: "coordination",
+      ...(options.configFile ? { configFile: options.configFile } : {}),
+      json: options.present.has("--json"),
+      ...(options.profileName ? { profileName: options.profileName } : {}),
+    }
   }
   const claimId = args[1]
   if (!claimId || claimId.startsWith("--")) {
     throw new ConfigurationError("coordination resolve requires a claim ID")
   }
   let confirmation: string | undefined
+  let configFile: string | undefined
   let json = false
+  let profileName: string | undefined
   const seen = new Set<string>()
   for (let index = 2; index < args.length; index += 1) {
     const argument = args[index]
-    if (argument !== "--confirm" && argument !== "--json") {
+    if (
+      argument !== "--config"
+      && argument !== "--confirm"
+      && argument !== "--json"
+      && argument !== "--profile"
+    ) {
       throw new ConfigurationError(`Unknown option ${argument || ""}`)
     }
     if (seen.has(argument)) {
@@ -760,10 +774,15 @@ function parseCoordinationCommand(
     }
     const value = args[index + 1]
     if (!value || value.startsWith("--")) {
-      throw new ConfigurationError("Option --confirm requires a value")
+      throw new ConfigurationError(`Option ${argument} requires a value`)
     }
-    confirmation = value
+    if (argument === "--config") configFile = value
+    if (argument === "--confirm") confirmation = value
+    if (argument === "--profile") profileName = value
     index += 1
+  }
+  if (configFile && profileName) {
+    throw new ConfigurationError("Options --config and --profile are mutually exclusive")
   }
   if (confirmation === undefined) {
     throw new ConfigurationError(
@@ -774,8 +793,10 @@ function parseCoordinationCommand(
     action: "resolve",
     claimId,
     command: "coordination",
+    ...(configFile ? { configFile } : {}),
     confirmation,
     json,
+    ...(profileName ? { profileName } : {}),
   }
 }
 
@@ -869,27 +890,27 @@ function helpText(topic: CliCommand | undefined): string {
     ].join("\n")
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor [--config FILE | --profile NAME] [--online] [--json]\n\nValidate the selected configuration and policy. Add --online to verify Discord identity and scoped guild access. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy. Add --online to verify Discord identity and scoped guild access. DISCORD_MCP_CONFIG_FILE may select the file instead. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "coordination") {
     return [
       "Usage: discord-mcp coordination <action> [options]",
       "",
       "Actions:",
-      "  list [--json]",
-      "  resolve CLAIM_ID --confirm CLAIM_ID [--json]",
+      "  list [--config FILE | --profile NAME] [--json]",
+      "  resolve CLAIM_ID --confirm CLAIM_ID [--config FILE | --profile NAME] [--json]",
       "",
-      "Inspect content-free reviewed-write claims without credentials or Discord access. Stop the owning process and inspect Discord before resolving a claim that requires review.",
+      "Inspect content-free reviewed-write claims for one selected policy without resolving credentials or contacting Discord. Stop the owning process and inspect Discord before resolving a claim that requires review.",
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup [--config FILE | --profile NAME] [--preset PRESET --guild-id ID... [--channel-id ID...]] [--token-env VARIABLE] [--force] [--name NAME] [--command COMMAND] [--json]\n\nVerify the bot, optionally apply an exact-scope read-only preset, save a standalone non-secret configuration or managed profile, and print a credential-free portable stdio launch descriptor."
+    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
-    return "Usage: discord-mcp smoke [--config FILE | --profile NAME] [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool."
+    return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool. DISCORD_MCP_CONFIG_FILE may select the file instead."
   }
   if (topic === "serve") {
-    return "Usage: discord-mcp serve [--config FILE | --profile NAME]\n\nRun the local stdio MCP server. This is also the default command."
+    return "Usage: discord-mcp serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. DISCORD_MCP_CONFIG_FILE may select the file instead."
   }
   if (topic === "profile") {
     return [
@@ -923,12 +944,12 @@ function helpText(topic: CliCommand | undefined): string {
     "Commands:",
     "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
     "  config   Create, migrate, validate, and inspect one non-secret policy file",
-    "  coordination  Inspect or resolve durable reviewed-write claims",
-    "  serve    Run the stdio MCP server (default)",
-    "  setup    Verify the bot and generate safe client configuration",
+    "  coordination  Inspect or resolve one policy's durable reviewed-write claims",
+    "  serve    Run the stdio MCP server with a selected policy (default)",
+    "  setup    Create or verify a policy and generate safe client configuration",
     "  preset   Inspect presets or generate an exact bot installation plan",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
-    "  doctor   Diagnose environment, policy, and optional Discord access",
+    "  doctor   Diagnose a selected policy and optional Discord access",
     "  smoke    Verify the read-only MCP path end to end",
     "  version  Print the package version",
     "  help     Show command help",
@@ -1060,10 +1081,10 @@ function renderSetup(report: SetupReport): string {
     )
   }
   if (report.profile) {
-    lines.push(`Saved profile: ${report.profile.name}`)
+    lines.push(`Profile: ${report.profile.name}`)
   }
   if (report.configFile) {
-    lines.push(`Saved configuration: ${report.configFile}`)
+    lines.push(`Configuration: ${report.configFile}`)
   }
   if (report.configBackupFile) {
     lines.push(`Previous configuration backup: ${report.configBackupFile}`)
@@ -1345,7 +1366,7 @@ function configSelectionEnvironment(
   }
   const selected = resolve(file)
   const ambient = environment[ENVIRONMENT_NAMES.configFile]?.trim()
-  if (ambient && ambient !== selected) {
+  if (ambient && resolve(ambient) !== selected) {
     throw new ConfigurationError(
       `Option --config conflicts with ${ENVIRONMENT_NAMES.configFile}`,
     )
@@ -1356,15 +1377,64 @@ function configSelectionEnvironment(
   }
 }
 
+const CONFIG_SELECTION_REQUIRED_MESSAGE =
+  "Operational commands require --config FILE, --profile NAME, or DISCORD_MCP_CONFIG_FILE; create a policy with discord-mcp config init or convert environment policy with discord-mcp config migrate"
+
+function assertSchemaV2Profile(profile: ConnectorProfile): asserts profile is Extract<
+  ConnectorProfile,
+  { schemaVersion: typeof CONFIG_DOCUMENT_SCHEMA_VERSION }
+> {
+  if (profile.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
+    throw new ConfigurationError(
+      `Profile ${profile.name} uses legacy schema version ${profile.schemaVersion}; convert it with discord-mcp config migrate FILE --profile ${profile.name}`,
+    )
+  }
+}
+
 async function runtimeSelectionEnvironment(
   selection: { configFile?: string; profileName?: string },
   environment: NodeJS.ProcessEnv,
   dependencies: CliDependencies,
 ): Promise<NodeJS.ProcessEnv> {
   if (selection.profileName) {
-    return (await dependencies.activateProfile(selection.profileName, { environment })).environment
+    const selectedProfile = await dependencies.loadProfile(
+      selection.profileName,
+      { environment },
+    )
+    assertSchemaV2Profile(selectedProfile)
+    const activated = await dependencies.activateProfile(selection.profileName, { environment })
+    assertSchemaV2Profile(activated.profile)
+    return activated.environment
   }
-  return configSelectionEnvironment(selection.configFile, environment)
+  const selected = configSelectionEnvironment(selection.configFile, environment)
+  if (!selected[ENVIRONMENT_NAMES.configFile]?.trim()) {
+    throw new RuntimeConfigurationRequiredError(CONFIG_SELECTION_REQUIRED_MESSAGE)
+  }
+  return selected
+}
+
+async function coordinationActivityFile(
+  selection: { configFile?: string; profileName?: string },
+  environment: NodeJS.ProcessEnv,
+  dependencies: CliDependencies,
+): Promise<string> {
+  let document: ConnectorConfigDocument
+  if (selection.profileName) {
+    if (environment[ENVIRONMENT_NAMES.configFile]?.trim()) {
+      throw new ConfigurationError(
+        `Option --profile conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+      )
+    }
+    const profile = await dependencies.loadProfile(selection.profileName, { environment })
+    assertSchemaV2Profile(profile)
+    document = profile
+  } else {
+    const selected = configSelectionEnvironment(selection.configFile, environment)
+    const file = selected[ENVIRONMENT_NAMES.configFile]?.trim()
+    if (!file) throw new RuntimeConfigurationRequiredError(CONFIG_SELECTION_REQUIRED_MESSAGE)
+    document = dependencies.showConfig(file).document
+  }
+  return resolveConnectorConfigDocumentAuditFile(document, environment)
 }
 
 export async function runCli(options: CliOptions = {}): Promise<number> {
@@ -1469,10 +1539,15 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "coordination": {
+        const activityFile = await coordinationActivityFile(
+          parsed,
+          environment,
+          dependencies,
+        )
         const report = parsed.action === "list"
-          ? await dependencies.listCoordination(environment)
+          ? await dependencies.listCoordination(activityFile)
           : await dependencies.resolveCoordination(
-            environment,
+            activityFile,
             parsed.claimId,
             parsed.confirmation,
           )

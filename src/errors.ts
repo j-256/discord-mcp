@@ -6,6 +6,10 @@ export class ConfigDocumentError extends ConfigurationError {
   override name = "ConfigDocumentError"
 }
 
+export class RuntimeConfigurationRequiredError extends ConfigurationError {
+  override name = "RuntimeConfigurationRequiredError"
+}
+
 export class DiscordAuditEvidenceError extends ConfigurationError {
   override name = "DiscordAuditEvidenceError"
 }

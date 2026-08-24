@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -14,6 +14,7 @@ import type { DiscordCatalogCheckReport } from "../src/catalog.js"
 import {
   explainConnectorConfig,
   summarizeConnectorConfigDocument,
+  writeConnectorConfigDocumentFile,
   type ConfigShowReport,
   type ConfigValidationReport,
   type ConfigWriteReport,
@@ -43,6 +44,7 @@ const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
+const CONFIG_FILE = "/configuration/discord-mcp.json"
 
 function outputStream() {
   let output = ""
@@ -89,23 +91,21 @@ function doctorReport(status: DoctorReport["status"] = "ok"): DoctorReport {
 }
 
 function setupReport(): SetupReport {
+  const configFile = "/configuration/discord-mcp.json"
   return {
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
     configBackupFile: null,
-    configFile: null,
+    configFile,
     credentialVariable: ENVIRONMENT_NAMES.token,
     guildsAccessibleOnFirstPage: 1,
     guildsInScopeOnFirstPage: 1,
     launch: {
-      args: ["serve"],
+      args: ["serve", "--config", configFile],
       command: "discord-mcp",
       environment: {
         forward: ["DISCORD_BOT_TOKEN"],
-        set: {
-          DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-          DISCORD_MCP_BOT_ID: BOT_ID,
-        },
+        set: {},
       },
       requirements: {
         elicitation: "required-for-reviewed-writes",
@@ -191,7 +191,7 @@ function catalogReport(): DiscordCatalogCheckReport {
   }
 }
 
-function connectorProfile(): ConnectorProfile {
+function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
@@ -199,13 +199,42 @@ function connectorProfile(): ConnectorProfile {
     credentialVariable: TOKEN_ALIAS,
     guildIds: [GUILD_ID],
     name: "support-bot",
+    ...(options.auditFile ? { storage: { auditFile: options.auditFile } } : {}),
     toolsets: ["connector", "messages"],
     toolSurface: "progressive",
   })
 }
 
-function configValidationReport(): ConfigValidationReport {
-  const profile = connectorProfile()
+function legacyProfile(): ConnectorProfile {
+  return {
+    credential: {
+      provider: "environment",
+      variable: TOKEN_ALIAS,
+    },
+    gateway: {
+      enabled: false,
+      eventBufferSize: 100,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    name: "legacy-support-bot",
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    schemaVersion: 1,
+    tools: {
+      surface: "progressive",
+      toolsets: ["connector", "messages"],
+    },
+  }
+}
+
+function configValidationReport(
+  profile: ConnectorProfile = connectorProfile(),
+): ConfigValidationReport {
   if (profile.schemaVersion !== 2) throw new Error("Expected schema-v2 profile")
   return {
     file: "/configuration/discord-mcp.json",
@@ -220,11 +249,12 @@ function configValidationReport(): ConfigValidationReport {
   }
 }
 
-function configShowReport(): ConfigShowReport {
-  const profile = connectorProfile()
+function configShowReport(
+  profile: ConnectorProfile = connectorProfile(),
+): ConfigShowReport {
   if (profile.schemaVersion !== 2) throw new Error("Expected schema-v2 profile")
   return {
-    ...configValidationReport(),
+    ...configValidationReport(profile),
     document: profile,
   }
 }
@@ -318,9 +348,16 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "catalog",
     json: true,
   })
-  assert.deepEqual(parseCliArguments(["coordination", "list", "--json"]), {
+  assert.deepEqual(parseCliArguments([
+    "coordination",
+    "list",
+    "--config",
+    "/configuration/discord.json",
+    "--json",
+  ]), {
     action: "list",
     command: "coordination",
+    configFile: "/configuration/discord.json",
     json: true,
   })
   assert.deepEqual(parseCliArguments([
@@ -329,12 +366,15 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     `claim_${"a".repeat(32)}`,
     "--confirm",
     `claim_${"a".repeat(32)}`,
+    "--profile",
+    "support-bot",
   ]), {
     action: "resolve",
     claimId: `claim_${"a".repeat(32)}`,
     command: "coordination",
     confirmation: `claim_${"a".repeat(32)}`,
     json: false,
+    profileName: "support-bot",
   })
   assert.deepEqual(parseCliArguments(["doctor", "--online", "--json"]), {
     command: "doctor",
@@ -424,23 +464,24 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     json: true,
     path: "capabilities.deletions",
   })
-  assert.deepEqual(parseCliArguments([
-    "setup",
-    "--name",
-    "team-discord",
-    "--command",
-    "/usr/local/bin/discord-mcp",
-  ]), {
-    command: "setup",
-    json: false,
-    launcherCommand: "/usr/local/bin/discord-mcp",
-    overwrite: false,
-    serverName: "team-discord",
-  })
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--name",
+      "team-discord",
+      "--command",
+      "/usr/local/bin/discord-mcp",
+    ]),
+    /requires --config FILE or --profile NAME/,
+  )
   assert.deepEqual(parseCliArguments([
     "setup",
     "--profile",
     "support-bot",
+    "--preset",
+    "server-observer",
+    "--guild-id",
+    GUILD_ID,
     "--token-env",
     TOKEN_ALIAS,
     "--force",
@@ -451,6 +492,11 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     json: true,
     launcherCommand: undefined,
     overwrite: true,
+    preset: {
+      channelIds: [],
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
     profileName: "support-bot",
     serverName: undefined,
   })
@@ -458,6 +504,10 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "setup",
     "--config",
     "/configuration/discord.json",
+    "--preset",
+    "server-observer",
+    "--guild-id",
+    GUILD_ID,
     "--token-env",
     TOKEN_ALIAS,
     "--force",
@@ -468,6 +518,11 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     json: false,
     launcherCommand: undefined,
     overwrite: true,
+    preset: {
+      channelIds: [],
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
     serverName: undefined,
   })
   assert.deepEqual(parseCliArguments([
@@ -584,7 +639,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(() => parseCliArguments(["setup", "--name"]), /requires a value/)
   assert.throws(
     () => parseCliArguments(["setup", "--token-env", TOKEN_ALIAS]),
-    /require --config or --profile/,
+    /requires --config FILE or --profile NAME/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -603,6 +658,15 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "reader",
       "--guild-id",
       GUILD_ID,
+    ]),
+    /require --preset/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--config",
+      "/configuration/discord.json",
+      "--force",
     ]),
     /require --preset/,
   )
@@ -689,7 +753,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   )
 })
 
-test("CLI defaults to the stdio server without writing normal output", async () => {
+test("CLI defaults to the stdio server through the selected config without writing normal output", async () => {
   let serves = 0
   const stdout = outputStream()
   const stderr = outputStream()
@@ -700,7 +764,10 @@ test("CLI defaults to the stdio server without writing normal output", async () 
         serves += 1
       },
     }),
-    environment: { DISCORD_BOT_TOKEN: `  ${TOKEN}  ` },
+    environment: {
+      [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE,
+      DISCORD_BOT_TOKEN: `  ${TOKEN}  `,
+    },
     stderr: stderr.stream,
     stdout: stdout.stream,
   })
@@ -709,6 +776,39 @@ test("CLI defaults to the stdio server without writing normal output", async () 
   assert.equal(serves, 1)
   assert.equal(stdout.value(), "")
   assert.equal(stderr.value(), "")
+})
+
+test("CLI rejects operational commands without a config or schema-v2 profile", async () => {
+  const stderr = outputStream()
+  const stdout = outputStream()
+  let serves = 0
+  const exitCode = await runCli({
+    args: [],
+    dependencies: dependencies({
+      serve() {
+        serves += 1
+      },
+    }),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stderr: stderr.stream,
+  })
+
+  assert.equal(exitCode, 1)
+  assert.equal(serves, 0)
+  assert.match(stderr.value(), /Operational commands require --config FILE/)
+  assert.match(stderr.value(), /config migrate/)
+  assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
+
+  assert.equal(await runCli({
+    args: ["doctor", "--json"],
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: stdout.stream,
+  }), 2)
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.error.category, "configuration")
+  assert.match(report.error.recovery.action, /config init/)
+  assert.match(report.error.recovery.action, /config migrate/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
 test("CLI starts the credential-free catalog without normal output or configuration", async () => {
@@ -761,13 +861,14 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
 
 test("CLI inspects and resolves coordination without credentials or Discord access", async () => {
   const claimId = `claim_${"a".repeat(32)}`
-  const environment = { DISCORD_MCP_AUDIT_FILE: "/test/discord-mcp-cli-activity.jsonl" }
+  const activityFile = "/test/discord-mcp-cli-activity.jsonl"
+  const environment = {}
   const events: string[] = []
   const listOutput = outputStream()
   const resolveOutput = outputStream()
   const coordinationDependencies = dependencies({
-    async listCoordination(receivedEnvironment) {
-      assert.equal(receivedEnvironment, environment)
+    async listCoordination(receivedActivityFile) {
+      assert.equal(receivedActivityFile, activityFile)
       events.push("list")
       return {
         claims: [{
@@ -788,8 +889,8 @@ test("CLI inspects and resolves coordination without credentials or Discord acce
         status: "ok",
       }
     },
-    async resolveCoordination(receivedEnvironment, receivedClaimId, confirmation) {
-      assert.equal(receivedEnvironment, environment)
+    async resolveCoordination(receivedActivityFile, receivedClaimId, confirmation) {
+      assert.equal(receivedActivityFile, activityFile)
       assert.equal(receivedClaimId, claimId)
       assert.equal(confirmation, claimId)
       events.push("resolve")
@@ -800,16 +901,28 @@ test("CLI inspects and resolves coordination without credentials or Discord acce
         status: "resolved",
       }
     },
+    showConfig() {
+      return configShowReport(connectorProfile({ auditFile: activityFile }))
+    },
   })
 
   assert.equal(await runCli({
-    args: ["coordination", "list"],
+    args: ["coordination", "list", "--config", CONFIG_FILE],
     dependencies: coordinationDependencies,
     environment,
     stdout: listOutput.stream,
   }), 0)
   assert.equal(await runCli({
-    args: ["coordination", "resolve", claimId, "--confirm", claimId, "--json"],
+    args: [
+      "coordination",
+      "resolve",
+      claimId,
+      "--confirm",
+      claimId,
+      "--config",
+      CONFIG_FILE,
+      "--json",
+    ],
     dependencies: coordinationDependencies,
     environment,
     stdout: resolveOutput.stream,
@@ -826,19 +939,22 @@ test("CLI inspects and resolves coordination without credentials or Discord acce
   assert.deepEqual(events, ["list", "resolve"])
 })
 
-test("CLI default coordination inspection needs no credential or connector configuration", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-cli-coordination-"))
-  context.after(() => rm(root, { force: true, recursive: true }))
+test("CLI coordination inspection uses selected policy without resolving credentials", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-coordination-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
   const stdout = outputStream()
   const stderr = outputStream()
   const claimId = `claim_${"f".repeat(32)}`
-  const environment = {
-    DISCORD_MCP_AUDIT_FILE: join(root, "activity.jsonl"),
-  }
+  const activityFile = join(root, "activity.jsonl")
+  const configFile = join(root, "discord-mcp.json")
+  const profile = connectorProfile({ auditFile: activityFile })
+  assert.equal(profile.schemaVersion, 2)
+  await writeConnectorConfigDocumentFile(configFile, profile)
 
   assert.equal(await runCli({
-    args: ["coordination", "list", "--json"],
-    environment,
+    args: ["coordination", "list", "--config", configFile, "--json"],
+    environment: {},
     stdout: stdout.stream,
   }), 0)
   assert.deepEqual(JSON.parse(stdout.value()), {
@@ -847,8 +963,16 @@ test("CLI default coordination inspection needs no credential or connector confi
     status: "ok",
   })
   assert.equal(await runCli({
-    args: ["coordination", "resolve", claimId, "--confirm", claimId],
-    environment,
+    args: [
+      "coordination",
+      "resolve",
+      claimId,
+      "--confirm",
+      claimId,
+      "--config",
+      configFile,
+    ],
+    environment: {},
     stderr: stderr.stream,
   }), 2)
   assert.match(stderr.value(), /Discord write claim was not found/)
@@ -865,7 +989,10 @@ test("CLI returns diagnostic failure while preserving secret-free JSON", async (
         return doctorReport("error")
       },
     }),
-    environment: { DISCORD_BOT_TOKEN: `  ${TOKEN}  ` },
+    environment: {
+      [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE,
+      DISCORD_BOT_TOKEN: `  ${TOKEN}  `,
+    },
     stderr: stderr.stream,
     stdout: stdout.stream,
   })
@@ -885,6 +1012,7 @@ test("CLI distinguishes doctor warnings and renders their recovery guidance", as
         return doctorReport("warning")
       },
     }),
+    environment: { [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE },
     stdout: stdout.stream,
   })
 
@@ -904,7 +1032,10 @@ test("CLI emits a redacted structured failure when JSON was requested", async ()
         throw new ConfigurationError(`Configuration exposed ${TOKEN}`)
       },
     }),
-    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    environment: {
+      [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE,
+      DISCORD_BOT_TOKEN: TOKEN,
+    },
     stderr: stderr.stream,
     stdout: stdout.stream,
   })
@@ -941,7 +1072,7 @@ test("CLI keeps JSON usage and profile failures machine-readable", async () => {
   assert.equal(usageError.value(), "")
 
   assert.equal(await runCli({
-    args: ["setup", "--json"],
+    args: ["setup", "--profile", "support-bot", "--json"],
     dependencies: dependencies({
       async prepareSetup() {
         throw new ProfileCredentialError(
@@ -979,7 +1110,7 @@ test("CLI exposes only bounded retry evidence for Discord rate limits", async ()
   const stdout = outputStream()
   const stderr = outputStream()
   const exitCode = await runCli({
-    args: ["smoke", "--json"],
+    args: ["smoke", "--config", CONFIG_FILE, "--json"],
     dependencies: dependencies({
       async smoke() {
         throw new DiscordApiError({
@@ -1014,6 +1145,7 @@ test("CLI preserves long-running startup failure status with recovery text", asy
         throw new Error("stdio startup failed")
       },
     }),
+    environment: { [ENVIRONMENT_NAMES.configFile]: CONFIG_FILE },
     stderr: stderr.stream,
   })
 
@@ -1027,7 +1159,16 @@ test("CLI redacts setup output and forwards setup options", async () => {
   const stdout = outputStream()
   let received: unknown
   const exitCode = await runCli({
-    args: ["setup", "--json", "--name", "team-discord", "--command", "/bin/discord-mcp"],
+    args: [
+      "setup",
+      "--config",
+      CONFIG_FILE,
+      "--json",
+      "--name",
+      "team-discord",
+      "--command",
+      "/bin/discord-mcp",
+    ],
     dependencies: dependencies({
       async prepareSetup(options) {
         received = options
@@ -1045,8 +1186,9 @@ test("CLI redacts setup output and forwards setup options", async () => {
   assert.deepEqual(received, {
     args: ["serve"],
     command: "/bin/discord-mcp",
+    configFile: CONFIG_FILE,
     environment: { DISCORD_BOT_TOKEN: `  ${TOKEN}  ` },
-    overwriteProfile: false,
+    overwriteConfig: false,
     serverName: "team-discord",
   })
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
@@ -1057,7 +1199,7 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
   let received: unknown
   const stdout = outputStream()
   const exitCode = await runCli({
-    args: ["setup"],
+    args: ["setup", "--config", CONFIG_FILE],
     dependencies: dependencies({
       async prepareSetup(options) {
         received = options
@@ -1074,8 +1216,9 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
   assert.deepEqual(received, {
     args: ["/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
+    configFile: CONFIG_FILE,
     environment: { DISCORD_BOT_TOKEN: TOKEN },
-    overwriteProfile: false,
+    overwriteConfig: false,
   })
   assert.match(stdout.value(), /Portable stdio launch descriptor/)
   assert.match(stdout.value(), /required-server, write-approval, elicitation, and timeout settings/)
@@ -1091,6 +1234,10 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
       "setup",
       "--profile",
       "support-bot",
+      "--preset",
+      "server-observer",
+      "--guild-id",
+      GUILD_ID,
       "--token-env",
       TOKEN_ALIAS,
       "--force",
@@ -1119,6 +1266,11 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
     credentialVariable: TOKEN_ALIAS,
     environment: source,
     overwriteProfile: true,
+    preset: {
+      channelIds: [],
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
     profileName: "support-bot",
   })
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
@@ -1134,6 +1286,10 @@ test("CLI forwards standalone configuration setup and renders recoverable replac
       "setup",
       "--config",
       "/configuration/discord.json",
+      "--preset",
+      "server-observer",
+      "--guild-id",
+      GUILD_ID,
       "--token-env",
       TOKEN_ALIAS,
       "--force",
@@ -1171,8 +1327,13 @@ test("CLI forwards standalone configuration setup and renders recoverable replac
     credentialVariable: TOKEN_ALIAS,
     environment: source,
     overwriteConfig: true,
+    preset: {
+      channelIds: [],
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
   })
-  assert.match(stdout.value(), /Saved configuration: \/configuration\/discord\.json/)
+  assert.match(stdout.value(), /Configuration: \/configuration\/discord\.json/)
   assert.match(stdout.value(), /Previous configuration backup:/)
   assert.match(stdout.value(), new RegExp(`Credential variable: ${TOKEN_ALIAS}`))
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
@@ -1375,6 +1536,35 @@ test("CLI activates profiles before serve, doctor, and smoke without mutating th
     "activate:support-bot",
     "smoke",
   ])
+})
+
+test("CLI rejects legacy profiles before resolving credentials or starting operations", async () => {
+  const stderr = outputStream()
+  let activations = 0
+  let serves = 0
+  const exitCode = await runCli({
+    args: ["serve", "--profile", "legacy-support-bot"],
+    dependencies: dependencies({
+      async activateProfile() {
+        activations += 1
+        throw new Error("Legacy profile must not activate")
+      },
+      async loadProfile() {
+        return legacyProfile()
+      },
+      serve() {
+        serves += 1
+      },
+    }),
+    environment: {},
+    stderr: stderr.stream,
+  })
+
+  assert.equal(exitCode, 1)
+  assert.equal(activations, 0)
+  assert.equal(serves, 0)
+  assert.match(stderr.value(), /legacy schema version 1/)
+  assert.match(stderr.value(), /config migrate FILE --profile legacy-support-bot/)
 })
 
 test("CLI selects one explicit configuration file before serve, doctor, and smoke", async () => {
@@ -1633,7 +1823,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const versionOutput = outputStream()
 
   assert.equal(await runCli({
-    args: ["smoke"],
+    args: ["smoke", "--config", CONFIG_FILE],
     dependencies: dependencies(),
     stdout: smokeOutput.stream,
   }), 0)
@@ -1661,7 +1851,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Discord MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
-  assert.match(helpOutput.value(), /doctor \[--config FILE \| --profile NAME\]/)
+  assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\]/)
   assert.match(configHelpOutput.value(), /migrate FILE/)
   assert.match(versionOutput.value(), /0\.1\.0/)
@@ -1670,7 +1860,7 @@ test("CLI renders smoke, help, and version output", async () => {
 test("CLI converts unknown failures into bounded diagnostics", async () => {
   const stderr = outputStream()
   const exitCode = await runCli({
-    args: ["smoke"],
+    args: ["smoke", "--config", CONFIG_FILE],
     dependencies: dependencies({
       async smoke() {
         throw new Error(`Transport exposed ${TOKEN}`)

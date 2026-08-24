@@ -4,6 +4,7 @@ import {
   errorMessage,
   ProfileCredentialError,
   ProfileError,
+  RuntimeConfigurationRequiredError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
   WriteCoordinationResolutionError,
@@ -106,6 +107,14 @@ export function classifyCliFailure(
       OPERATOR_RETRY.afterInspection,
     )
   }
+  if (error instanceof RuntimeConfigurationRequiredError) {
+    return guidance(
+      CLI_FAILURE_CATEGORIES.configuration,
+      "Create a policy with discord-mcp config init, convert environment policy with discord-mcp config migrate, then select it with --config or --profile.",
+      OPERATOR_REFERENCES.configuration,
+      OPERATOR_RETRY.afterCorrection,
+    )
+  }
   if (error instanceof DiscordApiError) {
     if (error.status === 401) {
       return guidance(
@@ -166,14 +175,14 @@ export function classifyCliFailure(
   if (error instanceof ConfigurationError) {
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
-      "Run discord-mcp doctor, resolve every failing check, and retry only with the intended credential, identity, scope, and policy.",
+      "Run discord-mcp doctor with the intended --config or --profile, resolve every failing check, and retry only with that credential, identity, scope, and policy.",
       OPERATOR_REFERENCES.configuration,
       OPERATOR_RETRY.afterCorrection,
     )
   }
   return guidance(
     CLI_FAILURE_CATEGORIES.operation,
-    "Run discord-mcp doctor and inspect the reported local or Discord state before retrying.",
+    "Run discord-mcp doctor with the intended --config or --profile and inspect the reported local or Discord state before retrying.",
     OPERATOR_REFERENCES.verification,
     OPERATOR_RETRY.afterInspection,
   )

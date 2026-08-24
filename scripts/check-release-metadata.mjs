@@ -121,12 +121,13 @@ const EXPECTED_PACKAGE_FILES = [
   "SECURITY.md",
   "dist",
   "discord-mcp.config.schema.json",
+  "docs/environment-migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "server.json",
 ]
 
-const EXPECTED_ENVIRONMENT_NAMES = [
+const EXPECTED_COMPATIBILITY_ENVIRONMENT_NAMES = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ADMIN_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
@@ -484,11 +485,15 @@ async function checkSourceIdentity(packageJson) {
   const environmentNames = [...environmentBlock.matchAll(/:\s*"([A-Z0-9_]+)"/g)]
     .map((match) => match[1])
     .sort()
-  assertEqual(environmentNames, EXPECTED_ENVIRONMENT_NAMES, "source compatibility environment catalog changed without review")
+  assertEqual(environmentNames, EXPECTED_COMPATIBILITY_ENVIRONMENT_NAMES, "source compatibility environment catalog changed without review")
 }
 
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
+  const migration = await readFile(
+    join(REPOSITORY_ROOT, "docs/environment-migration.md"),
+    "utf8",
+  )
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
@@ -523,6 +528,16 @@ async function checkDocumentation(packageJson) {
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
+  invariant(reference.includes("[environment-policy migration guide](environment-migration.md)"), "complete reference migration link is invalid")
+  invariant(migration.startsWith("# Migrate environment policy to a configuration file\n"), "environment migration heading is invalid")
+  const documentedCompatibilityEnvironmentNames = [
+    ...migration.matchAll(/^\| `([A-Z0-9_]+)`(?:, `([A-Z0-9_]+)`)?(?:, `([A-Z0-9_]+)`)? \|/gm),
+  ].flatMap((match) => match.slice(1).filter(Boolean)).sort()
+  assertEqual(
+    documentedCompatibilityEnvironmentNames,
+    EXPECTED_COMPATIBILITY_ENVIRONMENT_NAMES,
+    "environment migration catalog is incomplete",
+  )
   invariant(reference.length > readme.length, "complete reference must retain the detailed contract")
   for (const heading of REFERENCE_REQUIRED_HEADINGS) {
     invariant(reference.includes(heading), `complete reference is missing ${heading}`)

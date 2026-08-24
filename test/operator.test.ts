@@ -8,10 +8,14 @@ import {
   ENVIRONMENT_NAMES,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
+import { loadConnectorConfig } from "../src/config.js"
 import {
+  configDocumentPolicyFromEnvironment,
+  connectorConfigSecretEnvironmentNames,
   createConnectorConfigDocument,
   loadConnectorConfigDocumentFile,
 } from "../src/config-document.js"
+import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
 import type { DiscordToolService } from "../src/mcp.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import {
@@ -19,14 +23,17 @@ import {
   DOCTOR_CHECK_IDS,
   createStdioLaunchDescriptor,
   OPERATOR_REPORT_SCHEMA_VERSION,
-  prepareSetup,
+  prepareSetup as prepareConfigSetup,
   smokeConnector,
+  type SetupOptions,
+  type SetupReport,
   type StatusProvider,
 } from "../src/operator.js"
 import {
   createConnectorProfile,
   loadProfile,
 } from "../src/profile.js"
+import { selectedMcpToolsets } from "../src/mcp-tool-catalog.js"
 import { getSetupPreset } from "../src/setup-presets.js"
 import type { ConnectorService } from "../src/service.js"
 
@@ -48,6 +55,43 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
     DISCORD_MCP_BOT_ID: BOT_ID,
     ...overrides,
+  }
+}
+
+async function prepareSetup(options: SetupOptions): Promise<SetupReport> {
+  if (options.configFile || options.profileName) return prepareConfigSetup(options)
+  const source = options.environment || process.env
+  const config = loadConnectorConfig(source)
+  if (!config.expectedApplicationId || !config.expectedBotId) {
+    throw new Error("Test setup requires pinned identity")
+  }
+  const document = createConnectorConfigDocument({
+    applicationId: config.expectedApplicationId,
+    botId: config.expectedBotId,
+    channelIds: [...config.allowedChannelIds],
+    ...configDocumentPolicyFromEnvironment(source),
+    gatewayEnabled: config.allowGateway,
+    gatewayEventBufferSize: config.gatewayEventBufferSize,
+    guildIds: [...config.allowedGuildIds],
+    name: "test-policy",
+    toolsets: selectedMcpToolsets(config.mcpToolsets),
+    toolSurface: config.mcpToolSurface,
+  })
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-policy-"))
+  const configFile = join(await realpath(temporary), "discord-mcp.json")
+  const secretEnvironment: NodeJS.ProcessEnv = {}
+  for (const name of connectorConfigSecretEnvironmentNames(document)) {
+    secretEnvironment[name] = source[name]
+  }
+  try {
+    await writeConnectorConfigDocumentFile(configFile, document)
+    return await prepareConfigSetup({
+      ...options,
+      configFile,
+      environment: secretEnvironment,
+    })
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
   }
 }
 
@@ -479,8 +523,44 @@ test("doctor reports unsupported runtime and missing configuration without throw
   assert.match(runtime?.action || "", /Install Node\.js 22 or newer/)
   assert.equal(runtime?.reference, "docs/reference.md#requirements")
   const token = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)
-  assert.match(token?.action || "", /Set DISCORD_BOT_TOKEN/)
+  assert.match(token?.action || "", /credential\.variable/)
   assert.equal(token?.reference, "docs/reference.md#discord-bot-setup")
+})
+
+test("doctor resolves the credential variable referenced by a selected configuration", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-policy-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const configFile = join(await realpath(temporary), "discord-mcp.json")
+  await writeConnectorConfigDocumentFile(
+    configFile,
+    createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      channelIds: [CHANNEL_ID],
+      credentialVariable: TOKEN_ALIAS,
+      guildIds: [GUILD_ID],
+      name: "doctor-policy",
+      toolsets: MCP_TOOLSET_NAMES,
+      toolSurface: "full",
+    }),
+  )
+
+  const report = await diagnoseConnector({
+    environment: {
+      [ENVIRONMENT_NAMES.configFile]: configFile,
+      [TOKEN_ALIAS]: TOKEN,
+    },
+    nodeVersion: "22.14.0",
+  })
+
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)?.status,
+    "pass",
+  )
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.configuration)?.status,
+    "pass",
+  )
 })
 
 test("doctor distinguishes valid scoped configuration from safe warnings", async () => {
@@ -959,7 +1039,7 @@ test("doctor and setup explain privacy-safe reviewed thread governance", async (
     "DISCORD_MCP_THREAD_IDS",
     "DISCORD_MCP_THREAD_MEMBER_USER_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1056,7 +1136,7 @@ test("doctor and setup explain privacy-safe reaction audit and moderation", asyn
     "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
     "DISCORD_MCP_REACTION_CHANNEL_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1147,7 +1227,7 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
     "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
     "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1213,7 +1293,7 @@ test("doctor and setup explain reviewed message-forward scope and intent gates",
     "DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS",
     "DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1288,7 +1368,7 @@ test("doctor and setup explain announcement-subscription scope and review gates"
     "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS",
     "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1350,7 +1430,7 @@ test("doctor and setup explain native poll privacy and reviewed write scope", as
     "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
     "DISCORD_MCP_POLL_CHANNEL_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1448,7 +1528,7 @@ test("doctor and setup explain credential-safe reviewed webhook administration",
     "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
     "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1517,7 +1597,7 @@ test("doctor and setup explain privacy-safe integration audit and deletion", asy
     ENVIRONMENT_NAMES.integrationGuildIds,
     ENVIRONMENT_NAMES.integrationIds,
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -1771,7 +1851,7 @@ test("doctor and setup explain authenticated reviewed widget settings", async ()
     ENVIRONMENT_NAMES.allowWidgetPublicExposure,
     ENVIRONMENT_NAMES.widgetSettingsGuildIds,
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
   assert.doesNotMatch(JSON.stringify(enabled), /private-channel|audit reason/u)
 })
@@ -1827,7 +1907,7 @@ test("doctor and setup explain privacy-minimized reviewed guild settings", async
     ENVIRONMENT_NAMES.allowGuildSettingsChanges,
     ENVIRONMENT_NAMES.guildSettingsGuildIds,
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
   assert.doesNotMatch(JSON.stringify(enabled), /guild name|channel name|audit reason/u)
 })
@@ -1884,7 +1964,7 @@ test("doctor and setup explain transient reviewed guild profile text", async () 
     ENVIRONMENT_NAMES.allowGuildProfileChanges,
     ENVIRONMENT_NAMES.guildProfileGuildIds,
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
   assert.doesNotMatch(
     JSON.stringify(enabled),
@@ -2560,7 +2640,7 @@ test("doctor and setup separate role-order audit from reviewed changes", async (
     "DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES",
     "DISCORD_MCP_ROLE_ORDERING_GUILD_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -2607,7 +2687,7 @@ test("doctor and setup explain exact reviewed channel cloning", async () => {
     "DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS",
     "DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -2651,7 +2731,7 @@ test("doctor and setup separate channel-order audit from reviewed changes", asyn
     "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES",
     "DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -2696,7 +2776,7 @@ test("doctor and setup explain reviewed exact channel deletion", async () => {
     "DISCORD_MCP_ALLOW_CHANNEL_DELETIONS",
     "DISCORD_MCP_CHANNEL_DELETION_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -2741,7 +2821,7 @@ test("doctor and setup explain reviewed exact role deletion", async () => {
     "DISCORD_MCP_ALLOW_ROLE_DELETIONS",
     "DISCORD_MCP_ROLE_DELETION_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -2846,7 +2926,7 @@ test("doctor and setup explain reviewed member nickname scope without Discord wr
     "DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES",
     "DISCORD_MCP_NICKNAME_GUILD_IDS",
   ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), true)
+    assert.equal(setup.launch.environment.forward.includes(name), false)
   }
 })
 
@@ -3341,23 +3421,33 @@ test("doctor fails online verification when local scope contains no accessible g
   )
 })
 
-test("stdio launch descriptor is portable, complete, and credential-free", () => {
+test("stdio launch descriptor requires one policy and forwards only its secrets", () => {
+  const file = "/configuration/discord.json"
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: ENVIRONMENT_NAMES.token,
+    guildIds: [GUILD_ID],
+    name: "team-discord",
+    toolsets: ["connector"],
+    toolSurface: "full",
+  })
+  const config = { document, file }
   const result = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
     command: "/opt/Discord MCP/bin/discord-mcp",
+    config,
     serverName: "team-discord",
   })
 
   assert.deepEqual(result, {
-    args: ["serve"],
+    args: ["serve", "--config", file],
     command: "/opt/Discord MCP/bin/discord-mcp",
     environment: {
-      forward: result.environment.forward,
-      set: {
-        DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-        DISCORD_MCP_BOT_ID: BOT_ID,
-      },
+      forward: [ENVIRONMENT_NAMES.token],
+      set: {},
     },
     requirements: {
       elicitation: "required-for-reviewed-writes",
@@ -3371,34 +3461,19 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
     },
     transport: "stdio",
   })
-  assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowMemberDirectory), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.memberDirectoryGuildIds), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowBanAudit), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.banAuditGuildIds), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowInviteAudit), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowInviteDeletions), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.inviteGuildIds), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowOnboardingAudit), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowOnboardingChanges), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.onboardingGuildIds), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.allowRoleConfiguration), true)
-  assert.equal(result.environment.forward.includes(ENVIRONMENT_NAMES.roleConfigurationIds), true)
-  assert.deepEqual(
-    [...result.environment.forward].sort(),
-    Object.values(ENVIRONMENT_NAMES)
-      .filter((name) => (
-        name !== ENVIRONMENT_NAMES.applicationId
-        && name !== ENVIRONMENT_NAMES.botId
-        && name !== ENVIRONMENT_NAMES.configFile
-      ))
-      .sort(),
-  )
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
   assert.throws(
     () => createStdioLaunchDescriptor({
       applicationId: APPLICATION_ID,
       botId: BOT_ID,
+    }),
+    /require a schema-v2 configuration or profile/,
+  )
+  assert.throws(
+    () => createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      config,
       serverName: "bad.name",
     }),
     /MCP server name/,
@@ -3407,6 +3482,7 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
     () => createStdioLaunchDescriptor({
       applicationId: "not-a-snowflake",
       botId: BOT_ID,
+      config,
     }),
     /snowflake/,
   )
@@ -3414,6 +3490,7 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
     () => createStdioLaunchDescriptor({
       applicationId: APPLICATION_ID,
       botId: "not-a-snowflake",
+      config,
     }),
     /bot ID must be a snowflake/,
   )
@@ -3422,6 +3499,7 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
       applicationId: APPLICATION_ID,
       botId: BOT_ID,
       command: " ",
+      config,
     }),
     /command must not be empty/,
   )
@@ -3430,12 +3508,13 @@ test("stdio launch descriptor is portable, complete, and credential-free", () =>
       applicationId: APPLICATION_ID,
       args: ["serve", ""],
       botId: BOT_ID,
+      config,
     }),
     /arguments must be non-empty strings/,
   )
 })
 
-test("stdio launch descriptor makes a saved profile the non-overridable read boundary", () => {
+test("stdio launch descriptor makes a saved profile the complete non-overridable policy", () => {
   const profile = createConnectorProfile({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
@@ -3480,20 +3559,6 @@ test("stdio launch descriptor makes a saved profile the non-overridable read bou
     false,
   )
   assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
-  assert.deepEqual(createStdioLaunchDescriptor({
-    applicationId: APPLICATION_ID,
-    botId: BOT_ID,
-    profile,
-    profileEnvironmentForwarding: "credential-only",
-  }).environment.forward, [TOKEN_ALIAS])
-  assert.throws(
-    () => createStdioLaunchDescriptor({
-      applicationId: APPLICATION_ID,
-      botId: BOT_ID,
-      profileEnvironmentForwarding: "credential-only",
-    }),
-    /requires a profile/,
-  )
   assert.throws(
     () => createStdioLaunchDescriptor({
       applicationId: "999999999999999999",
@@ -3581,9 +3646,18 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.equal(report.serverName, "discord-safe")
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
-  assert.deepEqual(report.launch.args, ["/srv/discord-mcp/dist/cli.js", "serve"])
+  assert.deepEqual(report.launch.args, [
+    "/srv/discord-mcp/dist/cli.js",
+    "serve",
+    "--config",
+    report.configFile,
+  ])
   assert.equal(report.launch.command, "/usr/bin/node")
   assert.equal(report.launch.serverName, "discord-safe")
+  assert.deepEqual(report.launch.environment, {
+    forward: [ENVIRONMENT_NAMES.token],
+    set: {},
+  })
   assert.equal(report.preset, null)
   assert.equal(report.profile, null)
   assert.deepEqual(report.warnings, [])
@@ -3689,7 +3763,7 @@ test("preset setup saves resolved read-only authority and forwards only its cred
   )
 })
 
-test("setup verifies and saves a profile without persisting or reporting its credential", async (context) => {
+test("setup creates and verifies a preset-backed profile without persisting or reporting its credential", async (context) => {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-profile-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const profileDirectory = join(await realpath(temporary), "profiles")
@@ -3712,6 +3786,11 @@ test("setup verifies and saves a profile without persisting or reporting its cre
     environment: source,
     profileDirectory,
     profileName: "support-bot",
+    preset: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+      name: "channel-reader",
+    },
     service: statusProvider(),
   })
 
@@ -3726,24 +3805,24 @@ test("setup verifies and saves a profile without persisting or reporting its cre
     guildIds: [GUILD_ID],
   })
   assert.deepEqual(report.profile?.tools, {
-    surface: "progressive",
-    toolsets: ["connector", "messages"],
+    surface: "full",
+    toolsets: [...getSetupPreset("channel-reader").toolsets],
   })
   assert.deepEqual(report.profile?.gateway, {
-    enabled: true,
-    eventBufferSize: 250,
+    enabled: false,
+    eventBufferSize: 100,
   })
   assert.equal(
     report.profile?.schemaVersion === 2
       ? report.profile.capabilities.deletions
       : undefined,
-    true,
+    undefined,
   )
   assert.deepEqual(
     report.profile?.schemaVersion === 2
       ? report.profile.scopes.deleteChannelIds
       : undefined,
-    [CHANNEL_ID],
+    undefined,
   )
   assert.deepEqual(
     await loadProfile("support-bot", { directory: profileDirectory }),
@@ -3765,21 +3844,40 @@ test("setup verifies and saves a profile without persisting or reporting its cre
       environment: source,
       profileDirectory,
       profileName: "support-bot",
+      preset: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+        name: "channel-reader",
+      },
       service: statusProvider(),
     }),
     /already exists/,
   )
-  await prepareSetup({
-    credentialVariable: TOKEN_ALIAS,
-    environment: source,
-    overwriteProfile: true,
+  const saved = await readFile(join(profileDirectory, "support-bot.json"), "utf8")
+  const verified = await prepareSetup({
+    environment: { [TOKEN_ALIAS]: TOKEN },
     profileDirectory,
     profileName: "support-bot",
     service: statusProvider(),
   })
+  assert.deepEqual(verified.profile, report.profile)
+  assert.equal(
+    await readFile(join(profileDirectory, "support-bot.json"), "utf8"),
+    saved,
+  )
+  await assert.rejects(
+    () => prepareSetup({
+      environment: { [TOKEN_ALIAS]: TOKEN },
+      overwriteProfile: true,
+      profileDirectory,
+      profileName: "support-bot",
+      service: statusProvider(),
+    }),
+    /require --preset/,
+  )
 })
 
-test("setup verifies and saves a standalone configuration with recoverable replacement", async (context) => {
+test("setup creates and verifies a preset-backed configuration with recoverable replacement", async (context) => {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-config-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const configFile = join(await realpath(temporary), "discord.json")
@@ -3799,6 +3897,10 @@ test("setup verifies and saves a standalone configuration with recoverable repla
     configFile,
     credentialVariable: TOKEN_ALIAS,
     environment: source,
+    preset: {
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
     service: statusProvider(),
   })
 
@@ -3820,7 +3922,8 @@ test("setup verifies and saves a standalone configuration with recoverable repla
   const initial = loadConnectorConfigDocumentFile(configFile)
   assert.equal(initial.name, "discord")
   assert.equal(initial.credential.variable, TOKEN_ALIAS)
-  assert.equal(initial.gateway.enabled, true)
+  assert.equal(initial.gateway.enabled, false)
+  assert.deepEqual(initial.tools.toolsets, getSetupPreset("server-observer").toolsets)
   assert.doesNotMatch(await readFile(configFile, "utf8"), new RegExp(TOKEN))
   assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 
@@ -3829,20 +3932,34 @@ test("setup verifies and saves a standalone configuration with recoverable repla
       configFile,
       credentialVariable: TOKEN_ALIAS,
       environment: source,
+      preset: {
+        guildIds: [GUILD_ID],
+        name: "server-observer",
+      },
       service: statusProvider(),
     }),
     /already exists/,
   )
 
+  const saved = await readFile(configFile, "utf8")
+  const verified = await prepareSetup({
+    configFile,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    service: statusProvider(),
+  })
+  assert.equal(verified.configBackupFile, null)
+  assert.equal(await readFile(configFile, "utf8"), saved)
+
   const replacement = await prepareSetup({
     configFile,
     credentialVariable: TOKEN_ALIAS,
-    environment: environment({
-      [ENVIRONMENT_NAMES.token]: undefined,
-      [TOKEN_ALIAS]: TOKEN,
-      [ENVIRONMENT_NAMES.toolSurface]: "full",
-    }),
+    environment: source,
     overwriteConfig: true,
+    preset: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+      name: "channel-reader",
+    },
     service: statusProvider(),
   })
   assert.ok(replacement.configBackupFile)
@@ -3850,7 +3967,10 @@ test("setup verifies and saves a standalone configuration with recoverable repla
     loadConnectorConfigDocumentFile(replacement.configBackupFile),
     initial,
   )
-  assert.equal(loadConnectorConfigDocumentFile(configFile).tools.surface, "full")
+  assert.deepEqual(
+    loadConnectorConfigDocumentFile(configFile).tools.toolsets,
+    getSetupPreset("channel-reader").toolsets,
+  )
 
   const changedIdentity = status()
   changedIdentity.application.id = "100000000000000002"
@@ -3860,6 +3980,10 @@ test("setup verifies and saves a standalone configuration with recoverable repla
       credentialVariable: TOKEN_ALIAS,
       environment: source,
       overwriteConfig: true,
+      preset: {
+        guildIds: [GUILD_ID],
+        name: "server-observer",
+      },
       service: {
         async getStatus() {
           return changedIdentity
@@ -3870,46 +3994,92 @@ test("setup verifies and saves a standalone configuration with recoverable repla
   )
 })
 
-test("persistent setup rejects ambient scope and persistence-only options fail closed", async () => {
+test("setup requires one schema-v2 target and rejects ambient policy or implicit replacement", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-selection-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const configFile = join(root, "discord.json")
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "discord",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+
   await assert.rejects(
-    () => prepareSetup({
-      environment: environment({
-        [ENVIRONMENT_NAMES.allowedGuildIds]: undefined,
-      }),
-      profileName: "open-scope",
+    () => prepareConfigSetup({
+      environment: { [TOKEN_ALIAS]: TOKEN },
       service: statusProvider(),
     }),
-    new RegExp(ENVIRONMENT_NAMES.allowedGuildIds),
+    /requires a configuration file or profile/,
   )
   await assert.rejects(
-    () => prepareSetup({
+    () => prepareConfigSetup({
+      configFile,
+      environment: { [TOKEN_ALIAS]: TOKEN },
+      service: statusProvider(),
+    }),
+    /target was not found/,
+  )
+  await writeConnectorConfigDocumentFile(configFile, document)
+  await assert.rejects(
+    () => prepareConfigSetup({
+      configFile,
       credentialVariable: TOKEN_ALIAS,
-      environment: environment(),
+      environment: { [TOKEN_ALIAS]: TOKEN },
       service: statusProvider(),
     }),
-    /require a configuration file or profile/,
+    /require --preset/,
   )
   await assert.rejects(
-    () => prepareSetup({
-      environment: environment(),
-      preset: {
-        guildIds: [GUILD_ID],
-        name: "server-observer",
+    () => prepareConfigSetup({
+      configFile,
+      environment: {
+        [TOKEN_ALIAS]: TOKEN,
+        [ENVIRONMENT_NAMES.allowDeletions]: "true",
       },
       service: statusProvider(),
     }),
-    /require a configuration file or profile/,
+    /conflicts with policy environment variables/,
   )
   await assert.rejects(
-    () => prepareSetup({
-      environment: environment({
-        [TOKEN_ALIAS]: "different-token",
-      }),
-      profileName: "conflict",
-      credentialVariable: TOKEN_ALIAS,
+    () => prepareConfigSetup({
+      configFile,
+      environment: {
+        [ENVIRONMENT_NAMES.configFile]: join(root, "other.json"),
+        [TOKEN_ALIAS]: TOKEN,
+      },
       service: statusProvider(),
     }),
-    /conflicts with DISCORD_BOT_TOKEN/,
+    new RegExp(`conflicts with ${ENVIRONMENT_NAMES.configFile}`),
+  )
+  const profileDirectory = join(root, "profiles")
+  await prepareConfigSetup({
+    credentialVariable: TOKEN_ALIAS,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    preset: {
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
+    profileDirectory,
+    profileName: "observer",
+    service: statusProvider(),
+  })
+  await assert.rejects(
+    () => prepareConfigSetup({
+      environment: {
+        [ENVIRONMENT_NAMES.configFile]: configFile,
+        [TOKEN_ALIAS]: TOKEN,
+      },
+      profileDirectory,
+      profileName: "observer",
+      service: statusProvider(),
+    }),
+    new RegExp(`conflicts with ${ENVIRONMENT_NAMES.configFile}`),
   )
 })
 

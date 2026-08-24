@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import process from "node:process"
 import { PassThrough } from "node:stream"
 import test, { type TestContext } from "node:test"
@@ -29,6 +32,8 @@ import {
   REACTION_LIMITS,
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
+import { createConnectorConfigDocument } from "../src/config-document.js"
+import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
 import type {
   AnnouncementCrosspostPlan,
   AnnouncementCrosspostRequest,
@@ -393,6 +398,7 @@ import type {
 } from "../src/webhook-service.js"
 
 const TOKEN = "test-discord-token"
+const STDIO_TOKEN_VARIABLE = "DISCORD_MCP_STDIO_TEST_TOKEN"
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
 const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
@@ -408,6 +414,35 @@ const MESSAGE_ID = "300000000000000001"
 const ROLE_ID = "350000000000000001"
 const AUDIT_ENTRY_ID = "360000000000000001"
 const USER_ID = "400000000000000001"
+
+async function stdioConfigFile(
+  context: TestContext,
+  options: {
+    toolsets: readonly (typeof MCP_TOOLSET_NAMES)[number][]
+    toolSurface: "full" | "progressive"
+  },
+): Promise<string> {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-stdio-policy-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const configFile = join(root, "discord-mcp.json")
+  await writeConnectorConfigDocumentFile(
+    configFile,
+    createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      channelIds: [CHANNEL_ID],
+      credentialVariable: STDIO_TOKEN_VARIABLE,
+      guildIds: [GUILD_ID],
+      name: "stdio-test",
+      storage: { auditFile: join(root, "activity.jsonl") },
+      toolsets: options.toolsets,
+      toolSurface: options.toolSurface,
+    }),
+  )
+  return configFile
+}
+
 const AUDIT_REASON = "Reviewed safety incident 42"
 const OPERATION_KEY = "channel-create-attempt-0001"
 const ROLE_OPERATION_KEY = "role-create-attempt-0001"
@@ -24506,14 +24541,16 @@ test("MCP tool results redact the Discord token if Discord returns it as data", 
 })
 
 test("MCP stdio progressive discovery negotiates modern tool-list changes", async (context) => {
+  const configFile = await stdioConfigFile(context, {
+    toolsets: ["deletion"],
+    toolSurface: "progressive",
+  })
   const transport = new StdioClientTransport({
-    args: ["--import", "tsx", "src/cli.ts", "serve"],
+    args: ["--import", "tsx", "src/cli.ts", "serve", "--config", configFile],
     command: process.execPath,
     cwd: process.cwd(),
     env: {
-      DISCORD_BOT_TOKEN: TOKEN,
-      DISCORD_MCP_TOOLSETS: "deletion",
-      DISCORD_MCP_TOOL_SURFACE: "progressive",
+      [STDIO_TOKEN_VARIABLE]: TOKEN,
       PATH: process.env.PATH || "",
     },
     stderr: "pipe",
@@ -24600,12 +24637,16 @@ test("MCP stdio progressive discovery negotiates modern tool-list changes", asyn
 })
 
 test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", async (context) => {
+  const configFile = await stdioConfigFile(context, {
+    toolsets: MCP_TOOLSET_NAMES,
+    toolSurface: "full",
+  })
   const transport = new StdioClientTransport({
-    args: ["--import", "tsx", "src/cli.ts", "serve"],
+    args: ["--import", "tsx", "src/cli.ts", "serve", "--config", configFile],
     command: process.execPath,
     cwd: process.cwd(),
     env: {
-      DISCORD_BOT_TOKEN: TOKEN,
+      [STDIO_TOKEN_VARIABLE]: TOKEN,
       PATH: process.env.PATH || "",
     },
     stderr: "pipe",

@@ -2,6 +2,7 @@ import {
   Client,
   InMemoryTransport,
 } from "@modelcontextprotocol/client"
+import { existsSync } from "node:fs"
 import {
   basename,
   extname,
@@ -11,9 +12,11 @@ import type { ConnectorConfig } from "./config.js"
 import { loadConnectorConfig } from "./config.js"
 import {
   CONFIG_DOCUMENT_SCHEMA_VERSION,
+  activateConnectorConfigDocument,
   configDocumentPolicyFromEnvironment,
   connectorConfigSecretEnvironmentNames,
   createConnectorConfigDocument,
+  loadConnectorConfigDocumentFile,
   normalizeConfigName,
   parseConnectorConfigDocument,
   type ConnectorConfigDocument,
@@ -50,10 +53,11 @@ import {
 } from "./mcp-tool-catalog.js"
 import {
   activateCredentialEnvironment,
+  loadProfile,
   normalizeCredentialEnvironmentName,
   normalizeProfileName,
   parseConnectorProfile,
-  PROFILE_MANAGED_ENVIRONMENT_NAMES,
+  profilePath,
   saveProfile,
   type ConnectorProfile,
 } from "./profile.js"
@@ -169,14 +173,6 @@ const DEFAULT_MCP_SERVER_NAME = "discord"
 const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/
 const STARTUP_TIMEOUT_SECONDS = 30
 const TOOL_TIMEOUT_SECONDS = 180
-const PROFILE_ENVIRONMENT_FORWARDING = Object.freeze({
-  credentialOnly: "credential-only",
-  includePolicy: "include-policy",
-} as const)
-type ProfileEnvironmentForwarding = typeof PROFILE_ENVIRONMENT_FORWARDING[
-  keyof typeof PROFILE_ENVIRONMENT_FORWARDING
-]
-
 export type DoctorCheckStatus = "fail" | "pass" | "warn"
 export type OperatorReportStatus = "error" | "ok" | "warning"
 
@@ -322,19 +318,19 @@ function doctorGuidance(
   }
   if (id === DOCTOR_CHECK_IDS.token) {
     return {
-      action: `Set ${ENVIRONMENT_NAMES.token} in the current process or activate a profile whose credential variable is present, then rerun doctor.`,
+      action: "Set the environment variable referenced by credential.variable in the current process, then rerun doctor with the same selected policy.",
       reference: DOCTOR_REFERENCES.botSetup,
     }
   }
   if (id === DOCTOR_CHECK_IDS.configuration) {
     return {
-      action: "Correct the reported environment or profile value, then rerun doctor before starting the server.",
+      action: "Correct the selected configuration or referenced secret, then rerun doctor before starting the server.",
       reference: DOCTOR_REFERENCES.configuration,
     }
   }
   if (DOCTOR_IDENTITY_CHECK_IDS.has(id)) {
     return {
-      action: "Create or refresh a profile with setup so the verified application and bot identities are pinned.",
+      action: "Create or refresh the selected policy with setup so the verified application and bot identities are pinned.",
       reference: DOCTOR_REFERENCES.operatorCli,
     }
   }
@@ -909,32 +905,38 @@ export async function diagnoseConnector(
       `Node.js ${nodeVersion} does not satisfy the Node.js ${SUPPORTED_NODE_MAJOR}+ requirement`,
     ))
 
-  const token = environment[ENVIRONMENT_NAMES.token]?.trim()
+  let config: ConnectorConfig | undefined
+  let configurationFailure: unknown
+  try {
+    config = loadConnectorConfig(environment)
+  } catch (error) {
+    configurationFailure = error
+  }
+
+  const token = config?.token.trim() || environment[ENVIRONMENT_NAMES.token]?.trim()
   checks.push(token
     ? check(
       DOCTOR_CHECK_IDS.token,
       "pass",
-      `${ENVIRONMENT_NAMES.token} is present`,
+      "Selected bot credential is present",
     )
     : check(
       DOCTOR_CHECK_IDS.token,
       "fail",
-      `${ENVIRONMENT_NAMES.token} is missing`,
+      "Selected bot credential is missing",
     ))
 
-  let config: ConnectorConfig | undefined
-  try {
-    config = loadConnectorConfig(environment)
+  if (config) {
     checks.push(check(
       DOCTOR_CHECK_IDS.configuration,
       "pass",
       "Connector configuration is valid",
     ))
-  } catch (error) {
+  } else {
     checks.push(check(
       DOCTOR_CHECK_IDS.configuration,
       "fail",
-      redactedError(error, environment),
+      redactedError(configurationFailure, environment),
     ))
   }
 
@@ -948,7 +950,7 @@ export async function diagnoseConnector(
       : check(
         DOCTOR_CHECK_IDS.applicationIdentity,
         "warn",
-        `${ENVIRONMENT_NAMES.applicationId} is not set, so token identity is not pinned locally`,
+        "identity.applicationId is not set, so token identity is not pinned locally",
       ))
     checks.push(config.expectedBotId
       ? check(
@@ -959,7 +961,7 @@ export async function diagnoseConnector(
       : check(
         DOCTOR_CHECK_IDS.botIdentity,
         "warn",
-        `${ENVIRONMENT_NAMES.botId} is not set, so bot identity is not pinned locally`,
+        "identity.botId is not set, so bot identity is not pinned locally",
       ))
     checks.push(config.allowedGuildIds.size > 0
       ? check(
@@ -2667,7 +2669,6 @@ export function createStdioLaunchDescriptor(options: {
     file: string
   }
   profile?: ConnectorProfile
-  profileEnvironmentForwarding?: ProfileEnvironmentForwarding
   serverName?: string
 }): StdioLaunchDescriptor {
   const applicationId = options.applicationId.trim()
@@ -2692,20 +2693,14 @@ export function createStdioLaunchDescriptor(options: {
       "Portable launch configuration and profile are mutually exclusive",
     )
   }
-  const profileEnvironmentForwarding = options.profileEnvironmentForwarding
-    ?? PROFILE_ENVIRONMENT_FORWARDING.includePolicy
-  if (
-    profileEnvironmentForwarding !== PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
-    && profileEnvironmentForwarding !== PROFILE_ENVIRONMENT_FORWARDING.includePolicy
-  ) {
-    throw new ConfigurationError("Profile environment forwarding mode is invalid")
-  }
-  if (
-    !profile
-    && profileEnvironmentForwarding === PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
-  ) {
+  if (!config && !profile) {
     throw new ConfigurationError(
-      "Credential-only environment forwarding requires a profile",
+      "Portable launch descriptors require a schema-v2 configuration or profile",
+    )
+  }
+  if (profile && profile.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
+    throw new ConfigurationError(
+      `Portable launch profile ${profile.name} uses legacy schema version ${profile.schemaVersion}`,
     )
   }
   if (
@@ -2751,218 +2746,19 @@ export function createStdioLaunchDescriptor(options: {
     if (profile) args.push("--profile", profile.name)
     if (config) args.push("--config", config.file)
   }
-  let environmentVariables: string[] = [
-    ENVIRONMENT_NAMES.token,
-    ENVIRONMENT_NAMES.allowedGuildIds,
-    ENVIRONMENT_NAMES.allowedChannelIds,
-    ENVIRONMENT_NAMES.allowAttachments,
-    ENVIRONMENT_NAMES.attachmentChannelIds,
-    ENVIRONMENT_NAMES.attachmentMaxBytes,
-    ENVIRONMENT_NAMES.attachmentRoots,
-    ENVIRONMENT_NAMES.allowAutomodAudit,
-    ENVIRONMENT_NAMES.allowAutomodChanges,
-    ENVIRONMENT_NAMES.automodGuildIds,
-    ENVIRONMENT_NAMES.automodAlertChannelIds,
-    ENVIRONMENT_NAMES.allowAdministration,
-    ENVIRONMENT_NAMES.adminGuildIds,
-    ENVIRONMENT_NAMES.protectedUserIds,
-    ENVIRONMENT_NAMES.allowChannelCreation,
-    ENVIRONMENT_NAMES.channelCreationGuildIds,
-    ENVIRONMENT_NAMES.allowChannelDeletionAudit,
-    ENVIRONMENT_NAMES.allowChannelDeletions,
-    ENVIRONMENT_NAMES.channelDeletionIds,
-    ENVIRONMENT_NAMES.allowChannelCloneAudit,
-    ENVIRONMENT_NAMES.allowChannelCloning,
-    ENVIRONMENT_NAMES.channelCloneGuildIds,
-    ENVIRONMENT_NAMES.channelCloneSourceIds,
-    ENVIRONMENT_NAMES.allowChannelMetadataChanges,
-    ENVIRONMENT_NAMES.channelMetadataIds,
-    ENVIRONMENT_NAMES.allowChannelOrderingAudit,
-    ENVIRONMENT_NAMES.allowChannelOrderingChanges,
-    ENVIRONMENT_NAMES.channelOrderingGuildIds,
-    ENVIRONMENT_NAMES.allowRoleCreation,
-    ENVIRONMENT_NAMES.roleCreationGuildIds,
-    ENVIRONMENT_NAMES.allowRoleConfiguration,
-    ENVIRONMENT_NAMES.roleConfigurationIds,
-    ENVIRONMENT_NAMES.allowRoleDeletionAudit,
-    ENVIRONMENT_NAMES.allowRoleDeletions,
-    ENVIRONMENT_NAMES.roleDeletionIds,
-    ENVIRONMENT_NAMES.allowRoleOrderingAudit,
-    ENVIRONMENT_NAMES.allowRoleOrderingChanges,
-    ENVIRONMENT_NAMES.roleOrderingGuildIds,
-    ENVIRONMENT_NAMES.allowGuildScaffolds,
-    ENVIRONMENT_NAMES.guildScaffoldGuildIds,
-    ENVIRONMENT_NAMES.allowGuildTemplateAudit,
-    ENVIRONMENT_NAMES.allowGuildTemplateChanges,
-    ENVIRONMENT_NAMES.guildTemplateGuildIds,
-    ENVIRONMENT_NAMES.allowGuildExpressionAudit,
-    ENVIRONMENT_NAMES.allowGuildExpressionChanges,
-    ENVIRONMENT_NAMES.guildExpressionGuildIds,
-    ENVIRONMENT_NAMES.guildExpressionRoots,
-    ENVIRONMENT_NAMES.allowApplicationEmojiAudit,
-    ENVIRONMENT_NAMES.allowApplicationEmojiChanges,
-    ENVIRONMENT_NAMES.applicationEmojiRoots,
-    ENVIRONMENT_NAMES.allowScheduledEventAudit,
-    ENVIRONMENT_NAMES.allowScheduledEventChanges,
-    ENVIRONMENT_NAMES.allowScheduledEventUserAudit,
-    ENVIRONMENT_NAMES.scheduledEventGuildIds,
-    ENVIRONMENT_NAMES.scheduledEventRoots,
-    ENVIRONMENT_NAMES.allowSoundboardAudit,
-    ENVIRONMENT_NAMES.allowSoundboardChanges,
-    ENVIRONMENT_NAMES.soundboardGuildIds,
-    ENVIRONMENT_NAMES.soundboardRoots,
-    ENVIRONMENT_NAMES.allowStageInstanceAudit,
-    ENVIRONMENT_NAMES.allowStageInstanceChanges,
-    ENVIRONMENT_NAMES.allowStageStartNotifications,
-    ENVIRONMENT_NAMES.stageChannelIds,
-    ENVIRONMENT_NAMES.allowDeletions,
-    ENVIRONMENT_NAMES.deleteChannelIds,
-    ENVIRONMENT_NAMES.allowPinManagement,
-    ENVIRONMENT_NAMES.pinChannelIds,
-    ENVIRONMENT_NAMES.allowAnnouncementCrossposts,
-    ENVIRONMENT_NAMES.announcementCrosspostChannelIds,
-    ENVIRONMENT_NAMES.allowMessageForwarding,
-    ENVIRONMENT_NAMES.allowCrossGuildMessageForwarding,
-    ENVIRONMENT_NAMES.messageForwardSourceChannelIds,
-    ENVIRONMENT_NAMES.messageForwardTargetChannelIds,
-    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionAudit,
-    ENVIRONMENT_NAMES.allowAnnouncementSubscriptionChanges,
-    ENVIRONMENT_NAMES.announcementSubscriptionSourceChannelIds,
-    ENVIRONMENT_NAMES.announcementSubscriptionTargetChannelIds,
-    ENVIRONMENT_NAMES.allowPollAudit,
-    ENVIRONMENT_NAMES.allowPollVoterAudit,
-    ENVIRONMENT_NAMES.allowPollCreation,
-    ENVIRONMENT_NAMES.allowPollEnding,
-    ENVIRONMENT_NAMES.pollChannelIds,
-    ENVIRONMENT_NAMES.allowReactionUserAudit,
-    ENVIRONMENT_NAMES.allowReactionModeration,
-    ENVIRONMENT_NAMES.reactionChannelIds,
-    ENVIRONMENT_NAMES.allowPermissionOverwrites,
-    ENVIRONMENT_NAMES.permissionOverwriteChannelIds,
-    ENVIRONMENT_NAMES.allowForumPosts,
-    ENVIRONMENT_NAMES.forumPostChannelIds,
-    ENVIRONMENT_NAMES.allowForumTagAudit,
-    ENVIRONMENT_NAMES.allowForumTagChanges,
-    ENVIRONMENT_NAMES.forumTagChannelIds,
-    ENVIRONMENT_NAMES.allowThreadCreation,
-    ENVIRONMENT_NAMES.threadParentIds,
-    ENVIRONMENT_NAMES.allowThreadAudit,
-    ENVIRONMENT_NAMES.allowThreadChanges,
-    ENVIRONMENT_NAMES.threadGuildIds,
-    ENVIRONMENT_NAMES.threadIds,
-    ENVIRONMENT_NAMES.threadMemberUserIds,
-    ENVIRONMENT_NAMES.allowInteractions,
-    ENVIRONMENT_NAMES.interactionChannelIds,
-    ENVIRONMENT_NAMES.mentionUserIds,
-    ENVIRONMENT_NAMES.interactionMaxWritesPerMinute,
-    ENVIRONMENT_NAMES.interactionMinWriteIntervalMs,
-    ENVIRONMENT_NAMES.allowInviteAudit,
-    ENVIRONMENT_NAMES.allowInviteDeletions,
-    ENVIRONMENT_NAMES.inviteGuildIds,
-    ENVIRONMENT_NAMES.allowOnboardingAudit,
-    ENVIRONMENT_NAMES.allowOnboardingChanges,
-    ENVIRONMENT_NAMES.onboardingGuildIds,
-    ENVIRONMENT_NAMES.allowWelcomeScreenAudit,
-    ENVIRONMENT_NAMES.allowWelcomeScreenChanges,
-    ENVIRONMENT_NAMES.welcomeScreenGuildIds,
-    ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
-    ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
-    ENVIRONMENT_NAMES.allowWidgetPublicExposure,
-    ENVIRONMENT_NAMES.widgetSettingsGuildIds,
-    ENVIRONMENT_NAMES.allowGuildSettingsAudit,
-    ENVIRONMENT_NAMES.allowGuildSettingsChanges,
-    ENVIRONMENT_NAMES.guildSettingsGuildIds,
-    ENVIRONMENT_NAMES.allowGuildProfileAudit,
-    ENVIRONMENT_NAMES.allowGuildProfileChanges,
-    ENVIRONMENT_NAMES.guildProfileGuildIds,
-    ENVIRONMENT_NAMES.allowMemberDirectory,
-    ENVIRONMENT_NAMES.memberDirectoryGuildIds,
-    ENVIRONMENT_NAMES.allowBanAudit,
-    ENVIRONMENT_NAMES.banAuditGuildIds,
-    ENVIRONMENT_NAMES.allowNicknameChanges,
-    ENVIRONMENT_NAMES.allowOtherMemberNicknameChanges,
-    ENVIRONMENT_NAMES.nicknameGuildIds,
-    ENVIRONMENT_NAMES.allowMemberRoleChanges,
-    ENVIRONMENT_NAMES.memberRoleGuildIds,
-    ENVIRONMENT_NAMES.memberRoleIds,
-    ENVIRONMENT_NAMES.allowMemberVoiceAudit,
-    ENVIRONMENT_NAMES.allowMemberVoiceChanges,
-    ENVIRONMENT_NAMES.memberVoiceGuildIds,
-    ENVIRONMENT_NAMES.memberVoiceChannelIds,
-    ENVIRONMENT_NAMES.allowWebhookAudit,
-    ENVIRONMENT_NAMES.allowWebhookChanges,
-    ENVIRONMENT_NAMES.allowWebhookCreation,
-    ENVIRONMENT_NAMES.allowWebhookDeletions,
-    ENVIRONMENT_NAMES.webhookChannelIds,
-    ENVIRONMENT_NAMES.allowIntegrationAudit,
-    ENVIRONMENT_NAMES.allowIntegrationDeletions,
-    ENVIRONMENT_NAMES.integrationGuildIds,
-    ENVIRONMENT_NAMES.integrationIds,
-    ENVIRONMENT_NAMES.allowGateway,
-    ENVIRONMENT_NAMES.gatewayEventBufferSize,
-    ENVIRONMENT_NAMES.allowNativeCommandChanges,
-    ENVIRONMENT_NAMES.allowNativeInteractions,
-    ENVIRONMENT_NAMES.nativeCommandName,
-    ENVIRONMENT_NAMES.nativeInteractionGuildIds,
-    ENVIRONMENT_NAMES.nativeInteractionChannelIds,
-    ENVIRONMENT_NAMES.nativeInteractionUserIds,
-    ENVIRONMENT_NAMES.nativeInteractionMaxPending,
-    ENVIRONMENT_NAMES.nativeInteractionTtlSeconds,
-    ENVIRONMENT_NAMES.allowObservabilityExport,
-    ENVIRONMENT_NAMES.observabilityLogs,
-    ENVIRONMENT_NAMES.otelEndpoint,
-    ENVIRONMENT_NAMES.otelTraceEndpoint,
-    ENVIRONMENT_NAMES.otelMetricsEndpoint,
-    ENVIRONMENT_NAMES.otelHeaders,
-    ENVIRONMENT_NAMES.otelTraceHeaders,
-    ENVIRONMENT_NAMES.otelMetricsHeaders,
-    ENVIRONMENT_NAMES.otelProtocol,
-    ENVIRONMENT_NAMES.otelTraceProtocol,
-    ENVIRONMENT_NAMES.otelMetricsProtocol,
-    ENVIRONMENT_NAMES.otelCompression,
-    ENVIRONMENT_NAMES.otelTraceCompression,
-    ENVIRONMENT_NAMES.otelMetricsCompression,
-    ENVIRONMENT_NAMES.otelTimeout,
-    ENVIRONMENT_NAMES.otelTraceTimeout,
-    ENVIRONMENT_NAMES.otelMetricsTimeout,
-    ENVIRONMENT_NAMES.otelServiceName,
-    ENVIRONMENT_NAMES.otelTracesSampler,
-    ENVIRONMENT_NAMES.otelTracesSamplerArg,
-    ENVIRONMENT_NAMES.toolSurface,
-    ENVIRONMENT_NAMES.toolsets,
-    ENVIRONMENT_NAMES.auditFile,
-  ]
-  if (profile) {
-    if (profile.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
-      environmentVariables = [...connectorConfigSecretEnvironmentNames(profile)]
-    } else {
-      const managed = new Set<string>(PROFILE_MANAGED_ENVIRONMENT_NAMES)
-      environmentVariables = profileEnvironmentForwarding
-        === PROFILE_ENVIRONMENT_FORWARDING.credentialOnly
-        ? [profile.credential.variable]
-        : [
-            profile.credential.variable,
-            ...environmentVariables.filter((name) => (
-              name !== ENVIRONMENT_NAMES.token
-              && !managed.has(name)
-            )),
-          ]
-    }
+  const policy = config?.document || profile
+  if (!policy || policy.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
+    throw new ConfigurationError(
+      "Portable launch descriptors require a schema-v2 configuration or profile",
+    )
   }
-  if (config) {
-    environmentVariables = [...connectorConfigSecretEnvironmentNames(config.document)]
-  }
+  const environmentVariables = [...connectorConfigSecretEnvironmentNames(policy)]
   return {
     args,
     command,
     environment: {
       forward: environmentVariables,
-      set: profile || config
-        ? {}
-        : {
-          [ENVIRONMENT_NAMES.applicationId]: applicationId,
-          [ENVIRONMENT_NAMES.botId]: botId,
-        },
+      set: {},
     },
     requirements: {
       elicitation: "required-for-reviewed-writes",
@@ -2987,20 +2783,9 @@ export async function prepareSetup(
       "Setup configuration file and profile are mutually exclusive",
     )
   }
-  const hasPersistentConfig = options.configFile !== undefined
-    || options.profileName !== undefined
-  if (
-    !hasPersistentConfig
-    && (
-      options.credentialVariable !== undefined
-      || options.overwriteConfig
-      || options.overwriteProfile
-      || options.profileDirectory !== undefined
-      || options.preset !== undefined
-    )
-  ) {
+  if (options.configFile === undefined && options.profileName === undefined) {
     throw new ConfigurationError(
-      "Credential aliases, replacement, presets, and scoped setup require a configuration file or profile",
+      "Setup requires a configuration file or profile",
     )
   }
   if (options.configFile !== undefined && options.profileDirectory !== undefined) {
@@ -3021,14 +2806,67 @@ export async function prepareSetup(
   const configName = configFile
     ? normalizeConfigName(basename(configFile, extname(configFile)))
     : profileName
-  const credentialVariable = normalizeCredentialEnvironmentName(
-    options.credentialVariable ?? ENVIRONMENT_NAMES.token,
-  )
-  const credentialEnvironment = hasPersistentConfig
-    ? activateCredentialEnvironment(credentialVariable, environment)
-    : environment
-  const appliedPreset = options.preset
-    ? applySetupPreset({
+  if (!configName) throw new ConfigurationError("Setup could not resolve a policy name")
+  if (configFile) {
+    const ambientConfigFile = environment[ENVIRONMENT_NAMES.configFile]?.trim()
+    if (ambientConfigFile && resolveConnectorConfigFile(ambientConfigFile) !== configFile) {
+      throw new ConfigurationError(
+        `Setup configuration conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+      )
+    }
+  }
+  if (profileName && environment[ENVIRONMENT_NAMES.configFile]?.trim()) {
+    throw new ConfigurationError(
+      `Setup profile ${profileName} conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+    )
+  }
+  const profileLocation = {
+    environment,
+    ...(options.profileDirectory ? { directory: options.profileDirectory } : {}),
+  }
+  const targetExists = configFile
+    ? existsSync(configFile)
+    : existsSync(profilePath(profileName || configName, profileLocation))
+  const overwriteTarget = configFile
+    ? options.overwriteConfig
+    : options.overwriteProfile
+  if (options.preset && targetExists && !overwriteTarget) {
+    throw new ConfigurationError(
+      "Setup target already exists; rerun without --preset to verify it or add --force after review",
+    )
+  }
+  if (!options.preset && !targetExists) {
+    throw new ConfigurationError(
+      "Setup target was not found; create it with --preset, discord-mcp config init, or discord-mcp config migrate",
+    )
+  }
+  if (
+    !options.preset
+    && (
+      options.credentialVariable !== undefined
+      || options.overwriteConfig
+      || options.overwriteProfile
+    )
+  ) {
+    throw new ConfigurationError(
+      "--token-env and --force require --preset because an existing policy owns its credential references and content",
+    )
+  }
+
+  let appliedPreset: ReturnType<typeof applySetupPreset> | null = null
+  let credentialVariable: string
+  let portableConfig: ConnectorConfigDocument | undefined
+  let profile: ConnectorProfile | null = null
+  let runtimeEnvironment: NodeJS.ProcessEnv
+  if (options.preset) {
+    credentialVariable = normalizeCredentialEnvironmentName(
+      options.credentialVariable ?? ENVIRONMENT_NAMES.token,
+    )
+    const credentialEnvironment = activateCredentialEnvironment(
+      credentialVariable,
+      environment,
+    )
+    appliedPreset = applySetupPreset({
       ...(options.preset.channelIds
         ? { channelIds: options.preset.channelIds }
         : {}),
@@ -3036,14 +2874,24 @@ export async function prepareSetup(
       guildIds: options.preset.guildIds,
       name: options.preset.name,
     })
-    : null
-  const runtimeEnvironment = appliedPreset?.environment ?? credentialEnvironment
-  const config = loadConnectorConfig(runtimeEnvironment)
-  if (configName && config.allowedGuildIds.size === 0) {
-    throw new ConfigurationError(
-      `Persistent setup requires ${ENVIRONMENT_NAMES.allowedGuildIds}`,
-    )
+    runtimeEnvironment = appliedPreset.environment
+  } else if (configFile) {
+    portableConfig = loadConnectorConfigDocumentFile(configFile)
+    credentialVariable = portableConfig.credential.variable
+    runtimeEnvironment = activateConnectorConfigDocument(portableConfig, environment)
+  } else {
+    const loadedProfile = await loadProfile(profileName || configName, profileLocation)
+    if (loadedProfile.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
+      throw new ConfigurationError(
+        `Profile ${loadedProfile.name} uses legacy schema version ${loadedProfile.schemaVersion}; convert it with discord-mcp config migrate FILE --profile ${loadedProfile.name}`,
+      )
+    }
+    portableConfig = loadedProfile
+    profile = loadedProfile
+    credentialVariable = loadedProfile.credential.variable
+    runtimeEnvironment = activateConnectorConfigDocument(loadedProfile, environment)
   }
+  const config = loadConnectorConfig(runtimeEnvironment)
   const service = options.service || new ConnectorService({ config })
   const status = await service.getStatus()
   if (status.guildPage.inScope < 1) {
@@ -3057,8 +2905,8 @@ export async function prepareSetup(
       `Discord bot can access ${status.guildPage.inScope} of ${config.allowedGuildIds.size} exact preset guilds on the first membership page`,
     )
   }
-  const portableConfig = configName
-    ? createConnectorConfigDocument({
+  if (appliedPreset) {
+    portableConfig = createConnectorConfigDocument({
       applicationId: status.application.id,
       botId: status.bot.id,
       channelIds: [...config.allowedChannelIds],
@@ -3071,14 +2919,17 @@ export async function prepareSetup(
       toolsets: selectedMcpToolsets(config.mcpToolsets),
       toolSurface: config.mcpToolSurface,
     })
-    : null
-  const profile = profileName ? portableConfig : null
+    profile = profileName ? portableConfig : null
+  }
+  if (!portableConfig) {
+    throw new ConfigurationError("Setup could not resolve a schema-v2 policy")
+  }
   const launch = createStdioLaunchDescriptor({
     applicationId: status.application.id,
     botId: status.bot.id,
     ...(options.args ? { args: options.args } : {}),
     ...(options.command ? { command: options.command } : {}),
-    ...(configFile && portableConfig
+    ...(configFile
       ? {
           config: {
             document: portableConfig,
@@ -3087,22 +2938,16 @@ export async function prepareSetup(
         }
       : {}),
     ...(profile ? { profile } : {}),
-    ...(appliedPreset && profile
-      ? {
-          profileEnvironmentForwarding:
-            PROFILE_ENVIRONMENT_FORWARDING.credentialOnly,
-        }
-      : {}),
     ...(options.serverName !== undefined ? { serverName: options.serverName } : {}),
   })
-  if (profile) {
+  if (appliedPreset && profile) {
     await saveProfile(profile, {
       environment,
       overwrite: options.overwriteProfile ?? false,
       ...(options.profileDirectory ? { directory: options.profileDirectory } : {}),
     })
   }
-  const configWrite = configFile && portableConfig
+  const configWrite = appliedPreset && configFile
     ? await writeConnectorConfigDocumentFile(configFile, portableConfig, {
       overwrite: options.overwriteConfig ?? false,
     })
@@ -3129,7 +2974,7 @@ export async function prepareSetup(
     applicationId: status.application.id,
     botId: status.bot.id,
     configBackupFile: configWrite?.backupFile ?? null,
-    configFile: configWrite?.file ?? null,
+    configFile: configFile ?? null,
     credentialVariable,
     launch,
     preset: appliedPreset?.preset ?? null,
