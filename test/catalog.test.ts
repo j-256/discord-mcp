@@ -21,6 +21,7 @@ import {
   createDiscordCatalogServer,
 } from "../src/catalog.js"
 import {
+  CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
@@ -39,6 +40,7 @@ import {
 } from "../src/observability-catalog.js"
 
 const CHANNEL_ID = "200000000000000001"
+const LEGACY_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_ALLOW_DELETIONS"
 const EXPECTED_TOOL_NAMES = [
   ...selectedCanonicalMcpToolNames(new Set(MCP_TOOLSET_NAMES)),
   MCP_DISCOVERY_TOOL_NAME,
@@ -238,19 +240,14 @@ test("catalog evidence digest binds the normalized advertised contract and safet
   assert.equal(report.safetyResourceDigest, expectedSafetyResourceDigest)
 })
 
-test("catalog self-check ignores hostile ambient credentials, policy, Gateway, telemetry, and activity paths", async () => {
+test("catalog self-check ignores hostile ambient credentials and unrelated settings", async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-catalog-test-"))
   const activityFile = join(temporaryDirectory, "activity.jsonl")
   const ambientSecret = "ambient-catalog-secret"
   const overrides = new Map<string, string>([
     [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE, ambientSecret],
-    ["DISCORD_MCP_ALLOW_GATEWAY", "true"],
-    ["DISCORD_MCP_APPLICATION_ID", "invalid"],
-    ["DISCORD_MCP_TOOLSETS", "connector"],
-    ["DISCORD_MCP_TOOL_SURFACE", "progressive"],
-    ["DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT", "true"],
-    ["OTEL_EXPORTER_OTLP_ENDPOINT", "not-a-url"],
-    ["DISCORD_MCP_AUDIT_FILE", activityFile],
+    [CONFIG_FILE_ENVIRONMENT_VARIABLE, activityFile],
+    [LEGACY_POLICY_ENVIRONMENT_VARIABLE, "true"],
   ])
   const before = new Map(
     [...overrides].map(([name]) => [name, process.env[name]] as const),

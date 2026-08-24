@@ -48,6 +48,7 @@ const ROLE_ID = "500000000000000001"
 const TOKEN = "test-discord-token"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const HEADER_ALIAS = "HONEYCOMB_OTLP_HEADERS"
+const LEGACY_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_ALLOW_DELETIONS"
 
 function document(
   overrides: Partial<ConnectorConfigDocument> = {},
@@ -128,7 +129,7 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
       ...valid,
       credential: {
         provider: "environment",
-        variable: "DISCORD_MCP_ALLOW_DELETIONS",
+        variable: LEGACY_POLICY_ENVIRONMENT_VARIABLE,
       },
     },
     { ...valid, credential: { path: "relative-token", provider: "file" } },
@@ -164,7 +165,7 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
       observability: {
         headers: {
           provider: "environment",
-          variable: "DISCORD_MCP_ALLOW_GATEWAY",
+          variable: LEGACY_POLICY_ENVIRONMENT_VARIABLE,
         },
       },
     },
@@ -243,16 +244,9 @@ test("native configuration loads only referenced secrets and rejects ambient pol
   assert.throws(
     () => loadConnectorConfigDocument(configured, {
       ...source,
-      DISCORD_MCP_ALLOW_DELETIONS: "false",
+      [LEGACY_POLICY_ENVIRONMENT_VARIABLE]: "false",
     }),
-    /conflicts.*DISCORD_MCP_ALLOW_DELETIONS/,
-  )
-  assert.throws(
-    () => loadConnectorConfigDocument(configured, {
-      ...source,
-      DISCORD_MCP_ALLOW_DELETION: "true",
-    }),
-    /conflicts.*DISCORD_MCP_ALLOW_DELETION/,
+    new RegExp(`conflicts.*${LEGACY_POLICY_ENVIRONMENT_VARIABLE}`),
   )
   assert.throws(
     () => loadConnectorConfigDocument(configured, {

@@ -408,7 +408,10 @@ import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
 } from "../src/thread-creation-service.js"
-import { loadFixtureConfig } from "./config-fixture.js"
+import {
+  loadFixtureConfig,
+  type FixtureConfigOverrides,
+} from "./config-fixture.js"
 import type {
   ThreadChangePlan,
   ThreadChangeRequest,
@@ -426,7 +429,12 @@ import type {
 } from "../src/webhook-service.js"
 
 const TOKEN = "test-discord-token"
-const STDIO_TOKEN_VARIABLE = "DISCORD_MCP_STDIO_TEST_TOKEN"
+const STDIO_TOKEN_VARIABLE = "DISCORD_STDIO_TEST_TOKEN"
+const PROGRESSIVE_TOOL_SURFACE_CONFIG: FixtureConfigOverrides = {
+  tools: {
+    surface: "progressive",
+  },
+}
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
 const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
@@ -10288,7 +10296,7 @@ async function connectedFixture(
       action: "accept" | "cancel" | "decline"
       content?: { approve: boolean }
     }>
-    environment?: NodeJS.ProcessEnv
+    configOverrides?: FixtureConfigOverrides
     listChanged?: ClientOptions["listChanged"]
     serverMessages?: unknown[]
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
@@ -10297,13 +10305,15 @@ async function connectedFixture(
   } = {},
 ) {
   const serviceData = serviceFixture(options.serviceOverrides)
-  const environment = {
-    DISCORD_BOT_TOKEN: TOKEN,
-    ...options.environment,
+  const configOverrides = {
+    token: TOKEN,
+    ...options.configOverrides,
   }
   const server = createDiscordMcpServer({
-    config: loadFixtureConfig(environment),
-    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    config: loadFixtureConfig(configOverrides),
+    environment: {
+      DISCORD_BOT_TOKEN: TOKEN,
+    },
     ...(options.gateway ? { gateway: options.gateway } : {}),
     ...(options.nativeInteractions
       ? { nativeInteractions: options.nativeInteractions }
@@ -10411,8 +10421,12 @@ async function connectedModernStdioFixture(
   const serverInput = new PassThrough()
   const serverOutput = new PassThrough()
   const handle = runDiscordMcpServer({
-    config: loadFixtureConfig({ DISCORD_BOT_TOKEN: TOKEN }),
-    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    config: loadFixtureConfig({
+      token: TOKEN,
+    }),
+    environment: {
+      DISCORD_BOT_TOKEN: TOKEN,
+    },
     observability: new OperationalTelemetry({
       config: loadObservabilityDocumentConfig({}, {}, [TOKEN]),
     }),
@@ -11154,17 +11168,25 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
 })
 
 test("MCP server validates the exact reviewed channel-workflow Gateway layout scope", async () => {
-  const environment = {
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
-    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-    DISCORD_MCP_BOT_ID: BOT_ID,
-    DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
-    DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+  const configOverrides = {
+    token: TOKEN,
+    capabilities: {
+      channelCloneAudit: true,
+      channelOrderingAudit: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      channelCloneGuildIds: [GUILD_ID],
+      channelCloneSourceIds: [CHANNEL_ID],
+      channelOrderingGuildIds: [GUILD_ID],
+    },
   }
   const service = serviceFixture().service
   const gateway = (enabled: boolean, guildId: string) => new GatewayEventStore({
@@ -11178,8 +11200,8 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
 
   assert.throws(
     () => createDiscordMcpServer({
-      config: loadFixtureConfig(environment),
-      environment,
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: gateway(false, GUILD_ID),
       service,
     }),
@@ -11187,8 +11209,8 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
   )
   assert.throws(
     () => createDiscordMcpServer({
-      config: loadFixtureConfig(environment),
-      environment,
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: gateway(true, OTHER_GUILD_ID),
       service,
     }),
@@ -11196,8 +11218,8 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
   )
 
   const server = createDiscordMcpServer({
-    config: loadFixtureConfig(environment),
-    environment,
+    config: loadFixtureConfig(configOverrides),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
     gateway: gateway(true, GUILD_ID),
     service,
   })
@@ -11205,14 +11227,22 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
 })
 
 test("MCP server requires an exact operational Gateway source for voice channel status", async () => {
-  const environment = {
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
-    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-    DISCORD_MCP_BOT_ID: BOT_ID,
-    DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+  const configOverrides = {
+    token: TOKEN,
+    capabilities: {
+      channelMetadataChanges: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      channelMetadataIds: [CHANNEL_ID],
+    },
   }
   const service = serviceFixture().service
   const store = (scopedChannels: number) => new GatewayEventStore({
@@ -11226,8 +11256,8 @@ test("MCP server requires an exact operational Gateway source for voice channel 
 
   assert.throws(
     () => createDiscordMcpServer({
-      config: loadFixtureConfig(environment),
-      environment,
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: store(0),
       service,
     }),
@@ -11235,8 +11265,8 @@ test("MCP server requires an exact operational Gateway source for voice channel 
   )
   assert.throws(
     () => createDiscordMcpServer({
-      config: loadFixtureConfig(environment),
-      environment,
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: store(1),
       service,
     }),
@@ -11249,8 +11279,8 @@ test("MCP server requires an exact operational Gateway source for voice channel 
   })
   assert.throws(
     () => createDiscordMcpServer({
-      config: loadFixtureConfig(environment),
-      environment,
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: disabled,
       service,
     }),
@@ -11263,8 +11293,8 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
   })
   const server = createDiscordMcpServer({
-    config: loadFixtureConfig(environment),
-    environment,
+    config: loadFixtureConfig(configOverrides),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
     gateway: enabled,
     service,
   })
@@ -11340,7 +11370,7 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
     rejectFirstNotification = reject
   })
   const progressive = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
     listChanged: {
       tools: {
         debounceMs: 0,
@@ -11423,7 +11453,7 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
 
 test("progressive discovery enables the complete reviewed channel-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11447,7 +11477,7 @@ test("progressive discovery enables the complete reviewed channel-creation workf
 
 test("progressive discovery enables the complete reviewed channel-clone workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11471,7 +11501,7 @@ test("progressive discovery enables the complete reviewed channel-clone workflow
 
 test("progressive discovery separates channel-order audit from reviewed changes", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const auditDiscovery = structuredContent(await client.callTool({
@@ -11501,7 +11531,7 @@ test("progressive discovery separates channel-order audit from reviewed changes"
 
 test("progressive discovery separates role-deletion audit from reviewed changes", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const auditDiscovery = structuredContent(await client.callTool({
@@ -11531,7 +11561,7 @@ test("progressive discovery separates role-deletion audit from reviewed changes"
 
 test("progressive discovery enables the complete reviewed forum-post workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11555,7 +11585,7 @@ test("progressive discovery enables the complete reviewed forum-post workflow", 
 
 test("progressive discovery enables the complete reviewed forum-tag workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11579,7 +11609,7 @@ test("progressive discovery enables the complete reviewed forum-tag workflow", a
 
 test("progressive discovery enables the complete reviewed thread-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11603,7 +11633,7 @@ test("progressive discovery enables the complete reviewed thread-creation workfl
 
 test("progressive discovery enables the complete reviewed attachment-message workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11627,7 +11657,7 @@ test("progressive discovery enables the complete reviewed attachment-message wor
 
 test("progressive discovery enables the complete reviewed component-message workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11655,7 +11685,7 @@ test("progressive discovery enables the complete reviewed component-message work
 
 test("progressive discovery enables the complete reviewed guild-scaffold workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11681,7 +11711,7 @@ test("progressive discovery enables the complete reviewed guild-scaffold workflo
 
 test("progressive discovery enables the complete reviewed guild-blueprint workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11709,7 +11739,7 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
 
 test("progressive discovery enables the complete reviewed role-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11733,7 +11763,7 @@ test("progressive discovery enables the complete reviewed role-creation workflow
 
 test("progressive discovery enables the complete reviewed member nickname workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11757,7 +11787,7 @@ test("progressive discovery enables the complete reviewed member nickname workfl
 
 test("progressive discovery enables the complete reviewed member-role workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11781,7 +11811,7 @@ test("progressive discovery enables the complete reviewed member-role workflow",
 
 test("progressive discovery enables the complete reviewed member voice workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11805,7 +11835,7 @@ test("progressive discovery enables the complete reviewed member voice workflow"
 
 test("progressive discovery enables the complete reviewed thread-governance workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11829,7 +11859,7 @@ test("progressive discovery enables the complete reviewed thread-governance work
 
 test("progressive discovery enables the complete reviewed message-pin workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11853,7 +11883,7 @@ test("progressive discovery enables the complete reviewed message-pin workflow",
 
 test("progressive discovery enables the complete reviewed reaction-moderation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11877,7 +11907,7 @@ test("progressive discovery enables the complete reviewed reaction-moderation wo
 
 test("progressive discovery enables the complete reviewed announcement-crosspost workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11901,7 +11931,7 @@ test("progressive discovery enables the complete reviewed announcement-crosspost
 
 test("progressive discovery enables the complete reviewed message-forward workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11925,7 +11955,7 @@ test("progressive discovery enables the complete reviewed message-forward workfl
 
 test("progressive discovery keeps announcement audit separate from the reviewed change pair", async (context) => {
   const audit = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
   const auditDiscovery = structuredContent(await audit.client.callTool({
     arguments: { query: "list_announcement_subscriptions" },
@@ -11941,7 +11971,7 @@ test("progressive discovery keeps announcement audit separate from the reviewed 
   )
 
   const reviewed = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await reviewed.client.callTool({
@@ -11965,7 +11995,7 @@ test("progressive discovery keeps announcement audit separate from the reviewed 
 
 test("progressive discovery enables the complete reviewed poll-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -11989,7 +12019,7 @@ test("progressive discovery enables the complete reviewed poll-creation workflow
 
 test("progressive discovery enables the complete reviewed poll-ending workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12013,7 +12043,7 @@ test("progressive discovery enables the complete reviewed poll-ending workflow",
 
 test("progressive discovery enables the complete reviewed webhook-deletion workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12037,7 +12067,7 @@ test("progressive discovery enables the complete reviewed webhook-deletion workf
 
 test("progressive discovery enables the complete reviewed webhook-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12061,7 +12091,7 @@ test("progressive discovery enables the complete reviewed webhook-creation workf
 
 test("progressive discovery enables the complete reviewed webhook-change workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12085,7 +12115,7 @@ test("progressive discovery enables the complete reviewed webhook-change workflo
 
 test("progressive discovery enables the complete reviewed invite-deletion workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12109,7 +12139,7 @@ test("progressive discovery enables the complete reviewed invite-deletion workfl
 
 test("progressive discovery enables the complete reviewed onboarding workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12133,7 +12163,7 @@ test("progressive discovery enables the complete reviewed onboarding workflow", 
 
 test("progressive discovery enables the complete reviewed Welcome Screen workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12157,7 +12187,7 @@ test("progressive discovery enables the complete reviewed Welcome Screen workflo
 
 test("progressive discovery enables the complete reviewed widget-settings workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12181,7 +12211,7 @@ test("progressive discovery enables the complete reviewed widget-settings workfl
 
 test("progressive discovery enables the complete reviewed guild-expression workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12205,7 +12235,7 @@ test("progressive discovery enables the complete reviewed guild-expression workf
 
 test("progressive discovery enables the complete reviewed soundboard workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12229,7 +12259,7 @@ test("progressive discovery enables the complete reviewed soundboard workflow", 
 
 test("progressive discovery enables the complete reviewed AutoMod workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12253,7 +12283,7 @@ test("progressive discovery enables the complete reviewed AutoMod workflow", asy
 
 test("progressive discovery enables the complete reviewed scheduled-event workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12277,7 +12307,7 @@ test("progressive discovery enables the complete reviewed scheduled-event workfl
 
 test("progressive discovery enables the complete reviewed Stage-instance workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12301,7 +12331,7 @@ test("progressive discovery enables the complete reviewed Stage-instance workflo
 
 test("progressive discovery enables the complete reviewed channel-metadata workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12325,7 +12355,7 @@ test("progressive discovery enables the complete reviewed channel-metadata workf
 
 test("progressive discovery enables the reviewed voice channel status pair", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12349,7 +12379,7 @@ test("progressive discovery enables the reviewed voice channel status pair", asy
 
 test("progressive discovery exposes voice reads with reviewed channel settings", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12379,7 +12409,7 @@ test("progressive discovery exposes voice reads with reviewed channel settings",
 
 test("progressive discovery enables the complete reviewed permission-overwrite workflow", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -12403,7 +12433,11 @@ test("progressive discovery enables the complete reviewed permission-overwrite w
 
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOLSETS: "messages,connector" },
+    configOverrides: {
+      tools: {
+        toolsets: ["messages", "connector"],
+      },
+    },
   })
 
   assert.deepEqual(
@@ -12746,9 +12780,11 @@ test("MCP principal permission tools enforce exact subjects, targets, and bounde
 
 test("progressive permission discovery reveals only the requested exact tool", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: {
-      DISCORD_MCP_TOOLSETS: "permissions",
-      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    configOverrides: {
+      tools: {
+        toolsets: ["permissions"],
+        surface: "progressive",
+      },
     },
   })
 
@@ -12888,9 +12924,11 @@ test("MCP ban audit exposes bounded default-redacted pages and exact reads", asy
 
 test("progressive ban discovery reveals only the requested exact read", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: {
-      DISCORD_MCP_TOOLSETS: "bans",
-      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    configOverrides: {
+      tools: {
+        toolsets: ["bans"],
+        surface: "progressive",
+      },
     },
   })
 
@@ -12947,9 +12985,11 @@ test("MCP guild audit-log tools enforce bounded privacy tiers and exact IDs", as
 
 test("progressive audit-log discovery reveals only the requested exact read", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: {
-      DISCORD_MCP_TOOLSETS: "audit-logs",
-      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    configOverrides: {
+      tools: {
+        toolsets: ["audit-logs"],
+        surface: "progressive",
+      },
     },
   })
 
@@ -13016,12 +13056,18 @@ test("MCP Gateway tools expose local health and cursor continuity without conten
     enabled: true,
   })
   const { client } = await connectedFixture(context, {
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-      DISCORD_MCP_BOT_ID: BOT_ID,
+    configOverrides: {
+      gateway: {
+        enabled: true,
+      },
+      identity: {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
     },
     gateway,
   })
@@ -20801,7 +20847,7 @@ test("MCP scheduled event reads expose bounded privacy-safe evidence and opt-in 
 
 test("progressive discovery reveals the exact scheduled-event user audit", async (context) => {
   const { client } = await connectedFixture(context, {
-    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
   })
 
   const discovery = structuredContent(await client.callTool({
@@ -27097,8 +27143,12 @@ test("MCP stdio startup fails before reporting ready when the referenced token i
 test("MCP stdio runner rejects a source-only native Interaction adapter", () => {
   assert.throws(
     () => runDiscordMcpServer({
-      config: loadFixtureConfig({ DISCORD_BOT_TOKEN: TOKEN }),
-      environment: { DISCORD_BOT_TOKEN: TOKEN },
+      config: loadFixtureConfig({
+        token: TOKEN,
+      }),
+      environment: {
+        DISCORD_BOT_TOKEN: TOKEN,
+      },
       nativeInteractions: undefined,
     } as unknown as DiscordMcpRunOptions),
     /accept nativeInteractionRuntime, not a source-only/,
@@ -27196,20 +27246,28 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     voiceChannelStatusEnabled: false,
   }
   const serviceData = serviceFixture()
-  const environment = {
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
-    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-    DISCORD_MCP_BOT_ID: BOT_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: USER_ID,
+  const configOverrides = {
+    token: TOKEN,
+    capabilities: {
+      nativeInteractions: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionGuildIds: [GUILD_ID],
+      nativeInteractionUserIds: [USER_ID],
+    },
   }
   const handle = runDiscordMcpServer({
-    config: loadFixtureConfig(environment),
-    environment,
+    config: loadFixtureConfig(configOverrides),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
     gatewayRuntime,
     nativeInteractionRuntime,
     service: serviceData.service,
@@ -27291,8 +27349,12 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   const stdin = new PassThrough()
   const stdout = new PassThrough()
   const handle = runDiscordMcpServer({
-    config: loadFixtureConfig({ DISCORD_BOT_TOKEN: TOKEN }),
-    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    config: loadFixtureConfig({
+      token: TOKEN,
+    }),
+    environment: {
+      DISCORD_BOT_TOKEN: TOKEN,
+    },
     gatewayRuntime,
     stdin,
     observabilityRuntime,

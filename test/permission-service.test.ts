@@ -70,11 +70,13 @@ function member(userId: string, roles: string[] = []): DiscordGuildMember {
   }
 }
 
-function policy(channelIds = CHANNEL_ID): ScopePolicy {
+function policy(channelIds: readonly string[] = [CHANNEL_ID]): ScopePolicy {
   return new ScopePolicy(loadConnectorConfig({
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: channelIds,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    readScope: {
+      channelIds,
+      guildIds: [GUILD_ID],
+    },
+    token: TOKEN,
   }, { homeDirectory: "/test/home" }))
 }
 
@@ -342,7 +344,7 @@ test("permission service rejects unsafe schemas, stale cursors, and scope escape
   const outside = fixture()
   const scopedService = new PermissionService({
     client: outside.client,
-    policy: policy("999999999999999999"),
+    policy: policy(["999999999999999999"]),
   })
   await assert.rejects(
     () => scopedService.auditChannelRoles({ channelId: CHANNEL_ID }),

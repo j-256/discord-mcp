@@ -11,12 +11,11 @@ import { join } from "node:path"
 import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
+import type { ConnectorConfig } from "../src/config.js"
 import {
-  loadConnectorConfigDocument,
-  type ConnectorConfig,
-} from "../src/config.js"
-import { createConnectorConfigDocument } from "../src/config-document.js"
-import { loadFixtureConfig as loadConnectorConfig } from "./config-fixture.js"
+  loadFixtureConfig as loadConnectorConfig,
+  type FixtureConfigOverrides,
+} from "./config-fixture.js"
 import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_MESSAGE_FLAGS,
@@ -333,10 +332,10 @@ function serviceFixture(overrides: {
   channelMetadataOptions?: ConnectorServiceOptions["channelMetadataOptions"]
   channelOrderingOptions?: ConnectorServiceOptions["channelOrderingOptions"]
   config?: ConnectorConfig
+  configOverrides?: FixtureConfigOverrides
   componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
-  environment?: NodeJS.ProcessEnv
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
@@ -938,11 +937,17 @@ function serviceFixture(overrides: {
     },
   }
   const config = overrides.config || loadConnectorConfig({
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-    DISCORD_MCP_BOT_ID: BOT_ID,
-    ...overrides.environment,
+    token: TOKEN,
+    ...overrides.configOverrides,
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      ...overrides.configOverrides?.identity,
+    },
+    readScope: {
+      guildIds: [GUILD_ID],
+      ...overrides.configOverrides?.readScope,
+    },
   }, { homeDirectory: "/test/home" })
   return {
     calls,
@@ -1259,12 +1264,18 @@ test("service rejects reaction identity and moderation scope before identity acc
   assert.equal(calls.user, 0)
 
   const protectedFixture = serviceFixture({
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
-      DISCORD_MCP_PROTECTED_USER_IDS: MEMBER_USER_ID,
-      DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        reactionModeration: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        protectedUserIds: [MEMBER_USER_ID],
+        reactionChannelIds: [CHANNEL_ID],
+      },
     },
   })
   await assert.rejects(
@@ -1319,12 +1330,18 @@ test("service exposes privacy-safe reaction reads and coordinates exact-message 
         }]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
-      DISCORD_MCP_ALLOW_REACTION_USER_AUDIT: "true",
-      DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        reactionModeration: true,
+        reactionUserAudit: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        reactionChannelIds: [CHANNEL_ID],
+      },
     },
     operationStore,
     reactionOptions: { planKey: new Uint8Array(32).fill(7) },
@@ -1509,47 +1526,55 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         }]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
-      DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
-      DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_DELETIONS: "true",
-      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
-      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
-      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
-      DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
-      DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
-      DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
-      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
-      DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
-      DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
-      DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
-      DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ROLE_DELETION_IDS: CREATED_ROLE_ID,
-      DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: OTHER_CHANNEL_ID,
-      DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
-      DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
-      DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
-      DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
-      DISCORD_MCP_DELETE_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        forumTagAudit: true,
+        forumTagChanges: true,
+        deletions: true,
+        announcementSubscriptionAudit: true,
+        announcementSubscriptionChanges: true,
+        applicationEmojiAudit: true,
+        applicationEmojiChanges: true,
+        messageForwarding: true,
+        interactions: true,
+        integrationAudit: true,
+        integrationDeletions: true,
+        roleDeletionAudit: true,
+        roleDeletions: true,
+        roleOrderingAudit: true,
+        roleOrderingChanges: true,
+        channelOrderingAudit: true,
+        channelOrderingChanges: true,
+        channelCloneAudit: true,
+        channelCloning: true,
+        webhookAudit: true,
+        webhookChanges: true,
+        webhookCreation: true,
+        webhookDeletions: true,
+      },
+      gateway: {
+        enabled: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        forumTagChannelIds: [CHANNEL_ID],
+        channelCloneGuildIds: [GUILD_ID],
+        channelCloneSourceIds: [CHANNEL_ID],
+        channelOrderingGuildIds: [GUILD_ID],
+        integrationGuildIds: [GUILD_ID],
+        integrationIds: [INTEGRATION_ID],
+        interactionChannelIds: [CHANNEL_ID],
+        roleDeletionIds: [CREATED_ROLE_ID],
+        roleOrderingGuildIds: [GUILD_ID],
+        announcementSubscriptionTargetChannelIds: [CHANNEL_ID],
+        messageForwardSourceChannelIds: [CHANNEL_ID],
+        messageForwardTargetChannelIds: [OTHER_CHANNEL_ID],
+        deleteChannelIds: [CHANNEL_ID],
+        webhookChannelIds: [CHANNEL_ID],
+      },
     },
     gateway,
     writeCoordinator,
@@ -2196,11 +2221,19 @@ test("distinct connector facades coordinate through one production state root", 
       randomId: () => "activity-shared-channel-create",
     },
     client,
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
-      DISCORD_MCP_AUDIT_FILE: auditFile,
-      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        channelCreation: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        channelCreationGuildIds: [GUILD_ID],
+      },
+      storage: {
+        auditFile: auditFile,
+      },
     },
     useDefaultWriteCoordinator: true,
   } satisfies Parameters<typeof serviceFixture>[0]
@@ -2315,11 +2348,19 @@ test("distinct connector facades serialize resumable scaffold guild collections"
   }
   const shared = {
     client,
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_AUDIT_FILE: auditFile,
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
+      storage: {
+        auditFile: auditFile,
+      },
     },
     guildScaffoldOptions: {
       clock: () => new Date("2026-08-22T04:00:00.000Z"),
@@ -2377,12 +2418,20 @@ test("distinct connector facades serialize resumable scaffold guild collections"
 test("service verifies bot identity before delegating safe message interactions", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
   const { calls, service } = serviceFixture({
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    configOverrides: {
+      capabilities: {
+        interactions: true,
+      },
+      limits: {
+        interactionMinWriteIntervalMs: 0,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        interactionChannelIds: [CHANNEL_ID],
+      },
     },
     writeCoordinator,
   })
@@ -2444,12 +2493,18 @@ test("service verifies identity through credential-safe webhook administration",
         return inventory
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
-      DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
-      DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        webhookAudit: true,
+        webhookDeletions: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        webhookChannelIds: [CHANNEL_ID],
+      },
     },
     operationStore,
     webhookOptions: {
@@ -2568,12 +2623,18 @@ test("service pins identity through privacy-safe integration audit and deletion"
         return structuredClone(inventory)
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
-      DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+    configOverrides: {
+      capabilities: {
+        integrationAudit: true,
+        integrationDeletions: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        integrationGuildIds: [GUILD_ID],
+        integrationIds: [INTEGRATION_ID],
+      },
     },
     integrationOptions: {
       clock: () => new Date("2026-08-22T00:00:00.000Z"),
@@ -2667,11 +2728,17 @@ test("service pins identity through capability-safe invite audit and revocation"
         return inventory
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
-      DISCORD_MCP_INVITE_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        inviteAudit: true,
+        inviteDeletions: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        inviteGuildIds: [GUILD_ID],
+      },
     },
     inviteOptions: {
       clock: () => new Date("2026-08-21T00:00:00.000Z"),
@@ -2797,11 +2864,17 @@ test("service pins identity through capability-safe Guild Template audit and cha
         return inventory[0] as DiscordGuildTemplateSummary
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
-      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildTemplateAudit: true,
+        guildTemplateChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildTemplateGuildIds: [GUILD_ID],
+      },
     },
     gateway: completeChannelGateway(),
     guildTemplateOptions: {
@@ -2916,11 +2989,17 @@ test("service pins identity through privacy-safe reviewed onboarding", async () 
         throw new Error("Unexpected onboarding write")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
-      DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
-      DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        onboardingAudit: true,
+        onboardingChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        onboardingGuildIds: [GUILD_ID],
+      },
     },
     gateway: completeChannelGateway(),
     onboardingOptions: {
@@ -3006,11 +3085,17 @@ test("service pins identity through privacy-safe reviewed Welcome Screens", asyn
         throw new Error("Unexpected Welcome Screen write")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
-      DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
-      DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        welcomeScreenAudit: true,
+        welcomeScreenChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        welcomeScreenGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
     welcomeScreenOptions: {
@@ -3093,11 +3178,17 @@ test("service pins identity through authenticated reviewed widget settings", asy
         throw new Error("Unexpected widget-settings change")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
-      DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
-      DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        widgetSettingsAudit: true,
+        widgetSettingsChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        widgetSettingsGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
     widgetSettingsOptions: {
@@ -3184,11 +3275,17 @@ test("service pins identity through reviewed guild settings", async () => {
         throw new Error("Unexpected guild-settings change")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES: "true",
-      DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildSettingsAudit: true,
+        guildSettingsChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildSettingsGuildIds: [GUILD_ID],
+      },
     },
     gateway: completeChannelGateway([channel({ parent_id: null })]),
     guildSettingsOptions: {
@@ -3271,11 +3368,17 @@ test("service pins identity through reviewed guild incident actions", async () =
         throw new Error("Unexpected guild incident-action change")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES: "true",
-      DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildIncidentAudit: true,
+        guildIncidentChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildIncidentGuildIds: [GUILD_ID],
+      },
     },
     guildIncidentOptions: {
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
@@ -3361,11 +3464,17 @@ test("service pins identity through transient reviewed guild profile text", asyn
         throw new Error("Unexpected guild profile change")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
-      DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildProfileAudit: true,
+        guildProfileChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildProfileGuildIds: [GUILD_ID],
+      },
     },
     guildProfileOptions: {
       clock: () => new Date("2026-08-23T00:00:00.000Z"),
@@ -3461,11 +3570,17 @@ test("service pins identity through transient channel metadata reads and reviewe
         throw new Error("Unexpected channel metadata write")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
-      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        channelMetadataChanges: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        channelMetadataIds: [CHANNEL_ID],
+      },
     },
     operationStore,
   })
@@ -3605,11 +3720,17 @@ test("service reads and executes record-free voice channel status no-ops", async
         statusWrites += 1
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
-      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        channelMetadataChanges: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        channelMetadataIds: [CHANNEL_ID],
+      },
     },
     gateway,
     operationStore,
@@ -3761,11 +3882,17 @@ test("service coordinates exact voice channel status writes before final executi
         })
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
-      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        channelMetadataChanges: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        channelMetadataIds: [CHANNEL_ID],
+      },
     },
     gateway,
     operationStore,
@@ -3829,8 +3956,10 @@ test("service pins identity through global and guild voice-region inventories", 
         return structuredClone(regions)
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
     },
   })
 
@@ -3854,8 +3983,10 @@ test("service pins identity through global and guild voice-region inventories", 
         return []
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
     },
   })
   await assert.rejects(
@@ -3911,11 +4042,17 @@ test("service pins identity through privacy-safe guild expression reads and revi
         return inventory[0]!
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES: "true",
-      DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildExpressionAudit: true,
+        guildExpressionChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildExpressionGuildIds: [GUILD_ID],
+      },
     },
     guildExpressionOptions: {
       clock: () => new Date("2026-08-21T00:00:00.000Z"),
@@ -3999,9 +4136,11 @@ test("service pins application emoji scope to verified identity and coordinates 
         return inventory[0]!
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
-      DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+    configOverrides: {
+      capabilities: {
+        applicationEmojiAudit: true,
+        applicationEmojiChanges: true,
+      },
     },
     operationStore,
   })
@@ -4095,11 +4234,17 @@ test("service pins identity through privacy-safe AutoMod reads and reviewed chan
         return rule
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
-      DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
-      DISCORD_MCP_AUTOMOD_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        automodAudit: true,
+        automodChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        automodGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
   })
@@ -4212,12 +4357,18 @@ test("service pins identity through privacy-safe scheduled event reads and revie
         return scheduledEvent
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
-      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
-      DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
-      DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        scheduledEventAudit: true,
+        scheduledEventChanges: true,
+        scheduledEventUserAudit: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        scheduledEventGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
     scheduledEventOptions: {
@@ -4318,11 +4469,17 @@ test("service pins identity through privacy-safe reviewed soundboard changes", a
         return sound
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
-      DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
-      DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        soundboardAudit: true,
+        soundboardChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        soundboardGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
     soundboardOptions: {
@@ -4413,12 +4570,18 @@ test("service pins identity through privacy-safe reviewed Stage-instance lifecyc
         return stageInstance
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
-      DISCORD_MCP_STAGE_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        stageInstanceAudit: true,
+        stageInstanceChanges: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        stageChannelIds: [CHANNEL_ID],
+      },
     },
     operationStore,
     stageInstanceOptions: {
@@ -4511,11 +4674,17 @@ test("service verifies identity through reviewed channel permission changes", as
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
-      DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        permissionOverwrites: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        permissionOverwriteChannelIds: [CHANNEL_ID],
+      },
     },
     operationStore,
     permissionOverwriteOptions: {
@@ -4619,16 +4788,26 @@ test("service verifies identity before reviewed local-file attachment execution"
         })
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
-      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ATTACHMENT_MAX_BYTES: "1024",
-      DISCORD_MCP_ATTACHMENT_ROOTS: root,
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "1000",
+    configOverrides: {
+      capabilities: {
+        attachments: true,
+        interactions: true,
+      },
+      limits: {
+        attachmentMaxBytes: 1024,
+        interactionMinWriteIntervalMs: 1000,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        attachmentChannelIds: [CHANNEL_ID],
+        interactionChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        attachmentRoots: [root],
+      },
     },
     interactionOptions: {
       clock: () => new Date("2026-08-20T00:00:00.000Z"),
@@ -4673,13 +4852,21 @@ test("service verifies identity before reviewed local-file attachment execution"
 test("service verifies component messages and shares the interaction limiter", async () => {
   const operationStore = new MemoryOperationStore()
   let created: DiscordMessage | undefined
-  const environment = {
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "1",
-    DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+  const configOverrides = {
+    capabilities: {
+      interactions: true,
+    },
+    limits: {
+      interactionMaxWritesPerMinute: 1,
+      interactionMinWriteIntervalMs: 0,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      interactionChannelIds: [CHANNEL_ID],
+    },
   }
   const { calls, service } = serviceFixture({
     client: {
@@ -4728,7 +4915,7 @@ test("service verifies component messages and shares the interaction limiter", a
       planKey: new Uint8Array(32).fill(12),
       randomId: () => "activity-component-create",
     },
-    environment,
+    configOverrides,
     operationStore,
   })
   const request = {
@@ -4777,7 +4964,7 @@ test("service verifies component messages and shares the interaction limiter", a
         return created
       },
     },
-    environment,
+    configOverrides,
     operationStore,
   })
   const verification = await restarted.service.verifyComponentMessage(request)
@@ -4827,12 +5014,20 @@ test("service coordinates component edits only when the exact message changes", 
     componentMessageOptions: {
       planKey: new Uint8Array(32).fill(13),
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    configOverrides: {
+      capabilities: {
+        interactions: true,
+      },
+      limits: {
+        interactionMinWriteIntervalMs: 0,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        interactionChannelIds: [CHANNEL_ID],
+      },
     },
     writeCoordinator,
   })
@@ -4899,10 +5094,16 @@ test("service verifies identity before planning and executing exact member moder
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+    configOverrides: {
+      capabilities: {
+        administration: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        adminGuildIds: [GUILD_ID],
+      },
     },
     writeCoordinator,
   })
@@ -4973,10 +5174,16 @@ test("service pins identity through the narrow reviewed current-bot nickname rou
         return { nickname, userId: BOT_ID }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
-      DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        nicknameChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        nicknameGuildIds: [GUILD_ID],
+      },
     },
     memberNicknameOptions: {
       clock: () => new Date("2026-08-23T00:00:00.000Z"),
@@ -5075,11 +5282,17 @@ test("service pins identity through reviewed exact member-role changes", async (
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
-      DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_MEMBER_ROLE_IDS: selectedRoleId,
+    configOverrides: {
+      capabilities: {
+        memberRoleChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        memberRoleGuildIds: [GUILD_ID],
+        memberRoleIds: [selectedRoleId],
+      },
     },
     gateway: completeChannelGateway(),
     memberRoleOptions: {
@@ -5193,13 +5406,19 @@ test("service pins identity through privacy-safe reviewed member voice changes",
         }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
-      DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: `${CHANNEL_ID},${OTHER_CHANNEL_ID}`,
-      DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        memberVoiceAudit: true,
+        memberVoiceChanges: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        memberVoiceChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+        memberVoiceGuildIds: [GUILD_ID],
+      },
     },
     memberVoiceOptions: {
       clock: () => new Date("2026-08-22T00:00:00.000Z"),
@@ -5316,13 +5535,19 @@ test("service pins identity through privacy-safe reviewed thread governance", as
         return threadState
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${THREAD_ID}`,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
-      DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
-      DISCORD_MCP_THREAD_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_THREAD_IDS: THREAD_ID,
+    configOverrides: {
+      capabilities: {
+        threadAudit: true,
+        threadChanges: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID, THREAD_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        threadGuildIds: [GUILD_ID],
+        threadIds: [THREAD_ID],
+      },
     },
     operationStore,
     threadGovernanceOptions: {
@@ -5429,10 +5654,16 @@ test("service verifies identity before reviewed additive channel creation", asyn
         )]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
-      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        channelCreation: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        channelCreationGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
   })
@@ -5481,10 +5712,16 @@ test("service verifies identity before an exact guild-scaffold no-op", async () 
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
     },
     guildScaffoldOptions: {
       clock: () => new Date("2026-08-20T00:00:00.000Z"),
@@ -5554,10 +5791,16 @@ test("service durably coordinates active guild scaffolds by request identity", a
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
     },
     guildScaffoldOptions: {
       clock: () => new Date("2026-08-20T00:00:00.000Z"),
@@ -5670,30 +5913,33 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
       unknownFieldCount: 0,
     }],
   }
-  const config = loadConnectorConfigDocument(createConnectorConfigDocument({
-    applicationId: APPLICATION_ID,
-    botId: BOT_ID,
+  const config = loadConnectorConfig({
     capabilities: {
       guildProfileAudit: true,
       guildSettingsAudit: true,
       onboardingAudit: true,
       welcomeScreenAudit: true,
     },
-    channelIds: [],
-    credentialVariable: "DISCORD_BOT_TOKEN",
-    gatewayEnabled: false,
-    guildIds: [GUILD_ID],
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
     name: "guild-blueprint-capture-test",
+    readScope: {
+      channelIds: [],
+      guildIds: [GUILD_ID],
+    },
     scopes: {
       guildProfileGuildIds: [GUILD_ID],
       guildSettingsGuildIds: [GUILD_ID],
       onboardingGuildIds: [GUILD_ID],
       welcomeScreenGuildIds: [GUILD_ID],
     },
-    toolsets: ["guild-blueprints"],
-    toolSurface: "full",
-  }), {
-    DISCORD_BOT_TOKEN: TOKEN,
+    token: TOKEN,
+    tools: {
+      surface: "full",
+      toolsets: ["guild-blueprints"],
+    },
   }, { homeDirectory: "/test/home" })
   const { calls, service } = serviceFixture({
     client: {
@@ -5797,10 +6043,16 @@ test("service dispatches one guild-blueprint frontier through existing durable c
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
     },
     guildBlueprintOptions: {
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
@@ -5896,13 +6148,19 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
         return []
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
-      DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+        welcomeScreenAudit: true,
+        welcomeScreenChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+        welcomeScreenGuildIds: [GUILD_ID],
+      },
     },
     guildBlueprintOptions: {
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
@@ -6022,13 +6280,19 @@ test("service dispatches a guild-blueprint onboarding frontier through its domai
         return []
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
-      DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+        onboardingAudit: true,
+        onboardingChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+        onboardingGuildIds: [GUILD_ID],
+      },
     },
     gateway: completeChannelGateway([onboardingChannel]),
     guildBlueprintOptions: {
@@ -6144,14 +6408,22 @@ test("service dispatches one guild-blueprint publication through component coord
       planKey: new Uint8Array(32).fill(10),
       randomId: () => "activity-guild-blueprint-publication",
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    configOverrides: {
+      capabilities: {
+        guildScaffolds: true,
+        interactions: true,
+      },
+      limits: {
+        interactionMinWriteIntervalMs: 0,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+        interactionChannelIds: [CHANNEL_ID],
+      },
     },
     guildBlueprintOptions: {
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
@@ -6233,14 +6505,22 @@ test("service verifies a completed guild-blueprint publication after restart", a
     rate_limit_per_user: 0,
     topic: null,
   })
-  const environment = {
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-    DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+  const configOverrides = {
+    capabilities: {
+      guildScaffolds: true,
+      interactions: true,
+    },
+    limits: {
+      interactionMinWriteIntervalMs: 0,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      guildScaffoldGuildIds: [GUILD_ID],
+      interactionChannelIds: [CHANNEL_ID],
+    },
   }
   const serviceOptions = {
     client: {
@@ -6290,7 +6570,7 @@ test("service verifies a completed guild-blueprint publication after restart", a
       planKey: new Uint8Array(32).fill(10),
       randomId: () => "activity-guild-blueprint-publication",
     },
-    environment,
+    configOverrides,
     guildBlueprintOptions: {
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
       planKey: new Uint8Array(32).fill(9),
@@ -6424,13 +6704,19 @@ test("service pins identity through native poll audit and reviewed creation", as
         }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
-      DISCORD_MCP_ALLOW_POLL_CREATION: "true",
-      DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
-      DISCORD_MCP_POLL_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        pollAudit: true,
+        pollCreation: true,
+        pollVoterAudit: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        pollChannelIds: [CHANNEL_ID],
+      },
     },
     operationStore,
     pollOptions: {
@@ -6549,12 +6835,20 @@ test("service pins identity through reviewed forum creation without persisting i
         return starter
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
-      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+    configOverrides: {
+      capabilities: {
+        forumPosts: true,
+      },
+      limits: {
+        interactionMinWriteIntervalMs: 0,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        forumPostChannelIds: [CHANNEL_ID],
+      },
     },
     forumPostOptions: {
       clock: () => new Date("2026-08-20T00:00:00.000Z"),
@@ -6672,12 +6966,20 @@ test("service pins identity through reviewed anchored thread creation", async ()
         return source
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
-      DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+    configOverrides: {
+      capabilities: {
+        threadCreation: true,
+      },
+      limits: {
+        interactionMinWriteIntervalMs: 0,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        threadParentIds: [CHANNEL_ID],
+      },
     },
     operationStore,
     threadCreationOptions: {
@@ -6751,7 +7053,11 @@ test("service returns bounded role inventory and one exact role", async () => {
         return [role(GUILD_ID, 0n, "@everyone"), supportRole]
       },
     },
-    environment: { DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID },
+    configOverrides: {
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+    },
   })
 
   const listed = await service.listRoles(GUILD_ID)
@@ -6769,7 +7075,11 @@ test("service returns bounded role inventory and one exact role", async () => {
         return { ...supportRole, id: "999000000000000001" }
       },
     },
-    environment: { DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID },
+    configOverrides: {
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+    },
   }).service
   await assert.rejects(
     mismatched.getRole(GUILD_ID, CREATED_ROLE_ID),
@@ -6797,7 +7107,11 @@ test("service verifies identity and guild scope before privacy-safe audit-log re
         return { audit_log_entries: [] }
       },
     },
-    environment: { DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID },
+    configOverrides: {
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+    },
   })
 
   const listed = await service.listGuildAuditEntries(GUILD_ID, { limit: 1 })
@@ -6876,10 +7190,16 @@ test("service verifies identity before reviewed additive role creation", async (
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
-      DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        roleCreation: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        roleCreationGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
     roleAdministrationOptions: {
@@ -6961,10 +7281,16 @@ test("service pins identity through exact reviewed role configuration", async ()
         throw new Error("Unexpected role configuration write")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
-      DISCORD_MCP_ROLE_CONFIGURATION_IDS: CREATED_ROLE_ID,
+    configOverrides: {
+      capabilities: {
+        roleConfiguration: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        roleConfigurationIds: [CREATED_ROLE_ID],
+      },
     },
     operationStore,
     roleConfigurationOptions: {
@@ -7051,11 +7377,17 @@ test("service pins identity through audited and reviewed role ordering", async (
         throw new Error("Unexpected role-order write")
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
-      DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
-      DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        roleOrderingAudit: true,
+        roleOrderingChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        roleOrderingGuildIds: [GUILD_ID],
+      },
     },
     operationStore,
     roleOrderingOptions: {
@@ -7191,15 +7523,19 @@ test("service assesses current application posture against effective policy", as
   configured.interactions_endpoint_url = "https://interactions.invalid/private"
   const { calls, service } = serviceFixture({
     application: configured,
-    environment: {
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
-      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: BOT_ID,
+    configOverrides: {
+      capabilities: {
+        interactions: true,
+        memberDirectory: true,
+        nativeInteractions: true,
+      },
+      scopes: {
+        interactionChannelIds: [CHANNEL_ID],
+        memberDirectoryGuildIds: [GUILD_ID],
+        nativeInteractionChannelIds: [CHANNEL_ID],
+        nativeInteractionGuildIds: [GUILD_ID],
+        nativeInteractionUserIds: [BOT_ID],
+      },
     },
   })
 
@@ -7256,10 +7592,16 @@ test("service exposes an opt-in minimized member directory through exact REST ca
         return [remoteMember(MEMBER_USER_ID)]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
-      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        memberDirectory: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        memberDirectoryGuildIds: [GUILD_ID],
+      },
     },
   })
 
@@ -7313,10 +7655,16 @@ test("service pins identity before privacy-safe ban audit and rejects local inpu
         return [remoteBan]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
-      DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      capabilities: {
+        banAudit: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        banAuditGuildIds: [GUILD_ID],
+      },
     },
   })
 
@@ -7436,8 +7784,10 @@ test("service attenuates native search and returns compact scope-filtered result
         }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+      },
     },
   })
 
@@ -7535,8 +7885,10 @@ test("service bounds active threads after parent-aware local scope filtering", a
         }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+      },
     },
   })
 
@@ -7613,8 +7965,10 @@ test("service preserves forum metadata and emits a typed archived-thread cursor"
         }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+      },
     },
   })
 
@@ -7676,8 +8030,10 @@ test("service keeps joined-private archive pagination on thread-ID cursors", asy
         return { has_more: false, threads: [] }
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+      },
     },
   })
 
@@ -7729,8 +8085,10 @@ test("service explains current bot access using thread-parent overwrites", async
         ]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+      },
     },
   })
 
@@ -7757,9 +8115,11 @@ test("service verifies identity once before principal explanation and role audit
         )]
       },
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
     },
   })
 

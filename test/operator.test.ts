@@ -42,6 +42,7 @@ import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import {
   fixtureConfigInput,
   loadFixtureConfig,
+  type FixtureConfigOverrides,
 } from "./config-fixture.js"
 
 const TOKEN = "test-discord-token"
@@ -53,63 +54,72 @@ const SOURCE_CHANNEL_ID = "400000000000000002"
 const ROLE_ID = "500000000000000001"
 const INTEGRATION_ID = "600000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
+const LEGACY_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_ALLOW_DELETIONS"
 
-const FIXTURE_ENVIRONMENT_NAMES = Object.freeze({
-  allowDeletions: "DISCORD_MCP_ALLOW_DELETIONS",
-  allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
-  allowGuildProfileAudit: "DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT",
-  allowGuildProfileChanges: "DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES",
-  allowGuildIncidentAudit: "DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT",
-  allowGuildIncidentChanges: "DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES",
-  allowGuildSettingsAudit: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT",
-  allowGuildSettingsChanges: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES",
-  allowIntegrationAudit: "DISCORD_MCP_ALLOW_INTEGRATION_AUDIT",
-  allowIntegrationDeletions: "DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS",
-  allowObservabilityExport: "DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT",
-  allowWidgetPublicExposure: "DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE",
-  allowWidgetSettingsAudit: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT",
-  allowWidgetSettingsChanges: "DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES",
-  allowedChannelIds: "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
-  allowedGuildIds: "DISCORD_MCP_ALLOWED_GUILD_IDS",
-  auditFile: "DISCORD_MCP_AUDIT_FILE",
-  configFile: CONFIG_FILE_ENVIRONMENT_VARIABLE,
-  deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
-  gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
-  guildProfileGuildIds: "DISCORD_MCP_GUILD_PROFILE_GUILD_IDS",
-  guildIncidentGuildIds: "DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS",
-  guildSettingsGuildIds: "DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS",
-  integrationGuildIds: "DISCORD_MCP_INTEGRATION_GUILD_IDS",
-  integrationIds: "DISCORD_MCP_INTEGRATION_IDS",
-  otelEndpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",
-  token: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
-  toolSurface: "DISCORD_MCP_TOOL_SURFACE",
-  toolsets: "DISCORD_MCP_TOOLSETS",
-  widgetSettingsGuildIds: "DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS",
-})
-
-function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+function fixturePolicy(
+  overrides: FixtureConfigOverrides = {},
+): FixtureConfigOverrides {
   return {
-    DISCORD_BOT_TOKEN: TOKEN,
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
-    DISCORD_MCP_BOT_ID: BOT_ID,
+    token: TOKEN,
     ...overrides,
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      ...overrides.identity,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+      ...overrides.readScope,
+    },
   }
 }
 
-async function prepareSetup(options: SetupOptions): Promise<SetupReport> {
-  if (options.configFile || options.profileName) return prepareConfigSetup(options)
-  const source = options.environment || process.env
-  const fixture = fixtureConfigInput(source)
+function assertDefaultSecretForwarding(report: SetupReport): void {
+  assert.deepEqual(report.launch.environment, {
+    forward: [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
+    set: {},
+  })
+}
+
+type FixtureSetupOptions = Omit<SetupOptions, "environment"> & {
+  configOverrides?: FixtureConfigOverrides
+  environment?: NodeJS.ProcessEnv
+}
+
+type FixtureDoctorOptions = Omit<
+  NonNullable<Parameters<typeof diagnoseNativeConnector>[0]>,
+  "environment"
+> & {
+  configOverrides?: FixtureConfigOverrides
+  environment?: NodeJS.ProcessEnv
+}
+
+type FixtureSmokeOptions = Omit<
+  NonNullable<Parameters<typeof smokeNativeConnector>[0]>,
+  "environment"
+> & {
+  configOverrides?: FixtureConfigOverrides
+  environment?: NodeJS.ProcessEnv
+}
+
+async function prepareSetup(options: FixtureSetupOptions): Promise<SetupReport> {
+  const { configOverrides, ...nativeOptions } = options
+  if (nativeOptions.configFile || nativeOptions.profileName) {
+    return prepareConfigSetup(nativeOptions)
+  }
+  const fixture = fixtureConfigInput(configOverrides)
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-policy-"))
   const configFile = join(await realpath(temporary), "discord-mcp.json")
   try {
     await writeConnectorConfigDocumentFile(configFile, fixture.document)
     return await prepareConfigSetup({
-      ...options,
+      ...nativeOptions,
       configFile,
-      environment: fixture.environment,
+      environment: {
+        ...fixture.environment,
+        ...nativeOptions.environment,
+      },
     })
   } finally {
     await rm(temporary, { force: true, recursive: true })
@@ -117,36 +127,28 @@ async function prepareSetup(options: SetupOptions): Promise<SetupReport> {
 }
 
 function diagnoseConnector(
-  options: Parameters<typeof diagnoseNativeConnector>[0] = {},
+  options: FixtureDoctorOptions = {},
 ) {
-  const source = options.environment || process.env
-  if (
-    options.config
-    || source[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
-    || !source[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]?.trim()
-  ) {
-    return diagnoseNativeConnector(options)
+  const { configOverrides, ...nativeOptions } = options
+  if (configOverrides === undefined || nativeOptions.config) {
+    return diagnoseNativeConnector(nativeOptions)
   }
   return diagnoseNativeConnector({
-    ...options,
-    config: loadFixtureConfig(source),
+    ...nativeOptions,
+    config: loadFixtureConfig(configOverrides),
   })
 }
 
 function smokeConnector(
-  options: Parameters<typeof smokeNativeConnector>[0] = {},
+  options: FixtureSmokeOptions = {},
 ) {
-  const source = options.environment || process.env
-  if (
-    options.config
-    || source[CONFIG_FILE_ENVIRONMENT_VARIABLE]?.trim()
-    || !source[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]?.trim()
-  ) {
-    return smokeNativeConnector(options)
+  const { configOverrides, ...nativeOptions } = options
+  if (configOverrides === undefined || nativeOptions.config) {
+    return smokeNativeConnector(nativeOptions)
   }
   return smokeNativeConnector({
-    ...options,
-    config: loadFixtureConfig(source),
+    ...nativeOptions,
+    config: loadFixtureConfig(configOverrides),
   })
 }
 
@@ -640,7 +642,7 @@ test("doctor resolves the credential variable referenced by a selected configura
 
   const report = await diagnoseConnector({
     environment: {
-      [FIXTURE_ENVIRONMENT_NAMES.configFile]: configFile,
+      [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile,
       [TOKEN_ALIAS]: TOKEN,
     },
     nodeVersion: "22.14.0",
@@ -677,7 +679,7 @@ test("doctor resolves file-backed credentials and redacts downstream failures", 
   )
 
   const report = await diagnoseConnector({
-    environment: { [FIXTURE_ENVIRONMENT_NAMES.configFile]: configFile },
+    environment: { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile },
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -699,12 +701,12 @@ test("doctor resolves file-backed credentials and redacts downstream failures", 
 
 test("doctor distinguishes complete scope from a missing channel boundary", async () => {
   const scoped = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const guildOnly = await diagnoseConnector({
-    environment: {
-      DISCORD_BOT_TOKEN: TOKEN,
+    configOverrides: {
+      token: TOKEN,
     },
     nodeVersion: "22.14.0",
   })
@@ -726,8 +728,10 @@ test("doctor distinguishes complete scope from a missing channel boundary", asyn
 
 test("doctor gives feature-policy warnings a safe default recovery path", async () => {
   const report = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_DELETIONS: "true",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        deletions: true,
+      },
     }),
     nodeVersion: "22.14.0",
   })
@@ -742,18 +746,24 @@ test("doctor gives feature-policy warnings a safe default recovery path", async 
 })
 
 test("doctor and setup explain progressive risk-separated MCP toolsets", async () => {
-  const configuredEnvironment = environment({
-    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_TOOLSETS: "connector,messages",
-    DISCORD_MCP_TOOL_SURFACE: "progressive",
+  const configuredPolicy = fixturePolicy({
+    capabilities: {
+      interactions: true,
+    },
+    scopes: {
+      interactionChannelIds: [CHANNEL_ID],
+    },
+    tools: {
+      toolsets: ["connector", "messages"],
+      surface: "progressive",
+    },
   })
   const doctor = await diagnoseConnector({
-    environment: configuredEnvironment,
+    configOverrides: configuredPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: configuredEnvironment,
+    configOverrides: configuredPolicy,
     service: statusProvider(),
   })
 
@@ -773,25 +783,39 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
 })
 
 test("doctor and setup explain effective interaction policy without Discord writes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "12",
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      interactions: true,
+    },
+    limits: {
+      interactionMaxWritesPerMinute: 12,
+    },
+    scopes: {
+      interactionChannelIds: [CHANNEL_ID],
+    },
   })
   const report = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const warning = await diagnoseConnector({
-    environment: environment({ DISCORD_MCP_ALLOW_INTERACTIONS: "true" }),
+    configOverrides: fixturePolicy({
+      capabilities: {
+        interactions: true,
+      },
+    }),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: environment({ DISCORD_MCP_ALLOW_INTERACTIONS: "true" }),
+    configOverrides: fixturePolicy({
+      capabilities: {
+        interactions: true,
+      },
+    }),
     service: statusProvider(),
   })
   const missingIntent = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -801,7 +825,7 @@ test("doctor and setup explain effective interaction policy without Discord writ
     },
   })
   const missingIntentSetup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: {
       async getStatus() {
         return status(1, "unknown")
@@ -833,31 +857,49 @@ test("doctor and setup explain reviewed attachment scope without reading files o
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
-      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ATTACHMENT_MAX_BYTES: "4096",
-      DISCORD_MCP_ATTACHMENT_ROOTS: root,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        attachments: true,
+      },
+      limits: {
+        attachmentMaxBytes: 4096,
+      },
+      scopes: {
+        attachmentChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        attachmentRoots: [root],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      attachments: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ATTACHMENTS: "true",
-      DISCORD_MCP_ATTACHMENT_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ATTACHMENT_ROOTS: root,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        attachments: true,
+      },
+      scopes: {
+        attachmentChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        attachmentRoots: [root],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -880,22 +922,28 @@ test("doctor and setup explain reviewed attachment scope without reading files o
 
 test("doctor and setup explain exact administration scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ADMIN_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
-      DISCORD_MCP_PROTECTED_USER_IDS: "400000000000000001",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        administration: true,
+      },
+      scopes: {
+        adminGuildIds: [GUILD_ID],
+        protectedUserIds: ["400000000000000001"],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ADMINISTRATION: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      administration: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
 
@@ -915,28 +963,40 @@ test("doctor and setup explain exact administration scope without Discord writes
 
 test("doctor and setup explain reviewed channel-creation scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
-      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        channelCreation: true,
+      },
+      scopes: {
+        channelCreationGuildIds: [GUILD_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      channelCreation: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_CHANNEL_CREATION: "true",
-      DISCORD_MCP_CHANNEL_CREATION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        channelCreation: true,
+      },
+      scopes: {
+        channelCreationGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -958,28 +1018,40 @@ test("doctor and setup explain reviewed channel-creation scope without Discord w
 
 test("doctor and setup explain reviewed forum-post scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
-      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        forumPosts: true,
+      },
+      scopes: {
+        forumPostChannelIds: [CHANNEL_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      forumPosts: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_FORUM_POSTS: "true",
-      DISCORD_MCP_FORUM_POST_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        forumPosts: true,
+      },
+      scopes: {
+        forumPostChannelIds: [CHANNEL_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -1001,31 +1073,39 @@ test("doctor and setup explain reviewed forum-post scope without Discord writes"
 })
 
 test("doctor and setup explain exact forum-tag scope without Discord writes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
-    DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
-    DISCORD_MCP_FORUM_TAG_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      forumTagAudit: true,
+      forumTagChanges: true,
+    },
+    scopes: {
+      forumTagChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_FORUM_TAG_AUDIT: "true",
-    DISCORD_MCP_ALLOW_FORUM_TAG_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      forumTagAudit: true,
+      forumTagChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -1060,28 +1140,40 @@ test("doctor and setup explain exact forum-tag scope without Discord writes", as
 
 test("doctor and setup explain reviewed thread-creation scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
-      DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        threadCreation: true,
+      },
+      scopes: {
+        threadParentIds: [CHANNEL_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      threadCreation: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_THREAD_CREATION: "true",
-      DISCORD_MCP_THREAD_PARENT_IDS: CHANNEL_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        threadCreation: true,
+      },
+      scopes: {
+        threadParentIds: [CHANNEL_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -1103,33 +1195,41 @@ test("doctor and setup explain reviewed thread-creation scope without Discord wr
 })
 
 test("doctor and setup explain privacy-safe reviewed thread governance", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
-    DISCORD_MCP_THREAD_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_THREAD_IDS: CHANNEL_ID,
-    DISCORD_MCP_THREAD_MEMBER_USER_IDS: BOT_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      threadAudit: true,
+      threadChanges: true,
+    },
+    scopes: {
+      threadGuildIds: [GUILD_ID],
+      threadIds: [CHANNEL_ID],
+      threadMemberUserIds: [BOT_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_THREAD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_THREAD_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      threadAudit: true,
+      threadChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1158,41 +1258,45 @@ test("doctor and setup explain privacy-safe reviewed thread governance", async (
   )
   assert.match(setup.warnings.join("\n"), /exact guild and thread allowlists/)
   assert.match(omitted.warnings.join("\n"), /thread-governance toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_THREAD_AUDIT",
-    "DISCORD_MCP_ALLOW_THREAD_CHANGES",
-    "DISCORD_MCP_THREAD_GUILD_IDS",
-    "DISCORD_MCP_THREAD_IDS",
-    "DISCORD_MCP_THREAD_MEMBER_USER_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain reviewed message-pin scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
-      DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        pinManagement: true,
+      },
+      scopes: {
+        pinChannelIds: [CHANNEL_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      pinManagement: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_PIN_MANAGEMENT: "true",
-      DISCORD_MCP_PIN_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        pinManagement: true,
+      },
+      scopes: {
+        pinChannelIds: [CHANNEL_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -1214,27 +1318,33 @@ test("doctor and setup explain reviewed message-pin scope without Discord writes
 })
 
 test("doctor and setup explain privacy-safe reaction audit and moderation", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_REACTION_MODERATION: "true",
-    DISCORD_MCP_ALLOW_REACTION_USER_AUDIT: "true",
-    DISCORD_MCP_REACTION_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      reactionModeration: true,
+      reactionUserAudit: true,
+    },
+    scopes: {
+      reactionChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1257,46 +1367,50 @@ test("doctor and setup explain privacy-safe reaction audit and moderation", asyn
     /aggregate reaction reads remain available/,
   )
   assert.match(omitted.warnings.join("\n"), /interactions toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_REACTION_MODERATION",
-    "DISCORD_MCP_ALLOW_REACTION_USER_AUDIT",
-    "DISCORD_MCP_REACTION_CHANNEL_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup enforce reviewed announcement-crosspost prerequisites", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS: "true",
-    DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      announcementCrossposts: true,
+    },
+    scopes: {
+      announcementCrosspostChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      announcementCrossposts: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
   const omittedMissingIntent = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: {
       async getStatus() {
@@ -1305,7 +1419,7 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
     },
   })
   const missingIntent = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -1315,7 +1429,7 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
     },
   })
   const missingIntentSetup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: {
       async getStatus() {
         return status(1, "disabled")
@@ -1349,38 +1463,41 @@ test("doctor and setup enforce reviewed announcement-crosspost prerequisites", a
   assert.equal(missingIntent.status, "error")
   assert.match(missingIntentSetup.warnings.join("\n"), /crossposts are blocked/)
   assert.match(missingIntentSetup.warnings.join("\n"), /native search may be unavailable/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_ANNOUNCEMENT_CROSSPOSTS",
-    "DISCORD_MCP_ANNOUNCEMENT_CROSSPOST_CHANNEL_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain reviewed message-forward scope and intent gates", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${SOURCE_CHANNEL_ID}`,
-    DISCORD_MCP_ALLOW_MESSAGE_FORWARDING: "true",
-    DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS: SOURCE_CHANNEL_ID,
-    DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      messageForwarding: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID, SOURCE_CHANNEL_ID],
+    },
+    scopes: {
+      messageForwardSourceChannelIds: [SOURCE_CHANNEL_ID],
+      messageForwardTargetChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
   const missingIntent = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -1390,7 +1507,7 @@ test("doctor and setup explain reviewed message-forward scope and intent gates",
     },
   })
   const missingIntentSetup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: {
       async getStatus() {
         return status(1, "unknown")
@@ -1413,51 +1530,58 @@ test("doctor and setup explain reviewed message-forward scope and intent gates",
     "fail",
   )
   assert.match(missingIntentSetup.warnings.join("\n"), /message forwarding.*blocked/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_MESSAGE_FORWARDING",
-    "DISCORD_MCP_ALLOW_CROSS_GUILD_MESSAGE_FORWARDING",
-    "DISCORD_MCP_MESSAGE_FORWARD_SOURCE_CHANNEL_IDS",
-    "DISCORD_MCP_MESSAGE_FORWARD_TARGET_CHANNEL_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain announcement-subscription scope and review gates", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: `${CHANNEL_ID},${SOURCE_CHANNEL_ID}`,
-    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
-    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS: SOURCE_CHANNEL_ID,
-    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      announcementSubscriptionAudit: true,
+      announcementSubscriptionChanges: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID, SOURCE_CHANNEL_ID],
+    },
+    scopes: {
+      announcementSubscriptionSourceChannelIds: [SOURCE_CHANNEL_ID],
+      announcementSubscriptionTargetChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const auditWarning = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        announcementSubscriptionAudit: true,
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const changeWarningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES: "true",
-    DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS: CHANNEL_ID,
+  const changeWarningPolicy = fixturePolicy({
+    capabilities: {
+      announcementSubscriptionAudit: true,
+      announcementSubscriptionChanges: true,
+    },
+    scopes: {
+      announcementSubscriptionTargetChannelIds: [CHANNEL_ID],
+    },
   })
   const changeWarning = await diagnoseConnector({
-    environment: changeWarningEnvironment,
+    configOverrides: changeWarningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: changeWarningEnvironment,
+    configOverrides: changeWarningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1488,46 +1612,47 @@ test("doctor and setup explain announcement-subscription scope and review gates"
   )
   assert.match(setup.warnings.join("\n"), /source-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /announcement-subscriptions toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_AUDIT",
-    "DISCORD_MCP_ALLOW_ANNOUNCEMENT_SUBSCRIPTION_CHANGES",
-    "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_SOURCE_CHANNEL_IDS",
-    "DISCORD_MCP_ANNOUNCEMENT_SUBSCRIPTION_TARGET_CHANNEL_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain native poll privacy and reviewed write scope", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
-    DISCORD_MCP_ALLOW_POLL_CREATION: "true",
-    DISCORD_MCP_ALLOW_POLL_ENDING: "true",
-    DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
-    DISCORD_MCP_POLL_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      pollAudit: true,
+      pollCreation: true,
+      pollEnding: true,
+      pollVoterAudit: true,
+    },
+    scopes: {
+      pollChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_POLL_AUDIT: "true",
-    DISCORD_MCP_ALLOW_POLL_CREATION: "true",
-    DISCORD_MCP_ALLOW_POLL_ENDING: "true",
-    DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      pollAudit: true,
+      pollCreation: true,
+      pollEnding: true,
+      pollVoterAudit: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1549,47 +1674,47 @@ test("doctor and setup explain native poll privacy and reviewed write scope", as
   }
   assert.match(setup.warnings.join("\n"), /poll-channel allowlist/)
   assert.match(omitted.warnings.join("\n"), /polls toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_POLL_AUDIT",
-    "DISCORD_MCP_ALLOW_POLL_CREATION",
-    "DISCORD_MCP_ALLOW_POLL_ENDING",
-    "DISCORD_MCP_ALLOW_POLL_VOTER_AUDIT",
-    "DISCORD_MCP_POLL_CHANNEL_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain credential-safe reviewed webhook administration", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
-    DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
-    DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
-    DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
-    DISCORD_MCP_WEBHOOK_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      webhookAudit: true,
+      webhookChanges: true,
+      webhookCreation: true,
+      webhookDeletions: true,
+    },
+    scopes: {
+      webhookChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_WEBHOOK_AUDIT: "true",
-    DISCORD_MCP_ALLOW_WEBHOOK_CHANGES: "true",
-    DISCORD_MCP_ALLOW_WEBHOOK_CREATION: "true",
-    DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      webhookAudit: true,
+      webhookChanges: true,
+      webhookCreation: true,
+      webhookDeletions: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1647,44 +1772,44 @@ test("doctor and setup explain credential-safe reviewed webhook administration",
   assert.match(setup.warnings.join("\n"), /webhook-creation toggle/)
   assert.match(setup.warnings.join("\n"), /webhook-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /webhooks toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_WEBHOOK_AUDIT",
-    "DISCORD_MCP_ALLOW_WEBHOOK_CHANGES",
-    "DISCORD_MCP_ALLOW_WEBHOOK_CREATION",
-    "DISCORD_MCP_ALLOW_WEBHOOK_DELETIONS",
-    "DISCORD_MCP_WEBHOOK_CHANNEL_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain privacy-safe integration audit and deletion", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
-    DISCORD_MCP_INTEGRATION_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_INTEGRATION_IDS: INTEGRATION_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      integrationAudit: true,
+      integrationDeletions: true,
+    },
+    scopes: {
+      integrationGuildIds: [GUILD_ID],
+      integrationIds: [INTEGRATION_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_INTEGRATION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_INTEGRATION_DELETIONS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      integrationAudit: true,
+      integrationDeletions: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1717,42 +1842,43 @@ test("doctor and setup explain privacy-safe integration audit and deletion", asy
   assert.match(setup.warnings.join("\n"), /integration-audit toggle/)
   assert.match(setup.warnings.join("\n"), /integration-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /integrations toolset/)
-  for (const name of [
-    FIXTURE_ENVIRONMENT_NAMES.allowIntegrationAudit,
-    FIXTURE_ENVIRONMENT_NAMES.allowIntegrationDeletions,
-    FIXTURE_ENVIRONMENT_NAMES.integrationGuildIds,
-    FIXTURE_ENVIRONMENT_NAMES.integrationIds,
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain capability-safe invite audit and revocation", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
-    DISCORD_MCP_INVITE_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      inviteAudit: true,
+      inviteDeletions: true,
+    },
+    scopes: {
+      inviteGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_INVITE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_INVITE_DELETIONS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      inviteAudit: true,
+      inviteDeletions: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1787,31 +1913,39 @@ test("doctor and setup explain capability-safe invite audit and revocation", asy
 })
 
 test("doctor and setup explain privacy-safe reviewed onboarding", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
-    DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
-    DISCORD_MCP_ONBOARDING_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      onboardingAudit: true,
+      onboardingChanges: true,
+    },
+    scopes: {
+      onboardingGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ONBOARDING_AUDIT: "true",
-    DISCORD_MCP_ALLOW_ONBOARDING_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      onboardingAudit: true,
+      onboardingChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1847,31 +1981,39 @@ test("doctor and setup explain privacy-safe reviewed onboarding", async () => {
 })
 
 test("doctor and setup explain privacy-safe reviewed Welcome Screens", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
-    DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
-    DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      welcomeScreenAudit: true,
+      welcomeScreenChanges: true,
+    },
+    scopes: {
+      welcomeScreenGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
-    DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      welcomeScreenAudit: true,
+      welcomeScreenChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1907,33 +2049,41 @@ test("doctor and setup explain privacy-safe reviewed Welcome Screens", async () 
 })
 
 test("doctor and setup explain authenticated reviewed widget settings", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
-    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
-    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
-    DISCORD_MCP_WIDGET_SETTINGS_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      widgetPublicExposure: true,
+      widgetSettingsAudit: true,
+      widgetSettingsChanges: true,
+    },
+    scopes: {
+      widgetSettingsGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_WIDGET_PUBLIC_EXPOSURE: "true",
-    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_AUDIT: "true",
-    DISCORD_MCP_ALLOW_WIDGET_SETTINGS_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      widgetPublicExposure: true,
+      widgetSettingsAudit: true,
+      widgetSettingsChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -1971,39 +2121,38 @@ test("doctor and setup explain authenticated reviewed widget settings", async ()
   assert.match(setup.warnings.join("\n"), /widget-settings change toggle/)
   assert.match(setup.warnings.join("\n"), /widget public-exposure toggle/)
   assert.match(omitted.warnings.join("\n"), /widget-settings toolset/)
-  for (const name of [
-    FIXTURE_ENVIRONMENT_NAMES.allowWidgetSettingsAudit,
-    FIXTURE_ENVIRONMENT_NAMES.allowWidgetSettingsChanges,
-    FIXTURE_ENVIRONMENT_NAMES.allowWidgetPublicExposure,
-    FIXTURE_ENVIRONMENT_NAMES.widgetSettingsGuildIds,
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
   assert.doesNotMatch(JSON.stringify(enabled), /private-channel|audit reason/u)
 })
 
 test("doctor and setup explain privacy-minimized reviewed guild settings", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES: "true",
-    DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      guildSettingsAudit: true,
+      guildSettingsChanges: true,
+    },
+    scopes: {
+      guildSettingsGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2028,38 +2177,38 @@ test("doctor and setup explain privacy-minimized reviewed guild settings", async
     /audit is disabled/,
   )
   assert.match(omitted.warnings.join("\n"), /guild-settings toolset/)
-  for (const name of [
-    FIXTURE_ENVIRONMENT_NAMES.allowGuildSettingsAudit,
-    FIXTURE_ENVIRONMENT_NAMES.allowGuildSettingsChanges,
-    FIXTURE_ENVIRONMENT_NAMES.guildSettingsGuildIds,
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
   assert.doesNotMatch(JSON.stringify(enabled), /guild name|channel name|audit reason/u)
 })
 
 test("doctor and setup explain privacy-minimized reviewed guild incident actions", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES: "true",
-    DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      guildIncidentAudit: true,
+      guildIncidentChanges: true,
+    },
+    scopes: {
+      guildIncidentGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2086,13 +2235,7 @@ test("doctor and setup explain privacy-minimized reviewed guild incident actions
     /audit is disabled/,
   )
   assert.match(omitted.warnings.join("\n"), /guild-incidents toolset/)
-  for (const name of [
-    FIXTURE_ENVIRONMENT_NAMES.allowGuildIncidentAudit,
-    FIXTURE_ENVIRONMENT_NAMES.allowGuildIncidentChanges,
-    FIXTURE_ENVIRONMENT_NAMES.guildIncidentGuildIds,
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
   assert.doesNotMatch(
     JSON.stringify(enabled),
     /detection timestamp|disabled-until value|audit reason/u,
@@ -2100,27 +2243,33 @@ test("doctor and setup explain privacy-minimized reviewed guild incident actions
 })
 
 test("doctor and setup explain transient reviewed guild profile text", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
-    DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      guildProfileAudit: true,
+      guildProfileChanges: true,
+    },
+    scopes: {
+      guildProfileGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2146,13 +2295,7 @@ test("doctor and setup explain transient reviewed guild profile text", async () 
     /audit is disabled/,
   )
   assert.match(omitted.warnings.join("\n"), /guild-profile toolset/)
-  for (const name of [
-    FIXTURE_ENVIRONMENT_NAMES.allowGuildProfileAudit,
-    FIXTURE_ENVIRONMENT_NAMES.allowGuildProfileChanges,
-    FIXTURE_ENVIRONMENT_NAMES.guildProfileGuildIds,
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
   assert.doesNotMatch(
     JSON.stringify(enabled),
     /guild profile text|guild name|description value|audit reason/u,
@@ -2160,30 +2303,40 @@ test("doctor and setup explain transient reviewed guild profile text", async () 
 })
 
 test("doctor and setup explain reviewed exact-channel metadata changes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
-    DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      channelMetadataChanges: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+    },
+    scopes: {
+      channelMetadataIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      channelMetadataChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2227,41 +2380,55 @@ test("doctor and setup explain privacy-safe reviewed guild expression scope", as
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-expressions-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES: "true",
-    DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_GUILD_EXPRESSION_ROOTS: canonicalRoot,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      guildExpressionAudit: true,
+      guildExpressionChanges: true,
+    },
+    scopes: {
+      guildExpressionGuildIds: [GUILD_ID],
+    },
+    storage: {
+      guildExpressionRoots: [canonicalRoot],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingGuildEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES: "true",
+  const missingGuildPolicy = fixturePolicy({
+    capabilities: {
+      guildExpressionAudit: true,
+      guildExpressionChanges: true,
+    },
   })
   const missingGuild = await diagnoseConnector({
-    environment: missingGuildEnvironment,
+    configOverrides: missingGuildPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingRootEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_EXPRESSION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_EXPRESSION_CHANGES: "true",
-    DISCORD_MCP_GUILD_EXPRESSION_GUILD_IDS: GUILD_ID,
+  const missingRootPolicy = fixturePolicy({
+    capabilities: {
+      guildExpressionAudit: true,
+      guildExpressionChanges: true,
+    },
+    scopes: {
+      guildExpressionGuildIds: [GUILD_ID],
+    },
   })
   const missingRoot = await diagnoseConnector({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2304,31 +2471,39 @@ test("doctor and setup explain identity-bound reviewed application emoji scope",
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-emojis-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
-    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
-    DISCORD_MCP_APPLICATION_EMOJI_ROOTS: canonicalRoot,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      applicationEmojiAudit: true,
+      applicationEmojiChanges: true,
+    },
+    storage: {
+      applicationEmojiRoots: [canonicalRoot],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingRootEnvironment = environment({
-    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_AUDIT: "true",
-    DISCORD_MCP_ALLOW_APPLICATION_EMOJI_CHANGES: "true",
+  const missingRootPolicy = fixturePolicy({
+    capabilities: {
+      applicationEmojiAudit: true,
+      applicationEmojiChanges: true,
+    },
   })
   const missingRoot = await diagnoseConnector({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2358,48 +2533,62 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-events-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
-    DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_SCHEDULED_EVENT_ROOTS: canonicalRoot,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      scheduledEventAudit: true,
+      scheduledEventChanges: true,
+      scheduledEventUserAudit: true,
+    },
+    scopes: {
+      scheduledEventGuildIds: [GUILD_ID],
+    },
+    storage: {
+      scheduledEventRoots: [canonicalRoot],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingGuildEnvironment = environment({
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
+  const missingGuildPolicy = fixturePolicy({
+    capabilities: {
+      scheduledEventAudit: true,
+      scheduledEventChanges: true,
+      scheduledEventUserAudit: true,
+    },
   })
   const missingGuild = await diagnoseConnector({
-    environment: missingGuildEnvironment,
+    configOverrides: missingGuildPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingRootEnvironment = environment({
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_AUDIT: "true",
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_CHANGES: "true",
-    DISCORD_MCP_ALLOW_SCHEDULED_EVENT_USER_AUDIT: "true",
-    DISCORD_MCP_SCHEDULED_EVENT_GUILD_IDS: GUILD_ID,
+  const missingRootPolicy = fixturePolicy({
+    capabilities: {
+      scheduledEventAudit: true,
+      scheduledEventChanges: true,
+      scheduledEventUserAudit: true,
+    },
+    scopes: {
+      scheduledEventGuildIds: [GUILD_ID],
+    },
   })
   const missingRoot = await diagnoseConnector({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     service: statusProvider(),
   })
   const missingGuildSetup = await prepareSetup({
-    environment: missingGuildEnvironment,
+    configOverrides: missingGuildPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2455,41 +2644,55 @@ test("doctor and setup explain privacy-safe reviewed soundboard scope", async (c
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-soundboard-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
-    DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_SOUNDBOARD_ROOTS: canonicalRoot,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      soundboardAudit: true,
+      soundboardChanges: true,
+    },
+    scopes: {
+      soundboardGuildIds: [GUILD_ID],
+    },
+    storage: {
+      soundboardRoots: [canonicalRoot],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingGuildEnvironment = environment({
-    DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
+  const missingGuildPolicy = fixturePolicy({
+    capabilities: {
+      soundboardAudit: true,
+      soundboardChanges: true,
+    },
   })
   const missingGuild = await diagnoseConnector({
-    environment: missingGuildEnvironment,
+    configOverrides: missingGuildPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingRootEnvironment = environment({
-    DISCORD_MCP_ALLOW_SOUNDBOARD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_SOUNDBOARD_CHANGES: "true",
-    DISCORD_MCP_SOUNDBOARD_GUILD_IDS: GUILD_ID,
+  const missingRootPolicy = fixturePolicy({
+    capabilities: {
+      soundboardAudit: true,
+      soundboardChanges: true,
+    },
+    scopes: {
+      soundboardGuildIds: [GUILD_ID],
+    },
   })
   const missingRoot = await diagnoseConnector({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: missingRootEnvironment,
+    configOverrides: missingRootPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2529,33 +2732,41 @@ test("doctor and setup explain privacy-safe reviewed soundboard scope", async (c
 })
 
 test("doctor and setup explain reviewed Stage-instance scope", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
-    DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
-    DISCORD_MCP_STAGE_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      stageInstanceAudit: true,
+      stageInstanceChanges: true,
+      stageStartNotifications: true,
+    },
+    scopes: {
+      stageChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingChannelEnvironment = environment({
-    DISCORD_MCP_ALLOW_STAGE_INSTANCE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_STAGE_INSTANCE_CHANGES: "true",
-    DISCORD_MCP_ALLOW_STAGE_START_NOTIFICATIONS: "true",
+  const missingChannelPolicy = fixturePolicy({
+    capabilities: {
+      stageInstanceAudit: true,
+      stageInstanceChanges: true,
+      stageStartNotifications: true,
+    },
   })
   const missingChannel = await diagnoseConnector({
-    environment: missingChannelEnvironment,
+    configOverrides: missingChannelPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: missingChannelEnvironment,
+    configOverrides: missingChannelPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2593,32 +2804,40 @@ test("doctor and setup explain reviewed Stage-instance scope", async () => {
 })
 
 test("doctor and setup explain privacy-safe reviewed AutoMod scope", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
-    DISCORD_MCP_AUTOMOD_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_AUTOMOD_ALERT_CHANNEL_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      automodAudit: true,
+      automodChanges: true,
+    },
+    scopes: {
+      automodGuildIds: [GUILD_ID],
+      automodAlertChannelIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const missingGuildEnvironment = environment({
-    DISCORD_MCP_ALLOW_AUTOMOD_AUDIT: "true",
-    DISCORD_MCP_ALLOW_AUTOMOD_CHANGES: "true",
+  const missingGuildPolicy = fixturePolicy({
+    capabilities: {
+      automodAudit: true,
+      automodChanges: true,
+    },
   })
   const missingGuild = await diagnoseConnector({
-    environment: missingGuildEnvironment,
+    configOverrides: missingGuildPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: missingGuildEnvironment,
+    configOverrides: missingGuildPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2654,28 +2873,40 @@ test("doctor and setup explain privacy-safe reviewed AutoMod scope", async () =>
 
 test("doctor and setup explain reviewed permission-overwrite scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
-      DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        permissionOverwrites: true,
+      },
+      scopes: {
+        permissionOverwriteChannelIds: [CHANNEL_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      permissionOverwrites: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES: "true",
-      DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        permissionOverwrites: true,
+      },
+      scopes: {
+        permissionOverwriteChannelIds: [CHANNEL_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -2698,28 +2929,40 @@ test("doctor and setup explain reviewed permission-overwrite scope without Disco
 
 test("doctor and setup explain reviewed role-creation scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
-      DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        roleCreation: true,
+      },
+      scopes: {
+        roleCreationGuildIds: [GUILD_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      roleCreation: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ROLE_CREATION: "true",
-      DISCORD_MCP_ROLE_CREATION_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        roleCreation: true,
+      },
+      scopes: {
+        roleCreationGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -2741,36 +2984,54 @@ test("doctor and setup explain reviewed role-creation scope without Discord writ
 
 test("doctor and setup explain exact reviewed role-configuration scope", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
-      DISCORD_MCP_GUILD_EXPRESSION_ROOTS: process.cwd(),
-      DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        roleConfiguration: true,
+      },
+      scopes: {
+        roleConfigurationIds: [ROLE_ID],
+      },
+      storage: {
+        guildExpressionRoots: [process.cwd()],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      roleConfiguration: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const imageWarning = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
-      DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        roleConfiguration: true,
+      },
+      scopes: {
+        roleConfigurationIds: [ROLE_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_ROLE_CONFIGURATION: "true",
-      DISCORD_MCP_ROLE_CONFIGURATION_IDS: ROLE_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        roleConfiguration: true,
+      },
+      scopes: {
+        roleConfigurationIds: [ROLE_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -2805,31 +3066,39 @@ test("doctor and setup explain exact reviewed role-configuration scope", async (
 })
 
 test("doctor and setup separate role-order audit from reviewed changes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
-    DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
-    DISCORD_MCP_ROLE_ORDERING_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      roleOrderingAudit: true,
+      roleOrderingChanges: true,
+    },
+    scopes: {
+      roleOrderingGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT: "true",
-    DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      roleOrderingAudit: true,
+      roleOrderingChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2861,34 +3130,34 @@ test("doctor and setup separate role-order audit from reviewed changes", async (
   assert.match(setup.warnings.join("\n"), /role-ordering audit toggle/)
   assert.match(setup.warnings.join("\n"), /role-ordering change toggle/)
   assert.match(omitted.warnings.join("\n"), /role-ordering toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_ROLE_ORDERING_AUDIT",
-    "DISCORD_MCP_ALLOW_ROLE_ORDERING_CHANGES",
-    "DISCORD_MCP_ROLE_ORDERING_GUILD_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain exact reviewed channel cloning", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_CHANNEL_CLONING: "true",
-    DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      channelCloneAudit: true,
+      channelCloning: true,
+    },
+    scopes: {
+      channelCloneGuildIds: [GUILD_ID],
+      channelCloneSourceIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2907,34 +3176,33 @@ test("doctor and setup explain exact reviewed channel cloning", async () => {
   assert.match(changes?.summary || "", /atomic one-shot creation/)
   assert.match(changes?.summary || "", /content-free auditing/)
   assert.match(omitted.warnings.join("\n"), /channel-cloning toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_CHANNEL_CLONE_AUDIT",
-    "DISCORD_MCP_ALLOW_CHANNEL_CLONING",
-    "DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS",
-    "DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup separate channel-order audit from reviewed changes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT: "true",
-    DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES: "true",
-    DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      channelOrderingAudit: true,
+      channelOrderingChanges: true,
+    },
+    scopes: {
+      channelOrderingGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2952,34 +3220,36 @@ test("doctor and setup separate channel-order audit from reviewed changes", asyn
   assert.match(changes?.summary || "", /signed approval/)
   assert.match(changes?.summary || "", /newer complete Gateway verification/)
   assert.match(omitted.warnings.join("\n"), /channel-ordering toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT",
-    "DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES",
-    "DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain reviewed exact channel deletion", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT: "true",
-    DISCORD_MCP_ALLOW_CHANNEL_DELETIONS: "true",
-    DISCORD_MCP_ALLOW_GATEWAY: "true",
-    DISCORD_MCP_CHANNEL_DELETION_IDS: CHANNEL_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      channelDeletionAudit: true,
+      channelDeletions: true,
+    },
+    gateway: {
+      enabled: true,
+    },
+    scopes: {
+      channelDeletionIds: [CHANNEL_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -2997,34 +3267,36 @@ test("doctor and setup explain reviewed exact channel deletion", async () => {
   assert.match(changes?.summary || "", /irreversible acknowledgement/)
   assert.match(changes?.summary || "", /newer Gateway absence verification/)
   assert.match(omitted.warnings.join("\n"), /channel-deletion toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_CHANNEL_DELETION_AUDIT",
-    "DISCORD_MCP_ALLOW_CHANNEL_DELETIONS",
-    "DISCORD_MCP_CHANNEL_DELETION_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain reviewed exact role deletion", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_GATEWAY: "true",
-    DISCORD_MCP_ALLOW_ROLE_DELETIONS: "true",
-    DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT: "true",
-    DISCORD_MCP_ROLE_DELETION_IDS: ROLE_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      roleDeletions: true,
+      roleDeletionAudit: true,
+    },
+    gateway: {
+      enabled: true,
+    },
+    scopes: {
+      roleDeletionIds: [ROLE_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector,gateway",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector", "gateway"],
+      },
     },
     service: statusProvider(),
   })
@@ -3042,40 +3314,42 @@ test("doctor and setup explain reviewed exact role deletion", async () => {
   assert.match(changes?.summary || "", /irreversible acknowledgement/)
   assert.match(changes?.summary || "", /fresh absence verification/)
   assert.match(omitted.warnings.join("\n"), /role-deletion toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_ROLE_DELETION_AUDIT",
-    "DISCORD_MCP_ALLOW_ROLE_DELETIONS",
-    "DISCORD_MCP_ROLE_DELETION_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain reviewed member-role scope without Discord writes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
-    DISCORD_MCP_MEMBER_ROLE_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_MEMBER_ROLE_IDS: ROLE_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      memberRoleChanges: true,
+    },
+    scopes: {
+      memberRoleGuildIds: [GUILD_ID],
+      memberRoleIds: [ROLE_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_MEMBER_ROLE_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      memberRoleChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -3097,30 +3371,38 @@ test("doctor and setup explain reviewed member-role scope without Discord writes
 })
 
 test("doctor and setup explain reviewed member nickname scope without Discord writes", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
-    DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES: "true",
-    DISCORD_MCP_NICKNAME_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      nicknameChanges: true,
+      otherMemberNicknameChanges: true,
+    },
+    scopes: {
+      nicknameGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_NICKNAME_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      nicknameChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -3147,41 +3429,43 @@ test("doctor and setup explain reviewed member nickname scope without Discord wr
   )
   assert.match(setup.warnings.join("\n"), /exact guild allowlist/)
   assert.match(omitted.warnings.join("\n"), /member-nicknames toolset/)
-  for (const name of [
-    "DISCORD_MCP_ALLOW_NICKNAME_CHANGES",
-    "DISCORD_MCP_ALLOW_OTHER_MEMBER_NICKNAME_CHANGES",
-    "DISCORD_MCP_NICKNAME_GUILD_IDS",
-  ]) {
-    assert.equal(setup.launch.environment.forward.includes(name), false)
-  }
+  assertDefaultSecretForwarding(setup)
 })
 
 test("doctor and setup explain privacy-safe reviewed member voice scope", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_MEMBER_VOICE_CHANGES: "true",
-    DISCORD_MCP_MEMBER_VOICE_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_MEMBER_VOICE_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      memberVoiceAudit: true,
+      memberVoiceChanges: true,
+    },
+    scopes: {
+      memberVoiceChannelIds: [CHANNEL_ID],
+      memberVoiceGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_MEMBER_VOICE_AUDIT: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      memberVoiceAudit: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...enabledEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -3210,39 +3494,57 @@ test("doctor and setup explain privacy-safe reviewed member voice scope", async 
 
 test("doctor and setup explain resumable guild-scaffold scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        guildScaffolds: true,
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      guildScaffolds: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        guildScaffolds: true,
+      },
+      scopes: {
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
   const blueprintOmitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
-      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
-      DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        guildProfileAudit: true,
+        guildProfileChanges: true,
+        guildScaffolds: true,
+      },
+      scopes: {
+        guildProfileGuildIds: [GUILD_ID],
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -3265,31 +3567,43 @@ test("doctor and setup explain resumable guild-scaffold scope without Discord wr
 
 test("doctor and setup explain capability-safe Guild Template scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
-      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        guildTemplateAudit: true,
+        guildTemplateChanges: true,
+      },
+      scopes: {
+        guildTemplateGuildIds: [GUILD_ID],
+      },
     }),
     nodeVersion: "22.14.0",
   })
-  const warningEnvironment = environment({
-    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
-    DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      guildTemplateAudit: true,
+      guildTemplateChanges: true,
+    },
   })
   const warning = await diagnoseConnector({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
   const setup = await prepareSetup({
-    environment: warningEnvironment,
+    configOverrides: warningPolicy,
     service: statusProvider(),
   })
   const omitted = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_AUDIT: "true",
-      DISCORD_MCP_ALLOW_GUILD_TEMPLATE_CHANGES: "true",
-      DISCORD_MCP_GUILD_TEMPLATE_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        guildTemplateAudit: true,
+        guildTemplateChanges: true,
+      },
+      scopes: {
+        guildTemplateGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -3325,14 +3639,16 @@ test("doctor and setup explain capability-safe Guild Template scope without Disc
 
 test("doctor reports the privacy-safe Gateway policy without opening a connection", async () => {
   const enabled = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_GATEWAY: "true",
-      DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE: "250",
+    configOverrides: fixturePolicy({
+      gateway: {
+        enabled: true,
+        eventBufferSize: 250,
+      },
     }),
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
 
@@ -3351,28 +3667,38 @@ test("doctor reports the privacy-safe Gateway policy without opening a connectio
 })
 
 test("doctor and setup explain native Interaction ingress and command boundaries", async () => {
-  const configuredEnvironment = environment({
-    DISCORD_MCP_ALLOW_NATIVE_COMMAND_CHANGES: "true",
-    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
-    DISCORD_MCP_NATIVE_COMMAND_NAME: "ask",
-    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_MAX_PENDING: "7",
-    DISCORD_MCP_NATIVE_INTERACTION_TTL_SECONDS: "180",
-    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: BOT_ID,
+  const configuredPolicy = fixturePolicy({
+    capabilities: {
+      nativeCommandChanges: true,
+      nativeInteractions: true,
+    },
+    limits: {
+      nativeInteractionMaxPending: 7,
+      nativeInteractionTtlSeconds: 180,
+    },
+    runtime: {
+      nativeCommandName: "ask",
+    },
+    scopes: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionGuildIds: [GUILD_ID],
+      nativeInteractionUserIds: [BOT_ID],
+    },
   })
   const report = await diagnoseConnector({
-    environment: configuredEnvironment,
+    configOverrides: configuredPolicy,
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const omitted = await prepareSetup({
-    environment: {
-      ...configuredEnvironment,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: {
+      ...configuredPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
     },
     service: statusProvider(),
   })
@@ -3407,23 +3733,33 @@ test("doctor and setup explain native Interaction ingress and command boundaries
 
 test("doctor and setup report observability without opening collectors or exposing headers", async () => {
   const collectorHeader = "Bearer private-collector-credential"
-  const configuredEnvironment = environment({
-    DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
-    DISCORD_MCP_OBSERVABILITY_LOGS: "true",
-    OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test/otlp",
-    OTEL_EXPORTER_OTLP_HEADERS: `authorization=${encodeURIComponent(collectorHeader)}`,
+  const configuredPolicy = fixturePolicy({
+    secretEnvironment: {
+      DISCORD_OBSERVABILITY_HEADERS: `authorization=${encodeURIComponent(collectorHeader)}`,
+    },
+    observability: {
+      endpoint: "https://collector.example.test/otlp",
+      exportEnabled: true,
+      headers: {
+        provider: "environment",
+        variable: "DISCORD_OBSERVABILITY_HEADERS",
+      },
+      jsonLogsEnabled: true,
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: configuredEnvironment,
+    configOverrides: configuredPolicy,
     nodeVersion: "22.14.0",
   })
   const disabled = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
   })
   const defaultCollector = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_OBSERVABILITY_EXPORT: "true",
+    configOverrides: fixturePolicy({
+      observability: {
+        exportEnabled: true,
+      },
     }),
     service: statusProvider(),
   })
@@ -3450,7 +3786,9 @@ test("doctor and setup report observability without opening collectors or exposi
 test("doctor verifies identity online and redacts online failures", async () => {
   let calls = 0
   const verified = await diagnoseConnector({
-    environment: environment({ DISCORD_BOT_TOKEN: `  ${TOKEN}  ` }),
+    configOverrides: fixturePolicy({
+      token: `  ${TOKEN}  `,
+    }),
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -3461,7 +3799,9 @@ test("doctor verifies identity online and redacts online failures", async () => 
     },
   })
   const failed = await diagnoseConnector({
-    environment: environment({ DISCORD_BOT_TOKEN: `  ${TOKEN}  ` }),
+    configOverrides: fixturePolicy({
+      token: `  ${TOKEN}  `,
+    }),
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -3510,12 +3850,18 @@ test("doctor and setup turn current application posture into actionable findings
     messageContentIntent: "not-required",
     nativeInteractionIngressRequired: true,
   })
-  const configuredEnvironment = environment({
-    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
-    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
-    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: BOT_ID,
-    DISCORD_MCP_TOOLSETS: "connector,native-interactions",
+  const configuredPolicy = fixturePolicy({
+    capabilities: {
+      nativeInteractions: true,
+    },
+    scopes: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionGuildIds: [GUILD_ID],
+      nativeInteractionUserIds: [BOT_ID],
+    },
+    tools: {
+      toolsets: ["connector", "native-interactions"],
+    },
   })
   const provider = {
     async getStatus() {
@@ -3524,13 +3870,13 @@ test("doctor and setup turn current application posture into actionable findings
   }
 
   const report = await diagnoseConnector({
-    environment: configuredEnvironment,
+    configOverrides: configuredPolicy,
     nodeVersion: "22.14.0",
     online: true,
     service: provider,
   })
   const setup = await prepareSetup({
-    environment: configuredEnvironment,
+    configOverrides: configuredPolicy,
     service: provider,
   })
 
@@ -3559,7 +3905,7 @@ test("doctor and setup turn current application posture into actionable findings
 
 test("doctor and setup report Message Content intent needed by native search", async () => {
   const report = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -3569,7 +3915,7 @@ test("doctor and setup report Message Content intent needed by native search", a
     },
   })
   const setup = await prepareSetup({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     service: {
       async getStatus() {
         return status(1, "unknown")
@@ -3577,8 +3923,10 @@ test("doctor and setup report Message Content intent needed by native search", a
     },
   })
   const withoutMessages = await prepareSetup({
-    environment: environment({
-      [FIXTURE_ENVIRONMENT_NAMES.toolsets]: "connector",
+    configOverrides: fixturePolicy({
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: {
       async getStatus() {
@@ -3597,22 +3945,28 @@ test("doctor and setup report Message Content intent needed by native search", a
 })
 
 test("doctor and setup diagnose the separately gated Guild Members intent", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
-    DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      memberDirectory: true,
+    },
+    scopes: {
+      memberDirectoryGuildIds: [GUILD_ID],
+    },
   })
   const offline = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const empty = await diagnoseConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        memberDirectory: true,
+      },
     }),
     nodeVersion: "22.14.0",
   })
   const disabledIntent = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -3622,7 +3976,7 @@ test("doctor and setup diagnose the separately gated Guild Members intent", asyn
     },
   })
   const unknownIntentSetup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: {
       async getStatus() {
         return status(1, "enabled", "unknown")
@@ -3630,7 +3984,7 @@ test("doctor and setup diagnose the separately gated Guild Members intent", asyn
     },
   })
   const disabledDirectory = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
     online: true,
     service: {
@@ -3640,10 +3994,16 @@ test("doctor and setup diagnose the separately gated Guild Members intent", asyn
     },
   })
   const omittedToolset = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
-      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        memberDirectory: true,
+      },
+      scopes: {
+        memberDirectoryGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
@@ -3674,28 +4034,42 @@ test("doctor and setup diagnose the separately gated Guild Members intent", asyn
 })
 
 test("doctor and setup explain privacy-safe ban audit without privileged intent", async () => {
-  const enabledEnvironment = environment({
-    DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
-    DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      banAudit: true,
+    },
+    scopes: {
+      banAuditGuildIds: [GUILD_ID],
+    },
   })
   const enabled = await diagnoseConnector({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     nodeVersion: "22.14.0",
   })
   const empty = await diagnoseConnector({
-    environment: environment({ DISCORD_MCP_ALLOW_BAN_AUDIT: "true" }),
+    configOverrides: fixturePolicy({
+      capabilities: {
+        banAudit: true,
+      },
+    }),
     nodeVersion: "22.14.0",
   })
   const omittedToolset = await prepareSetup({
-    environment: environment({
-      DISCORD_MCP_ALLOW_BAN_AUDIT: "true",
-      DISCORD_MCP_BAN_AUDIT_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_TOOLSETS: "connector",
+    configOverrides: fixturePolicy({
+      capabilities: {
+        banAudit: true,
+      },
+      scopes: {
+        banAuditGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
     }),
     service: statusProvider(),
   })
   const setup = await prepareSetup({
-    environment: enabledEnvironment,
+    configOverrides: enabledPolicy,
     service: {
       async getStatus() {
         return status(1, "enabled", "disabled")
@@ -3719,7 +4093,7 @@ test("doctor and setup explain privacy-safe ban audit without privileged intent"
 
 test("doctor fails online verification when local scope contains no accessible guild", async () => {
   const report = await diagnoseConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     nodeVersion: "22.14.0",
     online: true,
     service: statusProvider(0),
@@ -3738,7 +4112,7 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
     channelIds: [CHANNEL_ID],
-    credentialVariable: FIXTURE_ENVIRONMENT_NAMES.token,
+    credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     guildIds: [GUILD_ID],
     name: "team-discord",
     toolsets: ["connector"],
@@ -3757,7 +4131,7 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
     args: ["serve", "--config", file],
     command: "/opt/Discord MCP/bin/discord-mcp",
     environment: {
-      forward: [FIXTURE_ENVIRONMENT_NAMES.token],
+      forward: [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
       set: {},
     },
     requirements: {
@@ -3766,7 +4140,7 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
       toolApproval: "writes",
     },
     secrets: {
-      environmentVariables: [FIXTURE_ENVIRONMENT_NAMES.token],
+      environmentVariables: [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
       files: [],
     },
     serverName: "team-discord",
@@ -3856,24 +4230,10 @@ test("stdio launch descriptor makes a saved profile the complete non-overridable
     "--profile",
     "support-bot",
   ])
-  assert.deepEqual(result.environment.set, {})
-  assert.equal(result.environment.forward.includes(TOKEN_ALIAS), true)
-  assert.equal(result.environment.forward.includes(FIXTURE_ENVIRONMENT_NAMES.token), false)
-  for (const variable of [
-    FIXTURE_ENVIRONMENT_NAMES.allowedChannelIds,
-    FIXTURE_ENVIRONMENT_NAMES.allowedGuildIds,
-    FIXTURE_ENVIRONMENT_NAMES.allowGateway,
-    FIXTURE_ENVIRONMENT_NAMES.gatewayEventBufferSize,
-    FIXTURE_ENVIRONMENT_NAMES.toolSurface,
-    FIXTURE_ENVIRONMENT_NAMES.toolsets,
-  ]) {
-    assert.equal(result.environment.forward.includes(variable), false)
-  }
-  assert.equal(
-    result.environment.forward.includes(FIXTURE_ENVIRONMENT_NAMES.allowDeletions),
-    false,
-  )
-  assert.equal(new Set(result.environment.forward).size, result.environment.forward.length)
+  assert.deepEqual(result.environment, {
+    forward: [TOKEN_ALIAS],
+    set: {},
+  })
   assert.throws(
     () => createStdioLaunchDescriptor({
       applicationId: "999999999999999999",
@@ -3949,7 +4309,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   const report = await prepareSetup({
     args: ["/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     serverName: "discord-safe",
     service: statusProvider(),
   })
@@ -3970,7 +4330,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.equal(report.launch.command, "/usr/bin/node")
   assert.equal(report.launch.serverName, "discord-safe")
   assert.deepEqual(report.launch.environment, {
-    forward: [FIXTURE_ENVIRONMENT_NAMES.token],
+    forward: [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
     set: {},
   })
   assert.equal(report.preset, null)
@@ -3980,7 +4340,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
 
   await assert.rejects(
     () => prepareSetup({
-      environment: environment(),
+      configOverrides: fixturePolicy(),
       service: statusProvider(0),
     }),
     /no accessible guilds/,
@@ -4403,7 +4763,7 @@ test("setup requires one schema-v2 target and rejects ambient policy or implicit
       configFile,
       environment: {
         [TOKEN_ALIAS]: TOKEN,
-        [FIXTURE_ENVIRONMENT_NAMES.allowDeletions]: "true",
+        [LEGACY_POLICY_ENVIRONMENT_VARIABLE]: "true",
       },
       service: statusProvider(),
     }),
@@ -4413,12 +4773,12 @@ test("setup requires one schema-v2 target and rejects ambient policy or implicit
     () => prepareConfigSetup({
       configFile,
       environment: {
-        [FIXTURE_ENVIRONMENT_NAMES.configFile]: join(root, "other.json"),
+        [CONFIG_FILE_ENVIRONMENT_VARIABLE]: join(root, "other.json"),
         [TOKEN_ALIAS]: TOKEN,
       },
       service: statusProvider(),
     }),
-    new RegExp(`conflicts with ${FIXTURE_ENVIRONMENT_NAMES.configFile}`),
+    new RegExp(`conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`),
   )
   const profileDirectory = join(root, "profiles")
   await prepareConfigSetup({
@@ -4435,20 +4795,20 @@ test("setup requires one schema-v2 target and rejects ambient policy or implicit
   await assert.rejects(
     () => prepareConfigSetup({
       environment: {
-        [FIXTURE_ENVIRONMENT_NAMES.configFile]: configFile,
+        [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile,
         [TOKEN_ALIAS]: TOKEN,
       },
       profileDirectory,
       profileName: "observer",
       service: statusProvider(),
     }),
-    new RegExp(`conflicts with ${FIXTURE_ENVIRONMENT_NAMES.configFile}`),
+    new RegExp(`conflicts with ${CONFIG_FILE_ENVIRONMENT_VARIABLE}`),
   )
 })
 
 test("MCP smoke negotiates the adapter, validates risk annotations, and calls status only", async () => {
   const report = await smokeConnector({
-    environment: environment(),
+    configOverrides: fixturePolicy(),
     service: toolService(),
   })
 
@@ -4649,7 +5009,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
 
   await assert.rejects(
     () => smokeConnector({
-      environment: environment(),
+      configOverrides: fixturePolicy(),
       service: toolServiceWithoutScopedGuilds(),
     }),
     /no accessible guilds/,
@@ -4658,9 +5018,13 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
 
 test("MCP smoke validates voice-channel status policy without opening its Gateway", async () => {
   const report = await smokeConnector({
-    environment: environment({
-      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
-      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    configOverrides: fixturePolicy({
+      capabilities: {
+        channelMetadataChanges: true,
+      },
+      scopes: {
+        channelMetadataIds: [CHANNEL_ID],
+      },
     }),
     service: toolService(),
   })
@@ -4682,9 +5046,11 @@ test("MCP smoke validates voice-channel status policy without opening its Gatewa
 
 test("MCP smoke expands a progressive subset without broadening configured toolsets", async () => {
   const report = await smokeConnector({
-    environment: environment({
-      DISCORD_MCP_TOOLSETS: "messages,activity",
-      DISCORD_MCP_TOOL_SURFACE: "progressive",
+    configOverrides: fixturePolicy({
+      tools: {
+        toolsets: ["messages", "activity"],
+        surface: "progressive",
+      },
     }),
     service: toolService(),
   })
