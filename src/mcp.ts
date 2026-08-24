@@ -90,6 +90,9 @@ import {
   type GuildScaffoldRequest,
 } from "./guild-scaffold-service.js"
 import {
+  type GuildBlueprintCaptureRequest,
+} from "./guild-blueprint-capture-service.js"
+import {
   guildBlueprintRequestDigest,
   normalizeGuildBlueprintRequest,
   type GuildBlueprintPlan,
@@ -4115,6 +4118,15 @@ const guildBlueprintFields = {
   settings: guildBlueprintSettingsSchema.optional(),
   welcomeScreen: guildBlueprintWelcomeScreenSchema.optional(),
 }
+const guildBlueprintCaptureInputSchema = z.strictObject({
+  auditReason: auditReasonSchema,
+  guildId: positiveSnowflakeSchema.describe("Exact guild blueprint capture source guild ID"),
+  operationKey: z.string()
+    .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
+    .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
+    .regex(IDEMPOTENCY_KEY_PATTERN)
+    .describe("Stable operation key to retain with the captured blueprint"),
+})
 function guildBlueprintRules(
   input: {
     onboarding?: {
@@ -6808,6 +6820,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  captureGuildBlueprint: ConnectorService["captureGuildBlueprint"]
   getApplicationPosture: ConnectorService["getApplicationPosture"]
   auditChannelDeletion: ConnectorService["auditChannelDeletion"]
   auditRoleDeletion: ConnectorService["auditRoleDeletion"]
@@ -13366,6 +13379,16 @@ function guildBlueprintRequest(
             enabled: input.welcomeScreen.enabled,
           },
         }),
+  }
+}
+
+function guildBlueprintCaptureRequest(
+  input: z.infer<typeof guildBlueprintCaptureInputSchema>,
+): GuildBlueprintCaptureRequest {
+  return {
+    auditReason: input.auditReason,
+    guildId: input.guildId,
+    operationKey: input.operationKey,
   }
 }
 
@@ -20723,6 +20746,34 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         },
         requestState: signedState,
       })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("capture_guild_blueprint", server.registerTool(
+    "capture_guild_blueprint",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. Returns a strict planner-ready blueprint or an explicit blocker, with stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, exact-bound references, unknown evidence, and capacity limits. Reads no messages, members, webhooks, invites, attachments, embeds, components, AutoMod, events, or audit logs, and persists no snapshot, content, operation, or activity record. A capture is an authoring and same-guild recovery aid, not a complete backup; review every omission before calling plan_guild_blueprint.",
+      inputSchema: guildBlueprintCaptureInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Capture caller-retained Discord guild blueprint",
+    },
+    safeToolHandler("capture_guild_blueprint", async (
+      input: z.infer<typeof guildBlueprintCaptureInputSchema>,
+      context,
+    ) => {
+      const result = await service.captureGuildBlueprint(
+        guildBlueprintCaptureRequest(input),
+        { signal: context.mcpReq.signal },
+      )
+      const summary = result.status === "changed-during-capture"
+        ? `changed-during-capture: Discord guild ${result.guildId} changed between capture passes; retry capture because no blueprint was returned`
+        : result.status === "blocked"
+          ? `blocked: Discord guild ${result.guildId} capture has ${result.blockers.length} blocker(s); resolve them and capture again`
+          : result.status === "review-required"
+            ? `review-required: Discord guild ${result.guildId} capture ${result.captureDigest} has ${result.omissions.length} omission(s); explicitly accept or edit the partial desired state before planning`
+            : `ready: Discord guild ${result.guildId} capture ${result.captureDigest} is representable; retain the returned blueprint and call plan_guild_blueprint`
+      return toolResult(result, summary)
     }, secrets, observability),
   ))
 

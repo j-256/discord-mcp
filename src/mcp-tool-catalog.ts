@@ -129,6 +129,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "blocker", "dependency", "delete", "retire", "role"],
     toolset: "role-deletion",
   },
+  capture_guild_blueprint: {
+    keywords: ["backup", "blueprint", "capture", "export", "guild", "onboarding", "profile", "recovery", "roles", "settings", "snapshot", "welcome"],
+    toolset: "guild-blueprints",
+    workflow: "guild-blueprint",
+  },
   delete_messages: {
     keywords: ["bulk", "delete", "exact ids", "remove"],
     toolset: "deletion",

@@ -11,6 +11,11 @@ import { join } from "node:path"
 import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
+import {
+  loadConnectorConfigDocument,
+  type ConnectorConfig,
+} from "../src/config.js"
+import { createConnectorConfigDocument } from "../src/config-document.js"
 import { loadFixtureConfig as loadConnectorConfig } from "./config-fixture.js"
 import {
   DISCORD_CHANNEL_TYPES,
@@ -327,6 +332,7 @@ function serviceFixture(overrides: {
   channelCloneOptions?: ConnectorServiceOptions["channelCloneOptions"]
   channelMetadataOptions?: ConnectorServiceOptions["channelMetadataOptions"]
   channelOrderingOptions?: ConnectorServiceOptions["channelOrderingOptions"]
+  config?: ConnectorConfig
   componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
@@ -924,7 +930,7 @@ function serviceFixture(overrides: {
       }
     },
   }
-  const config = loadConnectorConfig({
+  const config = overrides.config || loadConnectorConfig({
     DISCORD_BOT_TOKEN: TOKEN,
     DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
     DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
@@ -5494,6 +5500,176 @@ test("service durably coordinates active guild scaffolds by request identity", a
   assert.equal(calls.createChannel, 0)
   assert.equal(calls.createRole, 0)
   assert.equal(operationStore.receipt, undefined)
+})
+
+test("service captures a two-pass guild-blueprint draft under verified identity", async () => {
+  const reads = {
+    channels: 0,
+    guild: 0,
+    onboarding: 0,
+    profile: 0,
+    roles: 0,
+    welcomeScreen: 0,
+  }
+  const capturedChannel = channel({
+    default_auto_archive_duration: 1_440,
+    nsfw: false,
+    parent_id: null,
+    rate_limit_per_user: 0,
+    topic: "General discussion",
+  })
+  const capturedGuild = {
+    ...guild(),
+    afk_channel_id: null,
+    afk_timeout: 300,
+    banner: null,
+    default_message_notifications: 1,
+    description: "Private guild description",
+    discovery_splash: null,
+    explicit_content_filter: 2,
+    features: ["WELCOME_SCREEN_ENABLED"],
+    icon: null,
+    owner_id: "700000000000000009",
+    premium_progress_bar_enabled: false,
+    splash: null,
+    system_channel_flags: 0,
+    system_channel_id: CHANNEL_ID,
+    verification_level: 2,
+  }
+  const capturedOnboarding = {
+    defaultChannelIds: [CHANNEL_ID],
+    enabled: false,
+    guildId: GUILD_ID,
+    mode: 1,
+    prompts: [],
+    unknownEnumCount: 0,
+    unknownFieldCount: 0,
+  }
+  const capturedProfile = {
+    description: "Private guild description",
+    id: GUILD_ID,
+    mediaPresence: {
+      banner: false,
+      discoverySplash: false,
+      icon: false,
+      inviteSplash: false,
+    },
+    name: "Captured Guild",
+    ownerId: "700000000000000009",
+  }
+  const capturedRoles = [{
+    ...role(CREATED_ROLE_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "Members"),
+    position: 1,
+  }, role(GUILD_ID, 0n, "@everyone")]
+  const capturedWelcomeScreen = {
+    description: "Welcome",
+    unknownFieldCount: 0,
+    welcomeChannels: [{
+      channelId: CHANNEL_ID,
+      description: "Start here",
+      emojiId: null,
+      emojiName: "👋",
+      unknownFieldCount: 0,
+    }],
+  }
+  const config = loadConnectorConfigDocument(createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    capabilities: {
+      guildProfileAudit: true,
+      guildSettingsAudit: true,
+      onboardingAudit: true,
+      welcomeScreenAudit: true,
+    },
+    channelIds: [],
+    credentialVariable: "DISCORD_BOT_TOKEN",
+    gatewayEnabled: false,
+    guildIds: [GUILD_ID],
+    name: "guild-blueprint-capture-test",
+    scopes: {
+      guildProfileGuildIds: [GUILD_ID],
+      guildSettingsGuildIds: [GUILD_ID],
+      onboardingGuildIds: [GUILD_ID],
+      welcomeScreenGuildIds: [GUILD_ID],
+    },
+    toolsets: ["guild-blueprints"],
+    toolSurface: "full",
+  }), {
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" })
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        reads.guild += 1
+        return structuredClone(capturedGuild)
+      },
+      async getGuildChannels() {
+        reads.channels += 1
+        return structuredClone([capturedChannel])
+      },
+      async getGuildOnboarding() {
+        reads.onboarding += 1
+        return structuredClone(capturedOnboarding)
+      },
+      async getGuildProfile() {
+        reads.profile += 1
+        return structuredClone(capturedProfile)
+      },
+      async getGuildRoles() {
+        reads.roles += 1
+        return structuredClone(capturedRoles)
+      },
+      async getGuildWelcomeScreen() {
+        reads.welcomeScreen += 1
+        return structuredClone(capturedWelcomeScreen)
+      },
+    },
+    config,
+  })
+  const result = await service.captureGuildBlueprint({
+    auditReason: "Retain a reviewed live guild draft",
+    guildId: GUILD_ID,
+    operationKey: "guild-blueprint-capture-service-0001",
+  })
+
+  assert.equal(result.status, "ready")
+  assert.equal(result.applicationId, APPLICATION_ID)
+  assert.equal(result.botId, BOT_ID)
+  assert.equal(result.blueprint?.guildId, GUILD_ID)
+  assert.deepEqual(reads, {
+    channels: 2,
+    guild: 2,
+    onboarding: 2,
+    profile: 0,
+    roles: 2,
+    welcomeScreen: 2,
+  })
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityAppends, 0)
+  assert.equal(calls.listMessages, 0)
+  assert.equal(calls.createChannel, 0)
+  assert.equal(calls.createRole, 0)
+})
+
+test("service rejects guild-blueprint capture policy before identity access", async () => {
+  const { calls, service } = serviceFixture()
+  const request = {
+    auditReason: "Retain a reviewed live guild draft",
+    guildId: GUILD_ID,
+    operationKey: "guild-blueprint-capture-service-0001",
+  }
+
+  await assert.rejects(
+    service.captureGuildBlueprint(request),
+    /guild profile audit is disabled/iu,
+  )
+  await assert.rejects(
+    service.captureGuildBlueprint({ ...request, operationKey: "short" }),
+    /operation key/iu,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
 })
 
 test("service dispatches one guild-blueprint frontier through existing durable coordination", async () => {

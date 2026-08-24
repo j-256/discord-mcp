@@ -247,6 +247,12 @@ import type {
 } from "./guild-expression-service.js"
 import { GuildExpressionService } from "./guild-expression-service.js"
 import type {
+  GuildBlueprintCaptureRequest,
+  GuildBlueprintCaptureResult,
+  GuildBlueprintCaptureServiceOptions,
+} from "./guild-blueprint-capture-service.js"
+import { GuildBlueprintCaptureService } from "./guild-blueprint-capture-service.js"
+import type {
   GuildBlueprintPlan,
   GuildBlueprintRequest,
   GuildBlueprintResult,
@@ -859,6 +865,10 @@ export interface ConnectorServiceOptions {
     GuildBlueprintServiceOptions,
     "clock" | "planKey"
   >
+  guildBlueprintCaptureOptions?: Pick<
+    GuildBlueprintCaptureServiceOptions,
+    "clock"
+  >
   guildExpressionOptions?: Pick<
     GuildExpressionServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1099,6 +1109,7 @@ export class ConnectorService {
   readonly #nativeInteractionCommandService: NativeInteractionCommandService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
+  readonly #guildBlueprintCaptureService: GuildBlueprintCaptureService
   readonly #guildBlueprintService: GuildBlueprintService
   readonly #forumPostService: ForumPostService
   readonly #forumTagService: ForumTagService
@@ -1532,6 +1543,11 @@ export class ConnectorService {
         welcomeScreen: this.#welcomeScreenService,
       },
       ...options.guildBlueprintOptions,
+    })
+    this.#guildBlueprintCaptureService = new GuildBlueprintCaptureService({
+      client: this.#client,
+      policy: this.#policy,
+      ...options.guildBlueprintCaptureOptions,
     })
   }
 
@@ -3286,6 +3302,20 @@ export class ConnectorService {
       identity.application.id,
       identity.bot.id,
       applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
+  async captureGuildBlueprint(
+    request: GuildBlueprintCaptureRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildBlueprintCaptureResult> {
+    this.#guildBlueprintCaptureService.assertCaptureAllowed(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildBlueprintCaptureService.capture(
+      identity.application.id,
+      identity.bot.id,
       request,
       options,
     )

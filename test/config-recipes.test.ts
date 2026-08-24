@@ -74,6 +74,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   assert.equal(Object.isFrozen(guildBuilder), true)
   assert.deepEqual(guildBuilder.toolsets, ["guild-blueprints"])
   assert.deepEqual(guildBuilder.toolNames, [
+    "capture_guild_blueprint",
     "discover_discord_tools",
     "execute_guild_blueprint",
     "plan_guild_blueprint",

@@ -160,7 +160,10 @@ export interface DiscordForumTag {
 export interface DiscordGuild {
   afk_channel_id?: string | null
   afk_timeout?: number
+  banner?: string | null
   default_message_notifications?: number
+  description?: string | null
+  discovery_splash?: string | null
   explicit_content_filter?: number
   features?: string[]
   icon?: string | null
@@ -173,6 +176,7 @@ export interface DiscordGuild {
   public_updates_channel_id?: string | null
   rules_channel_id?: string | null
   safety_alerts_channel_id?: string | null
+  splash?: string | null
   permissions?: string
   system_channel_flags?: number
   system_channel_id?: string | null

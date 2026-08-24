@@ -2628,6 +2628,7 @@ export function registerDiscordPrompts(
           "4. Treat any domain scope, Message Content intent, identity, permission, hierarchy, capacity, receipt conflict, uncertainty, drift, spent operation binding, unresolved scaffold channel or role reference, publication blocker, or changed request digest as a blocker. Publication recovery must use only the exact receipt-bound message and never a history scan.",
           "5. Stop after reviewing this frontier. Do not call execute_guild_blueprint in this workflow, even if the frontier appears correct or needs no write.",
           "6. For later explicitly approved execution, retain the exact manifest and master operation key, execute only the matching frontier, then plan again. After all phases are current, call verify_guild_blueprint with the same caller-retained input for fresh content-free evidence.",
+          "7. When authoring a separate manifest from live guild state, capture_guild_blueprint may provide a two-pass caller-retained draft. Never pass a review-required capture to planning until every omission and exact-bound reference has been explicitly reviewed and the partial desired state has been accepted or edited.",
         ],
       ),
       "Plan-only Discord guild blueprint frontier review",

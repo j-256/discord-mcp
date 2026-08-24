@@ -386,6 +386,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    captureGuildBlueprint: unexpected,
     getApplicationPosture: unexpected,
     auditChannelDeletion: unexpected,
     auditRoleDeletion: unexpected,

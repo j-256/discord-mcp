@@ -4,6 +4,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   audit_channel_order: "discord-read",
   audit_role_deletion: "discord-read",
   audit_forum_tags: "discord-read",
+  capture_guild_blueprint: "discord-read",
   execute_application_emoji_change: "destructive-write",
   delete_messages: "destructive-write",
   discover_discord_tools: "local-read",

@@ -118,6 +118,10 @@ import type {
   GuildScaffoldRequest,
 } from "../src/guild-scaffold-service.js"
 import type {
+  GuildBlueprintCaptureRequest,
+  GuildBlueprintCaptureResult,
+} from "../src/guild-blueprint-capture-service.js"
+import type {
   GuildBlueprintPlan,
   GuildBlueprintRequest,
   GuildBlueprintResult,
@@ -6266,6 +6270,73 @@ function guildBlueprintPlan(
   }
 }
 
+function guildBlueprintCaptureResult(
+  request: GuildBlueprintCaptureRequest,
+): GuildBlueprintCaptureResult {
+  return {
+    applicationId: APPLICATION_ID,
+    blockers: [],
+    blueprint: {
+      ...guildBlueprintToolInput(),
+      auditReason: request.auditReason,
+      guildId: request.guildId,
+      operationKey: request.operationKey,
+    } as GuildBlueprintRequest,
+    botId: BOT_ID,
+    captureDigest: `sha256:${"d".repeat(64)}`,
+    captureWindow: {
+      completedAt: "2026-08-24T00:00:01.000Z",
+      passes: 2,
+      stable: true,
+      startedAt: "2026-08-24T00:00:00.000Z",
+    },
+    coverage: {
+      channels: {
+        captured: 1,
+        returned: 1,
+        visibility: "discord-and-policy-bounded",
+      },
+      domains: [
+        "structure",
+        "profile",
+        "settings",
+        "welcome-screen",
+        "onboarding",
+      ],
+      exactChannelReferences: 0,
+      exactRoleReferences: 0,
+      roles: { captured: 1, returned: 2 },
+    },
+    guildId: request.guildId,
+    freshPlanRequired: true,
+    limitations: {
+      atomicSnapshot: false,
+      completeBackup: false,
+      crossGuildPortable: false,
+      messageRecovery: false,
+      originalIdRestoration: false,
+      rollback: false,
+    },
+    omissions: [],
+    nextAction: "retain-blueprint-and-plan",
+    operationKeyHash: OPERATION_KEY_HASH,
+    plannerReady: true,
+    privacy: {
+      activityPersistence: "none",
+      attachments: "not-read",
+      components: "not-read",
+      memberProfiles: "not-read",
+      messageContent: "not-read",
+      rawPayloads: "omitted",
+      returnedText: "transient-caller-retained",
+      serverPersistence: "none",
+      webhooks: "not-read",
+    },
+    schemaVersion: 1,
+    status: "ready",
+  }
+}
+
 function guildBlueprintToolInput(planDigest?: string) {
   return {
     auditReason: AUDIT_REASON,
@@ -6584,6 +6655,7 @@ function serviceFixture(overrides: {
   forumTagPlanDigest?: string
   guildBlueprintError?: Error
   guildBlueprintBlocked?: boolean
+  guildBlueprintCaptureResult?: GuildBlueprintCaptureResult
   guildBlueprintOnboardingFrontier?: boolean
   guildBlueprintPlanDigest?: string
   guildBlueprintPublicationFrontier?: boolean
@@ -6700,6 +6772,7 @@ function serviceFixture(overrides: {
     get: 0,
     plan: 0,
   }
+  const guildBlueprintCaptureCalls = { capture: 0 }
   const nativeInteractionCommandCalls = {
     execute: 0,
     plan: 0,
@@ -6949,6 +7022,10 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async captureGuildBlueprint(request) {
+      guildBlueprintCaptureCalls.capture += 1
+      return overrides.guildBlueprintCaptureResult || guildBlueprintCaptureResult(request)
+    },
     async auditRoleDeletion(guildId, roleId) {
       calls.roleDeletionAudit += 1
       const planned = roleDeletionPlan(roleDeletionInput({ guildId, roleId }))
@@ -10010,6 +10087,7 @@ function serviceFixture(overrides: {
   }
   return {
     calls,
+    guildBlueprintCaptureCalls,
     guildProfileCalls,
     nativeInteractionCommandCalls,
     service,
@@ -10357,6 +10435,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_component_message",
       "plan_attachment_message",
       "execute_attachment_message",
+      "capture_guild_blueprint",
       "plan_guild_blueprint",
       "execute_guild_blueprint",
       "verify_guild_blueprint",
@@ -10781,6 +10860,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildBlueprintPlanTool = result.tools.find((tool) => (
     tool.name === "plan_guild_blueprint"
   ))
+  const guildBlueprintCaptureTool = result.tools.find((tool) => (
+    tool.name === "capture_guild_blueprint"
+  ))
+  assert.deepEqual(guildBlueprintCaptureTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
   assert.deepEqual(guildBlueprintPlanTool?.annotations, {
     destructiveHint: false,
     idempotentHint: true,
@@ -11419,6 +11507,7 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
   }))
 
   assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "capture_guild_blueprint",
     "execute_guild_blueprint",
     "plan_guild_blueprint",
     "verify_guild_blueprint",
@@ -11426,6 +11515,7 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
+      "capture_guild_blueprint",
       "plan_guild_blueprint",
       "execute_guild_blueprint",
       "verify_guild_blueprint",
@@ -22170,6 +22260,137 @@ test("MCP thread creation exposes uncertain and one-shot conflict outcomes safel
     JSON.stringify(conflictResult),
     new RegExp(THREAD_CREATION_OPERATION_KEY),
   )
+})
+
+test("MCP guild blueprint capture returns one strict planner-compatible draft", async (context) => {
+  const { calls, client, guildBlueprintCaptureCalls } = await connectedFixture(context)
+  const input = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_BLUEPRINT_OPERATION_KEY,
+  }
+  const captured = await client.callTool({
+    arguments: input,
+    name: "capture_guild_blueprint",
+  })
+  const capture = structuredContent(captured)
+
+  assert.equal(captured.isError, undefined)
+  assert.equal(capture.status, "ready")
+  assert.equal(capture.guildId, GUILD_ID)
+  assert.equal(capture.captureDigest, `sha256:${"d".repeat(64)}`)
+  assert.equal(capture.freshPlanRequired, true)
+  assert.equal(capture.nextAction, "retain-blueprint-and-plan")
+  assert.match(
+    (captured.content?.[0] as { text?: string } | undefined)?.text || "",
+    /ready:.*call plan_guild_blueprint/u,
+  )
+  assert.deepEqual(capture.privacy, {
+    activityPersistence: "none",
+    attachments: "not-read",
+    components: "not-read",
+    memberProfiles: "not-read",
+    messageContent: "not-read",
+    rawPayloads: "omitted",
+    returnedText: "transient-caller-retained",
+    serverPersistence: "none",
+    webhooks: "not-read",
+  })
+  assert.equal(guildBlueprintCaptureCalls.capture, 1)
+
+  const planned = await client.callTool({
+    arguments: capture.blueprint as Record<string, unknown>,
+    name: "plan_guild_blueprint",
+  })
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(calls.guildBlueprintPlan, 1)
+
+  const extra = await client.callTool({
+    arguments: { ...input, snapshotMembers: true },
+    name: "capture_guild_blueprint",
+  })
+  const invalidKey = await client.callTool({
+    arguments: { ...input, operationKey: "short" },
+    name: "capture_guild_blueprint",
+  })
+  assert.equal(extra.isError, true)
+  assert.equal(invalidKey.isError, true)
+  assert.equal(guildBlueprintCaptureCalls.capture, 1)
+  assert.equal(JSON.stringify(capture).includes(TOKEN), false)
+})
+
+test("MCP guild blueprint capture preserves structured review and retry outcomes", async (context) => {
+  const input = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_BLUEPRINT_OPERATION_KEY,
+  }
+  const ready = guildBlueprintCaptureResult(input)
+  assert.equal(ready.status, "ready")
+  const omission = {
+    code: "WELCOME_SCREEN_UNAVAILABLE" as const,
+    message: "Discord did not expose a Welcome Screen to capture",
+    resourceId: null,
+    resourceType: "capture" as const,
+  }
+  const reviewRequired = {
+    ...ready,
+    nextAction: "review-or-edit-omissions-before-plan",
+    omissions: [omission],
+    status: "review-required",
+  } as GuildBlueprintCaptureResult
+  const blocked = {
+    ...ready,
+    blockers: [{
+      code: "SETTINGS_UNKNOWN_ENUM",
+      message: "Discord returned an unsupported settings enum",
+      resourceId: null,
+      resourceType: "capture",
+    }],
+    blueprint: null,
+    captureDigest: null,
+    nextAction: "resolve-blockers-and-recapture",
+    plannerReady: false,
+    status: "blocked",
+  } as GuildBlueprintCaptureResult
+  const changed = {
+    ...ready,
+    blockers: [{
+      code: "CAPTURE_CHANGED",
+      message: "Discord blueprint source state changed between passes",
+      resourceId: null,
+      resourceType: "capture",
+    }],
+    blueprint: null,
+    captureDigest: null,
+    captureWindow: { ...ready.captureWindow, stable: false },
+    coverage: null,
+    nextAction: "retry-capture",
+    omissions: [],
+    plannerReady: false,
+    status: "changed-during-capture",
+  } as GuildBlueprintCaptureResult
+
+  for (const [result, expectedSummary] of [
+    [reviewRequired, /review-required:.*before planning/u],
+    [blocked, /blocked:.*capture again/u],
+    [changed, /changed-during-capture:.*retry capture/u],
+  ] as const) {
+    const fixture = await connectedFixture(context, {
+      serviceOverrides: { guildBlueprintCaptureResult: result },
+    })
+    const response = await fixture.client.callTool({
+      arguments: input,
+      name: "capture_guild_blueprint",
+    })
+    assert.equal(response.isError, undefined)
+    assert.equal(structuredContent(response).status, result.status)
+    assert.equal(structuredContent(response).nextAction, result.nextAction)
+    assert.match(
+      (response.content?.[0] as { text?: string } | undefined)?.text || "",
+      expectedSummary,
+    )
+  }
 })
 
 test("MCP guild blueprints validate and plan one exact caller-retained manifest", async (context) => {

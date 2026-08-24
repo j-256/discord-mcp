@@ -273,6 +273,7 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    captureGuildBlueprint: unexpected,
     async auditRoleDeletion(guildId, roleId) {
       calls.roleDeletions += 1
       calls.lastGuildId = guildId
@@ -4817,6 +4818,8 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildBlueprint, /Call only plan_guild_blueprint/)
   assert.match(guildBlueprint, /Do not call execute_guild_blueprint/)
   assert.match(guildBlueprint, /verify_guild_blueprint/)
+  assert.match(guildBlueprint, /capture_guild_blueprint/)
+  assert.match(guildBlueprint, /Never pass a review-required capture/)
   assert.match(guildBlueprint, /exact manifest and master operation key/)
   assert.match(
     guildBlueprint,
