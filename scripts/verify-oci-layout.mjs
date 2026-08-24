@@ -124,13 +124,19 @@ async function inspectLayout(root, expected) {
   for (const descriptor of validatedIndex.attestationDescriptors) {
     const subjectDigest = descriptor.annotations["vnd.docker.reference.digest"]
     const manifest = await readJsonBlob(root, descriptor, "OCI attestation manifest")
-    const validatedManifest = validateOciAttestationManifest(manifest)
+    const subjectDescriptor = validatedIndex.platformDescriptors.find(({ digest }) => digest === subjectDigest)
+    invariant(subjectDescriptor, "OCI image evidence subject is missing")
+    const validatedManifest = validateOciAttestationManifest(manifest, subjectDescriptor)
     const attestationConfig = await readJsonBlob(
       root,
       validatedManifest.configDescriptor,
       "OCI attestation configuration",
     )
-    validateOciAttestationConfig(attestationConfig, validatedManifest.layerDescriptors)
+    validateOciAttestationConfig(
+      attestationConfig,
+      validatedManifest.layerDescriptors,
+      validatedManifest.configFormat,
+    )
     for (const layer of validatedManifest.layerDescriptors) {
       const statement = await readJsonBlob(root, layer, "OCI attestation layer", EVIDENCE_BYTE_LIMIT)
       validateInTotoStatement(statement, layer.annotations["in-toto.io/predicate-type"])

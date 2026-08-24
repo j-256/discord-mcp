@@ -18,10 +18,12 @@ interface OciRegistryModule {
     config: unknown,
     expected: { architecture: string; layerCount?: number; revision: string; version: string },
   ): Record<string, string>
-  validateOciAttestationManifest(manifest: unknown): {
+  validateOciAttestationManifest(manifest: unknown, expectedSubject: unknown): {
+    configFormat: string
     predicateTypes: string[]
   }
-  validateOciAttestationConfig(config: unknown, layers: Array<{ digest: string }>): {
+  validateOciAttestationConfig(config: unknown, layers: Array<{ digest: string }>, configFormat?: string): {
+    configFormat: string
     layerDigests: string[]
   }
   validateInTotoStatement(statement: unknown, expectedPredicateType: string): {
@@ -162,6 +164,44 @@ function validAttestationManifest(): object {
     ],
     mediaType: "application/vnd.oci.image.manifest.v1+json",
     schemaVersion: 2,
+  }
+}
+
+function validArtifactAttestationManifest(expectedSubject: object): object {
+  const subject = expectedSubject as {
+    digest: string
+    mediaType: string
+    size: number
+  }
+  return {
+    artifactType: "application/vnd.docker.attestation.manifest.v1+json",
+    config: {
+      data: "e30=",
+      digest: "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      mediaType: "application/vnd.oci.empty.v1+json",
+      size: 2,
+    },
+    layers: [
+      {
+        annotations: { "in-toto.io/predicate-type": "https://spdx.dev/Document" },
+        digest: digest("b"),
+        mediaType: "application/vnd.in-toto+json",
+        size: 200,
+      },
+      {
+        annotations: { "in-toto.io/predicate-type": "https://slsa.dev/provenance/v1" },
+        digest: digest("c"),
+        mediaType: "application/vnd.in-toto+json",
+        size: 300,
+      },
+    ],
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    schemaVersion: 2,
+    subject: {
+      digest: subject.digest,
+      mediaType: subject.mediaType,
+      size: subject.size,
+    },
   }
 }
 
@@ -355,7 +395,12 @@ test("requires ordinary image layers and both BuildKit evidence predicates", () 
   assert.equal(image.configDescriptor.digest, digest("e"))
   assert.equal(image.layerDescriptors.length, 1)
 
-  const evidence = oci.validateOciAttestationManifest(validAttestationManifest())
+  const expectedSubject = imageDescriptor("amd64", "d")
+  const evidence = oci.validateOciAttestationManifest(
+    validAttestationManifest(),
+    expectedSubject,
+  )
+  assert.equal(evidence.configFormat, "legacy")
   assert.deepEqual(evidence.predicateTypes, [
     "https://slsa.dev/provenance/v1",
     "https://spdx.dev/Document",
@@ -368,13 +413,55 @@ test("requires ordinary image layers and both BuildKit evidence predicates", () 
     [digest("b"), digest("c")],
   )
 
+  const artifactEvidence = oci.validateOciAttestationManifest(
+    validArtifactAttestationManifest(expectedSubject),
+    expectedSubject,
+  )
+  assert.equal(artifactEvidence.configFormat, "artifact")
+  assert.deepEqual(
+    oci.validateOciAttestationConfig(
+      {},
+      [{ digest: digest("b") }, { digest: digest("c") }],
+      artifactEvidence.configFormat,
+    ),
+    {
+      configFormat: "artifact",
+      layerDigests: [digest("b"), digest("c")],
+    },
+  )
+
+  const externalEmptyConfig = validArtifactAttestationManifest(expectedSubject) as {
+    config: { data?: string }
+  }
+  delete externalEmptyConfig.config.data
+  assert.equal(
+    oci.validateOciAttestationManifest(externalEmptyConfig, expectedSubject).configFormat,
+    "artifact",
+  )
+
   const redirectingLayer = validImageManifest() as { layers: Array<{ urls?: string[] }> }
   redirectingLayer.layers[0]!.urls = ["https://example.invalid/layer"]
   assert.throws(() => oci.validateOciImageManifest(redirectingLayer), /redirect/u)
 
   const incompleteEvidence = validAttestationManifest() as { layers: unknown[] }
   incompleteEvidence.layers.pop()
-  assert.throws(() => oci.validateOciAttestationManifest(incompleteEvidence))
+  assert.throws(() => oci.validateOciAttestationManifest(incompleteEvidence, expectedSubject))
+
+  const mismatchedSubject = validArtifactAttestationManifest(expectedSubject) as {
+    subject: { digest: string }
+  }
+  mismatchedSubject.subject.digest = digest("f")
+  assert.throws(
+    () => oci.validateOciAttestationManifest(mismatchedSubject, expectedSubject),
+  )
+
+  const invalidEmptyConfig = validArtifactAttestationManifest(expectedSubject) as {
+    config: { data: string }
+  }
+  invalidEmptyConfig.config.data = "e30K"
+  assert.throws(
+    () => oci.validateOciAttestationManifest(invalidEmptyConfig, expectedSubject),
+  )
 
   const mismatchedConfiguration = validAttestationConfig() as { rootfs: { diff_ids: string[] } }
   mismatchedConfiguration.rootfs.diff_ids.reverse()

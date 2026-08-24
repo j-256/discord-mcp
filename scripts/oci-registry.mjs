@@ -9,6 +9,13 @@ const IMAGE_LAYER_MEDIA_TYPE = "application/vnd.oci.image.layer.v1.tar+gzip"
 const IMAGE_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
 const IN_TOTO_MEDIA_TYPE = "application/vnd.in-toto+json"
 const IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+const ATTESTATION_ARTIFACT_MEDIA_TYPE = "application/vnd.docker.attestation.manifest.v1+json"
+const EMPTY_CONFIG_MEDIA_TYPE = "application/vnd.oci.empty.v1+json"
+const EMPTY_CONFIG_DIGEST = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+const EMPTY_CONFIG_DATA = "e30="
+const EMPTY_CONFIG_SIZE = 2
+const ARTIFACT_ATTESTATION_CONFIG = "artifact"
+const LEGACY_ATTESTATION_CONFIG = "legacy"
 const GITHUB_API_VERSION = "2026-03-10"
 export const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 export const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
@@ -139,13 +146,37 @@ export function validateOciImageManifest(manifest, label = "OCI image manifest")
   }
 }
 
-export function validateOciAttestationManifest(manifest, label = "OCI attestation manifest") {
+export function validateOciAttestationManifest(
+  manifest,
+  expectedSubject,
+  label = "OCI attestation manifest",
+) {
   invariant(manifest?.schemaVersion === 2, `${label} schema version is invalid`)
   invariant(manifest?.mediaType === IMAGE_MANIFEST_MEDIA_TYPE, `${label} has the wrong media type`)
-  invariant(manifest.artifactType === undefined && manifest.subject === undefined, `${label} has an unexpected subject shape`)
   invariant(manifest.annotations === undefined, `${label} has unexpected annotations`)
-  validateDescriptor(manifest.config, IMAGE_CONFIG_MEDIA_TYPE, `${label} configuration`)
-  invariant(manifest.config.annotations === undefined, `${label} configuration has unexpected annotations`)
+  validateDescriptor(expectedSubject, IMAGE_MANIFEST_MEDIA_TYPE, `${label} subject`)
+  const expectedSubjectReference = {
+    digest: expectedSubject.digest,
+    mediaType: expectedSubject.mediaType,
+    size: expectedSubject.size,
+  }
+  let configFormat
+  if (manifest.artifactType === ATTESTATION_ARTIFACT_MEDIA_TYPE) {
+    assert.deepEqual(manifest.subject, expectedSubjectReference)
+    const expectedConfig = {
+      ...(manifest.config?.data === undefined ? {} : { data: EMPTY_CONFIG_DATA }),
+      digest: EMPTY_CONFIG_DIGEST,
+      mediaType: EMPTY_CONFIG_MEDIA_TYPE,
+      size: EMPTY_CONFIG_SIZE,
+    }
+    assert.deepEqual(manifest.config, expectedConfig)
+    configFormat = ARTIFACT_ATTESTATION_CONFIG
+  } else {
+    invariant(manifest.artifactType === undefined && manifest.subject === undefined, `${label} has an unexpected subject shape`)
+    validateDescriptor(manifest.config, IMAGE_CONFIG_MEDIA_TYPE, `${label} configuration`)
+    invariant(manifest.config.annotations === undefined, `${label} configuration has unexpected annotations`)
+    configFormat = LEGACY_ATTESTATION_CONFIG
+  }
   invariant(Array.isArray(manifest.layers), `${label} has no evidence layers`)
   for (const layer of manifest.layers) {
     validateDescriptor(layer, IN_TOTO_MEDIA_TYPE, `${label} evidence layer`)
@@ -157,12 +188,25 @@ export function validateOciAttestationManifest(manifest, label = "OCI attestatio
   assert.deepEqual(predicateTypes, BUILDKIT_PREDICATE_TYPES)
   return {
     configDescriptor: manifest.config,
+    configFormat,
     layerDescriptors: manifest.layers,
     predicateTypes,
   }
 }
 
-export function validateOciAttestationConfig(configDocument, layerDescriptors) {
+export function validateOciAttestationConfig(
+  configDocument,
+  layerDescriptors,
+  configFormat = LEGACY_ATTESTATION_CONFIG,
+) {
+  if (configFormat === ARTIFACT_ATTESTATION_CONFIG) {
+    assert.deepEqual(configDocument, {})
+    return {
+      configFormat,
+      layerDigests: layerDescriptors.map(({ digest }) => digest),
+    }
+  }
+  invariant(configFormat === LEGACY_ATTESTATION_CONFIG, "OCI attestation configuration format is invalid")
   assert.deepEqual(configDocument, {
     architecture: "unknown",
     config: {},
@@ -173,6 +217,7 @@ export function validateOciAttestationConfig(configDocument, layerDescriptors) {
     },
   })
   return {
+    configFormat,
     layerDigests: configDocument.rootfs.diff_ids,
   }
 }
@@ -497,11 +542,13 @@ export async function inspectPublicOciImage({ githubToken, reference, revision, 
     invariant(attestationResult.response.ok, `OCI registry returned HTTP ${attestationResult.response.status} for platform evidence`)
     assertResponseDigest(attestationResult.response, descriptor.digest)
     const manifest = await responseJson(attestationResult.response, "OCI attestation manifest", descriptor.digest)
-    const validatedManifest = validateOciAttestationManifest(manifest)
+    const subjectDescriptor = validated.platformDescriptors.find(({ digest }) => digest === subjectDigest)
+    invariant(subjectDescriptor, "OCI image evidence subject is missing")
+    const validatedManifest = validateOciAttestationManifest(manifest, subjectDescriptor)
     const attestationConfigResult = await registryRequest(
       `${baseUrl}/blobs/${validatedManifest.configDescriptor.digest}`,
       parsed.repository,
-      IMAGE_CONFIG_MEDIA_TYPE,
+      validatedManifest.configDescriptor.mediaType,
       initial.token,
     )
     invariant(
@@ -513,7 +560,11 @@ export async function inspectPublicOciImage({ githubToken, reference, revision, 
       "OCI attestation configuration",
       validatedManifest.configDescriptor.digest,
     )
-    validateOciAttestationConfig(attestationConfig, validatedManifest.layerDescriptors)
+    validateOciAttestationConfig(
+      attestationConfig,
+      validatedManifest.layerDescriptors,
+      validatedManifest.configFormat,
+    )
     for (const layer of validatedManifest.layerDescriptors) {
       invariant(layer.size <= EVIDENCE_RESPONSE_BYTE_LIMIT, "OCI evidence exceeds the response limit")
       const evidenceResult = await registryRequest(
