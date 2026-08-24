@@ -41,6 +41,7 @@ export const MCP_TOOLSET_NAMES = [
   "forum-posts",
   "forum-tags",
   "gateway",
+  "guild-blueprints",
   "guild-expressions",
   "guild-profile",
   "guild-scaffolds",

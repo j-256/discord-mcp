@@ -89,6 +89,12 @@ import {
   normalizeGuildScaffoldRequest,
   type GuildScaffoldRequest,
 } from "./guild-scaffold-service.js"
+import {
+  guildBlueprintRequestDigest,
+  normalizeGuildBlueprintRequest,
+  type GuildBlueprintPlan,
+  type GuildBlueprintRequest,
+} from "./guild-blueprint-service.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 import {
   voiceChannelStatusChannelIds,
@@ -217,6 +223,7 @@ import {
   ForumTagExecutionError,
   ForumTagOperationConflictError,
   ForumTagPlanChangedError,
+  GuildBlueprintPlanChangedError,
   GuildScaffoldExecutionError,
   GuildScaffoldOperationConflictError,
   GuildScaffoldPlanChangedError,
@@ -503,6 +510,7 @@ const WELCOME_SCREEN_REQUEST_STATE_CHARACTERS = 32_768
 const WIDGET_SETTINGS_REQUEST_STATE_CHARACTERS = 4_096
 const GUILD_SETTINGS_REQUEST_STATE_CHARACTERS = 8_192
 const GUILD_PROFILE_REQUEST_STATE_CHARACTERS = 4_096
+const GUILD_BLUEPRINT_REQUEST_DIGEST_PATTERN = /^hmac-sha256:[0-9a-f]{64}$/
 const CHANNEL_CREATION_CONFIRMATION_KEY = "confirm_channel_creation"
 const CHANNEL_CLONE_CONFIRMATION_KEY = "confirm_channel_clone"
 const CHANNEL_DELETION_CONFIRMATION_KEY = "confirm_channel_deletion"
@@ -513,6 +521,7 @@ const CHANNEL_PERMISSION_OVERWRITE_CONFIRMATION_KEY = "confirm_channel_permissio
 const DELETION_CONFIRMATION_KEY = "confirm_deletion"
 const FORUM_POST_CONFIRMATION_KEY = "confirm_forum_post"
 const FORUM_TAG_CONFIRMATION_KEY = "confirm_forum_tag_change"
+const GUILD_BLUEPRINT_CONFIRMATION_KEY = "confirm_guild_blueprint"
 const GUILD_SCAFFOLD_CONFIRMATION_KEY = "confirm_guild_scaffold"
 const GUILD_EXPRESSION_CONFIRMATION_KEY = "confirm_guild_expression_change"
 const SOUNDBOARD_CONFIRMATION_KEY = "confirm_guild_soundboard_change"
@@ -3907,6 +3916,110 @@ const guildScaffoldExecuteInputSchema = z.strictObject({
   ...guildScaffoldFields,
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
 }).superRefine(guildScaffoldRules)
+const guildBlueprintExactChannelReferenceSchema = z.strictObject({
+  channelId: positiveSnowflakeSchema,
+  kind: z.literal("exact"),
+})
+const guildBlueprintChannelReferenceSchema = z.discriminatedUnion("kind", [
+  guildBlueprintExactChannelReferenceSchema,
+  z.strictObject({
+    key: scaffoldSymbolSchema,
+    kind: z.literal("scaffold"),
+  }),
+])
+const guildBlueprintScaffoldSchema = z.strictObject({
+  channels: z.array(guildScaffoldChannelSchema)
+    .max(CONNECTOR_LIMITS.scaffoldChannels)
+    .default([]),
+  roles: z.array(guildScaffoldRoleSchema)
+    .max(CONNECTOR_LIMITS.scaffoldRoles)
+    .default([]),
+  stepLimit: z.number().int()
+    .min(1)
+    .max(CONNECTOR_LIMITS.scaffoldStepLimit)
+    .default(CONNECTOR_LIMITS.scaffoldStepLimit),
+}).superRefine(guildScaffoldRules)
+const guildBlueprintProfileSchema = z.strictObject({
+  description: guildProfileDescriptionSchema
+    .nullable()
+    .optional()
+    .describe("Complete desired guild description, null to clear it, or omit to preserve it"),
+  name: guildProfileNameSchema
+    .optional()
+    .describe("Complete desired guild name, or omit to preserve it"),
+}).refine(
+  selectsGuildProfileField,
+  { message: "Select at least one guild profile field to change" },
+)
+const guildBlueprintSettingsSchema = z.strictObject({
+  afkChannel: guildBlueprintExactChannelReferenceSchema
+    .nullable()
+    .optional()
+    .describe("Exact existing voice channel ID, null to clear, or omit to preserve"),
+  afkTimeoutSeconds: guildSettingsFields.afkTimeoutSeconds,
+  defaultMessageNotifications: guildSettingsFields.defaultMessageNotifications,
+  explicitContentFilter: guildSettingsFields.explicitContentFilter,
+  premiumProgressBarEnabled: guildSettingsFields.premiumProgressBarEnabled,
+  suppressedSystemNotifications: guildSettingsFields.suppressedSystemNotifications,
+  systemChannel: guildBlueprintChannelReferenceSchema
+    .nullable()
+    .optional()
+    .describe("Exact channel ID, requested scaffold text-channel key, null to clear, or omit to preserve"),
+  verificationLevel: guildSettingsFields.verificationLevel,
+}).refine(
+  (value) => Object.keys(value).length > 0,
+  { message: "Select at least one guild setting to change" },
+)
+const guildBlueprintFields = {
+  auditReason: auditReasonSchema,
+  guildId: positiveSnowflakeSchema.describe("Exact guild blueprint target guild ID"),
+  operationKey: z.string()
+    .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
+    .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
+    .regex(IDEMPOTENCY_KEY_PATTERN)
+    .describe("Stable blueprint operation key; keep unchanged across every reviewed frontier"),
+  profile: guildBlueprintProfileSchema.optional(),
+  scaffold: guildBlueprintScaffoldSchema,
+  settings: guildBlueprintSettingsSchema.optional(),
+}
+function guildBlueprintRules(
+  input: {
+    profile?: unknown
+    scaffold: {
+      channels: readonly { key: string; kind: string }[]
+    }
+    settings?: {
+      systemChannel?: { key?: string; kind: string } | null | undefined
+    } | undefined
+  },
+  context: z.RefinementCtx,
+): void {
+  if (input.profile === undefined && input.settings === undefined) {
+    context.addIssue({
+      code: "custom",
+      message: "guild blueprint requires a profile or settings phase after the scaffold",
+    })
+  }
+  const systemChannel = input.settings?.systemChannel
+  if (systemChannel?.kind === "scaffold") {
+    const requested = input.scaffold.channels.find(
+      (channel) => channel.key === systemChannel.key,
+    )
+    if (requested?.kind !== "text") {
+      context.addIssue({
+        code: "custom",
+        message: "guild blueprint system channel must reference a requested text channel",
+        path: ["settings", "systemChannel", "key"],
+      })
+    }
+  }
+}
+const guildBlueprintPlanInputSchema = z.strictObject(guildBlueprintFields)
+  .superRefine(guildBlueprintRules)
+const guildBlueprintExecuteInputSchema = z.strictObject({
+  ...guildBlueprintFields,
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+}).superRefine(guildBlueprintRules)
 const memberModerationFields = {
   action: z.enum(MEMBER_MODERATION_ACTIONS),
   auditReason: auditReasonSchema,
@@ -4039,6 +4152,9 @@ const forumTagConfirmationSchema = z.strictObject({
   approve: z.boolean(),
 })
 const threadCreationConfirmationSchema = z.strictObject({
+  approve: z.boolean(),
+})
+const guildBlueprintConfirmationSchema = z.strictObject({
   approve: z.boolean(),
 })
 const guildScaffoldConfirmationSchema = z.strictObject({
@@ -4488,6 +4604,27 @@ const threadGovernanceConfirmationRequestSchema: {
     approve: {
       description: "Set true only after reviewing the exact guild, parent, thread and optional member IDs, current and desired state, complete permissions, authorization basis, privacy projection, risks, reason, one-shot key hash, and plan digest",
       title: "Approve thread change",
+      type: "boolean",
+    },
+  },
+  required: ["approve"],
+  type: "object",
+}
+const guildBlueprintConfirmationRequestSchema: {
+  properties: {
+    approve: {
+      description: string
+      title: string
+      type: "boolean"
+    }
+  }
+  required: string[]
+  type: "object"
+} = {
+  properties: {
+    approve: {
+      description: "Set true only after reviewing the exact blueprint identity, caller-retained manifest digest, one-frontier boundary, nested domain plan, operation bindings, warnings, and aggregate plan digest",
+      title: "Approve guild blueprint frontier",
       type: "boolean",
     },
   },
@@ -5841,6 +5978,10 @@ const threadGovernanceRequestStateSchema = z.strictObject({
   threadId: positiveSnowflakeSchema,
   userId: positiveSnowflakeSchema.optional(),
 }).superRefine(threadGovernanceRules)
+const guildBlueprintRequestStateSchema = z.strictObject({
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  requestDigest: z.string().regex(GUILD_BLUEPRINT_REQUEST_DIGEST_PATTERN),
+})
 const guildScaffoldRequestStateSchema = z.strictObject({
   auditReason: auditReasonSchema,
   channels: z.array(z.strictObject({
@@ -6444,6 +6585,7 @@ export interface DiscordToolService {
   executeAutoModerationChange: ConnectorService["executeAutoModerationChange"]
   executeForumPost: ConnectorService["executeForumPost"]
   executeForumTagChange: ConnectorService["executeForumTagChange"]
+  executeGuildBlueprint: ConnectorService["executeGuildBlueprint"]
   executeGuildScaffold: ConnectorService["executeGuildScaffold"]
   executeGuildExpressionChange: ConnectorService["executeGuildExpressionChange"]
   executeGuildProfileChange: ConnectorService["executeGuildProfileChange"]
@@ -6555,6 +6697,8 @@ export interface DiscordToolService {
   planChannelPermissionOverwrite: ConnectorService["planChannelPermissionOverwrite"]
   planForumPost: ConnectorService["planForumPost"]
   planForumTagChange: ConnectorService["planForumTagChange"]
+  planGuildBlueprint: ConnectorService["planGuildBlueprint"]
+  verifyGuildBlueprint: ConnectorService["verifyGuildBlueprint"]
   planGuildScaffold: ConnectorService["planGuildScaffold"]
   verifyGuildScaffold: ConnectorService["verifyGuildScaffold"]
   planGuildExpressionChange: ConnectorService["planGuildExpressionChange"]
@@ -6874,6 +7018,10 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
     }
   }
   if (error instanceof ThreadGovernancePlanChangedError) {
+    details.actualDigest = error.actualDigest
+    details.expectedDigest = error.expectedDigest
+  }
+  if (error instanceof GuildBlueprintPlanChangedError) {
     details.actualDigest = error.actualDigest
     details.expectedDigest = error.expectedDigest
   }
@@ -7886,6 +8034,7 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
   if (error instanceof ForumPostPlanChangedError) status = "plan-changed"
   if (error instanceof ThreadCreationPlanChangedError) status = "plan-changed"
   if (error instanceof ThreadGovernancePlanChangedError) status = "plan-changed"
+  if (error instanceof GuildBlueprintPlanChangedError) status = "plan-changed"
   if (error instanceof GuildScaffoldPlanChangedError) status = "plan-changed"
   if (error instanceof ReactionModerationPlanChangedError) status = "plan-changed"
   if (error instanceof MessagePinPlanChangedError) status = "plan-changed"
@@ -12835,6 +12984,146 @@ function guildScaffoldConfirmationOutcome(
   }
 }
 
+function guildBlueprintRequest(
+  input: z.infer<typeof guildBlueprintPlanInputSchema>
+    | z.infer<typeof guildBlueprintExecuteInputSchema>,
+): GuildBlueprintRequest {
+  return {
+    auditReason: input.auditReason,
+    guildId: input.guildId,
+    operationKey: input.operationKey,
+    ...(input.profile === undefined
+      ? {}
+      : {
+          profile: {
+            ...(input.profile.description !== undefined
+              ? { description: input.profile.description }
+              : {}),
+            ...(input.profile.name !== undefined
+              ? { name: input.profile.name }
+              : {}),
+          },
+        }),
+    scaffold: {
+      channels: input.scaffold.channels.map((channel) => ({
+        ...(channel.defaultAutoArchiveDuration === undefined
+          ? {}
+          : { defaultAutoArchiveDuration: channel.defaultAutoArchiveDuration }),
+        key: channel.key,
+        kind: channel.kind,
+        name: channel.name,
+        ...(channel.nsfw === undefined ? {} : { nsfw: channel.nsfw }),
+        ...(channel.parentKey === undefined ? {} : { parentKey: channel.parentKey }),
+        ...(channel.rateLimitPerUser === undefined
+          ? {}
+          : { rateLimitPerUser: channel.rateLimitPerUser }),
+        ...(channel.topic === undefined ? {} : { topic: channel.topic }),
+      })),
+      roles: input.scaffold.roles.map((role) => ({
+        hoist: role.hoist,
+        key: role.key,
+        mentionable: role.mentionable,
+        name: role.name,
+        permissions: role.permissions,
+        primaryColor: role.primaryColor,
+      })),
+      stepLimit: input.scaffold.stepLimit,
+    },
+    ...(input.settings === undefined
+      ? {}
+      : {
+          settings: {
+            ...(input.settings.afkChannel !== undefined
+              ? { afkChannel: input.settings.afkChannel }
+              : {}),
+            ...(input.settings.afkTimeoutSeconds !== undefined
+              ? { afkTimeoutSeconds: input.settings.afkTimeoutSeconds }
+              : {}),
+            ...(input.settings.defaultMessageNotifications !== undefined
+              ? { defaultMessageNotifications: input.settings.defaultMessageNotifications }
+              : {}),
+            ...(input.settings.explicitContentFilter !== undefined
+              ? { explicitContentFilter: input.settings.explicitContentFilter }
+              : {}),
+            ...(input.settings.premiumProgressBarEnabled !== undefined
+              ? { premiumProgressBarEnabled: input.settings.premiumProgressBarEnabled }
+              : {}),
+            ...(input.settings.suppressedSystemNotifications !== undefined
+              ? { suppressedSystemNotifications: input.settings.suppressedSystemNotifications }
+              : {}),
+            ...(input.settings.systemChannel !== undefined
+              ? { systemChannel: input.settings.systemChannel }
+              : {}),
+            ...(input.settings.verificationLevel !== undefined
+              ? { verificationLevel: input.settings.verificationLevel }
+              : {}),
+          },
+        }),
+  }
+}
+
+function guildBlueprintConfirmationMessage(plan: GuildBlueprintPlan): string {
+  if (plan.frontier === null) {
+    throw new RangeError("Discord guild blueprint has no execution frontier")
+  }
+  const nestedReview = plan.frontier.kind === "structure"
+    ? guildScaffoldConfirmationMessage(plan.frontier.plan)
+    : plan.frontier.kind === "profile"
+      ? guildProfileConfirmationMessage(plan.frontier.plan)
+      : guildSettingsConfirmationMessage(plan.frontier.plan)
+  return [
+    "Approve exactly one reviewed Discord guild blueprint frontier?",
+    "The exact blueprint manifest remains caller-retained and is not persisted or copied into confirmation state.",
+    `Application ID: ${plan.applicationId}`,
+    `Bot ID: ${plan.botId}`,
+    `Guild ID: ${plan.guild.id}`,
+    `Guild name: ${reviewLiteral(plan.guild.name)}`,
+    `Guild owner ID: ${plan.guild.ownerId}`,
+    `Frontier phase: ${plan.frontier.kind}`,
+    `Frontier requires write: ${plan.frontier.writeRequired}`,
+    `Master operation key hash: ${plan.operationKeyHash}`,
+    `Caller-retained request digest: ${plan.requestDigest}`,
+    `Aggregate plan digest: ${plan.digest}`,
+    "Phase states:",
+    ...plan.steps.map((step) => `- ${step.kind}: ${step.state}; write required=${step.writeRequired}; nested plan=${step.nestedPlanDigest ?? "not planned"}; operation key hash=${step.operationKeyHash}`),
+    "Blueprint warnings:",
+    ...plan.warnings.map((warning) => `- ${warning}`),
+    "Nested frontier review:",
+    nestedReview,
+    "Only this exact frontier may execute. Retain the same manifest and master operation key, then plan again before any later phase.",
+    "Set approve to true only after checking the caller-retained manifest digest, aggregate digest, exact identity, phase boundary, nested domain plan, warnings, and derived operation binding.",
+  ].join("\n")
+}
+
+function validGuildBlueprintRequestState(
+  value: unknown,
+  request: GuildBlueprintRequest,
+  planDigest: string,
+): boolean {
+  const parsed = guildBlueprintRequestStateSchema.safeParse(value)
+  return parsed.success
+    && parsed.data.planDigest === planDigest
+    && parsed.data.requestDigest === guildBlueprintRequestDigest(request)
+}
+
+function guildBlueprintConfirmationOutcome(
+  request: GuildBlueprintRequest,
+  planDigest: string,
+  status: string,
+  reason: string,
+) {
+  const normalized = normalizeGuildBlueprintRequest(request)
+  return {
+    guildId: normalized.guildId,
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest,
+    reason,
+    requestDigest: guildBlueprintRequestDigest(request),
+    schemaVersion: SCHEMA_VERSION,
+    status,
+  }
+}
+
 function attachmentMessageRequest(
   input: z.infer<typeof attachmentMessagePlanInputSchema>
     | z.infer<typeof attachmentMessageExecuteInputSchema>,
@@ -13303,6 +13592,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Thread creation uses a separate exact parent-channel scope: call plan_thread_creation for a message-anchored, standalone public, or standalone private thread, review the exact source preview when present, resolved settings, complete permission evidence, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_thread_creation with identical inputs and the digest. A source message that already owns a thread produces a no-op without approval or durable records. Writes are never automatically retried, and forum or media parents, lifecycle changes, membership changes, and starter messages are excluded.",
       "Thread governance uses separate exact guild, thread, and optional member allowlists and never enumerates members. For one rename, archive, unarchive, lock, unlock, auto-archive, slowmode, invitation-policy, add-member, or remove-member change, call plan_thread_change, review the exact guild, parent, thread and optional member, minimized current and desired state, complete inherited permissions, action-specific MANAGE_THREADS, membership, send, or private-thread ownership authority, privacy projection, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_thread_change with identical inputs and the digest. Each execution performs one non-retried write and exact readback, never combines metadata fields or rolls back, and an uncertain outcome blocks later same-thread changes in the process.",
       "Forum-post creation uses a separate exact forum-channel scope: call plan_forum_post, review the exact title, starter content, tags, settings, notifications, audit reason, complete permission evidence, one-shot operation key hash, warnings, and keyed digest, then call execute_forum_post with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
+      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed structure, profile, and settings sequence. Call plan_guild_blueprint with the unchanged manifest and master operation key, review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
       "Guild scaffolds use a dedicated exact guild scope: call plan_guild_scaffold, review the verified application, bot, guild, exact additive role and channel graph, resolved parents, permissions, capacities, durable operation binding, ready frontier, step limit, warnings, and keyed digest, then call execute_guild_scaffold with identical inputs and the digest. Execution durably claims both guild role and channel collections; a normal verified pause releases the claims, while interruption or uncertain pending evidence requires review. Reuse the same operation key only for an intentional paused resume; an uncertain or drifting step permanently blocks it. After completion, call verify_guild_scaffold with the same caller-retained request and operation key for fresh content-free completion evidence.",
       "Member nickname changes use a self-only safe default and a second gate for other members. Call plan_member_nickname_change with the current-bot target or one exact member ID plus a strict nickname or explicit null, review the exact transient current and desired names, CHANGE_NICKNAME or MANAGE_NICKNAMES evidence, protected-target boundary, hierarchy where applicable, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_member_nickname_change with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, pending content-free records, one non-retried PATCH, and exact readback. Names are never transformed or persisted, and no mutation is retried or rolled back.",
       "Member-role changes use separate exact guild and role allowlists plus complete continuity-stable direct-channel metadata: call plan_member_role_change, review the exact member and selected role, channel evidence, current and proposed role IDs, guild-level permission delta, bot and target hierarchy, permission-escalation and unknown-bit evidence, every changed direct-channel permission decision, thread-coverage warning, audit reason, one-shot operation key hash, and keyed digest, then call execute_member_role_change with identical inputs and the digest. Any obfuscated channel blocks both add and remove. Both actions are destructive reviewed changes. Never replace a member's complete role array or retry after reservation or uncertainty.",
@@ -20096,6 +20386,176 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         },
         requestState: signedState,
       })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("plan_guild_blueprint", server.registerTool(
+    "plan_guild_blueprint",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Prepare the next process-bound frontier of one caller-retained declarative Discord guild blueprint. The structure, profile, and settings phases delegate to their existing complete-evidence planners in a fixed order; requested scaffold channel keys can become exact AFK or system-channel references only after verified creation. Returns the full transient frontier for review while persisting neither the manifest nor its content.",
+      inputSchema: guildBlueprintPlanInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Plan Discord guild blueprint frontier",
+    },
+    safeToolHandler("plan_guild_blueprint", async (
+      input: z.infer<typeof guildBlueprintPlanInputSchema>,
+      context,
+    ) => {
+      const result = await service.planGuildBlueprint(
+        guildBlueprintRequest(input),
+        { signal: context.mcpReq.signal },
+      )
+      const summary = result.frontier === null
+        ? `Discord guild blueprint ${result.digest} is already current in guild ${result.guild.id}`
+        : `Discord guild blueprint ${result.digest} has reviewed ${result.frontier.kind} frontier in guild ${result.guild.id}`
+      return toolResult(result, summary)
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("execute_guild_blueprint", server.registerTool(
+    "execute_guild_blueprint",
+    {
+      annotations: DESTRUCTIVE_ANNOTATIONS,
+      description: "Execute exactly one fresh reviewed frontier of a caller-retained Discord guild blueprint after signed interactive approval when a write is required. Signed state contains only request and aggregate plan digests. The coordinator derives phase-separated operation keys and delegates to the existing scaffold, profile, or settings executor, preserving every domain reservation, pending audit, non-retry, readback, conflict, and uncertainty-quarantine invariant. Plan again before any later phase.",
+      inputSchema: guildBlueprintExecuteInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Execute reviewed Discord guild blueprint frontier",
+    },
+    safeToolHandler("execute_guild_blueprint", async (
+      input: z.infer<typeof guildBlueprintExecuteInputSchema>,
+      context,
+    ) => {
+      const request = guildBlueprintRequest(input)
+      const requestState = context.mcpReq.requestState()
+      if (requestState !== undefined) {
+        if (!validGuildBlueprintRequestState(
+          requestState,
+          request,
+          input.planDigest,
+        )) {
+          const result = guildBlueprintConfirmationOutcome(
+            request,
+            input.planDigest,
+            "confirmation-invalid",
+            "Signed confirmation state does not match the caller-retained guild blueprint request digest or aggregate plan digest",
+          )
+          return toolResult(result, result.reason, { isError: true })
+        }
+        const response = inputResponse(
+          context.mcpReq.inputResponses,
+          GUILD_BLUEPRINT_CONFIRMATION_KEY,
+        )
+        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
+          const reason = response.action === "cancel"
+            ? "Discord guild blueprint confirmation was canceled"
+            : "Discord guild blueprint confirmation was declined"
+          const result = guildBlueprintConfirmationOutcome(
+            request,
+            input.planDigest,
+            "confirmation-declined",
+            reason,
+          )
+          return toolResult(result, reason)
+        }
+        const confirmation = acceptedContent(
+          context.mcpReq.inputResponses,
+          GUILD_BLUEPRINT_CONFIRMATION_KEY,
+          guildBlueprintConfirmationSchema,
+        )
+        if (!confirmation || confirmation.approve !== true) {
+          const result = guildBlueprintConfirmationOutcome(
+            request,
+            input.planDigest,
+            "confirmation-invalid",
+            "Discord guild blueprint execution requires explicit approval of the displayed frontier",
+          )
+          return toolResult(result, result.reason, { isError: true })
+        }
+        const result = await service.executeGuildBlueprint(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        )
+        return toolResult(
+          result,
+          `Discord guild blueprint ${result.status} in guild ${result.guildId}; executed phase=${result.executedPhase ?? "none"}; next action=${result.nextAction}`,
+        )
+      }
+      if (context.mcpReq.inputResponses !== undefined) {
+        const result = guildBlueprintConfirmationOutcome(
+          request,
+          input.planDigest,
+          "confirmation-invalid",
+          "Discord confirmation responses require signed request state",
+        )
+        return toolResult(result, result.reason, { isError: true })
+      }
+
+      const plan = await service.planGuildBlueprint(request, {
+        signal: context.mcpReq.signal,
+      })
+      if (plan.digest !== input.planDigest) {
+        const result = {
+          actualDigest: plan.digest,
+          expectedDigest: input.planDigest,
+          guildId: plan.guild.id,
+          operationKeyHash: plan.operationKeyHash,
+          reason: "The fresh Discord guild blueprint frontier does not match the requested aggregate digest",
+          requestDigest: plan.requestDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "plan-changed",
+        }
+        return toolResult(result, result.reason, { isError: true })
+      }
+      if (plan.frontier === null || !plan.frontier.writeRequired) {
+        const result = await service.executeGuildBlueprint(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        )
+        return toolResult(
+          result,
+          `Discord guild blueprint ${result.status} in guild ${result.guildId}; executed phase=${result.executedPhase ?? "none"}; next action=${result.nextAction}`,
+        )
+      }
+      const signedState = await requestStateCodec.mint({
+        planDigest: input.planDigest,
+        requestDigest: guildBlueprintRequestDigest(request),
+      }, context)
+      return inputRequired({
+        inputRequests: {
+          [GUILD_BLUEPRINT_CONFIRMATION_KEY]: inputRequired.elicit({
+            message: guildBlueprintConfirmationMessage(plan),
+            requestedSchema: guildBlueprintConfirmationRequestSchema,
+          }),
+        },
+        requestState: signedState,
+      })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("verify_guild_blueprint", server.registerTool(
+    "verify_guild_blueprint",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Verify one exact caller-retained Discord guild blueprint against fresh live domain plans and content-free durable receipts. Returns identities, hashes, phase states, exact created resource IDs without blueprint keys, and a fresh aggregate digest. It does not write, reserve an operation, persist the manifest, or return guild names, channel names, role names, topics, descriptions, permissions, or audit reasons.",
+      inputSchema: guildBlueprintPlanInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Verify Discord guild blueprint completion",
+    },
+    safeToolHandler("verify_guild_blueprint", async (
+      input: z.infer<typeof guildBlueprintPlanInputSchema>,
+      context,
+    ) => {
+      const result = await service.verifyGuildBlueprint(
+        guildBlueprintRequest(input),
+        { signal: context.mcpReq.signal },
+      )
+      return toolResult(
+        result,
+        `Discord guild blueprint verification is ${result.status} in guild ${result.guildId}`,
+      )
     }, secrets, observability),
   ))
 

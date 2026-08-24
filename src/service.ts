@@ -243,6 +243,14 @@ import type {
 } from "./guild-expression-service.js"
 import { GuildExpressionService } from "./guild-expression-service.js"
 import type {
+  GuildBlueprintPlan,
+  GuildBlueprintRequest,
+  GuildBlueprintResult,
+  GuildBlueprintServiceOptions,
+  GuildBlueprintVerification,
+} from "./guild-blueprint-service.js"
+import { GuildBlueprintService } from "./guild-blueprint-service.js"
+import type {
   GuildScaffoldPlan,
   GuildScaffoldRequest,
   GuildScaffoldResult,
@@ -843,6 +851,10 @@ export interface ConnectorServiceOptions {
     GuildScaffoldServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  guildBlueprintOptions?: Pick<
+    GuildBlueprintServiceOptions,
+    "clock" | "planKey"
+  >
   guildExpressionOptions?: Pick<
     GuildExpressionServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1083,6 +1095,7 @@ export class ConnectorService {
   readonly #nativeInteractionCommandService: NativeInteractionCommandService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
   readonly #guildAuditLogService: GuildAuditLogService
+  readonly #guildBlueprintService: GuildBlueprintService
   readonly #forumPostService: ForumPostService
   readonly #forumTagService: ForumTagService
   readonly #guildScaffoldService: GuildScaffoldService
@@ -1503,6 +1516,14 @@ export class ConnectorService {
       policy: this.#policy,
       roleService: this.#roleAdministrationService,
       ...options.guildScaffoldOptions,
+    })
+    this.#guildBlueprintService = new GuildBlueprintService({
+      domains: {
+        profile: this.#guildProfileService,
+        scaffold: this.#guildScaffoldService,
+        settings: this.#guildSettingsService,
+      },
+      ...options.guildBlueprintOptions,
     })
   }
 
@@ -3248,6 +3269,32 @@ export class ConnectorService {
     )
   }
 
+  async planGuildBlueprint(
+    request: GuildBlueprintRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildBlueprintPlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildBlueprintService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async verifyGuildBlueprint(
+    request: GuildBlueprintRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildBlueprintVerification> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildBlueprintService.verify(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async verifyGuildScaffold(
     request: GuildScaffoldRequest,
     options: RequestOptions = {},
@@ -3930,6 +3977,44 @@ export class ConnectorService {
       ],
       execute,
       { releasePendingScaffoldOnVerifiedPause: true },
+    )
+  }
+
+  async executeGuildBlueprint(
+    request: GuildBlueprintRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildBlueprintResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildBlueprintService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      {
+        executeProfile: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeGuildProfileChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeScaffold: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeGuildScaffold(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeSettings: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeGuildSettingsChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+      },
+      options,
     )
   }
 

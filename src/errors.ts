@@ -641,6 +641,18 @@ export class GuildScaffoldPlanChangedError extends Error {
   }
 }
 
+export class GuildBlueprintPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild state does not match the reviewed blueprint frontier")
+    this.name = "GuildBlueprintPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
 export class GuildScaffoldOperationConflictError extends Error {
   readonly receipt: unknown
 

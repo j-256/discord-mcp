@@ -117,6 +117,12 @@ import type {
   GuildScaffoldRequest,
 } from "../src/guild-scaffold-service.js"
 import type {
+  GuildBlueprintPlan,
+  GuildBlueprintRequest,
+  GuildBlueprintResult,
+  GuildBlueprintVerification,
+} from "../src/guild-blueprint-service.js"
+import type {
   GuildTemplateChangePlan,
   GuildTemplateChangeRequest,
   GuildTemplatePrivacyProjection,
@@ -471,6 +477,7 @@ const FORUM_TAG_OPERATION_KEY = "forum-tag-attempt-0001"
 const FORUM_TAG_ID = "385000000000000001"
 const CREATED_FORUM_TAG_ID = "385000000000000002"
 const THREAD_CREATION_OPERATION_KEY = "thread-create-attempt-0001"
+const GUILD_BLUEPRINT_OPERATION_KEY = "guild-blueprint-attempt-0001"
 const GUILD_SCAFFOLD_OPERATION_KEY = "guild-scaffold-attempt-0001"
 const MESSAGE_PIN_OPERATION_KEY = "message-pin-attempt-0001"
 const REACTION_MODERATION_OPERATION_KEY = "reaction-moderation-attempt-0001"
@@ -5956,6 +5963,117 @@ function guildScaffoldPlan(
   }
 }
 
+function guildBlueprintPlan(
+  request: GuildBlueprintRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): GuildBlueprintPlan {
+  const requestDigest = `hmac-sha256:${"b".repeat(64)}`
+  const nested = guildScaffoldPlan({
+    auditReason: request.auditReason,
+    channels: request.scaffold.channels,
+    guildId: request.guildId,
+    operationKey: request.operationKey,
+    roles: request.scaffold.roles,
+    ...(request.scaffold.stepLimit === undefined
+      ? {}
+      : { stepLimit: request.scaffold.stepLimit }),
+  })
+  return {
+    applicationId: APPLICATION_ID,
+    bindings: writeRequired
+      ? []
+      : [{
+          index: 0,
+          key: "reviewer-role",
+          kind: "role",
+          resourceId: ROLE_ID,
+        }, {
+          index: 1,
+          key: "review-category",
+          kind: "category",
+          resourceId: CHANNEL_ID,
+        }],
+    botId: BOT_ID,
+    createdAt: "2026-08-24T00:00:00.000Z",
+    digest,
+    frontier: writeRequired
+      ? { kind: "structure", plan: nested, writeRequired: true }
+      : null,
+    guild: {
+      id: request.guildId,
+      name: "Guild",
+      ownerId: USER_ID,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: {
+      activityAndReceipts: "content-free-domain-records",
+      manifestPersistence: "none",
+      planPersistence: "none",
+      requestState: "digests-only",
+    },
+    requestDigest,
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    steps: writeRequired
+      ? [{
+          kind: "structure",
+          nestedPlanDigest: nested.digest,
+          operationKeyHash: OPERATION_KEY_HASH,
+          state: "ready",
+          writeRequired: true,
+        }, {
+          kind: "settings",
+          nestedPlanDigest: null,
+          operationKeyHash: OPERATION_KEY_HASH,
+          state: "waiting",
+          writeRequired: false,
+        }]
+      : [{
+          kind: "structure",
+          nestedPlanDigest: nested.digest,
+          operationKeyHash: OPERATION_KEY_HASH,
+          state: "satisfied",
+          writeRequired: false,
+        }, {
+          kind: "settings",
+          nestedPlanDigest: DIGEST,
+          operationKeyHash: OPERATION_KEY_HASH,
+          state: "satisfied",
+          writeRequired: false,
+        }],
+    warnings: [
+      "The exact blueprint manifest and master operation key remain caller-retained and are not persisted by the connector",
+      "One execution call can run only this fresh reviewed frontier; plan again before any later phase",
+    ],
+  }
+}
+
+function guildBlueprintToolInput(planDigest?: string) {
+  return {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_BLUEPRINT_OPERATION_KEY,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    scaffold: {
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Review",
+      }],
+      roles: [{
+        key: "reviewer-role",
+        name: "reviewer",
+        permissions: ["VIEW_CHANNEL"],
+      }],
+      stepLimit: 2,
+    },
+    settings: {
+      verificationLevel: "medium",
+    },
+  }
+}
+
 function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
@@ -6189,6 +6307,9 @@ function serviceFixture(overrides: {
   forumTagEffect?: "change" | "none"
   forumTagError?: Error
   forumTagPlanDigest?: string
+  guildBlueprintError?: Error
+  guildBlueprintPlanDigest?: string
+  guildBlueprintWriteRequired?: boolean
   guildScaffoldError?: Error
   guildScaffoldPlanDigest?: string
   guildTemplateError?: Error
@@ -6355,6 +6476,9 @@ function serviceFixture(overrides: {
     forumTagAudit: 0,
     forumTagExecute: 0,
     forumTagPlan: 0,
+    guildBlueprintExecute: 0,
+    guildBlueprintPlan: 0,
+    guildBlueprintVerify: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     guildScaffoldVerify: 0,
@@ -8189,6 +8313,24 @@ function serviceFixture(overrides: {
         writeRequired: planned.writeRequired,
       }
     },
+    async executeGuildBlueprint(request, planDigest) {
+      if (overrides.guildBlueprintError) throw overrides.guildBlueprintError
+      calls.guildBlueprintExecute += 1
+      const writeRequired = overrides.guildBlueprintWriteRequired ?? true
+      const planned = guildBlueprintPlan(request, planDigest, writeRequired)
+      const result: GuildBlueprintResult = {
+        digest: planned.digest,
+        executedPhase: writeRequired ? "structure" : null,
+        guildId: request.guildId,
+        nestedResult: null,
+        nextAction: writeRequired ? "replan" : "done",
+        operationKeyHash: planned.operationKeyHash,
+        requestDigest: planned.requestDigest,
+        schemaVersion: 1,
+        status: writeRequired ? "frontier-executed" : "already-current",
+      }
+      return result
+    },
     async executeGuildScaffold(request, planDigest) {
       if (overrides.guildScaffoldError) throw overrides.guildScaffoldError
       calls.guildScaffoldExecute += 1
@@ -9277,6 +9419,47 @@ function serviceFixture(overrides: {
         overrides.threadCreationWriteRequired ?? true,
       )
     },
+    async planGuildBlueprint(request) {
+      calls.guildBlueprintPlan += 1
+      return guildBlueprintPlan(
+        request,
+        overrides.guildBlueprintPlanDigest || DIGEST,
+        overrides.guildBlueprintWriteRequired ?? true,
+      )
+    },
+    async verifyGuildBlueprint(request) {
+      calls.guildBlueprintVerify += 1
+      const planned = guildBlueprintPlan(
+        request,
+        overrides.guildBlueprintPlanDigest || DIGEST,
+        overrides.guildBlueprintWriteRequired ?? true,
+      )
+      const result: GuildBlueprintVerification = {
+        applicationId: planned.applicationId,
+        botId: planned.botId,
+        checkedAt: planned.createdAt,
+        digest: planned.digest,
+        evidence: {
+          activityAndReceipts: "content-free-domain-records",
+          callerRetainedManifestRequired: true,
+          historicalMutationProvenance: "domain-activity-only",
+          manifestPersisted: false,
+          source: "live-domain-plans",
+        },
+        guildId: request.guildId,
+        operationKeyHash: planned.operationKeyHash,
+        requestDigest: planned.requestDigest,
+        resources: planned.bindings.map((binding) => ({
+          index: binding.index,
+          kind: binding.kind,
+          resourceId: binding.resourceId,
+        })),
+        schemaVersion: 1,
+        status: planned.status === "already-current" ? "verified" : "incomplete",
+        steps: planned.steps,
+      }
+      return result
+    },
     async planGuildScaffold(request) {
       calls.guildScaffoldPlan += 1
       return guildScaffoldPlan(
@@ -9822,6 +10005,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_component_message",
       "plan_attachment_message",
       "execute_attachment_message",
+      "plan_guild_blueprint",
+      "execute_guild_blueprint",
+      "verify_guild_blueprint",
       "plan_guild_scaffold",
       "execute_guild_scaffold",
       "verify_guild_scaffold",
@@ -9949,6 +10135,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const componentMessage = result.tools.find((tool) => (
     tool.name === "execute_component_message"
   ))
+  const guildBlueprint = result.tools.find((tool) => (
+    tool.name === "execute_guild_blueprint"
+  ))
   for (const tool of [
     deletion,
     messagePin,
@@ -9978,6 +10167,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     roleOrdering,
     channelClone,
     channelOrdering,
+    guildBlueprint,
   ]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: true,
@@ -10230,6 +10420,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     tool.name === "verify_guild_scaffold"
   ))
   assert.deepEqual(guildScaffoldVerificationTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const guildBlueprintPlanTool = result.tools.find((tool) => (
+    tool.name === "plan_guild_blueprint"
+  ))
+  assert.deepEqual(guildBlueprintPlanTool?.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  const guildBlueprintVerificationTool = result.tools.find((tool) => (
+    tool.name === "verify_guild_blueprint"
+  ))
+  assert.deepEqual(guildBlueprintVerificationTool?.annotations, {
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
@@ -10825,6 +11033,32 @@ test("progressive discovery enables the complete reviewed guild-scaffold workflo
       "plan_guild_scaffold",
       "execute_guild_scaffold",
       "verify_guild_scaffold",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed guild-blueprint workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_blueprint" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_blueprint",
+    "plan_guild_blueprint",
+    "verify_guild_blueprint",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_blueprint",
+      "execute_guild_blueprint",
+      "verify_guild_blueprint",
       "discover_discord_tools",
     ],
   )
@@ -11675,6 +11909,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     forumTagAudit: 0,
     forumTagExecute: 0,
     forumTagPlan: 0,
+    guildBlueprintExecute: 0,
+    guildBlueprintPlan: 0,
+    guildBlueprintVerify: 0,
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     guildScaffoldVerify: 0,
@@ -21516,6 +21753,216 @@ test("MCP thread creation exposes uncertain and one-shot conflict outcomes safel
     JSON.stringify(conflictResult),
     new RegExp(THREAD_CREATION_OPERATION_KEY),
   )
+})
+
+test("MCP guild blueprints validate and plan one exact caller-retained manifest", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: guildBlueprintToolInput(),
+    name: "plan_guild_blueprint",
+  })
+  const { settings: _settings, ...withoutPostPhase } = guildBlueprintToolInput()
+  const missingPostPhase = await client.callTool({
+    arguments: withoutPostPhase,
+    name: "plan_guild_blueprint",
+  })
+  const emptySettings = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      settings: {},
+    },
+    name: "plan_guild_blueprint",
+  })
+  const unknownManifestField = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      template: "community",
+    },
+    name: "plan_guild_blueprint",
+  })
+  const incompatibleSystemChannel = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      settings: {
+        systemChannel: { key: "review-category", kind: "scaffold" },
+      },
+    },
+    name: "plan_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(missingPostPhase.isError, true)
+  assert.equal(emptySettings.isError, true)
+  assert.equal(unknownManifestField.isError, true)
+  assert.equal(incompatibleSystemChannel.isError, true)
+  assert.equal(calls.guildBlueprintPlan, 1)
+})
+
+test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const input = guildBlueprintToolInput()
+  input.scaffold.channels[0]!.name = "Private Blueprint Category"
+  input.scaffold.roles[0]!.name = "Private Blueprint Reviewer"
+  const result = await client.callTool({
+    arguments: input,
+    name: "verify_guild_blueprint",
+  })
+  const verification = structuredContent(result)
+
+  assert.equal(result.isError, undefined)
+  assert.equal(verification.status, "incomplete")
+  assert.equal(verification.guildId, GUILD_ID)
+  assert.equal(verification.operationKeyHash, OPERATION_KEY_HASH)
+  assert.deepEqual(verification.evidence, {
+    activityAndReceipts: "content-free-domain-records",
+    callerRetainedManifestRequired: true,
+    historicalMutationProvenance: "domain-activity-only",
+    manifestPersisted: false,
+    source: "live-domain-plans",
+  })
+  assert.equal(calls.guildBlueprintVerify, 1)
+  assert.equal(calls.guildBlueprintPlan, 0)
+  assert.equal(calls.guildBlueprintExecute, 0)
+
+  const serialized = JSON.stringify(result)
+  assert.doesNotMatch(serialized, /Private Blueprint Category|Private Blueprint Reviewer/)
+  assert.equal(serialized.includes(AUDIT_REASON), false)
+  assert.equal(serialized.includes(GUILD_BLUEPRINT_OPERATION_KEY), false)
+})
+
+test("MCP guild blueprints bind approval to one reviewed frontier with digest-only state", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const futureProfileName = "Future Private Blueprint Guild"
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(DIGEST),
+      profile: { name: futureProfileName },
+    },
+    name: "execute_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(result).status, "frontier-executed")
+  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(calls.guildBlueprintExecute, 1)
+  assert.match(confirmationMessage, /exactly one reviewed Discord guild blueprint frontier/i)
+  assert.match(confirmationMessage, /Frontier phase: structure/)
+  assert.match(confirmationMessage, /request digest/i)
+  assert.match(confirmationMessage, /Nested frontier review/)
+  assert.match(confirmationMessage, /reviewer-role/)
+  assert.match(confirmationMessage, /review-category/)
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(confirmationMessage, new RegExp(futureProfileName))
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_BLUEPRINT_OPERATION_KEY),
+  )
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(futureProfileName))
+})
+
+test("MCP guild blueprints stop on refusal or drift and skip approval for no-op completion", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: guildBlueprintToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.guildBlueprintExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: guildBlueprintToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.guildBlueprintExecute, 0)
+
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: guildBlueprintToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.guildBlueprintExecute, 1)
+})
+
+test("MCP guild blueprint signed state rejects every changed manifest binding", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = guildBlueprintToolInput(DIGEST)
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_guild_blueprint",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different blueprint reason" },
+    { ...request, operationKey: "guild-blueprint-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, settings: { verificationLevel: "high" } },
+    {
+      ...request,
+      scaffold: {
+        ...request.scaffold,
+        channels: [{
+          ...request.scaffold.channels[0],
+          name: "Different category",
+        }],
+      },
+    },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_guild_blueprint: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_guild_blueprint",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.guildBlueprintExecute, 0)
 })
 
 test("MCP guild scaffolds validate bounded additive resource graphs", async (context) => {

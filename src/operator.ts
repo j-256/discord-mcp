@@ -766,6 +766,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Thread governance audit and reviewed changes",
     ],
     [config.allowGateway, "gateway", "Gateway events"],
+    [
+      config.allowGuildScaffolds
+        && (config.allowGuildProfileChanges || config.allowGuildSettingsChanges),
+      "guild-blueprints",
+      "Guild blueprints",
+    ],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
     [
       config.allowGuildTemplateAudit || config.allowGuildTemplateChanges,

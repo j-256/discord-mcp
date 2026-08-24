@@ -43,6 +43,7 @@ import {
   InteractionRateLimitError,
   PolicyError,
 } from "../src/errors.js"
+import { guildBlueprintStepOperationKey } from "../src/guild-blueprint-service.js"
 import { GatewayChannelLayoutStore } from "../src/gateway-channel-layout.js"
 import type {
   GatewayVoiceChannelStatusSnapshot,
@@ -307,6 +308,7 @@ function serviceFixture(overrides: {
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
+  guildBlueprintOptions?: ConnectorServiceOptions["guildBlueprintOptions"]
   guildProfileOptions?: ConnectorServiceOptions["guildProfileOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   guildSettingsOptions?: ConnectorServiceOptions["guildSettingsOptions"]
@@ -978,6 +980,9 @@ function serviceFixture(overrides: {
       ...(overrides.gateway ? { gateway: overrides.gateway } : {}),
       ...(overrides.guildScaffoldOptions
         ? { guildScaffoldOptions: overrides.guildScaffoldOptions }
+        : {}),
+      ...(overrides.guildBlueprintOptions
+        ? { guildBlueprintOptions: overrides.guildBlueprintOptions }
         : {}),
       ...(overrides.guildSettingsOptions
         ? { guildSettingsOptions: overrides.guildSettingsOptions }
@@ -5430,6 +5435,86 @@ test("service durably coordinates active guild scaffolds by request identity", a
     releasePendingScaffoldOnVerifiedPause: true,
   }])
   assert.notEqual(plan.operation.requestDigest, plan.digest)
+  assert.equal(calls.createChannel, 0)
+  assert.equal(calls.createRole, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service dispatches one guild-blueprint frontier through existing durable coordination", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const botRoleId = "700000000000000002"
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildChannels() {
+        return []
+      },
+      async getGuildMember() {
+        return { roles: [botRoleId], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(botRoleId, permissions, "connector"),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+    },
+    guildBlueprintOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-blueprint-scaffold",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const operationKey = "guild-blueprint-attempt-0001"
+  const request = {
+    auditReason: "Reviewed coordinated guild build",
+    guildId: GUILD_ID,
+    operationKey,
+    profile: { name: "Coordinated Guild" },
+    scaffold: {
+      channels: [{ key: "support-category", kind: "category" as const, name: "Support" }],
+      roles: [{ key: "support-role", name: "Support" }],
+    },
+  }
+  const plan = await service.planGuildBlueprint(request)
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.frontier?.kind, "structure")
+  assert.deepEqual(plan.steps.map((step) => [step.kind, step.state]), [
+    ["structure", "ready"],
+    ["profile", "waiting"],
+  ])
+  await assert.rejects(
+    () => service.executeGuildBlueprint(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  const nestedOperationKey = guildBlueprintStepOperationKey(operationKey, "structure")
+  assert.equal(writeCoordinator.intents.length, 1)
+  assert.equal(writeCoordinator.intents[0]?.kind, "guild-scaffold")
+  assert.equal(
+    writeCoordinator.intents[0]?.operationKeyHash,
+    operationKeyHash(nestedOperationKey),
+  )
   assert.equal(calls.createChannel, 0)
   assert.equal(calls.createRole, 0)
   assert.equal(operationStore.receipt, undefined)

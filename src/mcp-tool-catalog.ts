@@ -52,6 +52,7 @@ type McpToolWorkflow =
   | "component-message"
   | "forum-post"
   | "forum-tag-change"
+  | "guild-blueprint"
   | "guild-scaffold"
   | "guild-expression-change"
   | "guild-profile-change"
@@ -231,6 +232,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["add", "archive", "execute", "invite", "lock", "member", "remove", "rename", "slowmode", "thread"],
     toolset: "thread-governance",
     workflow: "thread-governance-change",
+  },
+  execute_guild_blueprint: {
+    keywords: ["blueprint", "build", "configure", "execute", "guild", "profile", "scaffold", "settings"],
+    toolset: "guild-blueprints",
+    workflow: "guild-blueprint",
   },
   execute_guild_scaffold: {
     keywords: ["blueprint", "category", "channel", "create", "guild", "role", "scaffold"],
@@ -734,6 +740,16 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["add", "archive", "invite", "lock", "member", "plan", "remove", "rename", "review", "slowmode", "thread"],
     toolset: "thread-governance",
     workflow: "thread-governance-change",
+  },
+  plan_guild_blueprint: {
+    keywords: ["blueprint", "build", "configure", "guild", "plan", "profile", "review", "scaffold", "settings"],
+    toolset: "guild-blueprints",
+    workflow: "guild-blueprint",
+  },
+  verify_guild_blueprint: {
+    keywords: ["blueprint", "completion", "evidence", "guild", "profile", "scaffold", "settings", "verify"],
+    toolset: "guild-blueprints",
+    workflow: "guild-blueprint",
   },
   plan_guild_scaffold: {
     keywords: ["blueprint", "category", "channel", "guild", "plan", "review", "role", "scaffold"],

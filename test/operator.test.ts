@@ -453,6 +453,7 @@ function toolService(): DiscordToolService {
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
     executeThreadCreation: unexpected,
+    executeGuildBlueprint: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
     executeMessagePin: unexpected,
@@ -502,6 +503,8 @@ function toolService(): DiscordToolService {
     planChannelPermissionOverwrite: unexpected,
     planForumPost: unexpected,
     planThreadCreation: unexpected,
+    planGuildBlueprint: unexpected,
+    verifyGuildBlueprint: unexpected,
     planGuildScaffold: unexpected,
     verifyGuildScaffold: unexpected,
     planMemberModeration: unexpected,
@@ -3122,6 +3125,17 @@ test("doctor and setup explain resumable guild-scaffold scope without Discord wr
     }),
     service: statusProvider(),
   })
+  const blueprintOmitted = await prepareSetup({
+    environment: environment({
+      DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES: "true",
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_GUILD_PROFILE_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_TOOLSETS: "connector",
+    }),
+    service: statusProvider(),
+  })
 
   const scaffold = enabled.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.guildScaffoldPolicy,
@@ -3136,6 +3150,7 @@ test("doctor and setup explain resumable guild-scaffold scope without Discord wr
   )
   assert.match(setup.warnings.join("\n"), /guild-scaffold allowlist/)
   assert.match(omitted.warnings.join("\n"), /guild-scaffolds toolset/)
+  assert.match(blueprintOmitted.warnings.join("\n"), /guild-blueprints toolset/)
 })
 
 test("doctor and setup explain capability-safe Guild Template scope without Discord writes", async () => {
@@ -4376,6 +4391,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_channel_permission_overwrite",
     "review_forum_post",
     "review_forum_tag_change",
+    "review_guild_blueprint",
     "review_guild_expression_change",
     "review_guild_integration_deletion",
     "review_guild_profile_change",
@@ -4478,6 +4494,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_component_message",
     "execute_forum_tag_change",
+    "execute_guild_blueprint",
     "execute_guild_expression_change",
     "execute_guild_integration_deletion",
     "execute_guild_profile_change",
@@ -4521,6 +4538,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("audit_forum_tags"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_tag_change"), true)
+  assert.equal(report.readOnlyTools.includes("plan_guild_blueprint"), true)
+  assert.equal(report.readOnlyTools.includes("verify_guild_blueprint"), true)
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
   assert.equal(report.readOnlyTools.includes("preview_component_layout"), true)
   assert.equal(report.readOnlyTools.includes("plan_component_message"), true)

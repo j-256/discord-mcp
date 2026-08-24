@@ -1,0 +1,539 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import { GuildBlueprintPlanChangedError } from "../src/errors.js"
+import {
+  GuildBlueprintService,
+  guildBlueprintRequestDigest,
+  guildBlueprintStepOperationKey,
+  normalizeGuildBlueprintRequest,
+  type GuildBlueprintDomainServices,
+  type GuildBlueprintExecutors,
+  type GuildBlueprintRequest,
+} from "../src/guild-blueprint-service.js"
+import type {
+  GuildProfileChangePlan,
+  GuildProfileChangeRequest,
+  GuildProfileChangeResult,
+} from "../src/guild-profile-service.js"
+import type {
+  GuildScaffoldPlan,
+  GuildScaffoldRequest,
+  GuildScaffoldResult,
+} from "../src/guild-scaffold-service.js"
+import type {
+  GuildSettingsChangePlan,
+  GuildSettingsChangeRequest,
+  GuildSettingsChangeResult,
+} from "../src/guild-settings-service.js"
+import { operationKeyHash } from "../src/operation-store.js"
+
+const APPLICATION_ID = "100000000000000001"
+const GUILD_ID = "200000000000000001"
+const BOT_ID = "300000000000000001"
+const OWNER_ID = "400000000000000001"
+const ROLE_ID = "500000000000000001"
+const CATEGORY_ID = "600000000000000001"
+const CHANNEL_ID = "700000000000000001"
+const OPERATION_KEY = "guild-blueprint-operation-0001"
+const AUDIT_REASON = "Private blueprint audit reason"
+const NOW = "2026-08-24T12:00:00.000Z"
+const PLAN_KEY = new Uint8Array(32).fill(17)
+
+function request(
+  overrides: Partial<GuildBlueprintRequest> = {},
+): GuildBlueprintRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    profile: {
+      description: "Private profile description",
+      name: "Private Guild Name",
+    },
+    scaffold: {
+      channels: [
+        {
+          key: "private-category",
+          kind: "category",
+          name: "Private Category",
+        },
+        {
+          key: "private-system-channel",
+          kind: "text",
+          name: "private-system-channel",
+          parentKey: "private-category",
+          topic: "Private channel topic",
+        },
+      ],
+      roles: [{
+        key: "private-role",
+        name: "Private Role",
+        permissions: ["VIEW_CHANNEL"],
+      }],
+      stepLimit: 2,
+    },
+    settings: {
+      defaultMessageNotifications: "only-mentions",
+      systemChannel: {
+        key: "private-system-channel",
+        kind: "scaffold",
+      },
+      verificationLevel: "medium",
+    },
+    ...overrides,
+  }
+}
+
+function scaffoldPlan(
+  value: GuildScaffoldRequest,
+  status: GuildScaffoldPlan["status"],
+): GuildScaffoldPlan {
+  const satisfied = ["already-current", "completed"].includes(status)
+  const steps = [
+    ...value.roles.map((role, index) => ({
+      existingResourceId: satisfied ? ROLE_ID : null,
+      index,
+      key: role.key,
+      kind: "role" as const,
+      operationKeyHash: `sha256:${"1".repeat(64)}`,
+      parent: null,
+      state: satisfied ? "already-current" as const : "ready" as const,
+      target: { name: role.name },
+    })),
+    ...value.channels.map((channel, offset) => ({
+      existingResourceId: satisfied
+        ? channel.kind === "category"
+          ? CATEGORY_ID
+          : CHANNEL_ID
+        : null,
+      index: value.roles.length + offset,
+      key: channel.key,
+      kind: channel.kind,
+      operationKeyHash: `sha256:${"2".repeat(64)}`,
+      parent: null,
+      state: satisfied ? "already-current" as const : "ready" as const,
+      target: { name: channel.name },
+    })),
+  ]
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: value.auditReason,
+    botId: BOT_ID,
+    counts: {
+      alreadyCurrent: satisfied ? steps.length : 0,
+      completed: 0,
+      ready: satisfied ? 0 : steps.length,
+      total: steps.length,
+      waitingForParent: 0,
+    },
+    createdAt: NOW,
+    digest: `hmac-sha256:${(status === "planned" ? "3" : "4").repeat(64)}`,
+    executionFrontier: {
+      stepIndexes: satisfied ? [] : steps.map((step) => step.index),
+    },
+    guild: { id: GUILD_ID, name: "Private Guild", ownerId: OWNER_ID },
+    operation: {
+      operationKeyHash: operationKeyHash(value.operationKey),
+      requestDigest: `hmac-sha256:${"5".repeat(64)}`,
+      status: status === "completed" ? "completed" : "unreserved",
+      stepLimit: value.stepLimit as number,
+    },
+    permission: {
+      botAdministrator: false,
+      botEffectivePermissionNames: [],
+      botEffectivePermissions: "0",
+      botHighestRoleIds: [],
+      botHighestRolePosition: 1,
+      guildManageChannels: true,
+      guildManageRoles: true,
+      guildViewChannel: true,
+    },
+    schemaVersion: 1,
+    status,
+    steps,
+    visibleInventory: {
+      channelLimit: 500,
+      channels: 0,
+      roleLimit: 250,
+      roles: 1,
+    },
+    warnings: [],
+  }
+}
+
+function profilePlan(
+  value: GuildProfileChangeRequest,
+  writeRequired: boolean,
+): GuildProfileChangePlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    digest: `hmac-sha256:${(writeRequired ? "6" : "7").repeat(64)}`,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as GuildProfileChangePlan
+}
+
+function settingsPlan(
+  value: GuildSettingsChangeRequest,
+  writeRequired: boolean,
+): GuildSettingsChangePlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    digest: `hmac-sha256:${(writeRequired ? "8" : "9").repeat(64)}`,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as GuildSettingsChangePlan
+}
+
+interface FixtureOptions {
+  profileWrite?: boolean
+  scaffoldTransform?: (plan: GuildScaffoldPlan) => GuildScaffoldPlan
+  scaffoldStatus?: GuildScaffoldPlan["status"]
+  settingsWrite?: boolean
+}
+
+function fixture(options: FixtureOptions = {}) {
+  const calls: string[] = []
+  let resolvedSettings: GuildSettingsChangeRequest | null = null
+  const domains: GuildBlueprintDomainServices = {
+    profile: {
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-profile")
+        return profilePlan(value, options.profileWrite ?? false)
+      },
+    },
+    scaffold: {
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-structure")
+        const plan = scaffoldPlan(value, options.scaffoldStatus ?? "already-current")
+        return options.scaffoldTransform?.(plan) ?? plan
+      },
+    },
+    settings: {
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-settings")
+        resolvedSettings = value
+        return settingsPlan(value, options.settingsWrite ?? false)
+      },
+    },
+  }
+  const service = new GuildBlueprintService({
+    clock: () => new Date(NOW),
+    domains,
+    planKey: PLAN_KEY,
+  })
+  return {
+    calls,
+    get resolvedSettings() {
+      return resolvedSettings
+    },
+    service,
+  }
+}
+
+function executors(calls: string[]): GuildBlueprintExecutors {
+  return {
+    async executeProfile(value, planDigest) {
+      calls.push(`execute-profile:${planDigest}`)
+      return {
+        activityId: "activity-profile",
+        driftFields: [],
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        requestedFields: ["name"],
+        schemaVersion: 1,
+        status: "completed",
+        verification: "match",
+        warnings: [],
+      } as GuildProfileChangeResult
+    },
+    async executeScaffold(value, planDigest) {
+      calls.push(`execute-structure:${planDigest}`)
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        executedSteps: [],
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        remaining: { ready: 0, waitingForParent: 0 },
+        requestDigest: `hmac-sha256:${"a".repeat(64)}`,
+        schemaVersion: 1,
+        status: "completed",
+      } as GuildScaffoldResult
+    },
+    async executeSettings(value, planDigest) {
+      calls.push(`execute-settings:${planDigest}`)
+      return {
+        activityId: "activity-settings",
+        driftFields: [],
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        requestedFields: ["verificationLevel"],
+        schemaVersion: 1,
+        status: "completed",
+        verification: "match",
+        warnings: [],
+      } as GuildSettingsChangeResult
+    },
+  }
+}
+
+test("guild blueprint validation is strict and binds deterministic phase identities", () => {
+  const normalized = normalizeGuildBlueprintRequest(request())
+  assert.equal(normalized.operationKeyHash, operationKeyHash(OPERATION_KEY))
+  assert.deepEqual(
+    normalized.scaffold.channels.map((channel) => channel.key),
+    ["private-category", "private-system-channel"],
+  )
+  const structureKey = guildBlueprintStepOperationKey(OPERATION_KEY, "structure")
+  const profileKey = guildBlueprintStepOperationKey(OPERATION_KEY, "profile")
+  assert.equal(structureKey, guildBlueprintStepOperationKey(OPERATION_KEY, "structure"))
+  assert.notEqual(structureKey, profileKey)
+  assert.equal(structureKey.includes(OPERATION_KEY), false)
+  assert.match(guildBlueprintRequestDigest(request()), /^hmac-sha256:[a-f0-9]{64}$/)
+  assert.notEqual(
+    guildBlueprintRequestDigest(request()),
+    guildBlueprintRequestDigest(request({
+      profile: { name: "Different Private Guild Name" },
+    })),
+  )
+
+  const noPostPhase = request()
+  delete noPostPhase.profile
+  delete noPostPhase.settings
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(noPostPhase),
+    /requires a profile or settings phase/u,
+  )
+  const unknownReference = request({
+    settings: {
+      systemChannel: { key: "missing", kind: "scaffold" },
+    },
+  })
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(unknownReference),
+    /does not reference a requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      settings: {
+        systemChannel: { channelId: "0", kind: "exact" },
+      },
+    })),
+    /positive Discord snowflake/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      guildId: "18446744073709551616",
+    })),
+    /guild ID must be a positive Discord snowflake/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      settings: {
+        afkChannel: {
+          key: "private-system-channel",
+          kind: "scaffold",
+        } as never,
+      },
+    })),
+    /AFK channel scaffold key is not a compatible requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      settings: {
+        systemChannel: { key: "private-category", kind: "scaffold" },
+      },
+    })),
+    /system channel scaffold key is not a compatible requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      scaffold: {
+        ...request().scaffold,
+        roles: [{
+          key: "private-role",
+          name: "Private Role",
+          unexpected: true,
+        } as never],
+      },
+    })),
+    /scaffold role must be an exact object/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...request(),
+      unexpected: true,
+    } as GuildBlueprintRequest),
+    /must be an exact object/u,
+  )
+})
+
+test("guild blueprint exposes only the structure frontier before later planning", async () => {
+  const state = fixture({ scaffoldStatus: "planned" })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.frontier?.kind, "structure")
+  assert.deepEqual(state.calls, ["plan-structure"])
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "ready"],
+      ["profile", "waiting"],
+      ["settings", "waiting"],
+    ],
+  )
+  assert.deepEqual(plan.bindings, [])
+})
+
+test("guild blueprint stops at profile before planning settings", async () => {
+  const state = fixture({ profileWrite: true })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  assert.equal(plan.frontier?.kind, "profile")
+  assert.deepEqual(state.calls, ["plan-structure", "plan-profile"])
+  assert.equal(plan.bindings.length, 3)
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "satisfied"],
+      ["profile", "ready"],
+      ["settings", "waiting"],
+    ],
+  )
+})
+
+test("guild blueprint resolves settings only from exact scaffold evidence", async () => {
+  const state = fixture({ settingsWrite: true })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  assert.equal(plan.frontier?.kind, "settings")
+  assert.deepEqual(state.calls, ["plan-structure", "plan-profile", "plan-settings"])
+  assert.equal(state.resolvedSettings?.systemChannelId, CHANNEL_ID)
+  assert.equal(
+    state.resolvedSettings?.operationKey,
+    guildBlueprintStepOperationKey(OPERATION_KEY, "settings"),
+  )
+})
+
+test("guild blueprint rejects duplicate or mismatched scaffold evidence", async () => {
+  const duplicate = fixture({
+    scaffoldTransform(plan) {
+      const first = plan.steps[0]
+      const second = plan.steps[1]
+      if (first && second) second.existingResourceId = first.existingResourceId
+      return plan
+    },
+  })
+  await assert.rejects(
+    () => duplicate.service.plan(APPLICATION_ID, BOT_ID, request()),
+    /did not return complete exact resource bindings/u,
+  )
+
+  const mismatched = fixture({
+    scaffoldTransform(plan) {
+      const first = plan.steps[0]
+      if (first) first.index += 1
+      return plan
+    },
+  })
+  await assert.rejects(
+    () => mismatched.service.plan(APPLICATION_ID, BOT_ID, request()),
+    /did not return complete exact resource bindings/u,
+  )
+
+  const wrongBinding = fixture({
+    scaffoldTransform(plan) {
+      plan.operation.operationKeyHash = operationKeyHash("different-operation-key-0001")
+      return plan
+    },
+  })
+  await assert.rejects(
+    () => wrongBinding.service.plan(APPLICATION_ID, BOT_ID, request()),
+    /nested plan binding changed/u,
+  )
+})
+
+test("guild blueprint verification is live and content-free", async () => {
+  const state = fixture()
+  const result = await state.service.verify(APPLICATION_ID, BOT_ID, request())
+  assert.equal(result.status, "verified")
+  assert.equal(result.resources.length, 3)
+  const serialized = JSON.stringify(result)
+  for (const privateValue of [
+    AUDIT_REASON,
+    OPERATION_KEY,
+    "Private Guild Name",
+    "Private profile description",
+    "Private Category",
+    "private-system-channel",
+    "Private channel topic",
+    "private-role",
+  ]) assert.equal(serialized.includes(privateValue), false)
+})
+
+test("guild blueprint execution dispatches exactly one fresh frontier", async () => {
+  const state = fixture({ settingsWrite: true })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  state.calls.length = 0
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    plan.digest,
+    executors(state.calls),
+  )
+  assert.equal(result.status, "frontier-executed")
+  assert.equal(result.executedPhase, "settings")
+  assert.equal(result.nextAction, "replan")
+  assert.deepEqual(state.calls.slice(0, 3), [
+    "plan-structure",
+    "plan-profile",
+    "plan-settings",
+  ])
+  assert.equal(state.calls.filter((call) => call.startsWith("execute-")).length, 1)
+  assert.match(state.calls.at(-1) as string, /^execute-settings:/u)
+})
+
+test("guild blueprint execution rejects a changed aggregate plan", async () => {
+  const planned = fixture({ scaffoldStatus: "planned" })
+  const plan = await planned.service.plan(APPLICATION_ID, BOT_ID, request())
+  const changed = fixture({ profileWrite: true })
+  const executeCalls: string[] = []
+  await assert.rejects(
+    () => changed.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      request(),
+      plan.digest,
+      executors(executeCalls),
+    ),
+    GuildBlueprintPlanChangedError,
+  )
+  assert.deepEqual(executeCalls, [])
+})
+
+test("guild blueprint no-write execution has no confirmation-worthy dispatch", async () => {
+  const state = fixture()
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  state.calls.length = 0
+  const executeCalls: string[] = []
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    plan.digest,
+    executors(executeCalls),
+  )
+  assert.equal(result.status, "already-current")
+  assert.equal(result.nextAction, "done")
+  assert.deepEqual(executeCalls, [])
+})

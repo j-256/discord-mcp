@@ -1365,7 +1365,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 54,
+          "maxItems": 55,
           "type": "array",
           "items": {
             "type": "string",
@@ -1388,6 +1388,7 @@
               "forum-posts",
               "forum-tags",
               "gateway",
+              "guild-blueprints",
               "guild-expressions",
               "guild-profile",
               "guild-scaffolds",
