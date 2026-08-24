@@ -41,10 +41,13 @@ For an exact published version, inspect the real production contract and the rec
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.0 catalog --check
+npx --yes @j-256/discord-mcp@0.1.0 catalog --html ./discord-mcp-contract.html
 npx --yes @j-256/discord-mcp@0.1.0 preset show server-observer
 ```
 
 `catalog --check` launches a credential-free, execution-disabled MCP server, negotiates its real tools, prompts, resources, and templates, and verifies that every tool call is blocked by the catalog-only guard.
+
+`catalog --html FILE` writes a deterministic standalone explorer for that same negotiated contract. Open it locally to search and filter every tool, inspect exact input and output schemas, review prompts and resources, and compare the embedded contract and safety digests. The export contains no credential or external asset, makes no network request, and refuses to replace an existing file.
 
 The exact release image exposes the same safe catalog without a token and defaults to catalog mode instead of operational service:
 
@@ -196,6 +199,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | Command | What it proves | Discord access |
 | --- | --- | --- |
 | `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, fixed execution guard, and stable contract plus safety digests | None |
+| `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, instructions, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID --json` | Fixed-origin, guild-locked bot authorization URL, exact permission bitfield, intent guidance, and post-install commands | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
@@ -205,7 +209,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
-| `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, catalog evidence, and content-free MCP handshake | None |
+| `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
 | `npm run security:check` | Dependency vulnerabilities, registry signatures, and attestations | Public package registry only |
 
 `catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, tool schemas and annotations, prompt declarations, resource declarations, templates, safety response, and execution guard.

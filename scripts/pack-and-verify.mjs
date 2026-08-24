@@ -27,6 +27,7 @@ import { containsSpecificReference } from "./neutrality.mjs"
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
+const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-builder",
@@ -547,6 +548,45 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     EXPECTED_REST_METHODS,
     catalog.restOperationCount,
     "installed REST method counts",
+  )
+  const firstCatalogHtml = join(consumer, "catalog-first.html")
+  const secondCatalogHtml = join(consumer, "catalog-second.html")
+  const catalogHtmlEnvironment = {
+    ...catalogEnvironment,
+    DISCORD_MCP_CONFIG_FILE: join(consumer, "unavailable-catalog-policy.json"),
+    DISCORD_PACKAGE_BOT_TOKEN: DUMMY_TOKEN,
+  }
+  const firstCatalogHtmlResult = await run(bin, ["catalog", "--html", firstCatalogHtml], {
+    capture: true,
+    cwd: consumer,
+    env: catalogHtmlEnvironment,
+  })
+  const secondCatalogHtmlResult = await run(bin, ["catalog", "--html", secondCatalogHtml], {
+    capture: true,
+    cwd: consumer,
+    env: catalogHtmlEnvironment,
+  })
+  assert.match(firstCatalogHtmlResult.stdout, /Discord MCP catalog HTML: ok/)
+  assert.match(secondCatalogHtmlResult.stdout, /Discord MCP catalog HTML: ok/)
+  const firstCatalogHtmlBytes = await readFile(firstCatalogHtml)
+  const secondCatalogHtmlBytes = await readFile(secondCatalogHtml)
+  invariant(firstCatalogHtmlBytes.equals(secondCatalogHtmlBytes), "installed catalog HTML is not deterministic")
+  invariant(
+    ((await lstat(firstCatalogHtml)).mode & 0o077) === 0
+      && ((await lstat(secondCatalogHtml)).mode & 0o077) === 0,
+    "installed catalog HTML is not private",
+  )
+  const catalogHtml = firstCatalogHtmlBytes.toString("utf8")
+  invariant(catalogHtml.includes(CATALOG_HTML_FORMAT), "installed catalog HTML format changed")
+  invariant(catalogHtml.includes(catalog.contractDigest), "installed catalog HTML contract digest changed")
+  invariant(catalogHtml.includes(catalog.safetyResourceDigest), "installed catalog HTML safety digest changed")
+  for (const toolName of catalog.toolNames) {
+    invariant(catalogHtml.includes(`id="tool-${toolName}"`), `installed catalog HTML omitted ${toolName}`)
+  }
+  invariant(!catalogHtml.includes(DUMMY_TOKEN), "installed catalog HTML captured an ambient secret")
+  invariant(
+    !catalogHtml.includes(catalogHtmlEnvironment.DISCORD_MCP_CONFIG_FILE),
+    "installed catalog HTML captured the ambient policy selector",
   )
   const configFile = join(consumer, "discord-mcp.json")
   const configResult = await run(bin, [

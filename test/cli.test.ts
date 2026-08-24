@@ -12,6 +12,10 @@ import {
 import { createBotInstallPlan } from "../src/bot-install.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
 import {
+  CATALOG_HTML_FORMAT,
+  type DiscordCatalogHtmlExportReport,
+} from "../src/catalog-html.js"
+import {
   CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
   explainConnectorConfig,
   summarizeConnectorConfigDocument,
@@ -214,6 +218,21 @@ function catalogReport(): DiscordCatalogCheckReport {
   }
 }
 
+function catalogHtmlReport(file = "/output/discord-mcp-catalog.html"): DiscordCatalogHtmlExportReport {
+  return {
+    activityRecordsCreated: false,
+    bytes: 12345,
+    contractDigest: `sha256:${"a".repeat(64)}`,
+    credentialsRequired: false,
+    discordExecution: "disabled",
+    file,
+    format: CATALOG_HTML_FORMAT,
+    schemaVersion: 1,
+    status: "ok",
+    toolCount: 3,
+  }
+}
+
 function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
@@ -280,6 +299,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     catalog() {},
     async checkCatalog() {
       return catalogReport()
+    },
+    async exportCatalogHtml(file) {
+      return catalogHtmlReport(file)
     },
     async diagnose() {
       return doctorReport()
@@ -361,6 +383,18 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     check: true,
     command: "catalog",
     json: true,
+  })
+  assert.deepEqual(parseCliArguments(["catalog", "--html", "./catalog.html"]), {
+    check: false,
+    command: "catalog",
+    htmlFile: "./catalog.html",
+    json: false,
+  })
+  assert.deepEqual(parseCliArguments(["catalog", "--html", "./catalog.html", "--check"]), {
+    check: true,
+    command: "catalog",
+    htmlFile: "./catalog.html",
+    json: false,
   })
   assert.deepEqual(parseCliArguments([
     "coordination",
@@ -869,6 +903,11 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(() => parseCliArguments(["smoke", "--other"]), /Unknown option/)
   assert.throws(() => parseCliArguments(["catalog", "--json"]), /requires --check/)
   assert.throws(() => parseCliArguments(["catalog", "--check", "--check"]), /only once/)
+  assert.throws(() => parseCliArguments(["catalog", "--html"]), /requires a file path/)
+  assert.throws(
+    () => parseCliArguments(["catalog", "--html", "catalog.html", "--json"]),
+    /mutually exclusive/,
+  )
   assert.throws(
     () => parseCliArguments(["config", "explain", "--migration"]),
     /Unknown option --migration/,
@@ -963,6 +1002,8 @@ test("CLI starts the credential-free catalog without normal output or configurat
 test("CLI renders credential-free catalog checks as exact text and JSON", async () => {
   const textOutput = outputStream()
   const jsonOutput = outputStream()
+  const htmlOutput = outputStream()
+  const htmlFile = "/output/release-contract.html"
 
   assert.equal(await runCli({
     args: ["catalog", "--check"],
@@ -976,6 +1017,17 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
     environment: {},
     stdout: jsonOutput.stream,
   }), 0)
+  assert.equal(await runCli({
+    args: ["catalog", "--html", htmlFile],
+    dependencies: dependencies({
+      async exportCatalogHtml(file) {
+        assert.equal(file, htmlFile)
+        return catalogHtmlReport(file)
+      },
+    }),
+    environment: {},
+    stdout: htmlOutput.stream,
+  }), 0)
 
   assert.match(textOutput.value(), /Discord MCP catalog: ok/)
   assert.match(textOutput.value(), /Contract digest: sha256:[a-f0-9]{64}/)
@@ -984,6 +1036,11 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
   assert.match(textOutput.value(), /Execution guard: CATALOG_ONLY/)
   assert.match(textOutput.value(), /Credentials required: no/)
   assert.deepEqual(JSON.parse(jsonOutput.value()), catalogReport())
+  assert.match(htmlOutput.value(), /Discord MCP catalog HTML: ok/)
+  assert.match(htmlOutput.value(), new RegExp(htmlFile))
+  assert.match(htmlOutput.value(), new RegExp(CATALOG_HTML_FORMAT))
+  assert.match(htmlOutput.value(), /Credentials required: no/)
+  assert.match(htmlOutput.value(), /Discord execution: disabled/)
 })
 
 test("CLI inspects and resolves coordination without credentials or Discord access", async () => {
@@ -2223,7 +2280,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
-  assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\]/)
+  assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\] \[--html FILE\]/)
+  assert.match(catalogHelpOutput.value(), /without replacing an existing file/)
   assert.doesNotMatch(configHelpOutput.value(), /migrate FILE/)
   assert.match(configHelpOutput.value(), /explain \[PATH\] \[--json\]/)
   assert.match(configHelpOutput.value(), /--token-file FILE/)

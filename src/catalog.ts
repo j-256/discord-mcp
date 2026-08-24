@@ -5,7 +5,15 @@ import {
   Client,
   InMemoryTransport,
 } from "@modelcontextprotocol/client"
-import type { CallToolResult, McpServer } from "@modelcontextprotocol/server"
+import type {
+  CallToolResult,
+  ListPromptsResult,
+  ListResourcesResult,
+  ListResourceTemplatesResult,
+  ListToolsResult,
+  McpServer,
+  ReadResourceResult,
+} from "@modelcontextprotocol/server"
 import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio"
 
 import {
@@ -124,6 +132,17 @@ export interface DiscordCatalogCheckReport {
   toolCount: number
   toolNames: string[]
   toolsetNames: string[]
+}
+
+export interface DiscordCatalogSnapshot {
+  executionGuard: CallToolResult
+  instructions: string
+  prompts: ListPromptsResult["prompts"]
+  report: DiscordCatalogCheckReport
+  resourceTemplates: ListResourceTemplatesResult["resourceTemplates"]
+  resources: ListResourcesResult["resources"]
+  safetyResource: ReadResourceResult
+  tools: ListToolsResult["tools"]
 }
 
 export interface DiscordCatalogRunOptions {
@@ -315,7 +334,7 @@ export function createDiscordCatalogServer(): McpServer {
   return server
 }
 
-export async function checkDiscordCatalog(): Promise<DiscordCatalogCheckReport> {
+export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
   const server = createDiscordCatalogServer()
   const client = new Client(
     { name: "discord-mcp-catalog-check", version: CONNECTOR_VERSION },
@@ -385,21 +404,25 @@ export async function checkDiscordCatalog(): Promise<DiscordCatalogCheckReport> 
     const resourceTemplateUris = templatesResult.resourceTemplates
       .map((template) => template.uriTemplate)
       .sort()
+    const instructions = client.getInstructions() || ""
+    const prompts = sortedByIdentity(promptsResult.prompts, (prompt) => prompt.name)
+    const resourceTemplates = sortedByIdentity(
+      templatesResult.resourceTemplates,
+      (template) => template.uriTemplate,
+    )
+    const resources = sortedByIdentity(resourcesResult.resources, (resource) => resource.uri)
+    const tools = sortedByIdentity(toolsResult.tools, (tool) => tool.name)
     const protocolContract = {
       executionGuard: knownGuard,
-      instructions: client.getInstructions() || "",
-      prompts: sortedByIdentity(promptsResult.prompts, (prompt) => prompt.name),
-      resourceTemplates: sortedByIdentity(
-        templatesResult.resourceTemplates,
-        (template) => template.uriTemplate,
-      ),
-      resources: sortedByIdentity(resourcesResult.resources, (resource) => resource.uri),
+      instructions,
+      prompts,
+      resourceTemplates,
+      resources,
       safetyResource: safety,
-      tools: sortedByIdentity(toolsResult.tools, (tool) => tool.name),
+      tools,
     }
     const restMethods = Object.values(DISCORD_REST_OPERATIONS)
-
-    return {
+    const report: DiscordCatalogCheckReport = {
       activityRecordsCreated: false,
       contractDigest: sha256Digest(protocolContract, "protocol contract"),
       credentialsRequired: false,
@@ -426,10 +449,24 @@ export async function checkDiscordCatalog(): Promise<DiscordCatalogCheckReport> 
       toolNames,
       toolsetNames: [...MCP_TOOLSET_NAMES].sort(),
     }
+    return {
+      executionGuard: knownGuard,
+      instructions,
+      prompts,
+      report,
+      resourceTemplates,
+      resources,
+      safetyResource: safety,
+      tools,
+    }
   } finally {
     await client.close().catch(() => undefined)
     await server.close().catch(() => undefined)
   }
+}
+
+export async function checkDiscordCatalog(): Promise<DiscordCatalogCheckReport> {
+  return (await inspectDiscordCatalog()).report
 }
 
 export function runDiscordMcpCatalog(options: DiscordCatalogRunOptions = {}) {

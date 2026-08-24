@@ -8,6 +8,10 @@ import {
   type DiscordCatalogCheckReport,
 } from "./catalog.js"
 import {
+  exportDiscordCatalogHtml,
+  type DiscordCatalogHtmlExportReport,
+} from "./catalog-html.js"
+import {
   createBotInstallPlan,
   type BotInstallPlan,
 } from "./bot-install.js"
@@ -129,7 +133,7 @@ const CLI_EXIT_CODES = Object.freeze({
 type CliCommand = typeof CLI_COMMANDS[number]
 
 export type ParsedCliArguments =
-  | { check: boolean; command: "catalog"; json: boolean }
+  | { check: boolean; command: "catalog"; htmlFile?: string; json: boolean }
   | {
     action: "explain"
     command: "config"
@@ -268,6 +272,7 @@ export interface CliDependencies {
     stderr: Pick<NodeJS.WriteStream, "write">
   }): unknown
   checkCatalog(): Promise<DiscordCatalogCheckReport>
+  exportCatalogHtml(file: string): Promise<DiscordCatalogHtmlExportReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
   explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
@@ -324,6 +329,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   catalog: runDiscordMcpCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
+  exportCatalogHtml: exportDiscordCatalogHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
   listCoordination: async (auditFile) => {
@@ -978,13 +984,37 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
     }
   }
   if (command === "catalog") {
-    const options = parseBooleanOptions(rest, new Set(["--check", "--json"]))
-    const check = options.has("--check")
-    const json = options.has("--json")
+    let check = false
+    let htmlFile: string | undefined
+    let json = false
+    const seen = new Set<string>()
+    for (let index = 0; index < rest.length; index += 1) {
+      const argument = rest[index]
+      if (!argument || !["--check", "--html", "--json"].includes(argument)) {
+        throw new ConfigurationError(`Unknown option ${argument || ""}`)
+      }
+      if (seen.has(argument)) {
+        throw new ConfigurationError(`Option ${argument} may be provided only once`)
+      }
+      seen.add(argument)
+      if (argument === "--check") check = true
+      if (argument === "--json") json = true
+      if (argument === "--html") {
+        const value = rest[index + 1]
+        if (!value || value.startsWith("--")) {
+          throw new ConfigurationError("Option --html requires a file path")
+        }
+        htmlFile = value
+        index += 1
+      }
+    }
+    if (htmlFile && json) {
+      throw new ConfigurationError("Catalog options --html and --json are mutually exclusive")
+    }
     if (json && !check) {
       throw new ConfigurationError("catalog --json requires --check")
     }
-    return { check, command, json }
+    return { check, command, ...(htmlFile ? { htmlFile } : {}), json }
   }
   if (command === "config") return parseConfigCommand(rest)
   if (command === "coordination") return parseCoordinationCommand(rest)
@@ -1003,7 +1033,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
 
 function helpText(topic: CliCommand | undefined): string {
   if (topic === "catalog") {
-    return "Usage: discord-mcp catalog [--check] [--json]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check."
+    return "Usage: discord-mcp catalog [--check] [--json] [--html FILE]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check. Add --html FILE to perform the same check and exclusively write a standalone interactive contract explorer without replacing an existing file."
   }
   if (topic === "config") {
     return [
@@ -1124,6 +1154,20 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
     "Discord execution: disabled",
     "Gateway: disabled",
     "Observability export: disabled",
+    "Activity records created: no",
+  ].join("\n")
+}
+
+function renderCatalogHtmlExport(report: DiscordCatalogHtmlExportReport): string {
+  return [
+    "Discord MCP catalog HTML: ok",
+    `File: ${report.file}`,
+    `Format: ${report.format}`,
+    `Contract digest: ${report.contractDigest}`,
+    `Tools: ${report.toolCount}`,
+    `Bytes: ${report.bytes}`,
+    "Credentials required: no",
+    "Discord execution: disabled",
     "Activity records created: no",
   ].join("\n")
 }
@@ -1733,6 +1777,11 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
     parsed = parseCliArguments(args)
     switch (parsed.command) {
       case "catalog": {
+        if (parsed.htmlFile) {
+          const report = await dependencies.exportCatalogHtml(parsed.htmlFile)
+          safeWrite(stdout, renderCatalogHtmlExport(report), environment)
+          return CLI_EXIT_CODES.success
+        }
         if (!parsed.check) {
           dependencies.catalog({ stderr })
           return CLI_EXIT_CODES.success

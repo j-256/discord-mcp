@@ -433,6 +433,7 @@ The CLI provides a safe path from one non-secret configuration document to a ver
 
 ```sh
 node dist/cli.js catalog --check
+node dist/cli.js catalog --html ./discord-mcp-contract.html
 node dist/cli.js preset list
 node dist/cli.js preset show server-observer --json
 node dist/cli.js preset install server-observer --application-id APPLICATION_ID --guild-id GUILD_ID
@@ -457,7 +458,7 @@ node dist/cli.js doctor --config ./discord-mcp.json --online
 node dist/cli.js smoke --config ./discord-mcp.json
 ```
 
-`catalog` starts a separate credential-free stdio server that reuses the production registrations while disabling all tool execution. It reads no ambient token or policy, constructs no Discord client, opens no Gateway or telemetry exporter, and creates no activity record. Static safety guidance and validated prompts remain inspectable; every listed, invalid, disabled, discovery, or unknown tool call returns the same fixed `CATALOG_ONLY` result. Add `--check` to verify the exact tool, prompt, resource, and resource-template identities, every tool schema and risk annotation, static safety resource, and execution guard in process without contacting Discord. Add `--json` with `--check` for deterministic machine-readable evidence containing the sorted protocol inventories, production toolsets, risk-class and REST-method totals, a digest of the normalized MCP contract, and a separate safety-resource digest. The contract digest excludes the package version, timestamp, machine paths, and ambient configuration so equivalent installed contracts can be compared directly across builds.
+`catalog` starts a separate credential-free stdio server that reuses the production registrations while disabling all tool execution. It reads no ambient token or policy, constructs no Discord client, opens no Gateway or telemetry exporter, and creates no activity record. Static safety guidance and validated prompts remain inspectable; every listed, invalid, disabled, discovery, or unknown tool call returns the same fixed `CATALOG_ONLY` result. Add `--check` to verify the exact tool, prompt, resource, and resource-template identities, every tool schema and risk annotation, static safety resource, and execution guard in process without contacting Discord. Add `--json` with `--check` for deterministic machine-readable evidence containing the sorted protocol inventories, production toolsets, risk-class and REST-method totals, a digest of the normalized MCP contract, and a separate safety-resource digest. Add `--html FILE` to render the same negotiated snapshot as a searchable standalone explorer with exact schemas, annotations, prompts, resources, instructions, safety guidance, and toolset, workflow, and risk filters. The HTML export embeds no credential, timestamp, machine path, external asset, or runtime network capability; it uses a restrictive content security policy, is written with private permissions, and refuses to replace an existing path. Its bytes are deterministic for one installed release, so exports from separate installations of the same archive can be compared directly. HTML export may be combined with `--check`, but not with JSON output. The contract digest excludes the package version, timestamp, machine paths, and ambient configuration so equivalent installed contracts can be compared directly across builds.
 
 `preset list` and `preset show NAME` inspect deterministic least-privilege setup contracts without a credential, Discord request, Gateway connection, telemetry exporter, profile write, or activity record. Each report includes the exact toolsets and tool names derived from the production catalogs, allowed risk classes, exact scope requirements, bot permission names and decimal bitfield, privileged-intent guidance, disabled Gateway state, and an explicit zero-write assertion.
 
@@ -2267,7 +2268,7 @@ npm run container:index:verify
 npm run security:check
 ```
 
-`pack:verify` rebuilds and packs twice under one npm toolchain, requires byte-identical archives, enforces the published-file allowlist, scans for sensitive environment values, installs the archive without lifecycle scripts, runs the installed credential-free catalog check twice without a token, exercises the packaged operational CLI, negotiates the installed MCP catalogs, and reads only the static safety resource. With `--output DIRECTORY`, it emits the verified archive and its deterministic `catalog-evidence.json`. CI requires byte-identical decompressed tar payloads and catalog evidence across supported Node lines because npm patch releases can encode the same payload with different gzip bytes.
+`pack:verify` rebuilds and packs twice under one npm toolchain, requires byte-identical archives, enforces the published-file allowlist, scans for sensitive environment values, installs the archive without lifecycle scripts, runs the installed credential-free catalog check and HTML export twice without a token, exercises the packaged operational CLI, negotiates the installed MCP catalogs, and reads only the static safety resource. It requires the two standalone explorers to be byte-identical, privately written, bound to the same catalog and safety digests, and free of ambient secret values. With `--output DIRECTORY`, it emits the verified archive and its deterministic `catalog-evidence.json`. CI requires byte-identical decompressed tar payloads and catalog evidence across supported Node lines because npm patch releases can encode the same payload with different gzip bytes.
 
 `container:verify` builds from the exact digest-pinned Node.js base, checks the non-root image configuration and secret-free history, and exercises it with no network, a read-only root filesystem, no Linux capabilities, no privilege escalation, and a bounded process count. It compares repeated catalog output byte-for-byte with the source contract, negotiates the complete MCP catalogs, proves the catalog-only tool guard, verifies a read-only mounted standalone policy through the packaged CLI, and requires an explicit operational start without a credential to fail safely on stderr. With `--output DIRECTORY`, it emits the same deterministic catalog evidence plus a content-free container report and the reviewed Dockerfile. Neither package verification nor container verification contacts Discord.
 
@@ -2279,6 +2280,7 @@ After building, verify the compiled CLI and selected policy without contacting D
 
 ```sh
 node dist/cli.js catalog --check --json > catalog-evidence.json
+node dist/cli.js catalog --html ./discord-mcp-contract.html
 node dist/cli.js doctor --config ./discord-mcp.json
 node dist/cli.js help
 node dist/cli.js version
