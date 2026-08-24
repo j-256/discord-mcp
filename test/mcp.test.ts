@@ -204,6 +204,12 @@ import type {
   GuildSettingsPrivacyProjection,
 } from "../src/guild-settings-service.js"
 import type {
+  GuildIncidentActionChangePlan,
+  GuildIncidentActionChangeRequest,
+  GuildIncidentActionView,
+  GuildIncidentAuditResult,
+} from "../src/guild-incident-service.js"
+import type {
   PollCreationPlan,
   PollCreationRequest,
   PollEndPlan,
@@ -358,6 +364,8 @@ import {
   WidgetSettingsOperationConflictError,
   GuildSettingsExecutionError,
   GuildSettingsOperationConflictError,
+  GuildIncidentExecutionError,
+  GuildIncidentOperationConflictError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
   WriteCoordinationStateError,
@@ -523,7 +531,9 @@ const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
 const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
 const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
 const GUILD_SETTINGS_OPERATION_KEY = "guild-settings-change-attempt-0001"
+const GUILD_INCIDENT_OPERATION_KEY = "guild-incident-change-attempt-0001"
 const GUILD_PROFILE_OPERATION_KEY = "guild-profile-change-attempt-0001"
+const GUILD_INCIDENT_UNTIL = "2026-08-25T11:00:00.000Z"
 const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
 const VOICE_CHANNEL_STATUS_OPERATION_KEY = "voice-status-attempt-0001"
 const VOICE_CHANNEL_STATUS_CURRENT = "Private current incident status"
@@ -2309,6 +2319,127 @@ function guildSettingsPlan(
       ? ["Only the reviewed named fields will be patched"]
       : ["The requested guild settings already match Discord"],
     writeRequired: changed,
+  }
+}
+
+function guildIncidentRequest(
+  overrides: Partial<GuildIncidentActionChangeRequest> = {},
+): GuildIncidentActionChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    invitesDisabledUntil: GUILD_INCIDENT_UNTIL,
+    operationKey: GUILD_INCIDENT_OPERATION_KEY,
+    ...overrides,
+  }
+}
+
+function guildIncidentAccess(): GuildIncidentAuditResult["access"] {
+  return {
+    appliedRoleIds: [GUILD_ID, ROLE_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["MANAGE_GUILD"],
+    effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+    manageGuild: true,
+    requiredPermission: "MANAGE_GUILD",
+    unknownPermissionBits: "0",
+    warnings: [],
+  }
+}
+
+function guildIncidentView(
+  request: GuildIncidentActionChangeRequest | null,
+): GuildIncidentActionView {
+  return {
+    directMessagesDisabledUntil: request?.directMessagesDisabledUntil ?? null,
+    dmSpamDetected: true,
+    invitesDisabledUntil: request?.invitesDisabledUntil ?? null,
+    raidDetected: true,
+    sourceAvailable: true,
+    unknownFieldCount: 0,
+  }
+}
+
+function guildIncidentAudit(): GuildIncidentAuditResult {
+  return {
+    access: guildIncidentAccess(),
+    actions: guildIncidentView(null),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    guildId: GUILD_ID,
+    localConstraints: {
+      auditReasonDisposition: "local-review-only",
+      guildAllowlist: 100,
+      maximumDisableDurationMs: 86_400_000,
+      supportedFields: ["directMessages", "invites"],
+    },
+    privacy: {
+      auditReason: "digest-bound-not-persisted",
+      detectionTimestamps: "boolean-presence-only",
+      guildPresentation: "omitted",
+      incidentActionValues: "transient-untrusted",
+      persistence: "content-free-records-only",
+      rawPayloads: "omitted",
+      roleNames: "omitted",
+    },
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      auditLogReasonHeader: false,
+      automaticRetry: false,
+      freshApiReadback: true,
+      mutationResponse: true,
+      rollback: "not-automatic",
+    },
+  }
+}
+
+function guildIncidentPlan(
+  request: GuildIncidentActionChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): GuildIncidentActionChangePlan {
+  const requestedFields = [
+    ...(Object.hasOwn(request, "directMessagesDisabledUntil")
+      ? ["directMessages" as const]
+      : []),
+    ...(Object.hasOwn(request, "invitesDisabledUntil")
+      ? ["invites" as const]
+      : []),
+  ].sort()
+  const desired = guildIncidentView(request)
+  const current = effect === "change" ? guildIncidentView(null) : desired
+  return {
+    access: guildIncidentAccess(),
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields: effect === "change" ? requestedFields : [],
+    createdAt: "2026-08-24T12:00:00.000Z",
+    current,
+    desired,
+    digest,
+    effects: effect === "change"
+      ? requestedFields.map((field) => ({ effect: "disable" as const, field }))
+      : [],
+    guildId: request.guildId,
+    localConstraints: guildIncidentAudit().localConstraints,
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: guildIncidentAudit().privacy,
+    requestedFields,
+    risks: effect === "change"
+      ? ["This change disables guild invites and can disrupt legitimate activity"]
+      : [],
+    schemaVersion: 1,
+    status: effect === "change" ? "planned" : "already-current",
+    verificationBoundary: guildIncidentAudit().verificationBoundary,
+    warnings: [
+      "The review reason is digest-bound locally because Discord does not document an audit-log reason header for this endpoint",
+    ],
+    writeRequired: effect === "change",
   }
 }
 
@@ -6474,6 +6605,9 @@ function fixturePolicy(): PolicyDescription {
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildIncidentAuditEnabled: false,
+    guildIncidentChangesEnabled: false,
+    guildIncidentGuildIds: [],
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
@@ -6705,6 +6839,9 @@ function serviceFixture(overrides: {
   guildSettingsEffect?: "change" | "none"
   guildSettingsError?: Error
   guildSettingsPlanDigest?: string
+  guildIncidentEffect?: "change" | "none"
+  guildIncidentError?: Error
+  guildIncidentPlanDigest?: string
   guildProfileEffect?: "change" | "none"
   guildProfileError?: Error
   guildProfilePlanDigest?: string
@@ -6763,6 +6900,11 @@ function serviceFixture(overrides: {
     plan: 0,
   }
   const guildSettingsCalls = {
+    execute: 0,
+    get: 0,
+    plan: 0,
+  }
+  const guildIncidentCalls = {
     execute: 0,
     get: 0,
     plan: 0,
@@ -7645,6 +7787,27 @@ function serviceFixture(overrides: {
         warnings: planned.warnings,
       }
     },
+    async executeGuildIncidentActionChange(request, planDigest) {
+      if (overrides.guildIncidentError) throw overrides.guildIncidentError
+      guildIncidentCalls.execute += 1
+      const planned = guildIncidentPlan(
+        request,
+        planDigest,
+        overrides.guildIncidentEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-guild-incident" : null,
+        driftFields: [],
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        requestedFields: planned.requestedFields,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+        warnings: planned.warnings,
+      }
+    },
     async executeGuildProfileChange(request, planDigest) {
       if (overrides.guildProfileError) throw overrides.guildProfileError
       guildProfileCalls.execute += 1
@@ -7682,6 +7845,10 @@ function serviceFixture(overrides: {
       guildSettingsCalls.get += 1
       return guildSettingsAudit()
     },
+    async getGuildIncidentActions() {
+      guildIncidentCalls.get += 1
+      return guildIncidentAudit()
+    },
     async getGuildProfile() {
       guildProfileCalls.get += 1
       return guildProfileAudit()
@@ -7716,6 +7883,14 @@ function serviceFixture(overrides: {
         request,
         overrides.guildSettingsPlanDigest || DIGEST,
         overrides.guildSettingsEffect,
+      )
+    },
+    async planGuildIncidentActionChange(request) {
+      guildIncidentCalls.plan += 1
+      return guildIncidentPlan(
+        request,
+        overrides.guildIncidentPlanDigest || DIGEST,
+        overrides.guildIncidentEffect,
       )
     },
     async planGuildProfileChange(request) {
@@ -10088,6 +10263,7 @@ function serviceFixture(overrides: {
   return {
     calls,
     guildBlueprintCaptureCalls,
+    guildIncidentCalls,
     guildProfileCalls,
     nativeInteractionCommandCalls,
     service,
@@ -10322,6 +10498,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_welcome_screen",
       "get_guild_widget_settings",
       "get_guild_settings",
+      "get_guild_incident_actions",
       "get_guild_profile",
       "list_guild_audit_entries",
       "get_guild_audit_entry",
@@ -10401,6 +10578,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_widget_settings_change",
       "plan_guild_settings_change",
       "execute_guild_settings_change",
+      "plan_guild_incident_action_change",
+      "execute_guild_incident_action_change",
       "plan_guild_profile_change",
       "execute_guild_profile_change",
       "plan_guild_expression_change",
@@ -10512,6 +10691,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildSettings = result.tools.find((tool) => (
     tool.name === "execute_guild_settings_change"
   ))
+  const guildIncident = result.tools.find((tool) => (
+    tool.name === "execute_guild_incident_action_change"
+  ))
   const guildExpression = result.tools.find((tool) => (
     tool.name === "execute_guild_expression_change"
   ))
@@ -10582,6 +10764,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     onboarding,
     widgetSettings,
     guildSettings,
+    guildIncident,
     guildExpression,
     applicationEmoji,
     soundboard,
@@ -18241,6 +18424,196 @@ test("MCP guild-settings execution exposes uncertainty and content-free conflict
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(GUILD_SETTINGS_OPERATION_KEY))
+})
+
+test("MCP guild incident audit exposes privacy-minimized action state", async (context) => {
+  const { client, guildIncidentCalls } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_incident_actions",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "get_guild_incident_actions",
+  })
+
+  const content = structuredContent(audited)
+  const actions = content.actions as Record<string, unknown>
+  const privacy = content.privacy as Record<string, unknown>
+  assert.equal(actions.raidDetected, true)
+  assert.equal(actions.dmSpamDetected, true)
+  assert.equal(actions.sourceAvailable, true)
+  assert.equal(privacy.detectionTimestamps, "boolean-presence-only")
+  assert.equal(privacy.rawPayloads, "omitted")
+  assert.equal("raidDetectedAt" in actions, false)
+  assert.doesNotMatch(JSON.stringify(audited), /private-role|raid_detected_at/u)
+  assert.equal(invalid.isError, true)
+  assert.equal(guildIncidentCalls.get, 1)
+})
+
+test("MCP guild incident plans preserve exact sparse deadline intent", async (context) => {
+  const { client, guildIncidentCalls } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: { ...guildIncidentRequest() },
+    name: "plan_guild_incident_action_change",
+  })
+  const clearing = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      directMessagesDisabledUntil: null,
+      guildId: GUILD_ID,
+      operationKey: "guild-incident-clear-attempt-0001",
+    },
+    name: "plan_guild_incident_action_change",
+  })
+  const empty = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: GUILD_INCIDENT_OPERATION_KEY,
+    },
+    name: "plan_guild_incident_action_change",
+  })
+  const unsupported = await client.callTool({
+    arguments: { ...guildIncidentRequest(), disableInvites: true },
+    name: "plan_guild_incident_action_change",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.deepEqual(content.requestedFields, ["invites"])
+  assert.deepEqual(content.changedFields, ["invites"])
+  assert.equal(
+    (content.desired as Record<string, unknown>).invitesDisabledUntil,
+    GUILD_INCIDENT_UNTIL,
+  )
+  assert.deepEqual(structuredContent(clearing).requestedFields, ["directMessages"])
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(GUILD_INCIDENT_OPERATION_KEY))
+  assert.equal(empty.isError, true)
+  assert.equal(unsupported.isError, true)
+  assert.equal(guildIncidentCalls.plan, 2)
+})
+
+test("MCP guild incident execution binds approval to the exact local review intent", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client, guildIncidentCalls } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const request = guildIncidentRequest()
+
+  const result = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_guild_incident_action_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(guildIncidentCalls.plan, 1)
+  assert.equal(guildIncidentCalls.execute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    GUILD_INCIDENT_UNTIL,
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+  }
+  assert.match(confirmationMessage, /Current incident actions/)
+  assert.match(confirmationMessage, /the reason is not sent to Discord/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_INCIDENT_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(GUILD_INCIDENT_OPERATION_KEY))
+})
+
+test("MCP guild incident execution rejects changed signed state and exposes content-free failures", async (context) => {
+  const argumentsValue = {
+    ...guildIncidentRequest(),
+    planDigest: DIGEST,
+  }
+  const signed = await connectedModernStdioFixture(context)
+  const initial = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: argumentsValue,
+      name: "execute_guild_incident_action_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  const changed = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...argumentsValue,
+        invitesDisabledUntil: "2026-08-25T10:00:00.000Z",
+      },
+      inputResponses: {
+        confirm_guild_incident_action_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_incident_action_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changed).status, "confirmation-invalid")
+  assert.equal(changed.isError, true)
+  assert.equal(signed.guildIncidentCalls.execute, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildIncidentError: new GuildIncidentExecutionError(
+        "Discord guild incident-action outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_incident_action_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-incident",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    planDigest: DIGEST,
+    status: "completed" as const,
+    timestamp: "2026-08-24T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildIncidentError: new GuildIncidentOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_incident_action_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(GUILD_INCIDENT_OPERATION_KEY))
 })
 
 test("MCP guild profile audit exposes transient text and presence-only media", async (context) => {

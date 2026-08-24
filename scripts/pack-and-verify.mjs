@@ -28,7 +28,11 @@ const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
-const EXPECTED_CONFIG_RECIPES = ["guild-builder", "channel-publisher"]
+const EXPECTED_CONFIG_RECIPES = [
+  "guild-builder",
+  "channel-publisher",
+  "incident-response",
+]
 const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
   "channel-publisher": Object.freeze({
     evidenceConnection: "none",
@@ -39,6 +43,11 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
     evidenceConnection: "guild-layout",
     eventFeedPolicy: "unchanged",
     intents: Object.freeze(["GUILDS"]),
+  }),
+  "incident-response": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
   }),
 })
 const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
@@ -237,13 +246,19 @@ assert.equal(typeof connector.ChannelCloneService, "function")
 assert.equal(typeof connector.ChannelMetadataService, "function")
 assert.equal(typeof connector.VoiceChannelStatusService, "function")
 assert.equal(typeof connector.GuildTemplateService, "function")
+assert.equal(typeof connector.GuildIncidentService, "function")
 assert.equal(typeof connector.InviteService, "function")
 assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
 assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
 assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
-assert.deepEqual(connector.CONFIG_RECIPE_NAMES, ["guild-builder", "channel-publisher"])
+assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
+  "guild-builder",
+  "channel-publisher",
+  "incident-response",
+])
 assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
+assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)
 assert.equal(typeof connector.planConfigRecipe, "function")
 assert.equal(typeof connector.applyConfigRecipe, "function")
 assert.equal(typeof connector.createBotInstallPlan, "function")

@@ -78,7 +78,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 22
+export const OPERATOR_REPORT_SCHEMA_VERSION = 23
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -119,6 +119,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildScope: "guild-scope",
   guildExpressionAuditPolicy: "guild-expression-audit-policy",
   guildExpressionChangePolicy: "guild-expression-change-policy",
+  guildIncidentAuditPolicy: "guild-incident-audit-policy",
+  guildIncidentChangePolicy: "guild-incident-change-policy",
   guildProfileAuditPolicy: "guild-profile-audit-policy",
   guildProfileChangePolicy: "guild-profile-change-policy",
   gatewayPolicy: "gateway-policy",
@@ -639,6 +641,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowGuildSettingsChanges && config.guildSettingsGuildIds.size === 0) {
     warnings.push("The guild-settings change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
   }
+  if (config.allowGuildIncidentAudit && config.guildIncidentGuildIds.size === 0) {
+    warnings.push("The guild incident-action audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowGuildIncidentChanges && config.guildIncidentGuildIds.size === 0) {
+    warnings.push("The guild incident-action change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
   if (config.allowGuildProfileAudit && config.guildProfileGuildIds.size === 0) {
     warnings.push("The guild profile audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
   }
@@ -833,6 +841,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowGuildSettingsAudit || config.allowGuildSettingsChanges,
       "guild-settings",
       "Guild-settings audit and reviewed changes",
+    ],
+    [
+      config.allowGuildIncidentAudit || config.allowGuildIncidentChanges,
+      "guild-incidents",
+      "Guild incident-action audit and reviewed changes",
     ],
     [
       config.allowGuildProfileAudit || config.allowGuildProfileChanges,
@@ -2117,6 +2130,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.guildSettingsChangePolicy,
         "pass",
         `Reviewed guild-settings changes are constrained to ${config.guildSettingsGuildIds.size} exact guilds with sparse named-field review, signed approval, one-shot execution, and authoritative response plus API readback`,
+      ))
+    }
+    if (!config.allowGuildIncidentAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildIncidentAuditPolicy,
+        "pass",
+        "Privacy-minimized guild incident-action audit is disabled",
+      ))
+    } else if (config.guildIncidentGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildIncidentAuditPolicy,
+        "warn",
+        "Guild incident-action audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildIncidentAuditPolicy,
+        "pass",
+        `Guild incident-action audit is constrained to ${config.guildIncidentGuildIds.size} exact guilds with boolean-only detection evidence, unknown-field counts, and complete known owner or MANAGE_GUILD authority`,
+      ))
+    }
+    if (!config.allowGuildIncidentChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildIncidentChangePolicy,
+        "pass",
+        "Reviewed guild incident-action changes are disabled",
+      ))
+    } else if (config.guildIncidentGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildIncidentChangePolicy,
+        "warn",
+        "Guild incident-action changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildIncidentChangePolicy,
+        "pass",
+        `Reviewed guild incident-action changes are constrained to ${config.guildIncidentGuildIds.size} exact guilds with sparse 24-hour review, local-only reason binding, signed approval, non-retried one-shot execution, and strict response plus fresh readback`,
       ))
     }
     if (!config.allowGuildProfileAudit) {

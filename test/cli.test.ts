@@ -1644,6 +1644,7 @@ test("CLI inspects additive recipes without credentials or file access", async (
   assert.match(textOutput.value(), /Discord MCP additive configuration recipes/)
   assert.match(textOutput.value(), /guild-builder/)
   assert.match(textOutput.value(), /channel-publisher/)
+  assert.match(textOutput.value(), /incident-response/)
   assert.match(textOutput.value(), /Gateway evidence: guild-layout with GUILDS; event-feed policy unchanged/)
   assert.match(textOutput.value(), /Gateway evidence: none; event-feed policy unchanged/)
   assert.match(textOutput.value(), /Writes: enabled only through the underlying reviewed workflow gates/)
@@ -1653,7 +1654,7 @@ test("CLI inspects additive recipes without credentials or file access", async (
     schemaVersion: CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
     status: "ok",
   })
-  assert.equal(CONFIG_RECIPES.length, 2)
+  assert.equal(CONFIG_RECIPES.length, 3)
 })
 
 test("CLI plans and applies an exact recipe without resolving its credential", async (context) => {

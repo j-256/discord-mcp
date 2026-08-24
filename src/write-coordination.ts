@@ -43,6 +43,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "channels",
   "emojis",
   "guild-settings",
+  "incident-actions",
   "invites",
   "integrations",
   "onboarding",
@@ -835,6 +836,50 @@ export class FileWriteCoordinator implements WriteCoordinator {
     )
   }
 
+  async #discardRetiredClaim(
+    record: WriteClaimRecord,
+    target: WriteCoordinationTarget,
+  ): Promise<void> {
+    const hash = writeCoordinationTargetHash(target)
+    const source = this.#retiredTargetDirectory(record, target)
+    const existing = await this.#readClaimDirectory(source, hash, true)
+    if (!existing) return
+    if (!sameClaim(existing, record)) {
+      throw new WriteCoordinationStateError(
+        "Discord retired write claim changed identity",
+      )
+    }
+    let cleanup: string
+    try {
+      cleanup = await mkdtemp(join(this.#stagingDirectory, ".retired-"))
+    } catch (error) {
+      throw new WriteCoordinationStateError(
+        "Unable to stage retired Discord write claim cleanup",
+        { cause: error },
+      )
+    }
+    let moved = false
+    try {
+      try {
+        await rename(source, join(cleanup, "claim"))
+        moved = true
+      } catch (error) {
+        if (!await pathExists(source)) return
+        throw new WriteCoordinationStateError(
+          "Unable to stage retired Discord write claim cleanup",
+          { cause: error },
+        )
+      }
+      await Promise.all([
+        syncDirectory(this.#retiredDirectory),
+        syncDirectory(this.#stagingDirectory),
+      ])
+    } finally {
+      await rm(cleanup, { force: true, recursive: true }).catch(() => undefined)
+      if (moved) await syncDirectory(this.#stagingDirectory).catch(() => undefined)
+    }
+  }
+
   async #readClaimDirectory(
     directory: string,
     expectedHash: string,
@@ -961,6 +1006,13 @@ export class FileWriteCoordinator implements WriteCoordinator {
             "Discord retired write claim changed identity",
           )
         }
+        const current = await this.#readClaimDirectory(source, hash, true)
+        if (!current || current.claimId !== record.claimId) continue
+        if (!sameClaim(current, record)) {
+          throw new WriteCoordinationStateError(
+            "Discord write claim changed identity before release",
+          )
+        }
         throw new WriteCoordinationStateError(
           "Discord write claim exists in active and retired state",
         )
@@ -981,10 +1033,8 @@ export class FileWriteCoordinator implements WriteCoordinator {
       syncDirectory(this.#retiredDirectory),
     ])
     for (const target of record.targets) {
-      const retired = this.#retiredTargetDirectory(record, target)
-      await rm(retired, { force: true, recursive: true }).catch(() => undefined)
+      await this.#discardRetiredClaim(record, target)
     }
-    await syncDirectory(this.#retiredDirectory).catch(() => undefined)
     return released
   }
 

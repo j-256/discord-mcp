@@ -70,6 +70,8 @@ export interface ConnectorConfig {
   allowGateway: boolean
   allowGuildExpressionAudit: boolean
   allowGuildExpressionChanges: boolean
+  allowGuildIncidentAudit: boolean
+  allowGuildIncidentChanges: boolean
   allowGuildProfileAudit: boolean
   allowGuildProfileChanges: boolean
   allowGuildScaffolds: boolean
@@ -151,6 +153,7 @@ export interface ConnectorConfig {
   guildScaffoldGuildIds: ReadonlySet<string>
   guildExpressionGuildIds: ReadonlySet<string>
   guildExpressionRoots: readonly string[]
+  guildIncidentGuildIds: ReadonlySet<string>
   guildProfileGuildIds: ReadonlySet<string>
   guildSettingsGuildIds: ReadonlySet<string>
   guildTemplateGuildIds: ReadonlySet<string>
@@ -481,6 +484,11 @@ export function loadConnectorConfigDocument(
   )
   const guildScaffoldGuildIds = configScope(document, "guildScaffoldGuildIds")
   const guildExpressionGuildIds = configScope(document, "guildExpressionGuildIds")
+  const guildIncidentGuildIds = configScope(
+    document,
+    "guildIncidentGuildIds",
+    CONNECTOR_LIMITS.guildIncidentGuildAllowlist,
+  )
   const guildSettingsGuildIds = configScope(
     document,
     "guildSettingsGuildIds",
@@ -519,6 +527,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("channelOrderingGuildIds"), channelOrderingGuildIds],
     [configPolicyPath("guildScaffoldGuildIds"), guildScaffoldGuildIds],
     [configPolicyPath("guildExpressionGuildIds"), guildExpressionGuildIds],
+    [configPolicyPath("guildIncidentGuildIds"), guildIncidentGuildIds],
     [configPolicyPath("guildProfileGuildIds"), guildProfileGuildIds],
     [configPolicyPath("guildSettingsGuildIds"), guildSettingsGuildIds],
     [configPolicyPath("guildTemplateGuildIds"), guildTemplateGuildIds],
@@ -795,6 +804,18 @@ export function loadConnectorConfigDocument(
       `${configPolicyPath("allowGuildSettingsAudit")} requires ${configPolicyPath("guildSettingsGuildIds")}`,
     )
   }
+  const allowGuildIncidentAudit = configCapability(document, "guildIncidentAudit")
+  const allowGuildIncidentChanges = configCapability(document, "guildIncidentChanges")
+  if (allowGuildIncidentChanges && !allowGuildIncidentAudit) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildIncidentChanges")} requires ${configPolicyPath("allowGuildIncidentAudit")}`,
+    )
+  }
+  if (allowGuildIncidentAudit && guildIncidentGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildIncidentAudit")} requires ${configPolicyPath("guildIncidentGuildIds")}`,
+    )
+  }
   const allowGuildProfileAudit = configCapability(document, "guildProfileAudit")
   const allowGuildProfileChanges = configCapability(document, "guildProfileChanges")
   if (allowGuildProfileChanges && !allowGuildProfileAudit) {
@@ -929,6 +950,8 @@ export function loadConnectorConfigDocument(
     allowGateway,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
+    allowGuildIncidentAudit,
+    allowGuildIncidentChanges,
     allowGuildProfileAudit,
     allowGuildProfileChanges,
     allowGuildScaffolds: configCapability(document, "guildScaffolds"),
@@ -1027,6 +1050,7 @@ export function loadConnectorConfigDocument(
       document.storage.guildExpressionRoots,
       "$.storage.guildExpressionRoots",
     ),
+    guildIncidentGuildIds,
     guildProfileGuildIds,
     guildSettingsGuildIds,
     guildTemplateGuildIds,

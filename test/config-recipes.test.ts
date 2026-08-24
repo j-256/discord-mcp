@@ -67,7 +67,11 @@ async function configFile(
 }
 
 test("configuration recipes expose frozen catalog-derived requirements", () => {
-  assert.deepEqual(CONFIG_RECIPE_NAMES, ["guild-builder", "channel-publisher"])
+  assert.deepEqual(CONFIG_RECIPE_NAMES, [
+    "guild-builder",
+    "channel-publisher",
+    "incident-response",
+  ])
   assert.equal(Object.isFrozen(CONFIG_RECIPES), true)
 
   const guildBuilder = getConfigRecipe(" GUILD-BUILDER ")
@@ -122,6 +126,29 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     channelPublisher.requirements.botPermissionBitfield,
     expectedPermissions.toString(),
   )
+
+  const incidentResponse = getConfigRecipe("incident-response")
+  assert.deepEqual(incidentResponse.capabilities, [
+    "guildIncidentAudit",
+    "guildIncidentChanges",
+  ])
+  assert.deepEqual(incidentResponse.toolsets, ["guild-incidents"])
+  assert.deepEqual(incidentResponse.toolNames, [
+    "discover_discord_tools",
+    "execute_guild_incident_action_change",
+    "get_guild_incident_actions",
+    "plan_guild_incident_action_change",
+  ])
+  assert.deepEqual(incidentResponse.requirements.scope.targets, [
+    "$.scopes.guildIncidentGuildIds",
+  ])
+  assert.deepEqual(incidentResponse.requirements.botPermissions, ["MANAGE_GUILD"])
+  assert.deepEqual(incidentResponse.requirements.gateway, {
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: [],
+  })
+  assert.deepEqual(incidentResponse.requirements.privilegedIntents, [])
 })
 
 test("configuration recipe requests normalize exact bounded scope", () => {
@@ -132,6 +159,16 @@ test("configuration recipe requests normalize exact bounded scope", () => {
     name: "guild-builder",
     scope: {
       ids: [GUILD_ID, OTHER_GUILD_ID],
+      kind: "guild",
+    },
+  })
+  assert.deepEqual(normalizeConfigRecipeRequest({
+    guildIds: [GUILD_ID],
+    name: "incident-response",
+  }), {
+    name: "incident-response",
+    scope: {
+      ids: [GUILD_ID],
       kind: "guild",
     },
   })
@@ -279,6 +316,50 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
   assert.equal(
     plan.warnings.some((warning) => warning.includes("offline planning cannot prove")),
     true,
+  )
+})
+
+test("incident-response adds only exact-guild incident policy", async (context) => {
+  const original = document({
+    capabilities: { interactions: true },
+    scopes: { interactionChannelIds: [CHANNEL_ID] },
+    toolsets: ["connector", "interactions"],
+  })
+  const file = await configFile(context, original)
+  const plan = planConfigRecipe({
+    file,
+    guildIds: [GUILD_ID],
+    name: "incident-response",
+  })
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.execution.configurationWritten, false)
+  assert.equal(plan.execution.discordContacted, false)
+  assert.equal(plan.execution.secretValuesRead, false)
+  assert.equal(plan.proposedDocument.capabilities.guildIncidentAudit, true)
+  assert.equal(plan.proposedDocument.capabilities.guildIncidentChanges, true)
+  assert.equal(plan.proposedDocument.capabilities.interactions, true)
+  assert.deepEqual(plan.proposedDocument.scopes.guildIncidentGuildIds, [GUILD_ID])
+  assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.deepEqual(plan.proposedDocument.gateway, original.gateway)
+  assert.deepEqual(plan.proposedDocument.tools.toolsets, [
+    "connector",
+    "guild-incidents",
+    "interactions",
+  ])
+  const runtime = loadConnectorConfigDocument(plan.proposedDocument, {
+    [TOKEN_ALIAS]: TOKEN,
+  })
+  assert.equal(runtime.allowGuildIncidentAudit, true)
+  assert.equal(runtime.allowGuildIncidentChanges, true)
+  assert.equal(runtime.allowGateway, false)
+  assert.throws(
+    () => planConfigRecipe({
+      file,
+      guildIds: [OTHER_GUILD_ID],
+      name: "incident-response",
+    }),
+    /must remain inside readScope\.guildIds/,
   )
 })
 

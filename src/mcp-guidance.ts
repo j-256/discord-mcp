@@ -28,6 +28,7 @@ export type DiscordGuidanceService = Pick<
   | "getGuildWelcomeScreen"
   | "getGuildWidgetSettings"
   | "getGuildSettings"
+  | "getGuildIncidentActions"
   | "getGuildProfile"
   | "getGuildSoundboardSound"
   | "getMessage"

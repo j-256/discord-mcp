@@ -55,6 +55,7 @@ type McpToolWorkflow =
   | "guild-blueprint"
   | "guild-scaffold"
   | "guild-expression-change"
+  | "guild-incident-action-change"
   | "guild-profile-change"
   | "guild-soundboard-change"
   | "guild-settings-change"
@@ -293,6 +294,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-settings",
     workflow: "guild-settings-change",
   },
+  execute_guild_incident_action_change: {
+    keywords: ["direct message", "disable", "execute", "guild", "incident", "invite", "lockdown"],
+    toolset: "guild-incidents",
+    workflow: "guild-incident-action-change",
+  },
   execute_guild_profile_change: {
     keywords: ["description", "execute", "guild", "identity", "name", "profile"],
     toolset: "guild-profile",
@@ -418,6 +424,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   get_guild_settings: {
     keywords: ["afk", "audit", "content filter", "guild", "notifications", "safety", "settings"],
     toolset: "guild-settings",
+  },
+  get_guild_incident_actions: {
+    keywords: ["audit", "direct message", "guild", "incident", "invite", "lockdown", "raid"],
+    toolset: "guild-incidents",
   },
   get_guild_profile: {
     keywords: ["audit", "description", "guild", "identity", "name", "profile"],
@@ -810,6 +820,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["afk", "configure", "guild", "notifications", "plan", "review", "safety", "settings"],
     toolset: "guild-settings",
     workflow: "guild-settings-change",
+  },
+  plan_guild_incident_action_change: {
+    keywords: ["direct message", "disable", "guild", "incident", "invite", "lockdown", "plan", "review"],
+    toolset: "guild-incidents",
+    workflow: "guild-incident-action-change",
   },
   plan_guild_profile_change: {
     keywords: ["description", "guild", "identity", "name", "plan", "profile", "review"],

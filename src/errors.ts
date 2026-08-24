@@ -1131,6 +1131,42 @@ export class WelcomeScreenEvidenceError extends Error {
   override name = "WelcomeScreenEvidenceError"
 }
 
+export class GuildIncidentPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild incident-action snapshot does not match the reviewed plan")
+    this.name = "GuildIncidentPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildIncidentOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild incident-action operation key has already been reserved")
+    this.name = "GuildIncidentOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildIncidentExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildIncidentExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildIncidentEvidenceError extends Error {
+  override name = "GuildIncidentEvidenceError"
+}
+
 export class GuildSettingsPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

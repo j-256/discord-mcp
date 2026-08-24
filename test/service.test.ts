@@ -341,6 +341,7 @@ function serviceFixture(overrides: {
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildBlueprintOptions?: ConnectorServiceOptions["guildBlueprintOptions"]
+  guildIncidentOptions?: ConnectorServiceOptions["guildIncidentOptions"]
   guildProfileOptions?: ConnectorServiceOptions["guildProfileOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
   guildSettingsOptions?: ConnectorServiceOptions["guildSettingsOptions"]
@@ -600,6 +601,9 @@ function serviceFixture(overrides: {
         premium_tier: 0,
       }
     },
+    async getGuildIncidentActions() {
+      throw new Error("Unexpected guild incident-action lookup")
+    },
     async getGuildProfile() {
       throw new Error("Unexpected guild profile lookup")
     },
@@ -772,6 +776,9 @@ function serviceFixture(overrides: {
     },
     async modifyGuildSettings() {
       throw new Error("Unexpected guild-settings change")
+    },
+    async modifyGuildIncidentActions() {
+      throw new Error("Unexpected guild incident-action change")
     },
     async modifyGuildProfile() {
       throw new Error("Unexpected guild profile change")
@@ -1019,6 +1026,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.guildSettingsOptions
         ? { guildSettingsOptions: overrides.guildSettingsOptions }
+        : {}),
+      ...(overrides.guildIncidentOptions
+        ? { guildIncidentOptions: overrides.guildIncidentOptions }
         : {}),
       ...(overrides.guildProfileOptions
         ? { guildProfileOptions: overrides.guildProfileOptions }
@@ -3220,6 +3230,94 @@ test("service pins identity through reviewed guild settings", async () => {
   assert.equal(result.verification, "not-required")
   assert.equal(guildSettingsReads, 3)
   assert.equal(guildSettingsWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through reviewed guild incident actions", async () => {
+  const operationStore = new MemoryOperationStore()
+  let incidentReads = 0
+  let incidentWrites = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildIncidentActions(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        incidentReads += 1
+        return {
+          directMessagesDisabledUntil: null,
+          dmSpamDetected: false,
+          guildId,
+          invitesDisabledUntil: null,
+          ownerId: "700000000000000001",
+          raidDetected: false,
+          sourceAvailable: true,
+          unknownFieldCount: 0,
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD,
+          "@everyone",
+        )]
+      },
+      async modifyGuildIncidentActions() {
+        incidentWrites += 1
+        throw new Error("Unexpected guild incident-action change")
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
+      DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES: "true",
+      DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: GUILD_ID,
+    },
+    guildIncidentOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(61),
+      randomId: () => "activity-guild-incident",
+    },
+    operationStore,
+  })
+  const request = {
+    auditReason: "Reviewed incident state",
+    directMessagesDisabledUntil: null,
+    guildId: GUILD_ID,
+    invitesDisabledUntil: null,
+    operationKey: "guild-incident-service-attempt-0001",
+  }
+
+  await assert.rejects(
+    () => service.getGuildIncidentActions("bad"),
+    /guild incident-action guild ID/,
+  )
+  await assert.rejects(
+    () => service.planGuildIncidentActionChange({ ...request, guildId: "bad" }),
+    /guild incident-action guild ID/,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildIncidentActions(GUILD_ID)
+  const plan = await service.planGuildIncidentActionChange(request)
+  const result = await service.executeGuildIncidentActionChange(
+    request,
+    plan.digest,
+  )
+
+  assert.equal(audit.privacy.detectionTimestamps, "boolean-presence-only")
+  assert.equal(audit.actions.sourceAvailable, true)
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(incidentReads, 3)
+  assert.equal(incidentWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

@@ -43,6 +43,7 @@ export const MCP_TOOLSET_NAMES = [
   "gateway",
   "guild-blueprints",
   "guild-expressions",
+  "guild-incidents",
   "guild-profile",
   "guild-scaffolds",
   "guild-settings",
@@ -101,6 +102,13 @@ export const GUILD_SETTINGS_FIELDS = [
 ] as const
 
 export type GuildSettingsField = typeof GUILD_SETTINGS_FIELDS[number]
+
+export const GUILD_INCIDENT_ACTION_FIELDS = [
+  "directMessages",
+  "invites",
+] as const
+
+export type GuildIncidentActionField = typeof GUILD_INCIDENT_ACTION_FIELDS[number]
 
 export const GUILD_VERIFICATION_LEVELS = [
   "none",
@@ -386,6 +394,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   gatewayEventPage: 100,
   guildProfileGuildAllowlist: 100,
   guildBlueprintPublications: 10,
+  guildIncidentGuildAllowlist: 100,
   guildSettingsGuildAllowlist: 100,
   idempotencyKeyCharacters: 128,
   idempotencyKeyMinimumCharacters: 16,

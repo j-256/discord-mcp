@@ -29,6 +29,7 @@ import {
   type ForumPostActivity,
   type ForumTagActivity,
   type GuildExpressionActivity,
+  type GuildIncidentActivity,
   type GuildProfileActivity,
   type GuildSettingsActivity,
   type GuildTemplateActivity,
@@ -1066,6 +1067,31 @@ function guildSettingsChange(
     operationKeyHash: `sha256:${"e".repeat(64)}`,
     planDigest: `hmac-sha256:${"f".repeat(64)}`,
     requestedFields: ["explicitContentFilter", "verificationLevel"],
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function guildIncidentChange(
+  id: string,
+  status: GuildIncidentActivity["status"],
+): GuildIncidentActivity {
+  return {
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "guild-incident-action-change",
+    operationKeyHash: `sha256:${"0".repeat(64)}`,
+    planDigest: `hmac-sha256:${"9".repeat(64)}`,
+    requestedFields: ["directMessages", "invites"],
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -3257,6 +3283,61 @@ test("JSONL activity log accepts only exact content-free guild-settings evidence
     ],
   )
   assert.doesNotMatch(persisted, /private-audit-reason|private-channel-id|private-setting-value/)
+})
+
+test("JSONL activity log accepts only exact content-free guild-incident evidence", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(guildIncidentChange("1", "pending"))
+  await store.append(guildIncidentChange("2", "completed"))
+  await assert.rejects(
+    store.append({
+      ...guildIncidentChange("3", "completed"),
+      auditReason: "private-audit-reason",
+      directMessagesDisabledUntil: "2026-08-15T00:00:00.000Z",
+      invitesDisabledUntil: "2026-08-15T00:00:00.000Z",
+    } as GuildIncidentActivity),
+    /invalid content-free shape/,
+  )
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildIncidentChange("4", "completed"),
+      requestedFields: ["invites", "directMessages"],
+    })}\n${JSON.stringify({
+      ...guildIncidentChange("5", "completed"),
+      requestedFields: ["privateFutureField"],
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 2)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "requestedFields",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  assert.doesNotMatch(
+    persisted,
+    /private-audit-reason|2026-08-15T00:00:00.000Z/,
+  )
 })
 
 test("JSONL activity log accepts only exact content-free guild-profile evidence", async (context) => {

@@ -340,6 +340,7 @@ async function checkDocumentation(packageJson) {
     "catalog --check --json",
     "config validate ./discord-mcp.json",
     "doctor --config ./discord-mcp.json --online",
+    "incident-response",
     "recipe list",
     "recipe plan guild-builder",
     "recipe apply guild-builder",
@@ -351,6 +352,9 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks additive recipe inspection")
   invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-builder"), "complete reference lacks reviewed recipe application")
   invariant(reference.includes("No recipe removes or disables existing policy"), "complete reference lacks additive-only recipe policy")
+  invariant(reference.includes("## Privacy-minimized guild incident actions and reviewed lockdown changes"), "complete reference lacks reviewed guild incident actions")
+  invariant(reference.includes("does not document `X-Audit-Log-Reason`"), "complete reference lacks the guild incident audit-header boundary")
+  invariant(security.includes("## Guild incident actions"), "security policy lacks reviewed guild incident actions")
   invariant(readme.includes("nonprivileged `GUILDS`-only layout-evidence connection"), "README lacks guild-builder Gateway evidence disclosure")
   invariant(reference.includes("privacy-minimized `GUILDS`-only layout connection"), "complete reference lacks guild-builder Gateway evidence disclosure")
   invariant(security.includes("Gateway evidence requirement"), "security policy lacks recipe Gateway disclosure")

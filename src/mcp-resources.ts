@@ -216,6 +216,8 @@ export function registerDiscordResources(
           "",
           "Guild-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD or exact-owner evidence, complete bounded roles, and continuity-safe channel evidence. It returns only finite named verification, notification, explicit-media, AFK, system-routing, suppression, and presentation settings with names, members, raw payloads, raw numeric enums, raw bitfields, and unknown values omitted. Unknown system bits are presence-only. Reviewed sparse changes require an additional toggle, at least one named field, eligible trusted requested channel references, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried sparse PATCH with an audit-log reason, strict authoritative response validation, and a fresh complete readback. Omitted fields are preserved, an explicit null clears a channel reference, and unknown system bits block only suppression changes. Same-guild uncertain outcomes fail closed, and setting values, channel IDs, names, audit reasons, raw operation keys, and raw payloads are never persisted.",
           "",
+          "Guild incident-action audit requires a separate exact guild allowlist, verified connector identity, complete bounded roles and permissions, exact owner evidence, and an explicit known MANAGE_GUILD or owner authority verdict. It returns exact invite and direct-message disable deadlines, reduces detection timestamps to booleans, counts unknown incident fields, omits names and raw payloads, and persists nothing. Reviewed sparse changes require an additional toggle, at least one exact action, future deadlines no more than 24 hours ahead, a fresh matching keyed plan, signed approval, durable exact-guild coordination, one-shot reservation, pending content-free activity, one non-retried sparse PUT without an undocumented audit header, strict Incidents Data response validation, and a fresh exact readback. Omitted actions are preserved, null clears one action early, the review reason remains local and digest-bound, unrequested controlled-field drift is reported, and ambiguous outcomes quarantine later same-guild changes. Deadlines, detection timestamps, reasons, names, permission evidence, raw operation keys, and raw payloads are never persisted.",
+          "",
           "Guild profile text audit and changes require a separate exact guild scope, verified connector identity, complete bounded role and permission evidence, and exact owner evidence. Audit can report unavailable change authority while returning transient untrusted name and description text plus presence-only media state, with media hashes, role names, and raw payloads omitted. Reviewed sparse changes require exact ownership or MANAGE_GUILD, an additional toggle, at least one exact text field, a fresh matching keyed plan, signed approval, durable guild-settings collection exclusion, a one-shot reservation, pending content-free activity, one non-retried PATCH with an audit-log reason, strict response validation, and a fresh exact readback. Omitted fields and all media are preserved, null explicitly clears the description, empty strings never mean clear, same-guild uncertain outcomes fail closed, and profile text is never persisted or exported.",
           "",
           "Authenticated widget-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD evidence, complete bounded roles, visible channels and their overwrites, and complete authenticated settings evidence. It returns exact enabled and nullable channel state, @everyone visibility and invite-generation capability for the exact selected channel, optional guild-object cross-checks, explicit privacy and public-exposure projections, and unknown-field counts without channel names, invite codes or URLs, member or presence data, or raw payloads. It never calls anonymous widget JSON or image endpoints. Reviewed complete-state replacement requires an additional change toggle, an exact supported direct channel visible to @everyone when one is selected, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried complete PATCH with an audit-log reason, authoritative response validation, and a fresh authenticated readback. A selected channel omitted by Discord fails closed. Enabling the widget or selecting a different non-null channel also requires a separate public-exposure toggle because the Server Profile, widget data, presence-bearing member summaries, and invite generation may become public. Disabling does not prove that the Server Profile returned to Private Profile, so manual restoration may be required. Same-guild uncertain outcomes fail closed, and channel names, audit reasons, channel IDs, raw operation keys, settings payloads, and raw evidence are never persisted.",
@@ -821,6 +823,30 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.getGuildSettings(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildIncidentActions,
+    new ResourceTemplate(MCP_RESOURCE_TEMPLATE_URIS.guildIncidentActions, {
+      list: undefined,
+    }),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Bounded privacy-minimized incident-action audit for one exact separately allowlisted Discord guild. Returns invite and direct-message disable deadlines, boolean-only raid and direct-message-spam detection presence, source availability, unknown-field count, and complete known owner or MANAGE_GUILD evidence. Detection timestamps, guild presentation, role names, raw payloads, and unknown values are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Privacy-minimized Discord guild incident actions",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildIncidentActions(
         templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),

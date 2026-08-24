@@ -74,6 +74,14 @@ import {
   type DiscordGuildProfile,
 } from "./guild-profile.js"
 import {
+  guildIncidentActionsBody,
+  projectGuildIncidentMutationResponse,
+  projectGuildIncidentState,
+  type DiscordGuildIncidentActions,
+  type DiscordGuildIncidentState,
+  type ModifyGuildIncidentActionsInput,
+} from "./guild-incident.js"
+import {
   normalizeDesiredMemberNickname,
   projectMemberNickname,
 } from "./member-nickname.js"
@@ -1409,6 +1417,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_current_user_voice_state",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
+  "get_guild_incident_actions",
   "get_guild_profile",
   "get_forum_tags",
   "get_guild_soundboard_sound",
@@ -1446,6 +1455,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_webhook",
   "modify_stage_instance",
   "modify_guild_onboarding",
+  "modify_guild_incident_actions",
   "modify_guild_profile",
   "modify_guild_channel_positions",
   "modify_guild_role_positions",
@@ -8539,6 +8549,41 @@ export class DiscordClient {
       },
     )
     return projectGuildProfile(response, guildId)
+  }
+
+  async getGuildIncidentActions(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildIncidentState> {
+    assertPositiveSnowflake(guildId, "Discord guild incident-action guild ID")
+    const response = await this.#request<unknown>(
+      "get_guild_incident_actions",
+      `/guilds/${guildId}`,
+      {
+        ...options,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildIncidentState(response, guildId)
+  }
+
+  async modifyGuildIncidentActions(
+    guildId: string,
+    input: ModifyGuildIncidentActionsInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildIncidentActions> {
+    assertPositiveSnowflake(guildId, "Discord guild incident-action guild ID")
+    const response = await this.#request<unknown>(
+      "modify_guild_incident_actions",
+      `/guilds/${guildId}/incident-actions`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: guildIncidentActionsBody(input),
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildIncidentMutationResponse(response)
   }
 
   async modifyGuildProfile(

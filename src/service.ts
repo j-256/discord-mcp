@@ -560,6 +560,18 @@ import {
   normalizeGuildProfileChangeRequest,
 } from "./guild-profile-service.js"
 import type {
+  GuildIncidentActionChangePlan,
+  GuildIncidentActionChangeRequest,
+  GuildIncidentActionChangeResult,
+  GuildIncidentAuditResult,
+  GuildIncidentServiceOptions,
+} from "./guild-incident-service.js"
+import {
+  assertGuildIncidentGetInput,
+  GuildIncidentService,
+  normalizeGuildIncidentActionChangeRequest,
+} from "./guild-incident-service.js"
+import type {
   ThreadCreationPlan,
   ThreadCreationRequest,
   ThreadCreationResult,
@@ -695,6 +707,7 @@ export interface DiscordServiceClient {
   getCurrentUserVoiceState: DiscordClient["getCurrentUserVoiceState"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
+  getGuildIncidentActions: DiscordClient["getGuildIncidentActions"]
   getGuildProfile: DiscordClient["getGuildProfile"]
   getGuildAutoModerationRule: DiscordClient["getGuildAutoModerationRule"]
   getGuildAuditLog: DiscordClient["getGuildAuditLog"]
@@ -757,6 +770,7 @@ export interface DiscordServiceClient {
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
   modifyGuildWidgetSettings: DiscordClient["modifyGuildWidgetSettings"]
   modifyGuildSettings: DiscordClient["modifyGuildSettings"]
+  modifyGuildIncidentActions: DiscordClient["modifyGuildIncidentActions"]
   modifyGuildProfile: DiscordClient["modifyGuildProfile"]
   modifyGuildAutoModerationRule: DiscordClient["modifyGuildAutoModerationRule"]
   modifyGuildEmoji: DiscordClient["modifyGuildEmoji"]
@@ -871,6 +885,10 @@ export interface ConnectorServiceOptions {
   >
   guildExpressionOptions?: Pick<
     GuildExpressionServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildIncidentOptions?: Pick<
+    GuildIncidentServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   guildSettingsOptions?: Pick<
@@ -1115,6 +1133,7 @@ export class ConnectorService {
   readonly #forumTagService: ForumTagService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
+  readonly #guildIncidentService: GuildIncidentService
   readonly #guildProfileService: GuildProfileService
   readonly #guildSettingsService: GuildSettingsService
   readonly #guildTemplateService: GuildTemplateService
@@ -1326,6 +1345,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildSettingsOptions,
+    })
+    this.#guildIncidentService = new GuildIncidentService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildIncidentOptions,
     })
     this.#guildProfileService = new GuildProfileService({
       activityStore: this.#activityStore,
@@ -2046,6 +2072,20 @@ export class ConnectorService {
     assertGuildSettingsGetInput(guildId)
     const identity = await this.#verifyIdentity(options)
     return this.#guildSettingsService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async getGuildIncidentActions(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildIncidentAuditResult> {
+    assertGuildIncidentGetInput(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildIncidentService.get(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -2950,6 +2990,20 @@ export class ConnectorService {
     normalizeGuildSettingsChangeRequest(request)
     const identity = await this.#verifyIdentity(options)
     return this.#guildSettingsService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildIncidentActionChange(
+    request: GuildIncidentActionChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildIncidentActionChangePlan> {
+    normalizeGuildIncidentActionChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildIncidentService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -4860,6 +4914,31 @@ export class ConnectorService {
       planDigest,
       [writeGuildCollectionTarget("guild-settings", request.guildId)],
       () => this.#guildSettingsService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildIncidentActionChange(
+    request: GuildIncidentActionChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildIncidentActionChangeResult> {
+    normalizeGuildIncidentActionChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild incident-action plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "guild-incident-action-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("incident-actions", request.guildId)],
+      () => this.#guildIncidentService.execute(
         identity.application.id,
         identity.bot.id,
         request,

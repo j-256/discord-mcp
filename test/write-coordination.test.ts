@@ -196,6 +196,7 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   const collection = writeGuildCollectionTarget("channels", GUILD_ID)
   const integration = writeResourceTarget("integration", MESSAGE_ID)
   const integrations = writeGuildCollectionTarget("integrations", GUILD_ID)
+  const incidentActions = writeGuildCollectionTarget("incident-actions", GUILD_ID)
   const webhooks = writeGuildCollectionTarget("webhooks", GUILD_ID)
   const applicationEmojis = writeApplicationCollectionTarget(
     "emojis",
@@ -211,6 +212,11 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   assert.deepEqual(integration, { id: MESSAGE_ID, kind: "integration" })
   assert.deepEqual(integrations, {
     collection: "integrations",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  })
+  assert.deepEqual(incidentActions, {
+    collection: "incident-actions",
     guildId: GUILD_ID,
     kind: "guild-collection",
   })
@@ -1028,6 +1034,8 @@ test("concurrent operator resolution publishes one immutable acknowledgement", a
     1,
   )
   assert.deepEqual(await claimFiles(directory), [])
+  assert.deepEqual(await readdir(join(directory, "retired")), [])
+  assert.deepEqual(await readdir(join(directory, "staging")), [])
   const acknowledgement = JSON.parse(await readFile(
     join(directory, "resolutions", CLAIM_ID, "acknowledgement.json"),
     "utf8",

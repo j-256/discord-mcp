@@ -233,6 +233,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildIncidentAuditEnabled: false,
+    guildIncidentChangesEnabled: false,
+    guildIncidentGuildIds: [],
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
@@ -786,6 +789,9 @@ test("configuration and policy require an exact administration guild and protect
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildIncidentAuditEnabled: false,
+    guildIncidentChangesEnabled: false,
+    guildIncidentGuildIds: [],
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
@@ -1400,6 +1406,84 @@ test("configuration and policy isolate reviewed guild settings", () => {
     () => loadConnectorConfig({
       DISCORD_BOT_TOKEN: TOKEN,
       DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS: Array.from(
+        { length: 101 },
+        (_, index) => String(index + 1),
+      ).join(","),
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/,
+  )
+})
+
+test("configuration and policy isolate reviewed guild incident actions", () => {
+  const config = loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: `${GUILD_ID},${OTHER_GUILD_ID}`,
+    DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
+    DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowGuildIncidentAudit, true)
+  assert.equal(config.allowGuildIncidentChanges, true)
+  assert.deepEqual([...config.guildIncidentGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().guildIncidentAuditEnabled, true)
+  assert.equal(policy.describe().guildIncidentChangesEnabled, true)
+  assert.deepEqual(policy.describe().guildIncidentGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildIncidentAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildIncidentChangeable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildIncidentAuditable(OTHER_GUILD_ID),
+    /outside the guild incident-action scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildIncidentAuditable(GUILD_ID),
+    /guild incident-action audit is disabled/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
+    DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: GUILD_ID,
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildIncidentAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildIncidentChangeable(GUILD_ID),
+    /guild incident-action changes are disabled/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.capabilities\.guildIncidentAudit/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.scopes\.guildIncidentGuildIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: OTHER_GUILD_ID,
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.guildIncidentGuildIds must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      DISCORD_BOT_TOKEN: TOKEN,
+      DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: Array.from(
         { length: 101 },
         (_, index) => String(index + 1),
       ).join(","),
@@ -3218,6 +3302,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildExpressionCreationEnabled: false,
     guildExpressionGuildIds: [],
     guildExpressionRootCount: 0,
+    guildIncidentAuditEnabled: false,
+    guildIncidentChangesEnabled: false,
+    guildIncidentGuildIds: [],
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],

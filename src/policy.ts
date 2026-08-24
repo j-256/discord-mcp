@@ -64,6 +64,9 @@ export interface PolicyDescription {
   guildExpressionCreationEnabled: boolean
   guildExpressionGuildIds: string[]
   guildExpressionRootCount: number
+  guildIncidentAuditEnabled: boolean
+  guildIncidentChangesEnabled: boolean
+  guildIncidentGuildIds: string[]
   guildProfileAuditEnabled: boolean
   guildProfileChangesEnabled: boolean
   guildProfileGuildIds: string[]
@@ -233,6 +236,8 @@ export class ScopePolicy {
   readonly #allowGateway: boolean
   readonly #allowGuildExpressionAudit: boolean
   readonly #allowGuildExpressionChanges: boolean
+  readonly #allowGuildIncidentAudit: boolean
+  readonly #allowGuildIncidentChanges: boolean
   readonly #allowGuildProfileAudit: boolean
   readonly #allowGuildProfileChanges: boolean
   readonly #allowGuildScaffolds: boolean
@@ -296,6 +301,7 @@ export class ScopePolicy {
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
   readonly #guildExpressionGuildIds: ReadonlySet<string>
   readonly #guildExpressionRoots: readonly string[]
+  readonly #guildIncidentGuildIds: ReadonlySet<string>
   readonly #guildProfileGuildIds: ReadonlySet<string>
   readonly #guildSettingsGuildIds: ReadonlySet<string>
   readonly #guildTemplateGuildIds: ReadonlySet<string>
@@ -378,6 +384,8 @@ export class ScopePolicy {
     | "allowGateway"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
+    | "allowGuildIncidentAudit"
+    | "allowGuildIncidentChanges"
     | "allowGuildTemplateAudit"
     | "allowGuildTemplateChanges"
     | "allowIntegrationAudit"
@@ -459,6 +467,7 @@ export class ScopePolicy {
     | "guildScaffoldGuildIds"
     | "guildExpressionGuildIds"
     | "guildExpressionRoots"
+    | "guildIncidentGuildIds"
     | "guildProfileGuildIds"
     | "guildSettingsGuildIds"
     | "guildTemplateGuildIds"
@@ -556,6 +565,8 @@ export class ScopePolicy {
     this.#allowGateway = config.allowGateway ?? false
     this.#allowGuildExpressionAudit = config.allowGuildExpressionAudit ?? false
     this.#allowGuildExpressionChanges = config.allowGuildExpressionChanges ?? false
+    this.#allowGuildIncidentAudit = config.allowGuildIncidentAudit ?? false
+    this.#allowGuildIncidentChanges = config.allowGuildIncidentChanges ?? false
     this.#allowGuildProfileAudit = config.allowGuildProfileAudit ?? false
     this.#allowGuildProfileChanges = config.allowGuildProfileChanges ?? false
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
@@ -622,6 +633,7 @@ export class ScopePolicy {
     this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
     this.#guildExpressionGuildIds = config.guildExpressionGuildIds ?? new Set()
     this.#guildExpressionRoots = config.guildExpressionRoots ?? []
+    this.#guildIncidentGuildIds = config.guildIncidentGuildIds ?? new Set()
     this.#guildProfileGuildIds = config.guildProfileGuildIds ?? new Set()
     this.#guildSettingsGuildIds = config.guildSettingsGuildIds ?? new Set()
     this.#guildTemplateGuildIds = config.guildTemplateGuildIds ?? new Set()
@@ -757,6 +769,12 @@ export class ScopePolicy {
         && this.#guildExpressionRoots.length > 0,
       guildExpressionGuildIds: [...this.#guildExpressionGuildIds].sort(),
       guildExpressionRootCount: this.#guildExpressionRoots.length,
+      guildIncidentAuditEnabled: this.#allowGuildIncidentAudit
+        && this.#guildIncidentGuildIds.size > 0,
+      guildIncidentChangesEnabled: this.#allowGuildIncidentAudit
+        && this.#allowGuildIncidentChanges
+        && this.#guildIncidentGuildIds.size > 0,
+      guildIncidentGuildIds: [...this.#guildIncidentGuildIds].sort(),
       guildProfileAuditEnabled: this.#allowGuildProfileAudit
         && this.#guildProfileGuildIds.size > 0,
       guildProfileChangesEnabled: this.#allowGuildProfileAudit
@@ -1110,6 +1128,26 @@ export class ScopePolicy {
     }
     if (!this.#guildSettingsGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the guild-settings scope`)
+    }
+  }
+
+  assertGuildIncidentAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowGuildIncidentAudit) {
+      throw new PolicyError("Discord guild incident-action audit is disabled by connector configuration")
+    }
+    if (this.#guildIncidentGuildIds.size === 0) {
+      throw new PolicyError("Discord guild incident-action audit requires an explicit guild allowlist")
+    }
+    if (!this.#guildIncidentGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the guild incident-action scope`)
+    }
+  }
+
+  assertGuildIncidentChangeable(guildId: string): void {
+    this.assertGuildIncidentAuditable(guildId)
+    if (!this.#allowGuildIncidentChanges) {
+      throw new PolicyError("Discord guild incident-action changes are disabled by connector configuration")
     }
   }
 

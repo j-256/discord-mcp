@@ -107,6 +107,14 @@
           "type": "boolean",
           "description": "Enable guild expression changes policy"
         },
+        "guildIncidentAudit": {
+          "type": "boolean",
+          "description": "Enable guild incident audit policy"
+        },
+        "guildIncidentChanges": {
+          "type": "boolean",
+          "description": "Enable guild incident changes policy"
+        },
         "guildProfileAudit": {
           "type": "boolean",
           "description": "Enable guild profile audit policy"
@@ -894,6 +902,16 @@
           },
           "description": "Exact Discord ID allowlist for guild expression guild ids"
         },
+        "guildIncidentGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact Discord ID allowlist for guild incident guild ids"
+        },
         "guildProfileGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1365,7 +1383,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 55,
+          "maxItems": 56,
           "type": "array",
           "items": {
             "type": "string",
@@ -1390,6 +1408,7 @@
               "gateway",
               "guild-blueprints",
               "guild-expressions",
+              "guild-incidents",
               "guild-profile",
               "guild-scaffolds",
               "guild-settings",

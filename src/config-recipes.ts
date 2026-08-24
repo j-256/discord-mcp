@@ -48,6 +48,7 @@ const CONFIG_RECIPE_PLAN_FORMAT = "discord-mcp.config-recipe-plan.v1"
 export const CONFIG_RECIPE_NAMES = Object.freeze([
   "guild-builder",
   "channel-publisher",
+  "incident-response",
 ] as const)
 
 export type ConfigRecipeName = typeof CONFIG_RECIPE_NAMES[number]
@@ -263,6 +264,36 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     warnings: [
       "Mentions remain suppressed unless exact notification users are configured separately and visibly referenced in the reviewed message",
       "A newly scaffolded publication channel must be added after its exact Discord ID is known",
+    ],
+  },
+  {
+    botPermissions: [
+      "MANAGE_GUILD",
+    ],
+    capabilities: [
+      "guildIncidentAudit",
+      "guildIncidentChanges",
+    ],
+    description: "Add exact-guild privacy-minimized incident-action audit plus reviewed invite and member direct-message lockdown or early clearing.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "incident-response",
+    privilegedIntents: [],
+    risks: [
+      "Disabling invites or member direct messages can disrupt legitimate guild activity",
+      "Clearing an incident action early can re-enable an abused surface before Discord's existing deadline",
+    ],
+    scope: {
+      kind: "guild",
+      names: ["guildIncidentGuildIds"],
+    },
+    toolsets: ["guild-incidents"],
+    warnings: [
+      "Every change requires exact known owner or MANAGE_GUILD evidence, a fresh keyed plan, signed approval, pending content-free evidence, one non-retried PUT, and exact readback",
+      "Discord documents a maximum 24-hour future deadline and does not document an audit-log reason header for this endpoint, so the human reason remains local review context only",
     ],
   },
 ] as const satisfies readonly ConfigRecipeSource[])

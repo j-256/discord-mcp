@@ -16,6 +16,7 @@ import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   FORUM_TAG_ACTIONS,
+  GUILD_INCIDENT_ACTION_FIELDS,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
@@ -30,6 +31,7 @@ import {
   THREAD_CREATION_MODES,
   type ChannelCreationKind,
   type ForumTagAction,
+  type GuildIncidentActionField,
   type GuildProfileField,
   type GuildSettingsField,
   type MemberModerationAction,
@@ -78,6 +80,19 @@ const GUILD_SETTINGS_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "verification",
 ])
 const GUILD_PROFILE_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "requestedFields",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+])
+const GUILD_INCIDENT_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "error",
   "guildId",
   "id",
@@ -927,6 +942,27 @@ export interface GuildProfileActivity {
   verification: "drift" | "match" | null
 }
 
+export type GuildIncidentActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildIncidentActivity {
+  error: string | null
+  guildId: string
+  id: string
+  kind: "guild-incident-action-change"
+  operationKeyHash: string
+  planDigest: string
+  requestedFields: GuildIncidentActionField[]
+  schemaVersion: number
+  status: GuildIncidentActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ScheduledEventActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1184,6 +1220,7 @@ export type ActivityEntry =
   | ForumPostActivity
   | ForumTagActivity
   | GuildExpressionActivity
+  | GuildIncidentActivity
   | GuildProfileActivity
   | GuildSettingsActivity
   | GuildTemplateActivity
@@ -4238,6 +4275,78 @@ function parseGuildProfileActivity(
   }
 }
 
+function parseGuildIncidentActivity(
+  value: unknown,
+): GuildIncidentActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const fields = Array.isArray(record.requestedFields)
+    ? record.requestedFields
+    : []
+  const status = String(record.status)
+  if (
+    Object.keys(record).length !== GUILD_INCIDENT_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !GUILD_INCIDENT_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-incident-action-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || fields.length < 1
+    || fields.length > GUILD_INCIDENT_ACTION_FIELDS.length
+    || fields.some((field) => (
+      typeof field !== "string"
+      || !(GUILD_INCIDENT_ACTION_FIELDS as readonly string[]).includes(field)
+    ))
+    || new Set(fields).size !== fields.length
+    || JSON.stringify(fields) !== JSON.stringify([...fields].sort())
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (status === "completed-with-drift" && (
+      record.error !== null || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "guild-incident-action-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    requestedFields: fields as GuildIncidentActionField[],
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GuildIncidentActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
 function parseAutoModerationActivity(
   value: unknown,
 ): AutoModerationActivity | undefined {
@@ -4751,6 +4860,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)
     || parseWelcomeScreenActivity(value)
+    || parseGuildIncidentActivity(value)
     || parseGuildProfileActivity(value)
     || parseGuildSettingsActivity(value)
     || parseWidgetSettingsActivity(value)

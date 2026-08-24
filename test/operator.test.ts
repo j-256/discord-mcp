@@ -59,6 +59,8 @@ const FIXTURE_ENVIRONMENT_NAMES = Object.freeze({
   allowGateway: "DISCORD_MCP_ALLOW_GATEWAY",
   allowGuildProfileAudit: "DISCORD_MCP_ALLOW_GUILD_PROFILE_AUDIT",
   allowGuildProfileChanges: "DISCORD_MCP_ALLOW_GUILD_PROFILE_CHANGES",
+  allowGuildIncidentAudit: "DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT",
+  allowGuildIncidentChanges: "DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES",
   allowGuildSettingsAudit: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_AUDIT",
   allowGuildSettingsChanges: "DISCORD_MCP_ALLOW_GUILD_SETTINGS_CHANGES",
   allowIntegrationAudit: "DISCORD_MCP_ALLOW_INTEGRATION_AUDIT",
@@ -74,6 +76,7 @@ const FIXTURE_ENVIRONMENT_NAMES = Object.freeze({
   deleteChannelIds: "DISCORD_MCP_DELETE_CHANNEL_IDS",
   gatewayEventBufferSize: "DISCORD_MCP_GATEWAY_EVENT_BUFFER_SIZE",
   guildProfileGuildIds: "DISCORD_MCP_GUILD_PROFILE_GUILD_IDS",
+  guildIncidentGuildIds: "DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS",
   guildSettingsGuildIds: "DISCORD_MCP_GUILD_SETTINGS_GUILD_IDS",
   integrationGuildIds: "DISCORD_MCP_INTEGRATION_GUILD_IDS",
   integrationIds: "DISCORD_MCP_INTEGRATION_IDS",
@@ -246,6 +249,9 @@ function status(
       guildExpressionCreationEnabled: false,
       guildExpressionGuildIds: [],
       guildExpressionRootCount: 0,
+      guildIncidentAuditEnabled: false,
+      guildIncidentChangesEnabled: false,
+      guildIncidentGuildIds: [],
       guildProfileAuditEnabled: false,
       guildProfileChangesEnabled: false,
       guildProfileGuildIds: [],
@@ -414,6 +420,7 @@ function toolService(): DiscordToolService {
     executeWelcomeScreenChange: unexpected,
     executeWidgetSettingsChange: unexpected,
     executeGuildSettingsChange: unexpected,
+    executeGuildIncidentActionChange: unexpected,
     executeGuildProfileChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
@@ -447,6 +454,7 @@ function toolService(): DiscordToolService {
     getGuildWelcomeScreen: unexpected,
     getGuildWidgetSettings: unexpected,
     getGuildSettings: unexpected,
+    getGuildIncidentActions: unexpected,
     getGuildProfile: unexpected,
     listChannelWebhooks: unexpected,
     listAnnouncementSubscriptions: unexpected,
@@ -471,6 +479,7 @@ function toolService(): DiscordToolService {
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildSettingsChange: unexpected,
+    planGuildIncidentActionChange: unexpected,
     planGuildProfileChange: unexpected,
     planGuildExpressionChange: unexpected,
     planApplicationEmojiChange: unexpected,
@@ -2027,6 +2036,67 @@ test("doctor and setup explain privacy-minimized reviewed guild settings", async
     assert.equal(setup.launch.environment.forward.includes(name), false)
   }
   assert.doesNotMatch(JSON.stringify(enabled), /guild name|channel name|audit reason/u)
+})
+
+test("doctor and setup explain privacy-minimized reviewed guild incident actions", async () => {
+  const enabledEnvironment = environment({
+    DISCORD_MCP_ALLOW_GUILD_INCIDENT_AUDIT: "true",
+    DISCORD_MCP_ALLOW_GUILD_INCIDENT_CHANGES: "true",
+    DISCORD_MCP_GUILD_INCIDENT_GUILD_IDS: GUILD_ID,
+  })
+  const enabled = await diagnoseConnector({
+    environment: enabledEnvironment,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    environment: environment(),
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    environment: enabledEnvironment,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    environment: {
+      ...enabledEnvironment,
+      DISCORD_MCP_TOOLSETS: "connector",
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildIncidentAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildIncidentChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /boolean-only detection evidence/)
+  assert.match(audit?.summary || "", /unknown-field counts/)
+  assert.match(audit?.summary || "", /MANAGE_GUILD authority/)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /sparse 24-hour review/)
+  assert.match(change?.summary || "", /local-only reason binding/)
+  assert.match(change?.summary || "", /non-retried one-shot execution/)
+  assert.match(change?.summary || "", /strict response plus fresh readback/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.guildIncidentAuditPolicy,
+    )?.summary || "",
+    /audit is disabled/,
+  )
+  assert.match(omitted.warnings.join("\n"), /guild-incidents toolset/)
+  for (const name of [
+    FIXTURE_ENVIRONMENT_NAMES.allowGuildIncidentAudit,
+    FIXTURE_ENVIRONMENT_NAMES.allowGuildIncidentChanges,
+    FIXTURE_ENVIRONMENT_NAMES.guildIncidentGuildIds,
+  ]) {
+    assert.equal(setup.launch.environment.forward.includes(name), false)
+  }
+  assert.doesNotMatch(
+    JSON.stringify(enabled),
+    /detection timestamp|disabled-until value|audit reason/u,
+  )
 })
 
 test("doctor and setup explain transient reviewed guild profile text", async () => {
@@ -4406,6 +4476,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_forum_tag_change",
     "review_guild_blueprint",
     "review_guild_expression_change",
+    "review_guild_incident_action_change",
     "review_guild_integration_deletion",
     "review_guild_profile_change",
     "review_guild_scaffold",
@@ -4471,6 +4542,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
     "discord://guilds/{guildId}/channels/{channelId}/voice-status",
     "discord://guilds/{guildId}/emojis",
+    "discord://guilds/{guildId}/incident-actions",
     "discord://guilds/{guildId}/integrations",
     "discord://guilds/{guildId}/invites/{inviteRef}",
     "discord://guilds/{guildId}/members/{userId}",
@@ -4509,6 +4581,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_forum_tag_change",
     "execute_guild_blueprint",
     "execute_guild_expression_change",
+    "execute_guild_incident_action_change",
     "execute_guild_integration_deletion",
     "execute_guild_profile_change",
     "execute_guild_settings_change",

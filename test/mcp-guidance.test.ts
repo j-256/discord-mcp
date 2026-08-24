@@ -177,6 +177,7 @@ interface GuidanceCalls {
   forumTags: number
   guilds: number
   guildExpressions: number
+  guildIncidents: number
   guildProfiles: number
   guildSettings: number
   guildVoiceRegions: number
@@ -234,6 +235,7 @@ function guidanceService(options: {
     forumTags: 0,
     guilds: 0,
     guildExpressions: 0,
+    guildIncidents: 0,
     guildProfiles: 0,
     guildSettings: 0,
     guildVoiceRegions: 0,
@@ -1380,6 +1382,60 @@ function guidanceService(options: {
         },
       }
     },
+    async getGuildIncidentActions(guildId) {
+      calls.guildIncidents += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        actions: {
+          directMessagesDisabledUntil: null,
+          dmSpamDetected: true,
+          invitesDisabledUntil: "2026-08-25T11:00:00.000Z",
+          raidDetected: true,
+          sourceAvailable: true,
+          unknownFieldCount: 0,
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guildId,
+        localConstraints: {
+          auditReasonDisposition: "local-review-only" as const,
+          guildAllowlist: 100,
+          maximumDisableDurationMs: 86_400_000,
+          supportedFields: ["directMessages", "invites"] as Array<"directMessages" | "invites">,
+        },
+        privacy: {
+          auditReason: "digest-bound-not-persisted" as const,
+          detectionTimestamps: "boolean-presence-only" as const,
+          guildPresentation: "omitted" as const,
+          incidentActionValues: "transient-untrusted" as const,
+          persistence: "content-free-records-only" as const,
+          rawPayloads: "omitted" as const,
+          roleNames: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        verificationBoundary: {
+          auditLogReasonHeader: false as const,
+          automaticRetry: false as const,
+          freshApiReadback: true as const,
+          mutationResponse: true as const,
+          rollback: "not-automatic" as const,
+        },
+      }
+    },
     async getGuildProfile(guildId) {
       calls.guildProfiles += 1
       calls.lastGuildId = guildId
@@ -1868,7 +1924,9 @@ function guidanceService(options: {
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildSettingsChange: unexpected,
+    planGuildIncidentActionChange: unexpected,
     planGuildProfileChange: unexpected,
+    executeGuildIncidentActionChange: unexpected,
     auditChannelRoleAccess: unexpected,
     deleteMessages: unexpected,
     describePolicy() {
@@ -1927,6 +1985,9 @@ function guidanceService(options: {
         guildExpressionCreationEnabled: false,
         guildExpressionGuildIds: [],
         guildExpressionRootCount: 0,
+        guildIncidentAuditEnabled: false,
+        guildIncidentChangesEnabled: false,
+        guildIncidentGuildIds: [],
         guildProfileAuditEnabled: false,
         guildProfileChangesEnabled: false,
         guildProfileGuildIds: [],
@@ -2637,6 +2698,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.forumTags
     + calls.guilds
     + calls.guildExpressions
+    + calls.guildIncidents
     + calls.guildProfiles
     + calls.guildSettings
     + calls.guildVoiceRegions
@@ -2816,6 +2878,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildEmojis,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildEmojis,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildIncidentActions,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildIncidentActions,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildIntegrations,
@@ -3599,6 +3665,20 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   )
   assert.doesNotMatch(guildSettings.text, /system_channel_flags|Private guild/u)
 
+  const guildIncidents = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/incident-actions`,
+  )
+  const guildIncidentData = guildIncidents.value.data as Record<string, unknown>
+  const guildIncidentPrivacy = guildIncidentData.privacy as Record<string, unknown>
+  const guildIncidentActions = guildIncidentData.actions as Record<string, unknown>
+  assert.equal(guildIncidentPrivacy.detectionTimestamps, "boolean-presence-only")
+  assert.equal(guildIncidentPrivacy.rawPayloads, "omitted")
+  assert.equal(guildIncidentActions.raidDetected, true)
+  assert.equal(guildIncidentActions.dmSpamDetected, true)
+  assert.equal("raidDetectedAt" in guildIncidentActions, false)
+  assert.doesNotMatch(guildIncidents.text, /private-role|raid_detected_at/u)
+
   const guildProfile = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/profile`,
@@ -3709,6 +3789,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.welcomeScreens, 1)
   assert.equal(calls.widgetSettings, 1)
   assert.equal(calls.guildSettings, 1)
+  assert.equal(calls.guildIncidents, 1)
   assert.equal(calls.guildProfiles, 1)
   assert.equal(calls.automod, 1)
   assert.equal(calls.channels, 1)
@@ -4342,6 +4423,25 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildSettings, /requested and changed fields/)
   assert.match(guildSettings, /unknown-bit boundary/)
   assert.match(guildSettings, /uncertain same-guild predecessor/)
+
+  const guildIncidentRequest = {
+    auditReason: "Reviewed temporary incident lockdown",
+    guildId: GUILD_ID,
+    invitesDisabledUntil: "2026-08-25T11:00:00.000Z",
+    operationKey: OPERATION_KEY,
+  }
+  const guildIncident = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(guildIncidentRequest) },
+    name: MCP_PROMPT_NAMES.reviewGuildIncidentActionChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(guildIncident.split("\n")[1] || ""),
+    guildIncidentRequest,
+  )
+  assert.match(guildIncident, /Call only plan_guild_incident_action_change/)
+  assert.match(guildIncident, /Do not call execute_guild_incident_action_change/)
+  assert.match(guildIncident, /presence-only raid and direct-message-spam detection/)
+  assert.match(guildIncident, /more-than-24-hour deadline/)
 
   const guildProfileRequest = {
     auditReason: "Reviewed public guild presentation",
@@ -5131,6 +5231,51 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed temporary incident lockdown",
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildIncidentActionChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed temporary incident lockdown",
+          guildId: GUILD_ID,
+          invitesDisabledUntil: null,
+          operationKey: OPERATION_KEY,
+          raidDetectedAt: "2026-08-25T11:00:00.000Z",
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildIncidentActionChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed temporary incident lockdown",
+          directMessagesDisabledUntil: "tomorrow",
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildIncidentActionChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          auditReason: "Reviewed temporary incident lockdown",
+          guildId: GUILD_ID,
+          invitesDisabledUntil: null,
+          operationKey: OPERATION_KEY,
+          planDigest: "execute-only",
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildIncidentActionChange,
+    },
     {
       arguments: {
         requestJson: JSON.stringify({
