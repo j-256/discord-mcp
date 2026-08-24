@@ -2972,6 +2972,58 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
   assert.equal(totalCalls(calls), 0)
 })
 
+test("MCP guidance completes exact configured IDs without service calls", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const [guild, channel, invalid, unbound] = await Promise.all([
+    client.complete({
+      argument: { name: "guildId", value: "100" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+      },
+    }),
+    client.complete({
+      argument: { name: "channelId", value: "200" },
+      ref: {
+        name: MCP_PROMPT_NAMES.summarizeChannel,
+        type: "ref/prompt",
+      },
+    }),
+    client.complete({
+      argument: { name: "channelId", value: "not-an-id" },
+      ref: {
+        name: MCP_PROMPT_NAMES.summarizeChannel,
+        type: "ref/prompt",
+      },
+    }),
+    client.complete({
+      argument: { name: "messageId", value: "300" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.exactMessage,
+      },
+    }),
+  ])
+
+  assert.deepEqual(guild.completion, {
+    hasMore: false,
+    total: 1,
+    values: [GUILD_ID],
+  })
+  assert.deepEqual(channel.completion, {
+    hasMore: false,
+    total: 1,
+    values: [CHANNEL_ID],
+  })
+  assert.deepEqual(invalid.completion.values, [])
+  assert.notEqual(invalid.completion.hasMore, true)
+  assert.deepEqual(unbound.completion.values, [])
+  assert.notEqual(unbound.completion.hasMore, true)
+  assert.deepEqual(client.getServerCapabilities()?.completions, {})
+  assert.equal(totalCalls(calls), 0)
+})
+
 test("MCP local resources expose safety, policy, and content-free activity without secrets", async (context) => {
   const { calls, client } = await connectedFixture(context)
 

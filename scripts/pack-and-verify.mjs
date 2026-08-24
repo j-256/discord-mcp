@@ -237,8 +237,11 @@ import * as connector from "@j-256/discord-mcp"
 
 const DISCOVERY_TOOL_NAME = "discover_discord_tools"
 const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
+const REVIEW_MESSAGE_DELETION_PROMPT = "review_message_deletion"
 const PROFILE_NAME = "installed-profile"
 const PROFILE_TOKEN_VARIABLE = "DISCORD_INSTALLED_BOT_TOKEN"
+const GUILD_ID = "300000000000000001"
+const CHANNEL_ID = "400000000000000001"
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
@@ -266,10 +269,11 @@ assert.equal(typeof connector.createBotInstallPlan, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
   botId: "200000000000000001",
-  channelIds: ["400000000000000001"],
+  channelIds: [CHANNEL_ID],
   credentialVariable: PROFILE_TOKEN_VARIABLE,
-  guildIds: ["300000000000000001"],
+  guildIds: [GUILD_ID],
   name: PROFILE_NAME,
+  scopes: { deleteChannelIds: [CHANNEL_ID] },
   toolsets: ["deletion"],
   toolSurface: "progressive",
 }))
@@ -291,6 +295,12 @@ try {
   assert.ok(resources.resources.length > 0)
   assert.ok(templates.resourceTemplates.length > 0)
   assert.ok(prompts.prompts.length > 0)
+  assert.deepEqual(catalogClient.getServerCapabilities().completions, {})
+  const catalogCompletion = await catalogClient.complete({
+    argument: { name: "guildId", value: "" },
+    ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
+  })
+  assert.deepEqual(catalogCompletion.completion.values, [])
   const listedGuard = await catalogClient.callTool({
     arguments: {},
     name: "read_messages",
@@ -306,6 +316,30 @@ try {
   assert.equal(catalogSafety.contents.length, 1)
 } finally {
   await catalogClient.close().catch(() => undefined)
+}
+const modernCatalogTransport = new StdioClientTransport({
+  command: process.execPath,
+  args: [entrypoint, "catalog"],
+  env: {},
+})
+const modernCatalogClient = new Client(
+  { name: "installed-modern-catalog-verifier", version: "1.0.0" },
+  {
+    capabilities: {},
+    versionNegotiation: { mode: { pin: "2026-07-28" } },
+  },
+)
+try {
+  await modernCatalogClient.connect(modernCatalogTransport)
+  const completion = await modernCatalogClient.complete({
+    argument: { name: "channelId", value: "" },
+    ref: { name: "summarize_channel", type: "ref/prompt" },
+  })
+  assert.equal(modernCatalogClient.getProtocolEra(), "modern")
+  assert.deepEqual(modernCatalogClient.getServerCapabilities().completions, {})
+  assert.deepEqual(completion.completion.values, [])
+} finally {
+  await modernCatalogClient.close().catch(() => undefined)
 }
 const operationalEnvironment = {
   ...getDefaultEnvironment(),
@@ -330,6 +364,19 @@ try {
   assert.ok(resources.resources.length > 0)
   assert.ok(templates.resourceTemplates.length > 0)
   assert.ok(prompts.prompts.length > 0)
+  assert.deepEqual(client.getServerCapabilities().completions, {})
+  const [guildCompletion, channelCompletion] = await Promise.all([
+    client.complete({
+      argument: { name: "guildId", value: "300" },
+      ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
+    }),
+    client.complete({
+      argument: { name: "channelId", value: "400" },
+      ref: { name: REVIEW_MESSAGE_DELETION_PROMPT, type: "ref/prompt" },
+    }),
+  ])
+  assert.deepEqual(guildCompletion.completion.values, [GUILD_ID])
+  assert.deepEqual(channelCompletion.completion.values, [CHANNEL_ID])
   const discovery = await client.callTool({
     arguments: { query: REVIEWED_DELETION_TOOLS[0] },
     name: DISCOVERY_TOOL_NAME,
@@ -349,6 +396,30 @@ try {
   assert.match(safety.contents[0].text, /review-first workflows/)
 } finally {
   await client.close().catch(() => undefined)
+}
+const modernTransport = new StdioClientTransport({
+  command: process.execPath,
+  args: [entrypoint, "serve", "--profile", PROFILE_NAME],
+  env: operationalEnvironment,
+})
+const modernClient = new Client(
+  { name: "installed-modern-package-verifier", version: "1.0.0" },
+  {
+    capabilities: {},
+    versionNegotiation: { mode: { pin: "2026-07-28" } },
+  },
+)
+try {
+  await modernClient.connect(modernTransport)
+  const completion = await modernClient.complete({
+    argument: { name: "guildId", value: "300" },
+    ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
+  })
+  assert.equal(modernClient.getProtocolEra(), "modern")
+  assert.deepEqual(modernClient.getServerCapabilities().completions, {})
+  assert.deepEqual(completion.completion.values, [GUILD_ID])
+} finally {
+  await modernClient.close().catch(() => undefined)
 }
 `
 
@@ -515,6 +586,38 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   invariant(catalog.gateway === "disabled", "installed catalog enabled the Gateway")
   invariant(catalog.observabilityExport === "disabled", "installed catalog enabled telemetry export")
   invariant(catalog.activityRecordsCreated === false, "installed catalog created activity records")
+  invariant(
+    Number.isSafeInteger(catalog.completionBindingCount)
+      && catalog.completionBindingCount > 0,
+    "installed catalog completion binding count is invalid",
+  )
+  invariant(
+    catalog.completionCatalogValuesExposed === false,
+    "installed catalog exposed completion identifiers",
+  )
+  invariant(
+    Array.isArray(catalog.completionBindings)
+      && catalog.completionBindings.length === catalog.completionBindingCount,
+    "installed catalog completion manifest does not match its count",
+  )
+  const completionKeys = []
+  for (const completion of catalog.completionBindings) {
+    invariant(
+      completion
+        && (completion.kind === "prompt" || completion.kind === "resource-template")
+        && typeof completion.reference === "string"
+        && completion.reference.length > 0
+        && typeof completion.argument === "string"
+        && completion.argument.length > 0,
+      "installed catalog contains an invalid completion binding",
+    )
+    assertSortedUniqueStrings(
+      completion.policyFields,
+      `installed completion ${completion.reference} ${completion.argument} policy fields`,
+    )
+    completionKeys.push(`${completion.kind}:${completion.reference}:${completion.argument}`)
+  }
+  assertSortedUniqueStrings(completionKeys, "installed completion binding inventory")
   for (const name of [
     "toolCount",
     "promptCount",
@@ -578,10 +681,18 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   )
   const catalogHtml = firstCatalogHtmlBytes.toString("utf8")
   invariant(catalogHtml.includes(CATALOG_HTML_FORMAT), "installed catalog HTML format changed")
+  invariant(catalogHtml.includes('id="completions"'), "installed catalog HTML omitted completions")
   invariant(catalogHtml.includes(catalog.contractDigest), "installed catalog HTML contract digest changed")
   invariant(catalogHtml.includes(catalog.safetyResourceDigest), "installed catalog HTML safety digest changed")
   for (const toolName of catalog.toolNames) {
     invariant(catalogHtml.includes(`id="tool-${toolName}"`), `installed catalog HTML omitted ${toolName}`)
+  }
+  for (const completion of catalog.completionBindings) {
+    invariant(
+      catalogHtml.includes(completion.reference)
+        && catalogHtml.includes(completion.argument),
+      `installed catalog HTML omitted completion ${completion.reference} ${completion.argument}`,
+    )
   }
   invariant(!catalogHtml.includes(DUMMY_TOKEN), "installed catalog HTML captured an ambient secret")
   invariant(

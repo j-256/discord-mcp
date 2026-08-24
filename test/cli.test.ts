@@ -179,6 +179,14 @@ function smokeReport(): SmokeReport {
 function catalogReport(): DiscordCatalogCheckReport {
   return {
     activityRecordsCreated: false,
+    completionBindingCount: 1,
+    completionBindings: [{
+      argument: "channelId",
+      kind: "resource-template",
+      policyFields: ["allowedChannelIds"],
+      reference: "discord://channels/{channelId}",
+    }],
+    completionCatalogValuesExposed: false,
     contractDigest: `sha256:${"a".repeat(64)}`,
     credentialsRequired: false,
     discordExecution: "disabled",

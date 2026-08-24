@@ -50,6 +50,9 @@ test("catalog HTML renders the exact negotiated contract as one offline explorer
   assert.match(html, /id="toolset-filter"/)
   assert.match(html, /id="risk-filter"/)
   assert.match(html, /id="workflow-filter"/)
+  assert.match(html, /id="completions"/)
+  assert.match(html, /Policy completion routes/)
+  assert.match(html, /zero returned identifiers/)
   assert.match(html, /role="status" aria-live="polite"/)
   assert.match(html, /<pre tabindex="0">/)
   assert.match(html, /prefers-reduced-motion/)
@@ -72,6 +75,13 @@ test("catalog HTML renders the exact negotiated contract as one offline explorer
   }
   for (const template of snapshot.resourceTemplates) {
     assert.ok(html.includes(escaped(template.uriTemplate)), template.uriTemplate)
+  }
+  for (const completion of snapshot.report.completionBindings) {
+    assert.ok(html.includes(escaped(completion.reference)), completion.reference)
+    assert.ok(html.includes(escaped(completion.argument)), completion.argument)
+    for (const field of completion.policyFields) {
+      assert.ok(html.includes(escaped(field)), field)
+    }
   }
 })
 

@@ -45,9 +45,9 @@ npx --yes @j-256/discord-mcp@0.1.0 catalog --html ./discord-mcp-contract.html
 npx --yes @j-256/discord-mcp@0.1.0 preset show server-observer
 ```
 
-`catalog --check` launches a credential-free, execution-disabled MCP server, negotiates its real tools, prompts, resources, and templates, and verifies that every tool call is blocked by the catalog-only guard.
+`catalog --check` launches a credential-free, execution-disabled MCP server, negotiates its real tools, prompts, resources, templates, and completion capability, verifies every policy-completion route with zero returned identifiers, and verifies that every tool call is blocked by the catalog-only guard.
 
-`catalog --html FILE` writes a deterministic standalone explorer for that same negotiated contract. Open it locally to search and filter every tool, inspect exact input and output schemas, review prompts and resources, and compare the embedded contract and safety digests. The export contains no credential or external asset, makes no network request, and refuses to replace an existing file.
+`catalog --html FILE` writes a deterministic standalone explorer for that same negotiated contract. Open it locally to search and filter every tool, inspect exact input and output schemas, review prompts, resources, and policy-completion routes, and compare the embedded contract and safety digests. The export contains no credential or identifier completion value, uses no external asset, makes no network request, and refuses to replace an existing file.
 
 The exact release image exposes the same safe catalog without a token and defaults to catalog mode instead of operational service:
 
@@ -163,7 +163,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | Guild structure | Privacy-minimized two-pass capture into caller-retained declarative guild blueprints across additive structure, guild profile, named settings, complete Welcome Screens, complete onboarding, and ordered restart-verifiable static Components V2 publications; additive channels and roles; reviewed exact channel and standard-role retirement; resumable scaffolds; atomic channel cloning; relative channel and role ordering; boost-aware voice and Stage channel metadata; connection-sensitive voice-channel status changes; permission overwrites; forum tags; and exact role configuration with reviewed local or Unicode icons |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, time-bounded incident actions, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
-| Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
+| Operations | Full or progressive tool discovery, resources, prompts, policy-aware exact-ID completion, strict non-secret policy files and managed profiles, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).
 
@@ -198,8 +198,8 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 
 | Command | What it proves | Discord access |
 | --- | --- | --- |
-| `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, fixed execution guard, and stable contract plus safety digests | None |
-| `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, instructions, resources, and safety guidance | None |
+| `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, policy-completion manifest and zero-value catalog proof, fixed execution guard, and stable contract plus safety digests | None |
+| `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, completion routes, instructions, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID --json` | Fixed-origin, guild-locked bot authorization URL, exact permission bitfield, intent guidance, and post-install commands | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
@@ -212,7 +212,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
 | `npm run security:check` | Dependency vulnerabilities, registry signatures, and attestations | Public package registry only |
 
-`catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, tool schemas and annotations, prompt declarations, resource declarations, templates, safety response, and execution guard.
+`catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, policy-completion bindings, tool schemas and annotations, prompt declarations, resource declarations, templates, safety response, and execution guard.
 
 The release workflow rebuilds candidates from source, packs them twice, installs them without lifecycle scripts, compares them across supported Node.js lines, builds an exact-version multi-architecture OCI image, tests the image under a read-only root filesystem with no capabilities or network, generates an SPDX SBOM, and retains signed provenance, SBOM, and catalog attestations. The [release runbook](docs/releasing.md) documents the human-controlled publication gates and independent verification path.
 

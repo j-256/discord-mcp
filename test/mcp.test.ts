@@ -389,6 +389,7 @@ import {
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_TEMPLATE_NAMES,
+  MCP_RESOURCE_TEMPLATE_URIS,
   MCP_RESOURCE_URIS,
 } from "../src/mcp-guidance.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
@@ -27090,6 +27091,22 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     client.listResourceTemplates(),
     client.readResource({ uri: "discord://connector/safety" }),
   ])
+  const [guildCompletion, channelCompletion] = await Promise.all([
+    client.complete({
+      argument: { name: "guildId", value: "100" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+      },
+    }),
+    client.complete({
+      argument: { name: "channelId", value: "200" },
+      ref: {
+        name: MCP_PROMPT_NAMES.summarizeChannel,
+        type: "ref/prompt",
+      },
+    }),
+  ])
 
   assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
@@ -27104,6 +27121,62 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   }
   assert.equal(safety.cacheScope, "public")
   assert.equal(safety.ttlMs, STATIC_RESOURCE_CACHE_TTL_MS)
+  assert.deepEqual(guildCompletion.completion.values, [GUILD_ID])
+  assert.deepEqual(channelCompletion.completion.values, [CHANNEL_ID])
+  assert.deepEqual(client.getServerCapabilities()?.completions, {})
+  assert.match(diagnostics, /stdio server ready/)
+  assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
+})
+
+test("MCP stdio entrypoint completes policy IDs for legacy clients", async (context) => {
+  const configFile = await stdioConfigFile(context, {
+    toolsets: ["connector", "messages"],
+    toolSurface: "full",
+  })
+  const transport = new StdioClientTransport({
+    args: ["--import", "tsx", "src/cli.ts", "serve", "--config", configFile],
+    command: process.execPath,
+    cwd: process.cwd(),
+    env: {
+      [STDIO_TOKEN_VARIABLE]: TOKEN,
+      PATH: process.env.PATH || "",
+    },
+    stderr: "pipe",
+  })
+  let diagnostics = ""
+  transport.stderr?.on("data", (chunk) => {
+    diagnostics += String(chunk)
+  })
+  const client = new Client(
+    { name: "discord-mcp-stdio-legacy-completion-test", version: "1.0.0" },
+    { capabilities: {} },
+  )
+  context.after(async () => {
+    await client.close().catch(() => undefined)
+  })
+
+  await client.connect(transport)
+  const [guildCompletion, channelCompletion] = await Promise.all([
+    client.complete({
+      argument: { name: "guildId", value: "100" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+      },
+    }),
+    client.complete({
+      argument: { name: "channelId", value: "200" },
+      ref: {
+        name: MCP_PROMPT_NAMES.summarizeChannel,
+        type: "ref/prompt",
+      },
+    }),
+  ])
+
+  assert.equal(client.getProtocolEra(), "legacy")
+  assert.deepEqual(client.getServerCapabilities()?.completions, {})
+  assert.deepEqual(guildCompletion.completion.values, [GUILD_ID])
+  assert.deepEqual(channelCompletion.completion.values, [CHANNEL_ID])
   assert.match(diagnostics, /stdio server ready/)
   assert.doesNotMatch(diagnostics, new RegExp(TOKEN))
 })

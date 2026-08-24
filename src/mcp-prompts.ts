@@ -77,8 +77,10 @@ import {
 } from "./guild-template-service.js"
 import { MESSAGE_PIN_STATES } from "./message-pin-service.js"
 import { normalizeDesiredMemberNickname } from "./member-nickname.js"
+import { policyCompletablePromptSchema } from "./mcp-completions.js"
 import { MCP_PROMPT_NAMES } from "./mcp-guidance-catalog.js"
 import { redactMcpValue } from "./mcp-output.js"
+import type { PolicyDescription } from "./policy.js"
 import {
   normalizeReactionModerationRequest,
   type ReactionModerationRequest,
@@ -2369,9 +2371,13 @@ function userPrompt(
 
 export function registerDiscordPrompts(
   server: McpServer,
-  secrets: readonly (string | undefined)[],
-  toolsets: ReadonlySet<McpToolsetName>,
+  options: {
+    completionPolicy?: PolicyDescription
+    secrets: readonly (string | undefined)[]
+    toolsets: ReadonlySet<McpToolsetName>
+  },
 ): void {
+  const { completionPolicy, secrets, toolsets } = options
   if (toolsets.has("native-interactions")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewPendingNativeInteractions,
     {
@@ -2398,7 +2404,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("members")) server.registerPrompt(
     MCP_PROMPT_NAMES.findGuildMembers,
     {
-      argsSchema: findGuildMembersPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.findGuildMembers,
+        findGuildMembersPromptSchema,
+        completionPolicy,
+      ),
       description: "Run one bounded privacy-minimized Discord member prefix search and review exact user IDs without writing.",
       title: "Find Discord guild members",
     },
@@ -2427,7 +2437,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("bans")) server.registerPrompt(
     MCP_PROMPT_NAMES.inspectGuildBan,
     {
-      argsSchema: inspectGuildBanPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.inspectGuildBan,
+        inspectGuildBanPromptSchema,
+        completionPolicy,
+      ),
       description: `Inspect one exact privacy-minimized Discord guild ban without listing bans or writing. Reasons are omitted unless explicitly requested and remain bounded to ${BAN_AUDIT_LIMITS.reasonCharacters} characters.`,
       title: "Inspect exact Discord guild ban",
     },
@@ -2454,7 +2468,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("attachments")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewAttachmentMessage,
     {
-      argsSchema: reviewAttachmentMessagePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewAttachmentMessage,
+        reviewAttachmentMessagePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact local-file attachment-message plan without executing it.",
       title: "Review Discord attachment message",
     },
@@ -2492,7 +2510,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("channel-creation")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewChannelCreation,
     {
-      argsSchema: reviewChannelCreationPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewChannelCreation,
+        reviewChannelCreationPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one additive Discord channel-creation plan without executing it.",
       title: "Review Discord channel creation",
     },
@@ -2579,7 +2601,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("forum-posts")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewForumPost,
     {
-      argsSchema: reviewForumPostPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewForumPost,
+        reviewForumPostPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact public Discord forum-post plan without executing it.",
       title: "Review Discord forum post",
     },
@@ -2667,7 +2693,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("guild-scaffolds")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewGuildScaffold,
     {
-      argsSchema: reviewGuildScaffoldPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewGuildScaffold,
+        reviewGuildScaffoldPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one resumable additive Discord guild-scaffold frontier without executing it.",
       title: "Review Discord guild scaffold",
     },
@@ -2703,7 +2733,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("member-nicknames")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMemberNicknameChange,
     {
-      argsSchema: reviewMemberNicknameChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+        reviewMemberNicknameChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord member nickname change or clear plan without executing it.",
       title: "Review Discord member nickname change",
     },
@@ -2734,7 +2768,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("member-roles")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMemberRoleChange,
     {
-      argsSchema: reviewMemberRoleChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMemberRoleChange,
+        reviewMemberRoleChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord member-role change plan without executing it.",
       title: "Review Discord member role change",
     },
@@ -2764,7 +2802,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("voice-moderation")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMemberVoiceChange,
     {
-      argsSchema: reviewMemberVoiceChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMemberVoiceChange,
+        reviewMemberVoiceChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord member voice-state change plan without executing it.",
       title: "Review Discord member voice change",
     },
@@ -2802,7 +2844,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("thread-governance")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewThreadChange,
     {
-      argsSchema: reviewThreadChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewThreadChange,
+        reviewThreadChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord thread lifecycle, metadata, or membership change plan without executing it.",
       title: "Review Discord thread change",
     },
@@ -2845,7 +2891,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("role-creation")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewRoleCreation,
     {
-      argsSchema: reviewRoleCreationPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewRoleCreation,
+        reviewRoleCreationPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one additive Discord role-creation plan without executing it.",
       title: "Review Discord role creation",
     },
@@ -3020,7 +3070,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("messages")) server.registerPrompt(
     MCP_PROMPT_NAMES.summarizeChannel,
     {
-      argsSchema: summarizeChannelPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.summarizeChannel,
+        summarizeChannelPromptSchema,
+        completionPolicy,
+      ),
       description: "Summarize one bounded Discord message page without searching or writing.",
       title: "Summarize a Discord channel",
     },
@@ -3048,7 +3102,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("messages")) server.registerPrompt(
     MCP_PROMPT_NAMES.searchGuildMessages,
     {
-      argsSchema: searchGuildMessagesPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.searchGuildMessages,
+        searchGuildMessagesPromptSchema,
+        completionPolicy,
+      ),
       description: "Run one bounded native content search in an exact Discord guild and review the matches.",
       title: "Search Discord guild messages",
     },
@@ -3077,7 +3135,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("deletion")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMessageDeletion,
     {
-      argsSchema: reviewMessageDeletionPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMessageDeletion,
+        reviewMessageDeletionPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review an exact message-deletion plan without executing it.",
       title: "Review Discord message deletion",
     },
@@ -3105,7 +3167,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("pins")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMessagePin,
     {
-      argsSchema: reviewMessagePinPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMessagePin,
+        reviewMessagePinPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord message pin-state plan without executing it.",
       title: "Review Discord message pin change",
     },
@@ -3159,7 +3225,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("announcement-crossposts")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewAnnouncementCrosspost,
     {
-      argsSchema: reviewAnnouncementCrosspostPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewAnnouncementCrosspost,
+        reviewAnnouncementCrosspostPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact irreversible Discord announcement-crosspost plan without executing it.",
       title: "Review Discord announcement crosspost",
     },
@@ -3186,7 +3256,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("message-forwarding")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMessageForward,
     {
-      argsSchema: reviewMessageForwardPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMessageForward,
+        reviewMessageForwardPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord message-forward plan without executing it.",
       title: "Review Discord message forward",
     },
@@ -3215,7 +3289,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("announcement-subscriptions")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewAnnouncementSubscription,
     {
-      argsSchema: reviewAnnouncementSubscriptionPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewAnnouncementSubscription,
+        reviewAnnouncementSubscriptionPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord announcement subscription or unsubscription plan without executing it.",
       title: "Review Discord announcement subscription change",
     },
@@ -3254,7 +3332,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("webhooks")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewWebhookCreation,
     {
-      argsSchema: reviewWebhookCreationPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewWebhookCreation,
+        reviewWebhookCreationPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact credential-safe Discord Incoming-webhook creation plan without executing it.",
       title: "Review Discord webhook creation",
     },
@@ -3283,7 +3365,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("webhooks")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewWebhookChange,
     {
-      argsSchema: reviewWebhookChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewWebhookChange,
+        reviewWebhookChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact credential-free Discord Incoming-webhook rename or move plan without executing it.",
       title: "Review Discord webhook change",
     },
@@ -3316,7 +3402,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("webhooks")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewWebhookDeletion,
     {
-      argsSchema: reviewWebhookDeletionPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewWebhookDeletion,
+        reviewWebhookDeletionPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact credential-free Discord Incoming-webhook deletion plan without executing it.",
       title: "Review Discord webhook deletion",
     },
@@ -3344,7 +3434,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("integrations")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewGuildIntegrationDeletion,
     {
-      argsSchema: reviewIntegrationDeletionPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewGuildIntegrationDeletion,
+        reviewIntegrationDeletionPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact privacy-safe Discord guild-integration deletion plan without executing it.",
       title: "Review Discord guild integration deletion",
     },
@@ -3375,7 +3469,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("invites")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewInviteDeletion,
     {
-      argsSchema: reviewInviteDeletionPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewInviteDeletion,
+        reviewInviteDeletionPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact capability-safe Discord invite deletion plan without executing it.",
       title: "Review Discord invite revocation",
     },
@@ -3598,7 +3696,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("guild-expressions")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewGuildExpressionChange,
     {
-      argsSchema: reviewGuildExpressionChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewGuildExpressionChange,
+        reviewGuildExpressionChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact privacy-safe Discord guild emoji or sticker change plan without executing it.",
       title: "Review Discord guild expression change",
     },
@@ -3692,7 +3794,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("soundboard")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewSoundboardChange,
     {
-      argsSchema: reviewSoundboardChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewSoundboardChange,
+        reviewSoundboardChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact privacy-safe Discord guild soundboard change plan without executing it.",
       title: "Review Discord guild soundboard change",
     },
@@ -3738,7 +3844,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("scheduled-events")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewScheduledEventChange,
     {
-      argsSchema: reviewScheduledEventChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewScheduledEventChange,
+        reviewScheduledEventChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact privacy-safe Discord scheduled event change plan without executing it.",
       title: "Review Discord scheduled event change",
     },
@@ -3761,7 +3871,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("stage-instances")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewStageInstanceChange,
     {
-      argsSchema: reviewStageInstanceChangePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewStageInstanceChange,
+        reviewStageInstanceChangePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact privacy-safe Discord Stage-instance lifecycle plan without executing it.",
       title: "Review Discord Stage-instance change",
     },
@@ -3784,7 +3898,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("permission-overwrites")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
     {
-      argsSchema: reviewChannelPermissionOverwritePromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
+        reviewChannelPermissionOverwritePromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact Discord channel permission-overwrite plan without executing it.",
       title: "Review Discord channel permission change",
     },
@@ -3817,7 +3935,11 @@ export function registerDiscordPrompts(
   if (toolsets.has("moderation")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewMemberModeration,
     {
-      argsSchema: reviewMemberModerationPromptSchema,
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewMemberModeration,
+        reviewMemberModerationPromptSchema,
+        completionPolicy,
+      ),
       description: "Create and review one exact member-moderation plan without executing it.",
       title: "Review Discord member moderation",
     },

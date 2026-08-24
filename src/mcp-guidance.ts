@@ -57,6 +57,7 @@ export type DiscordGuidanceService = Pick<
 >
 
 export interface DiscordGuidanceOptions {
+  completionPolicy?: PolicyDescription
   policy: PolicyDescription
   secrets: readonly (string | undefined)[]
   service: DiscordGuidanceService
@@ -68,5 +69,5 @@ export function registerDiscordGuidance(
   options: DiscordGuidanceOptions,
 ): void {
   registerDiscordResources(server, options)
-  registerDiscordPrompts(server, options.secrets, options.toolsets)
+  registerDiscordPrompts(server, options)
 }

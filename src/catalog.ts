@@ -13,6 +13,7 @@ import type {
   ListToolsResult,
   McpServer,
   ReadResourceResult,
+  ServerCapabilities,
 } from "@modelcontextprotocol/server"
 import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio"
 
@@ -38,6 +39,10 @@ import {
   MCP_RESOURCE_TEMPLATE_URIS,
   selectedMcpPromptNames,
 } from "./mcp-guidance.js"
+import {
+  MCP_POLICY_COMPLETION_BINDINGS,
+  type McpPolicyCompletionBinding,
+} from "./mcp-completions.js"
 import {
   createDiscordMcpServer,
   type DiscordToolService,
@@ -108,6 +113,9 @@ const EXPECTED_RESOURCE_TEMPLATE_URIS = Object.freeze(
 
 export interface DiscordCatalogCheckReport {
   activityRecordsCreated: false
+  completionBindingCount: number
+  completionBindings: McpPolicyCompletionBinding[]
+  completionCatalogValuesExposed: false
   contractDigest: string
   credentialsRequired: false
   discordExecution: "disabled"
@@ -142,6 +150,7 @@ export interface DiscordCatalogSnapshot {
   resourceTemplates: ListResourceTemplatesResult["resourceTemplates"]
   resources: ListResourcesResult["resources"]
   safetyResource: ReadResourceResult
+  serverCapabilities: ServerCapabilities
   tools: ListToolsResult["tools"]
 }
 
@@ -371,6 +380,36 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       EXPECTED_RESOURCE_TEMPLATE_URIS,
       "resource-template catalog",
     )
+    const serverCapabilities = client.getServerCapabilities()
+    catalogInvariant(serverCapabilities, "server capabilities are unavailable")
+    catalogInvariant(
+      serverCapabilities.completions !== undefined,
+      "completion capability is not advertised",
+    )
+    const completionBindings = MCP_POLICY_COMPLETION_BINDINGS.map((candidate) => ({
+      argument: candidate.argument,
+      kind: candidate.kind,
+      policyFields: [...candidate.policyFields],
+      reference: candidate.reference,
+    }))
+    const completionResults = await Promise.all(
+      completionBindings.map((candidate) => client.complete({
+        argument: { name: candidate.argument, value: "" },
+        ref: candidate.kind === "prompt"
+          ? { name: candidate.reference, type: "ref/prompt" as const }
+          : { type: "ref/resource" as const, uri: candidate.reference },
+      })),
+    )
+    for (const [index, result] of completionResults.entries()) {
+      const candidate = completionBindings[index]
+      catalogInvariant(candidate, "completion binding disappeared during inspection")
+      catalogInvariant(
+        result.completion.values.length === 0
+        && (result.completion.total === undefined || result.completion.total === 0)
+        && result.completion.hasMore !== true,
+        `${candidate.reference} ${candidate.argument} exposed catalog completion values`,
+      )
+    }
 
     const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
     const safetyContent = safety.contents[0]
@@ -413,17 +452,22 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
     const resources = sortedByIdentity(resourcesResult.resources, (resource) => resource.uri)
     const tools = sortedByIdentity(toolsResult.tools, (tool) => tool.name)
     const protocolContract = {
+      completionBindings,
       executionGuard: knownGuard,
       instructions,
       prompts,
       resourceTemplates,
       resources,
       safetyResource: safety,
+      serverCapabilities,
       tools,
     }
     const restMethods = Object.values(DISCORD_REST_OPERATIONS)
     const report: DiscordCatalogCheckReport = {
       activityRecordsCreated: false,
+      completionBindingCount: completionBindings.length,
+      completionBindings,
+      completionCatalogValuesExposed: false,
       contractDigest: sha256Digest(protocolContract, "protocol contract"),
       credentialsRequired: false,
       discordExecution: "disabled",
@@ -457,6 +501,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       resourceTemplates,
       resources,
       safetyResource: safety,
+      serverCapabilities,
       tools,
     }
   } finally {

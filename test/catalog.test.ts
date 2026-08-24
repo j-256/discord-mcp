@@ -26,6 +26,7 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
+import { MCP_POLICY_COMPLETION_BINDINGS } from "../src/mcp-completions.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_URIS,
@@ -140,6 +141,7 @@ test("credential-free catalog exposes every exact production contract with compl
     assert.match(client.getInstructions() || "", /credential-free catalog/)
     assert.match(client.getInstructions() || "", /every tools\/call request returns the fixed CATALOG_ONLY result/)
     assert.match(client.getInstructions() || "", /operational serve command/)
+    assert.deepEqual(client.getServerCapabilities()?.completions, {})
   })
 })
 
@@ -176,12 +178,30 @@ test("catalog serves local guidance while live resources remain isolated", async
       arguments: { channelId: CHANNEL_ID },
       name: MCP_PROMPT_NAMES.summarizeChannel,
     })
+    const [resourceCompletion, promptCompletion] = await Promise.all([
+      client.complete({
+        argument: { name: "guildId", value: "" },
+        ref: {
+          type: "ref/resource",
+          uri: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+        },
+      }),
+      client.complete({
+        argument: { name: "channelId", value: "" },
+        ref: {
+          name: MCP_PROMPT_NAMES.summarizeChannel,
+          type: "ref/prompt",
+        },
+      }),
+    ])
 
     assert.equal(safety.contents.length, 1)
     assert.match("text" in safety.contents[0]! ? safety.contents[0].text : "", /review-first workflows/)
     assert.equal(policy.contents.length, 1)
     assert.doesNotMatch(JSON.stringify(policy), /catalog-only-placeholder/)
     assert.ok(prompt.messages.length > 0)
+    assert.deepEqual(resourceCompletion.completion.values, [])
+    assert.deepEqual(promptCompletion.completion.values, [])
     await assert.rejects(
       client.readResource({ uri: MCP_RESOURCE_URIS.guilds }),
       /CATALOG_ONLY/,
@@ -221,6 +241,7 @@ test("catalog evidence digest binds the normalized advertised contract and safet
       name: "read_messages",
     })
     expectedContractDigest = evidenceDigest({
+      completionBindings: MCP_POLICY_COMPLETION_BINDINGS,
       executionGuard,
       instructions: client.getInstructions() || "",
       prompts: sortedByIdentity(prompts.prompts, (prompt) => prompt.name),
@@ -230,6 +251,7 @@ test("catalog evidence digest binds the normalized advertised contract and safet
       ),
       resources: sortedByIdentity(resources.resources, (resource) => resource.uri),
       safetyResource: safety,
+      serverCapabilities: client.getServerCapabilities(),
       tools: sortedByIdentity(tools.tools, (tool) => tool.name),
     })
     expectedSafetyResourceDigest = evidenceDigest(safety)
@@ -273,6 +295,9 @@ test("catalog self-check ignores hostile ambient credentials and unrelated setti
     assert.equal(report.gateway, "disabled")
     assert.equal(report.observabilityExport, "disabled")
     assert.equal(report.activityRecordsCreated, false)
+    assert.equal(report.completionBindingCount, MCP_POLICY_COMPLETION_BINDINGS.length)
+    assert.equal(report.completionCatalogValuesExposed, false)
+    assert.deepEqual(report.completionBindings, MCP_POLICY_COMPLETION_BINDINGS)
     assert.equal(report.toolCount, EXPECTED_TOOL_NAMES.length)
     assert.deepEqual(report.toolNames, EXPECTED_TOOL_NAMES)
     assert.equal(report.promptCount, EXPECTED_PROMPT_NAMES.length)
