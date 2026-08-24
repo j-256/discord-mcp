@@ -9,12 +9,20 @@ import {
   runCli,
   type CliDependencies,
 } from "../src/cli.js"
-import { createBotInstallPlan } from "../src/bot-install.js"
+import {
+  createBotInstallPlan,
+  type BotInstallPlan,
+} from "../src/bot-install.js"
 import type { DiscordCatalogCheckReport } from "../src/catalog.js"
 import {
   CATALOG_HTML_FORMAT,
   type DiscordCatalogHtmlExportReport,
 } from "../src/catalog-html.js"
+import {
+  ONBOARDING_HTML_FORMAT,
+  ONBOARDING_HTML_SCHEMA_VERSION,
+  type DiscordOnboardingHtmlExportReport,
+} from "../src/onboarding-html.js"
 import {
   CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
   explainConnectorConfig,
@@ -254,6 +262,29 @@ function catalogHtmlReport(file = "/output/discord-mcp-catalog.html"): DiscordCa
   }
 }
 
+function onboardingHtmlReport(
+  file = "/output/discord-mcp-onboarding.html",
+): DiscordOnboardingHtmlExportReport {
+  return {
+    activityRecordsCreated: false,
+    automaticNetwork: "disabled",
+    browserOpened: false,
+    bytes: 54321,
+    clientSpecificConfiguration: false,
+    credentialsEmbedded: false,
+    credentialsRequired: false,
+    discordContacted: false,
+    externalNavigationOrigins: ["https://discord.com"],
+    file,
+    format: ONBOARDING_HTML_FORMAT,
+    htmlDigest: `sha256:${"e".repeat(64)}`,
+    planDigest: `sha256:${"f".repeat(64)}`,
+    schemaVersion: ONBOARDING_HTML_SCHEMA_VERSION,
+    statePersistence: "disabled",
+    status: "ok",
+  }
+}
+
 function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
@@ -323,6 +354,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async exportCatalogHtml(file) {
       return catalogHtmlReport(file)
+    },
+    async exportOnboardingHtml(file) {
+      return onboardingHtmlReport(file)
     },
     async diagnose() {
       return doctorReport()
@@ -652,12 +686,15 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     APPLICATION_ID,
     "--guild-id",
     GUILD_ID,
+    "--html",
+    "./onboarding.html",
     "--json",
   ]), {
     action: "install",
     applicationId: APPLICATION_ID,
     command: "preset",
     guildId: GUILD_ID,
+    htmlFile: "./onboarding.html",
     json: true,
     name: "channel-reader",
   })
@@ -912,6 +949,35 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       GUILD_ID,
     ]),
     /Option --application-id may be provided only once/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "preset",
+      "install",
+      "server-observer",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--html",
+    ]),
+    /Option --html requires a value/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "preset",
+      "install",
+      "server-observer",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--html",
+      "first.html",
+      "--html",
+      "second.html",
+    ]),
+    /Option --html may be provided only once/,
   )
   assert.throws(
     () => parseCliArguments(["profile", "remove", "support-bot"]),
@@ -1893,10 +1959,19 @@ test("CLI plans and applies an exact recipe without resolving its credential", a
   assert.equal(JSON.stringify(applied).includes(TOKEN), false)
 })
 
-test("CLI generates human and JSON bot installation plans without dependencies", async () => {
+test("CLI generates human and JSON bot installation plans with optional offline guides", async () => {
   const textOutput = outputStream()
   const jsonOutput = outputStream()
+  const guideTextOutput = outputStream()
+  const guideJsonOutput = outputStream()
+  const guideFile = "/output/onboarding.html"
+  const exported: BotInstallPlan[] = []
   const unavailable = dependencies({
+    async exportOnboardingHtml(file, plan) {
+      assert.equal(file, guideFile)
+      exported.push(plan)
+      return onboardingHtmlReport(file)
+    },
     async prepareSetup() {
       throw new Error("Bot installation planning must not run setup")
     },
@@ -1923,6 +1998,18 @@ test("CLI generates human and JSON bot installation plans without dependencies",
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     stdout: jsonOutput.stream,
   }), 0)
+  assert.equal(await runCli({
+    args: [...args, "--html", guideFile],
+    dependencies: unavailable,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: guideTextOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [...args, "--html", guideFile, "--json"],
+    dependencies: unavailable,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: guideJsonOutput.stream,
+  }), 0)
 
   assert.match(textOutput.value(), /Discord MCP bot install plan: channel-reader/)
   assert.match(textOutput.value(), /VIEW_CHANNEL, READ_MESSAGE_HISTORY \(66560\)/)
@@ -1939,6 +2026,22 @@ test("CLI generates human and JSON bot installation plans without dependencies",
       preset: "channel-reader",
     }),
   )
+  assert.equal(exported.length, 2)
+  assert.deepEqual(exported[0], createBotInstallPlan({
+    applicationId: APPLICATION_ID,
+    guildId: GUILD_ID,
+    preset: "channel-reader",
+  }))
+  assert.match(guideTextOutput.value(), /Discord MCP onboarding HTML: ok/)
+  assert.match(guideTextOutput.value(), new RegExp(guideFile))
+  assert.match(guideTextOutput.value(), /Credentials embedded: no/)
+  assert.match(guideTextOutput.value(), /Automatic network: disabled/)
+  assert.match(guideTextOutput.value(), /State persistence: disabled/)
+  assert.doesNotMatch(guideTextOutput.value(), new RegExp(TOKEN))
+  const guideJson = JSON.parse(guideJsonOutput.value())
+  assert.deepEqual(guideJson.guide, onboardingHtmlReport(guideFile))
+  assert.equal(guideJson.installUrl, exported[0]?.installUrl)
+  assert.equal(JSON.stringify(guideJson).includes(TOKEN), false)
 })
 
 test("CLI inspects profiles without activation for doctor while serve and smoke activate", async () => {

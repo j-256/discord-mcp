@@ -69,10 +69,13 @@ Create a Discord application and bot in the [Developer Portal](https://discord.c
 ```sh
 npx --yes @j-256/discord-mcp@0.1.0 preset install server-observer \
   --application-id YOUR_APPLICATION_ID \
-  --guild-id YOUR_GUILD_ID
+  --guild-id YOUR_GUILD_ID \
+  --html ./discord-mcp-onboarding.html
 ```
 
 Open the printed URL while signed in as a member allowed to manage that server. It requests only `View Channel` for `server-observer`, locks the server selector to the supplied ID, requests no user token, and never sends the bot token to the connector command. Keep Public Bot disabled unless other people should be able to install your application. Use `channel-reader` instead to request `View Channel` plus `Read Message History`; its plan also identifies Message Content as the recommended Developer Portal intent.
+
+The optional `--html FILE` output is a deterministic standalone guide derived from that exact validated installation plan. It provides an in-memory checklist, non-secret copy controls, the explicit Discord install navigation, strict-policy commands, and exact plan evidence without accepting a token, loading an external asset, making a background request, persisting browser state, opening a browser, or replacing an existing file. The terminal plan remains complete when HTML is not wanted.
 
 ### Create the safest first configuration
 
@@ -202,7 +205,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, policy-completion manifest and zero-value catalog proof, plan-review app bytes and authority, fixed execution guard, and stable contract, safety, and app digests | None |
 | `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, completion routes, app source, instructions, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
-| `discord-mcp preset install server-observer --application-id ID --guild-id ID --json` | Fixed-origin, guild-locked bot authorization URL, exact permission bitfield, intent guidance, and post-install commands | None |
+| `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
 | `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
 | `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |

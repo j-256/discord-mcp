@@ -16,6 +16,10 @@ import {
   type BotInstallPlan,
 } from "./bot-install.js"
 import {
+  exportDiscordOnboardingHtml,
+  type DiscordOnboardingHtmlExportReport,
+} from "./onboarding-html.js"
+import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
@@ -184,6 +188,7 @@ export type ParsedCliArguments =
     applicationId: string
     command: "preset"
     guildId: string
+    htmlFile?: string
     json: boolean
     name: string
   }
@@ -273,6 +278,10 @@ export interface CliDependencies {
   }): unknown
   checkCatalog(): Promise<DiscordCatalogCheckReport>
   exportCatalogHtml(file: string): Promise<DiscordCatalogHtmlExportReport>
+  exportOnboardingHtml(
+    file: string,
+    plan: BotInstallPlan,
+  ): Promise<DiscordOnboardingHtmlExportReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
   explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
@@ -330,6 +339,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
   exportCatalogHtml: exportDiscordCatalogHtml,
+  exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
   listCoordination: async (auditFile) => {
@@ -628,11 +638,12 @@ function parsePresetCommand(
   if (action === "install") {
     let applicationId: string | undefined
     let guildId: string | undefined
+    let htmlFile: string | undefined
     let json = false
     const seen = new Set<string>()
     for (let index = 2; index < args.length; index += 1) {
       const argument = args[index]
-      if (!argument || !["--application-id", "--guild-id", "--json"].includes(argument)) {
+      if (!argument || !["--application-id", "--guild-id", "--html", "--json"].includes(argument)) {
         throw new ConfigurationError(`Unknown option ${argument || ""}`)
       }
       if (seen.has(argument)) {
@@ -650,6 +661,7 @@ function parsePresetCommand(
       index += 1
       if (argument === "--application-id") applicationId = value
       if (argument === "--guild-id") guildId = value
+      if (argument === "--html") htmlFile = value
     }
     if (!applicationId) {
       throw new ConfigurationError("preset install requires --application-id")
@@ -663,6 +675,7 @@ function parsePresetCommand(
       applicationId: plan.applicationId,
       command: "preset",
       guildId: plan.guildId,
+      ...(htmlFile ? { htmlFile } : {}),
       json,
       name: plan.preset.name,
     }
@@ -1091,7 +1104,7 @@ function helpText(topic: CliCommand | undefined): string {
       "Actions:",
       "  list [--json]",
       "  show NAME [--json]",
-      "  install NAME --application-id ID --guild-id ID [--json]",
+      "  install NAME --application-id ID --guild-id ID [--html FILE] [--json]",
       "",
       "Inspect deterministic least-privilege setup presets or generate a callback-free, guild-locked bot installation plan without credentials or Discord access.",
     ].join("\n")
@@ -1354,7 +1367,7 @@ function renderBotInstallPlan(report: BotInstallPlan): string {
     "3. Open this callback-free, guild-locked URL and approve only the permissions listed above:",
     report.installUrl,
     `4. Store the bot token as ${report.postInstall.credentialVariable} in a secret-capable MCP host setting. Never put its value in the config file or command line.`,
-    `5. ${report.preset.name === "channel-reader" ? "Replace CHANNEL_ID, then " : ""}Run verified setup to create the strict non-secret policy file:`,
+    `5. ${report.preset.name === "channel-reader" ? "Replace CHANNEL_ID, then run" : "Run"} verified setup to create the strict non-secret policy file:`,
     `   ${setup}`,
     "6. Validate the file, verify Discord identity and access, then exercise the read-only MCP path:",
     `   ${validate}`,
@@ -1362,6 +1375,23 @@ function renderBotInstallPlan(report: BotInstallPlan): string {
     `   ${smoke}`,
     "",
     "Discord was not contacted and no browser was opened. Guild roles and channel overrides determine effective access; online doctor is the post-install authority.",
+  ].join("\n")
+}
+
+function renderOnboardingHtmlExport(
+  report: DiscordOnboardingHtmlExportReport,
+): string {
+  return [
+    "Discord MCP onboarding HTML: ok",
+    `File: ${report.file}`,
+    `Format: ${report.format}`,
+    `Plan digest: ${report.planDigest}`,
+    `HTML digest: ${report.htmlDigest}`,
+    `Bytes: ${report.bytes}`,
+    "Credentials embedded: no",
+    "Automatic network: disabled",
+    "Browser opened: no",
+    "State persistence: disabled",
   ].join("\n")
 }
 
@@ -1962,9 +1992,17 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             guildId: parsed.guildId,
             preset: parsed.name,
           })
+          const guide = parsed.htmlFile
+            ? await dependencies.exportOnboardingHtml(parsed.htmlFile, report)
+            : undefined
           safeWrite(
             stdout,
-            parsed.json ? jsonReport(report) : renderBotInstallPlan(report),
+            parsed.json
+              ? jsonReport({ ...report, ...(guide ? { guide } : {}) })
+              : [
+                  renderBotInstallPlan(report),
+                  ...(guide ? [renderOnboardingHtmlExport(guide)] : []),
+                ].join("\n\n"),
             environment,
           )
           return CLI_EXIT_CODES.success
