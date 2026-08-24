@@ -119,6 +119,22 @@ npx --yes @j-256/discord-mcp@0.1.0 setup \
   --channel-id YOUR_CHANNEL_ID
 ```
 
+### Expand the policy through review
+
+Keep first setup read-only, then inspect and plan an additive recipe when a write workflow is needed. `guild-builder` adds caller-retained guild blueprints across structure, profile, settings, Welcome Screen, and onboarding for exact guilds. Its settings and onboarding evidence uses a nonprivileged `GUILDS`-only layout-evidence connection when the resulting policy is served, while the configured event-feed policy remains unchanged. `channel-publisher` adds bounded message and static Components V2 publication tools for exact channels without adding a Gateway evidence connection, and it reports the required Message Content intent.
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.0 recipe list
+npx --yes @j-256/discord-mcp@0.1.0 recipe plan guild-builder ./discord-mcp.json \
+  --guild-id YOUR_GUILD_ID
+npx --yes @j-256/discord-mcp@0.1.0 recipe apply guild-builder ./discord-mcp.json \
+  --guild-id YOUR_GUILD_ID \
+  --plan-digest SHA256_FROM_THE_PLAN \
+  --confirm guild-builder
+```
+
+Planning prints the complete proposed non-secret document, exact field changes, permissions, intents, risks, warnings, and a path-bound digest without resolving a secret or contacting Discord. Application recomputes that plan, requires the exact digest and recipe-name confirmation, rejects a concurrent source change, preserves a recoverable backup, and still grants no Discord authority by itself. Run the printed offline validation, online doctor, and smoke checks after applying. Recipes add policy only; they never remove an existing capability, scope, or toolset.
+
 The online doctor verifies identity, the bounded guild-membership page, and a privacy-safe application security posture covering installation settings, privileged intents, Interaction delivery, event webhooks, and least-privilege fit. The smoke command verifies the real MCP path without listing channels, reading messages, opening the Gateway, exporting telemetry, or writing to Discord.
 
 ### Build from source
@@ -142,7 +158,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | Guild structure | Caller-retained declarative guild blueprints across additive structure, guild profile, named settings, complete Welcome Screens, complete onboarding, and ordered restart-verifiable static Components V2 publications; additive channels and roles; reviewed exact channel and standard-role retirement; resumable scaffolds; atomic channel cloning; relative channel and role ordering; boost-aware voice and Stage channel metadata; connection-sensitive voice-channel status changes; permission overwrites; forum tags; and exact role configuration with reviewed local or Unicode icons |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
-| Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic presets, privacy-safe application posture audits, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
+| Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).
 
@@ -179,6 +195,8 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, fixed execution guard, and stable contract plus safety digests | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID --json` | Fixed-origin, guild-locked bot authorization URL, exact permission bitfield, intent guidance, and post-install commands | None |
+| `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
+| `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
 | `discord-mcp doctor --config FILE` | Local Node.js, credential-variable, identity-pin, policy, scope, tool-surface, Gateway, observability, and write-gate diagnostics | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
 | `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |

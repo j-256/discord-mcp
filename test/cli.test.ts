@@ -20,6 +20,14 @@ import {
   type ConfigValidationReport,
   type ConfigWriteReport,
 } from "../src/config-operator.js"
+import {
+  CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
+  CONFIG_RECIPES,
+  applyConfigRecipe,
+  getConfigRecipe,
+  planConfigRecipe,
+} from "../src/config-recipes.js"
+import { loadConnectorConfigDocumentFile } from "../src/config-document.js"
 import { loadConnectorConfigDocument } from "../src/config.js"
 import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
@@ -265,6 +273,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
         profile,
       }
     },
+    applyRecipe: applyConfigRecipe,
     catalog() {},
     async checkCatalog() {
       return catalogReport()
@@ -306,6 +315,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async prepareSetup() {
       return setupReport()
     },
+    planRecipe: planConfigRecipe,
     async resolveCoordination(_environment, claimId) {
       return {
         claimId,
@@ -590,6 +600,57 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     json: true,
     name: "channel-reader",
   })
+  assert.deepEqual(parseCliArguments(["recipe", "list", "--json"]), {
+    action: "list",
+    command: "recipe",
+    json: true,
+  })
+  assert.deepEqual(parseCliArguments(["recipe", "show", "GUILD-BUILDER"]), {
+    action: "show",
+    command: "recipe",
+    json: false,
+    name: "guild-builder",
+  })
+  assert.deepEqual(parseCliArguments([
+    "recipe",
+    "plan",
+    "guild-builder",
+    "/configuration/discord.json",
+    "--guild-id",
+    GUILD_ID,
+    "--json",
+  ]), {
+    action: "plan",
+    channelIds: [],
+    command: "recipe",
+    file: "/configuration/discord.json",
+    guildIds: [GUILD_ID],
+    json: true,
+    name: "guild-builder",
+  })
+  const recipeDigest = `sha256:${"a".repeat(64)}`
+  assert.deepEqual(parseCliArguments([
+    "recipe",
+    "apply",
+    "CHANNEL-PUBLISHER",
+    "/configuration/discord.json",
+    "--channel-id",
+    CHANNEL_ID,
+    "--plan-digest",
+    recipeDigest,
+    "--confirm",
+    "channel-publisher",
+  ]), {
+    action: "apply",
+    channelIds: [CHANNEL_ID],
+    command: "recipe",
+    confirmation: "channel-publisher",
+    file: "/configuration/discord.json",
+    guildIds: [],
+    json: false,
+    name: "channel-publisher",
+    planDigest: recipeDigest,
+  })
   assert.deepEqual(parseCliArguments(["profile", "list", "--json"]), {
     action: "list",
     command: "profile",
@@ -713,6 +774,44 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     /Setup preset must be one of/,
   )
   assert.throws(() => parseCliArguments(["preset"]), /requires install, list, or show/)
+  assert.throws(() => parseCliArguments(["recipe"]), /requires apply, list, plan, or show/)
+  assert.throws(
+    () => parseCliArguments([
+      "recipe",
+      "plan",
+      "guild-builder",
+      "/configuration/discord.json",
+      "--channel-id",
+      CHANNEL_ID,
+    ]),
+    /accepts --guild-id, not --channel-id/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "recipe",
+      "apply",
+      "channel-publisher",
+      "/configuration/discord.json",
+      "--channel-id",
+      CHANNEL_ID,
+      "--confirm",
+      "channel-publisher",
+    ]),
+    /requires --plan-digest/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "recipe",
+      "plan",
+      "channel-publisher",
+      "/configuration/discord.json",
+      "--channel-id",
+      CHANNEL_ID,
+      "--confirm",
+      "channel-publisher",
+    ]),
+    /Unknown option --confirm/,
+  )
   assert.throws(
     () => parseCliArguments(["preset", "install", "server-observer"]),
     /requires --application-id/,
@@ -1517,6 +1616,116 @@ test("CLI inspects presets without credentials or dependency activity", async ()
   })
 })
 
+test("CLI inspects additive recipes without credentials or file access", async () => {
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+  const unavailable = dependencies({
+    async applyRecipe() {
+      throw new Error("Recipe inspection must not apply a configuration")
+    },
+    planRecipe() {
+      throw new Error("Recipe inspection must not read a configuration")
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["recipe", "list"],
+    dependencies: unavailable,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["recipe", "show", "channel-publisher", "--json"],
+    dependencies: unavailable,
+    environment: {},
+    stdout: jsonOutput.stream,
+  }), 0)
+
+  assert.match(textOutput.value(), /Discord MCP additive configuration recipes/)
+  assert.match(textOutput.value(), /guild-builder/)
+  assert.match(textOutput.value(), /channel-publisher/)
+  assert.match(textOutput.value(), /Gateway evidence: guild-layout with GUILDS; event-feed policy unchanged/)
+  assert.match(textOutput.value(), /Gateway evidence: none; event-feed policy unchanged/)
+  assert.match(textOutput.value(), /Writes: enabled only through the underlying reviewed workflow gates/)
+  assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
+  assert.deepEqual(JSON.parse(jsonOutput.value()), {
+    recipe: getConfigRecipe("channel-publisher"),
+    schemaVersion: CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
+    status: "ok",
+  })
+  assert.equal(CONFIG_RECIPES.length, 2)
+})
+
+test("CLI plans and applies an exact recipe without resolving its credential", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-recipe-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "discord-mcp.json")
+  await writeConnectorConfigDocumentFile(file, connectorProfile())
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+  const applyOutput = outputStream()
+  const args = [
+    "recipe",
+    "plan",
+    "channel-publisher",
+    file,
+    "--channel-id",
+    CHANNEL_ID,
+  ]
+  const recipeDependencies = dependencies()
+
+  assert.equal(await runCli({
+    args,
+    dependencies: recipeDependencies,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [...args, "--json"],
+    dependencies: recipeDependencies,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: jsonOutput.stream,
+  }), 0)
+  const plan = JSON.parse(jsonOutput.value())
+  assert.equal(plan.action, "plan")
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.execution.secretValuesRead, false)
+  assert.equal(plan.execution.discordContacted, false)
+  assert.match(textOutput.value(), /Complete proposed non-secret configuration/)
+  assert.match(textOutput.value(), /Configuration written: no/)
+  assert.match(textOutput.value(), /No secret value was read and Discord was not contacted/)
+  assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
+
+  assert.equal(await runCli({
+    args: [
+      "recipe",
+      "apply",
+      "channel-publisher",
+      file,
+      "--channel-id",
+      CHANNEL_ID,
+      "--plan-digest",
+      plan.planDigest,
+      "--confirm",
+      "channel-publisher",
+      "--json",
+    ],
+    dependencies: recipeDependencies,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: applyOutput.stream,
+  }), 0)
+  const applied = JSON.parse(applyOutput.value())
+  assert.equal(applied.action, "apply")
+  assert.equal(applied.status, "applied")
+  assert.equal(applied.execution.configurationWritten, true)
+  assert.equal(typeof applied.backupFile, "string")
+  const stored = loadConnectorConfigDocumentFile(file)
+  assert.equal(stored.capabilities.interactions, true)
+  assert.deepEqual(stored.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.equal(JSON.stringify(applied).includes(TOKEN), false)
+})
+
 test("CLI generates human and JSON bot installation plans without dependencies", async () => {
   const textOutput = outputStream()
   const jsonOutput = outputStream()
@@ -1876,6 +2085,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const helpOutput = outputStream()
   const catalogHelpOutput = outputStream()
   const configHelpOutput = outputStream()
+  const recipeHelpOutput = outputStream()
   const versionOutput = outputStream()
 
   assert.equal(await runCli({
@@ -1899,6 +2109,11 @@ test("CLI renders smoke, help, and version output", async () => {
     stdout: configHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
+    args: ["recipe", "--help"],
+    dependencies: dependencies(),
+    stdout: recipeHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
     args: ["--version"],
     dependencies: dependencies(),
     stdout: versionOutput.stream,
@@ -1913,6 +2128,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(configHelpOutput.value(), /explain \[PATH\] \[--json\]/)
   assert.match(configHelpOutput.value(), /--token-file FILE/)
   assert.match(configHelpOutput.value(), /one strict non-secret configuration file/)
+  assert.match(recipeHelpOutput.value(), /plan NAME FILE/)
+  assert.match(recipeHelpOutput.value(), /--plan-digest DIGEST --confirm NAME/)
+  assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
   assert.match(versionOutput.value(), /0\.1\.0/)
 })
 

@@ -28,6 +28,19 @@ const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
+const EXPECTED_CONFIG_RECIPES = ["guild-builder", "channel-publisher"]
+const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
+  "channel-publisher": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "guild-builder": Object.freeze({
+    evidenceConnection: "guild-layout",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze(["GUILDS"]),
+  }),
+})
 const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
 const EXPECTED_SETUP_PRESETS = ["server-observer", "channel-reader"]
 const EXPECTED_RISK_CLASSES = [
@@ -229,6 +242,10 @@ assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
 assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
 assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
+assert.deepEqual(connector.CONFIG_RECIPE_NAMES, ["guild-builder", "channel-publisher"])
+assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
+assert.equal(typeof connector.planConfigRecipe, "function")
+assert.equal(typeof connector.applyConfigRecipe, "function")
 assert.equal(typeof connector.createBotInstallPlan, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
@@ -378,6 +395,42 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     invariant(preset.requirements.botPermissions.includes("ADMINISTRATOR") === false, `installed setup preset ${preset.name} requests Administrator`)
     invariant(/^(0|[1-9][0-9]*)$/.test(preset.requirements.botPermissionBitfield), `installed setup preset ${preset.name} has an invalid bot permission bitfield`)
   }
+  const recipeResult = await run(bin, ["recipe", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  const repeatedRecipeResult = await run(bin, ["recipe", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  assert.equal(
+    repeatedRecipeResult.stdout,
+    recipeResult.stdout,
+    "installed configuration recipes are not deterministic",
+  )
+  const recipeReport = JSON.parse(recipeResult.stdout)
+  invariant(recipeReport.status === "ok", "installed configuration recipe inspection failed")
+  assert.deepEqual(
+    recipeReport.recipes.map(({ name }) => name),
+    EXPECTED_CONFIG_RECIPES,
+  )
+  for (const recipe of recipeReport.recipes) {
+    invariant(recipe.writeCapable === true, `installed configuration recipe ${recipe.name} is not write-capable`)
+    invariant(recipe.requirements.botPermissions.includes("ADMINISTRATOR") === false, `installed configuration recipe ${recipe.name} requests Administrator`)
+    invariant(/^[1-9][0-9]*$/.test(recipe.requirements.botPermissionBitfield), `installed configuration recipe ${recipe.name} has an invalid bot permission bitfield`)
+    assertSortedUniqueStrings(recipe.capabilities, `installed configuration recipe ${recipe.name} capability inventory`)
+    assertSortedUniqueStrings(recipe.riskClasses, `installed configuration recipe ${recipe.name} risk inventory`)
+    assertSortedUniqueStrings(recipe.toolNames, `installed configuration recipe ${recipe.name} tool inventory`)
+    assertSortedUniqueStrings(recipe.toolsets, `installed configuration recipe ${recipe.name} toolset inventory`)
+    invariant(recipe.requirements.scope.targets.length > 0, `installed configuration recipe ${recipe.name} has no scope target`)
+    assert.deepEqual(
+      recipe.requirements.gateway,
+      EXPECTED_RECIPE_GATEWAY_REQUIREMENTS[recipe.name],
+      `installed configuration recipe ${recipe.name} Gateway requirement is invalid`,
+    )
+  }
   const installArguments = [
     "preset",
     "install",
@@ -501,7 +554,127 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     cwd: consumer,
     env: environment,
   })
-  invariant(JSON.parse(configResult.stdout).status === "ok", "installed config initialization failed")
+  const initializedConfig = JSON.parse(configResult.stdout)
+  invariant(initializedConfig.status === "ok", "installed config initialization failed")
+  const recipePlanArguments = [
+    "recipe",
+    "plan",
+    "guild-builder",
+    configFile,
+    "--guild-id",
+    "300000000000000001",
+    "--json",
+  ]
+  const recipePlanResult = await run(bin, recipePlanArguments, {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const repeatedRecipePlanResult = await run(bin, recipePlanArguments, {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  assert.equal(
+    repeatedRecipePlanResult.stdout,
+    recipePlanResult.stdout,
+    "installed configuration recipe plan is not deterministic",
+  )
+  const recipePlan = JSON.parse(recipePlanResult.stdout)
+  invariant(recipePlan.action === "plan" && recipePlan.status === "planned", "installed configuration recipe planning failed")
+  invariant(SHA256_DIGEST_PATTERN.test(recipePlan.currentDocumentDigest), "installed configuration recipe current digest is invalid")
+  invariant(SHA256_DIGEST_PATTERN.test(recipePlan.proposedDocumentDigest), "installed configuration recipe proposed digest is invalid")
+  invariant(SHA256_DIGEST_PATTERN.test(recipePlan.recipeContractDigest), "installed configuration recipe contract digest is invalid")
+  invariant(SHA256_DIGEST_PATTERN.test(recipePlan.planDigest), "installed configuration recipe plan digest is invalid")
+  assert.deepEqual(recipePlan.execution, {
+    configurationWritten: false,
+    discordContacted: false,
+    secretValuesRead: false,
+  })
+  invariant(recipePlan.proposedDocument.capabilities.guildScaffolds === true, "installed guild-builder recipe omitted guild scaffolds")
+  for (const scope of [
+    "guildScaffoldGuildIds",
+    "guildProfileGuildIds",
+    "guildSettingsGuildIds",
+    "onboardingGuildIds",
+    "welcomeScreenGuildIds",
+  ]) {
+    assert.deepEqual(
+      recipePlan.proposedDocument.scopes[scope],
+      ["300000000000000001"],
+      `installed guild-builder recipe omitted ${scope}`,
+    )
+  }
+  assert.doesNotMatch(recipePlanResult.stdout, new RegExp(DUMMY_TOKEN))
+  const recipeApplyResult = await run(bin, [
+    "recipe",
+    "apply",
+    "guild-builder",
+    configFile,
+    "--guild-id",
+    "300000000000000001",
+    "--plan-digest",
+    recipePlan.planDigest,
+    "--confirm",
+    "guild-builder",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const recipeApply = JSON.parse(recipeApplyResult.stdout)
+  invariant(recipeApply.action === "apply" && recipeApply.status === "applied", "installed configuration recipe application failed")
+  assert.deepEqual(recipeApply.execution, {
+    configurationWritten: true,
+    discordContacted: false,
+    secretValuesRead: false,
+  })
+  invariant(typeof recipeApply.backupFile === "string", "installed configuration recipe omitted its recoverable backup")
+  assert.deepEqual(
+    JSON.parse(await readFile(recipeApply.backupFile, "utf8")),
+    initializedConfig.document,
+    "installed configuration recipe backup changed the reviewed source",
+  )
+  invariant(
+    ((await lstat(recipeApply.backupFile)).mode & 0o077) === 0,
+    "installed configuration recipe backup is not private",
+  )
+  const appliedConfig = JSON.parse(await readFile(configFile, "utf8"))
+  assert.deepEqual(appliedConfig, recipePlan.proposedDocument)
+  assert.doesNotMatch(recipeApplyResult.stdout, new RegExp(DUMMY_TOKEN))
+  const alreadyCurrentPlanResult = await run(bin, recipePlanArguments, {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const alreadyCurrentPlan = JSON.parse(alreadyCurrentPlanResult.stdout)
+  invariant(alreadyCurrentPlan.status === "already-current", "installed configuration recipe did not detect current policy")
+  const noOpRecipeResult = await run(bin, [
+    "recipe",
+    "apply",
+    "guild-builder",
+    configFile,
+    "--guild-id",
+    "300000000000000001",
+    "--plan-digest",
+    alreadyCurrentPlan.planDigest,
+    "--confirm",
+    "guild-builder",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const noOpRecipe = JSON.parse(noOpRecipeResult.stdout)
+  invariant(noOpRecipe.status === "already-current" && noOpRecipe.applied === false, "installed configuration recipe no-op failed")
+  invariant(noOpRecipe.backupFile === undefined, "installed configuration recipe no-op created a backup")
+  assert.deepEqual(noOpRecipe.execution, {
+    configurationWritten: false,
+    discordContacted: false,
+    secretValuesRead: false,
+  })
   const doctorResult = await run(process.execPath, [
     entrypoint,
     "doctor",

@@ -170,6 +170,37 @@ test("configuration publication respects directory safety and another writer's l
   }
 })
 
+test("configuration replacement rejects changed or removed reviewed source", async (context) => {
+  const root = await operatorRoot(context)
+  const file = join(root, "discord-mcp.json")
+  const original = document()
+  const changed = document({
+    limits: { interactionMaxWritesPerMinute: 9 },
+  })
+  await writeConnectorConfigDocumentFile(file, original)
+  await writeConnectorConfigDocumentFile(file, changed, { overwrite: true })
+
+  await assert.rejects(
+    () => writeConnectorConfigDocumentFile(
+      file,
+      document({ limits: { interactionMaxWritesPerMinute: 10 } }),
+      { expectedCurrent: original, overwrite: true },
+    ),
+    /changed after the reviewed source was read/,
+  )
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), changed)
+
+  await rm(file)
+  await assert.rejects(
+    () => writeConnectorConfigDocumentFile(
+      file,
+      document({ limits: { interactionMaxWritesPerMinute: 10 } }),
+      { expectedCurrent: changed, overwrite: true },
+    ),
+    /removed after the reviewed source was read/,
+  )
+})
+
 test("configuration init creates a read-only preset and enforces required channel scope", async (context) => {
   const root = await operatorRoot(context)
   const observerFile = join(root, "observer.json")

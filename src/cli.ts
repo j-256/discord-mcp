@@ -35,6 +35,19 @@ import {
   type ConfigWriteReport,
 } from "./config-operator.js"
 import {
+  CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
+  CONFIG_RECIPES,
+  applyConfigRecipe,
+  getConfigRecipe,
+  normalizeConfigRecipeRequest,
+  planConfigRecipe,
+  type ConfigRecipeApplyOptions,
+  type ConfigRecipeApplyReport,
+  type ConfigRecipeDescriptor,
+  type ConfigRecipePlanOptions,
+  type ConfigRecipePlanReport,
+} from "./config-recipes.js"
+import {
   ConfigurationError,
   redactText,
   RuntimeConfigurationRequiredError,
@@ -97,6 +110,7 @@ const CLI_COMMANDS = Object.freeze([
   "help",
   "preset",
   "profile",
+  "recipe",
   "serve",
   "setup",
   "smoke",
@@ -195,6 +209,37 @@ export type ParsedCliArguments =
     json: boolean
     name: string
   }
+  | {
+    action: "list"
+    command: "recipe"
+    json: boolean
+  }
+  | {
+    action: "show"
+    command: "recipe"
+    json: boolean
+    name: string
+  }
+  | {
+    action: "plan"
+    channelIds: string[]
+    command: "recipe"
+    file: string
+    guildIds: string[]
+    json: boolean
+    name: string
+  }
+  | {
+    action: "apply"
+    channelIds: string[]
+    command: "recipe"
+    confirmation: string
+    file: string
+    guildIds: string[]
+    json: boolean
+    name: string
+    planDigest: string
+  }
   | { command: "serve"; configFile?: string; profileName?: string }
   | {
     command: "setup"
@@ -228,6 +273,8 @@ export interface CliDependencies {
   loadConfig(environment: NodeJS.ProcessEnv): ConnectorConfig
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
+  applyRecipe(options: ConfigRecipeApplyOptions): Promise<ConfigRecipeApplyReport>
+  planRecipe(options: ConfigRecipePlanOptions): ConfigRecipePlanReport
   resolveCoordination(
     activityFile: string,
     claimId: string,
@@ -269,6 +316,7 @@ export interface CliErrorReport {
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
   activateProfile,
+  applyRecipe: applyConfigRecipe,
   catalog: runDiscordMcpCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
@@ -284,6 +332,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   loadConfig: loadConnectorConfig,
   loadProfile,
   prepareSetup,
+  planRecipe: planConfigRecipe,
   resolveCoordination: async (auditFile, claimId, confirmation) => {
     return new FileWriteCoordinator(
       writeCoordinationDirectory(auditFile),
@@ -616,6 +665,98 @@ function parsePresetCommand(
   }
 }
 
+function parseRecipeCommand(
+  args: readonly string[],
+): Extract<ParsedCliArguments, { command: "recipe" }> {
+  const action = args[0]
+  if (!action || !["apply", "list", "plan", "show"].includes(action)) {
+    throw new ConfigurationError("recipe requires apply, list, plan, or show")
+  }
+  if (action === "list") {
+    const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
+    return { action, command: "recipe", json: options.has("--json") }
+  }
+
+  const name = args[1]
+  if (!name || name.startsWith("--")) {
+    throw new ConfigurationError(`recipe ${action} requires a recipe name`)
+  }
+  if (action === "show") {
+    const options = parseBooleanOptions(args.slice(2), new Set(["--json"]))
+    return {
+      action,
+      command: "recipe",
+      json: options.has("--json"),
+      name: getConfigRecipe(name).name,
+    }
+  }
+
+  const file = args[2]
+  if (!file || file.startsWith("--")) {
+    throw new ConfigurationError(`recipe ${action} requires a file path`)
+  }
+  const channelIds: string[] = []
+  let confirmation: string | undefined
+  const guildIds: string[] = []
+  let json = false
+  let planDigest: string | undefined
+  const seen = new Set<string>()
+  const allowed = new Set([
+    "--channel-id",
+    "--guild-id",
+    "--json",
+    ...(action === "apply" ? ["--confirm", "--plan-digest"] : []),
+  ])
+  for (let index = 3; index < args.length; index += 1) {
+    const argument = args[index]
+    if (!argument || !allowed.has(argument)) {
+      throw new ConfigurationError(`Unknown option ${argument || ""}`)
+    }
+    const repeatable = argument === "--channel-id" || argument === "--guild-id"
+    if (!repeatable && seen.has(argument)) {
+      throw new ConfigurationError(`Option ${argument} may be provided only once`)
+    }
+    if (!repeatable) seen.add(argument)
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) {
+      throw new ConfigurationError(`Option ${argument} requires a value`)
+    }
+    index += 1
+    if (argument === "--channel-id") channelIds.push(value)
+    if (argument === "--confirm") confirmation = value
+    if (argument === "--guild-id") guildIds.push(value)
+    if (argument === "--plan-digest") planDigest = value
+  }
+  const request = normalizeConfigRecipeRequest({ channelIds, guildIds, name })
+  const selection = {
+    channelIds: request.scope.kind === "channel" ? [...request.scope.ids] : [],
+    file,
+    guildIds: request.scope.kind === "guild" ? [...request.scope.ids] : [],
+    json,
+    name: request.name,
+  }
+  if (action === "plan") {
+    return { action, command: "recipe", ...selection }
+  }
+  if (planDigest === undefined) {
+    throw new ConfigurationError("recipe apply requires --plan-digest DIGEST")
+  }
+  if (confirmation === undefined) {
+    throw new ConfigurationError("recipe apply requires --confirm NAME")
+  }
+  return {
+    action: "apply",
+    command: "recipe",
+    confirmation,
+    planDigest,
+    ...selection,
+  }
+}
+
 function parseRuntimeSelectionOptions(
   args: readonly string[],
   booleanOptions: ReadonlySet<string>,
@@ -845,6 +986,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (command === "setup") return parseSetupOptions(rest)
   if (command === "preset") return parsePresetCommand(rest)
   if (command === "profile") return parseProfileCommand(rest)
+  if (command === "recipe") return parseRecipeCommand(rest)
   const options = parseRuntimeSelectionOptions(rest, new Set(["--json"]))
   return {
     command: "smoke",
@@ -919,6 +1061,19 @@ function helpText(topic: CliCommand | undefined): string {
       "Inspect deterministic least-privilege setup presets or generate a callback-free, guild-locked bot installation plan without credentials or Discord access.",
     ].join("\n")
   }
+  if (topic === "recipe") {
+    return [
+      "Usage: discord-mcp recipe <action> [options]",
+      "",
+      "Actions:",
+      "  list [--json]",
+      "  show NAME [--json]",
+      "  plan NAME FILE (--guild-id ID... | --channel-id ID...) [--json]",
+      "  apply NAME FILE (--guild-id ID... | --channel-id ID...) --plan-digest DIGEST --confirm NAME [--json]",
+      "",
+      "Review and add one bounded write workflow to an existing strict policy. Planning and application do not resolve secrets or contact Discord. Application recomputes the exact plan, rejects concurrent source changes, and preserves a recoverable backup.",
+    ].join("\n")
+  }
   if (topic === "version") return "Usage: discord-mcp version\n\nPrint the package version."
   return [
     `Usage: ${CONNECTOR_NAME} <command> [options]`,
@@ -931,6 +1086,7 @@ function helpText(topic: CliCommand | undefined): string {
     "  setup    Create or verify a policy and generate safe client configuration",
     "  preset   Inspect presets or generate an exact bot installation plan",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
+    "  recipe   Review and add a bounded workflow to an existing policy",
     "  doctor   Diagnose a selected policy and optional Discord access",
     "  smoke    Verify the read-only MCP path end to end",
     "  version  Print the package version",
@@ -1164,6 +1320,110 @@ function renderPresetList(report: PresetListReport): string {
       ...(index > 0 ? [""] : []),
       renderPreset(preset),
     ]),
+  ].join("\n")
+}
+
+interface RecipeListReport {
+  recipes: readonly ConfigRecipeDescriptor[]
+  schemaVersion: number
+  status: "ok"
+}
+
+interface RecipeShowReport {
+  recipe: ConfigRecipeDescriptor
+  schemaVersion: number
+  status: "ok"
+}
+
+function renderRecipe(recipe: ConfigRecipeDescriptor): string {
+  const privilegedIntents = recipe.requirements.privilegedIntents.length === 0
+    ? "none"
+    : recipe.requirements.privilegedIntents
+      .map((intent) => `${intent.name} (${intent.status})`)
+      .join(", ")
+  const gatewayEvidence = recipe.requirements.gateway.evidenceConnection === "none"
+    ? `none; event-feed policy ${recipe.requirements.gateway.eventFeedPolicy}`
+    : `${recipe.requirements.gateway.evidenceConnection} with ${recipe.requirements.gateway.intents.join(", ")}; event-feed policy ${recipe.requirements.gateway.eventFeedPolicy}`
+  return [
+    recipe.name,
+    `  ${recipe.description}`,
+    `  Scope input: ${recipe.requirements.scope.option} (${recipe.requirements.scope.minimum}-${recipe.requirements.scope.maximum})`,
+    `  Outer boundary: ${recipe.requirements.scope.outerBoundary}`,
+    `  Added scopes: ${recipe.requirements.scope.targets.join(", ")}`,
+    `  Bot permissions: ${recipe.requirements.botPermissions.join(", ")} (${recipe.requirements.botPermissionBitfield})`,
+    `  Privileged intents: ${privilegedIntents}`,
+    `  Gateway evidence: ${gatewayEvidence}`,
+    `  Toolsets: ${recipe.toolsets.join(", ")}`,
+    `  Tools (${recipe.toolNames.length}): ${recipe.toolNames.join(", ")}`,
+    `  Risk classes: ${recipe.riskClasses.join(", ")}`,
+    "  Writes: enabled only through the underlying reviewed workflow gates",
+    "  Risks:",
+    ...recipe.risks.map((risk) => `    - ${risk}`),
+    "  Warnings:",
+    ...recipe.warnings.map((warning) => `    - ${warning}`),
+  ].join("\n")
+}
+
+function renderRecipeList(report: RecipeListReport): string {
+  return [
+    "Discord MCP additive configuration recipes",
+    "",
+    ...report.recipes.flatMap((recipe, index) => [
+      ...(index > 0 ? [""] : []),
+      renderRecipe(recipe),
+    ]),
+  ].join("\n")
+}
+
+function renderRecipePlan(
+  report: ConfigRecipePlanReport | ConfigRecipeApplyReport,
+): string {
+  const scope = report.request.scope
+  const changes = report.changes.length === 0
+    ? ["  none"]
+    : report.changes.map((change) => (
+        `  ${change.path}: ${JSON.stringify(change.before)} -> ${JSON.stringify(change.after)}`
+      ))
+  const nextChecks = report.nextChecks.map((next) => (
+    `  ${JSON.stringify({ args: next.args, command: next.command })}`
+  ))
+  const applied = report.action === "apply" ? report : undefined
+  return [
+    `Discord MCP configuration recipe ${report.action}: ${report.recipe.name} (${report.status})`,
+    `File: ${report.file}`,
+    `Exact ${scope.kind} scope: ${scope.ids.join(", ")}`,
+    `Current document digest: ${report.currentDocumentDigest}`,
+    `Proposed document digest: ${report.proposedDocumentDigest}`,
+    `Recipe contract digest: ${report.recipeContractDigest}`,
+    `Plan digest: ${report.planDigest}`,
+    `Required confirmation: ${report.confirmation.requiredValue}`,
+    `Configuration written: ${report.execution.configurationWritten ? "yes" : "no"}`,
+    ...(applied?.backupFile
+      ? [`Recoverable prior version: ${applied.backupFile}`]
+      : []),
+    `Bot permissions: ${report.recipe.requirements.botPermissions.join(", ")} (${report.recipe.requirements.botPermissionBitfield})`,
+    `Privileged intents: ${report.recipe.requirements.privilegedIntents.length === 0
+      ? "none"
+      : report.recipe.requirements.privilegedIntents
+        .map((intent) => `${intent.name} (${intent.status})`)
+        .join(", ")}`,
+    `Gateway evidence: ${report.recipe.requirements.gateway.evidenceConnection === "none"
+      ? `none; event-feed policy ${report.recipe.requirements.gateway.eventFeedPolicy}`
+      : `${report.recipe.requirements.gateway.evidenceConnection} with ${report.recipe.requirements.gateway.intents.join(", ")}; event-feed policy ${report.recipe.requirements.gateway.eventFeedPolicy}`}`,
+    "Changes:",
+    ...changes,
+    "Risks:",
+    ...report.risks.map((risk) => `  - ${risk}`),
+    "Warnings:",
+    ...report.warnings.map((warning) => `  - ${warning}`),
+    "",
+    "Complete proposed non-secret configuration:",
+    JSON.stringify(report.proposedDocument, null, 2),
+    "",
+    "Post-application checks as structured commands:",
+    ...nextChecks,
+    "",
+    "No secret value was read and Discord was not contacted.",
   ].join("\n")
 }
 
@@ -1630,6 +1890,53 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         safeWrite(
           stdout,
           parsed.json ? jsonReport(report) : renderPreset(report.preset),
+          environment,
+        )
+        return CLI_EXIT_CODES.success
+      }
+      case "recipe": {
+        if (parsed.action === "list") {
+          const report: RecipeListReport = {
+            recipes: CONFIG_RECIPES,
+            schemaVersion: CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
+            status: "ok",
+          }
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderRecipeList(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
+        if (parsed.action === "show") {
+          const report: RecipeShowReport = {
+            recipe: getConfigRecipe(parsed.name),
+            schemaVersion: CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
+            status: "ok",
+          }
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderRecipe(report.recipe),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
+        const selection = {
+          channelIds: parsed.channelIds,
+          file: parsed.file,
+          guildIds: parsed.guildIds,
+          name: parsed.name,
+        }
+        const report = parsed.action === "plan"
+          ? dependencies.planRecipe(selection)
+          : await dependencies.applyRecipe({
+              ...selection,
+              confirmation: parsed.confirmation,
+              planDigest: parsed.planDigest,
+            })
+        safeWrite(
+          stdout,
+          parsed.json ? jsonReport(report) : renderRecipePlan(report),
           environment,
         )
         return CLI_EXIT_CODES.success

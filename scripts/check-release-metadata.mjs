@@ -313,6 +313,7 @@ async function checkSourceIdentity(packageJson) {
 
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
+  const security = await readFile(join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
@@ -339,11 +340,24 @@ async function checkDocumentation(packageJson) {
     "catalog --check --json",
     "config validate ./discord-mcp.json",
     "doctor --config ./discord-mcp.json --online",
+    "recipe list",
+    "recipe plan guild-builder",
+    "recipe apply guild-builder",
     "smoke --config ./discord-mcp.json",
   ]) {
     invariant(readme.includes(required), `README is missing ${required}`)
   }
   invariant(reference.includes("preset install server-observer"), "complete reference lacks preset-derived bot installation")
+  invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks additive recipe inspection")
+  invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-builder"), "complete reference lacks reviewed recipe application")
+  invariant(reference.includes("No recipe removes or disables existing policy"), "complete reference lacks additive-only recipe policy")
+  invariant(readme.includes("nonprivileged `GUILDS`-only layout-evidence connection"), "README lacks guild-builder Gateway evidence disclosure")
+  invariant(reference.includes("privacy-minimized `GUILDS`-only layout connection"), "complete reference lacks guild-builder Gateway evidence disclosure")
+  invariant(security.includes("Gateway evidence requirement"), "security policy lacks recipe Gateway disclosure")
+  invariant(readme.includes("there is no alternate environment-policy or migration mode"), "README lacks clean-break configuration policy")
+  invariant(reference.includes("There is no environment-policy or migration command"), "complete reference lacks clean-break configuration policy")
+  invariant(security.includes("no environment-policy compatibility shape is accepted"), "security policy lacks clean-break configuration policy")
+  invariant(security.includes("An already-current application is a no-write, no-backup operation"), "security policy lacks guarded recipe application")
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")

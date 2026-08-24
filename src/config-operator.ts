@@ -29,6 +29,7 @@ import {
 } from "./config-document.js"
 import { DEFAULT_TOKEN_ENVIRONMENT_VARIABLE } from "./constants.js"
 import { ConfigDocumentError, ConfigurationError } from "./errors.js"
+import { stableString } from "./normalize.js"
 import { getSetupPreset } from "./setup-presets.js"
 
 export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 3
@@ -103,6 +104,7 @@ export interface ConfigWriteReport extends ConfigShowReport {
 }
 
 export interface ConfigWriteOptions {
+  expectedCurrent?: ConnectorConfigDocument
   overwrite?: boolean
 }
 
@@ -461,6 +463,16 @@ export async function writeConnectorConfigDocumentFile(
     let backupFile: string | undefined
     if (exists) {
       const current = loadConnectorConfigDocumentFile(target)
+      if (
+        options.expectedCurrent !== undefined
+        && stableString(current) !== stableString(
+          validateConnectorConfigDocumentPolicy(options.expectedCurrent),
+        )
+      ) {
+        throw new ConfigDocumentError(
+          "Configuration file changed after the reviewed source was read",
+        )
+      }
       if (!options.overwrite) {
         throw new ConfigDocumentError("Configuration file already exists")
       }
@@ -472,6 +484,10 @@ export async function writeConnectorConfigDocumentFile(
           "Configuration file is locked to its existing Discord identity",
         )
       }
+    } else if (options.expectedCurrent !== undefined) {
+      throw new ConfigDocumentError(
+        "Configuration file was removed after the reviewed source was read",
+      )
     }
 
     const temporary = await writeTemporaryConfig(directory, targetName, document)
