@@ -28,6 +28,7 @@ const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v1"
+const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-builder",
@@ -448,6 +449,12 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     env: environment,
   })
   assert.match(helpResult.stdout, /Run the stdio MCP server/)
+  const configHelpResult = await run(bin, ["config", "--help"], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  assert.match(configHelpResult.stdout, /workbench ACTIVE_FILE --html OUTPUT_FILE/)
   const catalogEnvironment = baseVerificationEnvironment(
     join(workDirectory, "catalog-home"),
   )
@@ -722,6 +729,85 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   })
   const initializedConfig = JSON.parse(configResult.stdout)
   invariant(initializedConfig.status === "ok", "installed config initialization failed")
+  const firstWorkbenchFile = join(consumer, "workbench-first.html")
+  const secondWorkbenchFile = join(consumer, "workbench-second.html")
+  const firstWorkbenchResult = await run(bin, [
+    "config",
+    "workbench",
+    configFile,
+    "--html",
+    firstWorkbenchFile,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const secondWorkbenchResult = await run(bin, [
+    "config",
+    "workbench",
+    configFile,
+    "--html",
+    secondWorkbenchFile,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const workbench = JSON.parse(firstWorkbenchResult.stdout)
+  const repeatedWorkbench = JSON.parse(secondWorkbenchResult.stdout)
+  for (const report of [workbench, repeatedWorkbench]) {
+    invariant(report.status === "ok", "installed configuration workbench export failed")
+    invariant(report.format === CONFIG_WORKBENCH_HTML_FORMAT, "installed configuration workbench format changed")
+    invariant(SHA256_DIGEST_PATTERN.test(report.activeDocumentDigest), "installed configuration workbench document digest is invalid")
+    invariant(SHA256_DIGEST_PATTERN.test(report.schemaDigest), "installed configuration workbench schema digest is invalid")
+    invariant(SHA256_DIGEST_PATTERN.test(report.htmlDigest), "installed configuration workbench HTML digest is invalid")
+    assert.deepEqual({
+      activeConfigurationWritten: report.activeConfigurationWritten,
+      automaticNetwork: report.automaticNetwork,
+      browserOpened: report.browserOpened,
+      candidateAuthority: report.candidateAuthority,
+      configurationEmbedded: report.configurationEmbedded,
+      credentialsEmbedded: report.credentialsEmbedded,
+      discordContacted: report.discordContacted,
+      externalNavigationOrigins: report.externalNavigationOrigins,
+      outputFileCreated: report.outputFileCreated,
+      secretValuesRead: report.secretValuesRead,
+      statePersistence: report.statePersistence,
+    }, {
+      activeConfigurationWritten: false,
+      automaticNetwork: "disabled",
+      browserOpened: false,
+      candidateAuthority: "explicit-download-only",
+      configurationEmbedded: true,
+      credentialsEmbedded: false,
+      discordContacted: false,
+      externalNavigationOrigins: [],
+      outputFileCreated: true,
+      secretValuesRead: false,
+      statePersistence: "disabled",
+    })
+  }
+  assert.equal(repeatedWorkbench.htmlDigest, workbench.htmlDigest, "installed configuration workbench digest is not deterministic")
+  const firstWorkbenchBytes = await readFile(firstWorkbenchFile)
+  const secondWorkbenchBytes = await readFile(secondWorkbenchFile)
+  invariant(firstWorkbenchBytes.equals(secondWorkbenchBytes), "installed configuration workbench HTML is not deterministic")
+  invariant(
+    ((await lstat(firstWorkbenchFile)).mode & 0o077) === 0
+      && ((await lstat(secondWorkbenchFile)).mode & 0o077) === 0,
+    "installed configuration workbench HTML is not private",
+  )
+  const workbenchHtml = firstWorkbenchBytes.toString("utf8")
+  invariant(workbenchHtml.includes(CONFIG_WORKBENCH_HTML_FORMAT), "installed configuration workbench HTML omitted its format")
+  invariant(workbenchHtml.includes("connect-src 'none'"), "installed configuration workbench HTML permits network connections")
+  invariant(!workbenchHtml.includes(DUMMY_TOKEN), "installed configuration workbench HTML captured an ambient secret")
+  invariant(!/(?:fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)/.test(workbenchHtml), "installed configuration workbench HTML contains forbidden browser authority")
+  assert.deepEqual(
+    JSON.parse(await readFile(configFile, "utf8")),
+    initializedConfig.document,
+    "installed configuration workbench changed the active policy",
+  )
   const recipePlanArguments = [
     "recipe",
     "plan",

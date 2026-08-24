@@ -121,6 +121,9 @@ Offline `doctor` remains useful before a secret is mounted or when its reference
 Keep the active policy unchanged while editing a separate candidate, then review and apply only an exact fresh plan:
 
 ```sh
+npx --yes @j-256/discord-mcp@0.1.0 config workbench \
+  ./discord-mcp.json \
+  --html ./discord-mcp-workbench.html
 npx --yes @j-256/discord-mcp@0.1.0 config plan \
   ./discord-mcp.json \
   ./discord-mcp.candidate.json
@@ -131,7 +134,9 @@ npx --yes @j-256/discord-mcp@0.1.0 config apply \
   --confirm ACTIVE_POLICY_NAME
 ```
 
-Planning reads two protected non-secret documents and reports every exact field change, its authority or operational impact, canonical tool additions and removals, warnings, both document digests, the complete candidate, and structured post-application checks. It never resolves a referenced secret or contacts Discord. Application rereads both files, requires the exact digest and active-policy-name confirmation, rejects identity drift or either stale document, preserves a recoverable backup, and leaves the candidate untouched. The active document remains the only policy source; there is no legacy environment fallback or migration layer.
+The optional workbench validates the active schema-v2 document, then writes an exclusive private standalone editor. It embeds the complete non-secret policy, including public Discord IDs, local paths, and external secret reference names, so treat the HTML as private. Edits stay in browser memory until an explicit candidate download. The page has no secret field, network or external navigation authority, browser persistence, Discord access, active-file write, or approval authority, and it does not open a browser automatically. Its local checks and preliminary impact labels are guidance only.
+
+Planning remains authoritative. It reads two protected non-secret documents and reports every exact field change, its authority or operational impact, canonical tool additions and removals, warnings, both document digests, the complete candidate, and structured post-application checks. It never resolves a referenced secret or contacts Discord. Application rereads both files, requires the exact digest and active-policy-name confirmation, rejects identity drift or either stale document, preserves a recoverable backup, and leaves the candidate untouched. The active document remains the only policy source; there is no legacy environment fallback or migration layer.
 
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
@@ -194,7 +199,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | Guild structure | Privacy-minimized two-pass capture into caller-retained declarative guild blueprints across additive structure, guild profile, named settings, complete Welcome Screens, complete onboarding, and ordered restart-verifiable static Components V2 publications; additive channels and roles; reviewed exact channel and standard-role retirement; resumable scaffolds; atomic channel cloning; relative channel and role ordering; boost-aware voice and Stage channel metadata; connection-sensitive voice-channel status changes; permission overwrites; forum tags; and exact role configuration with reviewed local or Unicode icons |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, time-bounded incident actions, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
-| Operations | Full or progressive tool discovery, resources, prompts, policy-aware exact-ID completion, optional display-only MCP App plan review, strict non-secret policy files and managed profiles, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, digest-bound content-free activity review with optional private HTML, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
+| Operations | Full or progressive tool discovery, resources, prompts, policy-aware exact-ID completion, optional display-only MCP App plan review, strict non-secret policy files and managed profiles, private offline policy workbench, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, digest-bound content-free activity review with optional private HTML, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).
 
@@ -233,6 +238,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, completion routes, app source, instructions, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
+| `discord-mcp config workbench ACTIVE --html FILE` | Private offline in-memory editor and explicit candidate download for one validated schema-v2 policy, with no active-file write or approval authority | None |
 | `discord-mcp config plan ACTIVE CANDIDATE --json` | Complete candidate policy, exact semantic changes, authority impacts, tool exposure, warnings, identity lock, and fresh path-bound digest | None |
 | `discord-mcp config apply ACTIVE CANDIDATE --plan-digest DIGEST --confirm ACTIVE_NAME` | Exact fresh local policy replacement with stale-file rejection, atomic publication, and a recoverable prior version | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |

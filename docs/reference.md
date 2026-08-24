@@ -448,6 +448,7 @@ node dist/cli.js config validate ./discord-mcp.json
 node dist/cli.js config show ./discord-mcp.json
 node dist/cli.js config explain capabilities.deletions
 node dist/cli.js config init ./mounted-secret.json --name mounted-secret --application-id APPLICATION_ID --bot-id BOT_ID --guild-id GUILD_ID --token-file /run/secrets/discord_bot_token
+node dist/cli.js config workbench ./discord-mcp.json --html ./discord-mcp-workbench.html
 node dist/cli.js config plan ./discord-mcp.json ./discord-mcp.candidate.json
 node dist/cli.js config apply ./discord-mcp.json ./discord-mcp.candidate.json --plan-digest PLAN_DIGEST --confirm ACTIVE_POLICY_NAME
 node dist/cli.js recipe list
@@ -535,6 +536,14 @@ discord-mcp smoke --config ./discord-mcp.json
 ```
 
 `config init FILE` creates a preset-backed file from caller-supplied public IDs without contacting Discord. `config validate FILE` uses placeholder secrets to check strict structure and every cross-field policy without reading a token or contacting Discord. `config show FILE` returns the canonical document and a bounded summary; `config explain [PATH]` returns schema-backed descriptions for the whole document or one field. Add `--json` for versioned reports. `--force` retains a recoverable hidden backup and cannot replace the pinned application or bot identity. There is no environment-policy or migration command.
+
+### Offline configuration workbench
+
+`config workbench ACTIVE_FILE --html OUTPUT_FILE` validates one protected schema-v2 policy without resolving its credential or contacting Discord, then writes a standalone editor with exclusive private permissions. The output parent must be a canonical directory owned by the process user and not writable by a group or the world, and an existing output target is never replaced. Add `--json` for a versioned export report.
+
+The workbench embeds the complete non-secret active document, schema-derived field metadata, public Discord identity and scope IDs, local paths, and external secret reference names. It never embeds a secret value. Treat the HTML as a private operator artifact because those non-secret details can still be sensitive. The page contains no external navigation target or browser persistence API. Its content security policy permits only the exact embedded style and script while blocking network connections, forms, frames, workers, objects, and media, and the page exposes a candidate only through an explicit local download or copy action. The command does not open a browser, write the active policy, construct a Discord client, create activity state, or grant approval.
+
+The page keeps edits in memory, locks the schema version and application and bot identities, gives every non-secret policy field a schema-derived control, supports search, filters, reset, complete canonical preview, and preliminary local field and authority-impact guidance. These checks intentionally do not duplicate the full cross-field policy engine. Download the candidate to a distinct protected path, then run `config plan ACTIVE_FILE CANDIDATE_FILE`; only that command supplies authoritative validation, exact semantic impacts, canonical tool exposure, warnings, identity proof, and a fresh digest for `config apply`.
 
 ### Reviewed configuration replacement
 

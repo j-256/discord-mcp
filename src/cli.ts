@@ -48,6 +48,10 @@ import {
   type ConfigChangePlanReport,
 } from "./config-review.js"
 import {
+  exportDiscordConfigWorkbenchHtml,
+  type DiscordConfigWorkbenchHtmlExportReport,
+} from "./config-workbench-html.js"
+import {
   loadConnectorConfigDocumentFile,
   type ConnectorConfigDocument,
 } from "./config-document.js"
@@ -208,6 +212,13 @@ export type ParsedCliArguments =
     json: boolean
   }
   | {
+    action: "workbench"
+    command: "config"
+    file: string
+    htmlFile: string
+    json: boolean
+  }
+  | {
     action: "list"
     command: "coordination"
     configFile?: string
@@ -325,6 +336,10 @@ export interface CliDependencies {
     report: DiscordActivityReviewReport,
   ): Promise<DiscordActivityHtmlExportReport>
   exportCatalogHtml(file: string): Promise<DiscordCatalogHtmlExportReport>
+  exportConfigWorkbenchHtml(
+    activeFile: string,
+    outputFile: string,
+  ): Promise<DiscordConfigWorkbenchHtmlExportReport>
   exportOnboardingHtml(
     file: string,
     plan: BotInstallPlan,
@@ -393,6 +408,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   diagnose: diagnoseConnector,
   exportActivityHtml: exportDiscordActivityHtml,
   exportCatalogHtml: exportDiscordCatalogHtml,
+  exportConfigWorkbenchHtml: exportDiscordConfigWorkbenchHtml,
   exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
@@ -561,9 +577,9 @@ function parseConfigCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "config" }> {
   const action = args[0]
-  if (!action || !["apply", "explain", "init", "plan", "show", "validate"].includes(action)) {
+  if (!action || !["apply", "explain", "init", "plan", "show", "validate", "workbench"].includes(action)) {
     throw new ConfigurationError(
-      "config requires apply, explain, init, plan, show, or validate",
+      "config requires apply, explain, init, plan, show, validate, or workbench",
     )
   }
   if (action === "plan" || action === "apply") {
@@ -643,6 +659,41 @@ function parseConfigCommand(
   const file = args[1]
   if (!file || file.startsWith("--")) {
     throw new ConfigurationError(`config ${action} requires a file path`)
+  }
+  if (action === "workbench") {
+    let htmlFile: string | undefined
+    let json = false
+    const seen = new Set<string>()
+    for (let index = 2; index < args.length; index += 1) {
+      const argument = args[index]
+      if (!argument || !["--html", "--json"].includes(argument)) {
+        throw new ConfigurationError(`Unknown option ${argument || ""}`)
+      }
+      if (seen.has(argument)) {
+        throw new ConfigurationError(`Option ${argument} may be provided only once`)
+      }
+      seen.add(argument)
+      if (argument === "--json") {
+        json = true
+        continue
+      }
+      const value = args[index + 1]
+      if (!value || value.startsWith("--")) {
+        throw new ConfigurationError("Option --html requires a value")
+      }
+      htmlFile = value
+      index += 1
+    }
+    if (!htmlFile) {
+      throw new ConfigurationError("config workbench requires --html")
+    }
+    return {
+      action,
+      command: "config",
+      file,
+      htmlFile,
+      json,
+    }
   }
   if (action === "show" || action === "validate") {
     const options = parseBooleanOptions(args.slice(2), new Set(["--json"]))
@@ -1240,10 +1291,11 @@ function helpText(topic: CliCommand | undefined): string {
       "  validate FILE [--json]",
       "  show FILE [--json]",
       "  explain [PATH] [--json]",
+      "  workbench ACTIVE_FILE --html OUTPUT_FILE [--json]",
       "  plan ACTIVE_FILE CANDIDATE_FILE [--json]",
       "  apply ACTIVE_FILE CANDIDATE_FILE --plan-digest DIGEST --confirm ACTIVE_NAME [--json]",
       "",
-      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. Validation and change planning do not read secret values or contact Discord. Applying a reviewed change fresh-checks both files, preserves a recoverable backup, and cannot change the pinned Discord identity.",
+      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. The private offline workbench writes only a standalone candidate editor; it cannot resolve secrets, contact Discord, or replace the active policy. Validation and change planning do not read secret values or contact Discord. Applying a reviewed change fresh-checks both files, preserves a recoverable backup, and cannot change the pinned Discord identity.",
     ].join("\n")
   }
   if (topic === "doctor") {
@@ -1917,6 +1969,23 @@ function renderConfigWrite(report: ConfigWriteReport): string {
   ].join("\n")
 }
 
+function renderConfigWorkbench(
+  report: DiscordConfigWorkbenchHtmlExportReport,
+): string {
+  return [
+    `Discord MCP configuration workbench: ${report.file}`,
+    `Validated active file: ${report.activeFile}`,
+    `Suggested candidate filename: ${report.candidateFilename}`,
+    `Active document digest: ${report.activeDocumentDigest}`,
+    `Schema digest: ${report.schemaDigest}`,
+    `HTML digest: ${report.htmlDigest}`,
+    `Bytes: ${report.bytes}`,
+    "Boundary: private standalone HTML, memory-only edits, explicit candidate download, no active-file write",
+    "No secret value was read, Discord was not contacted, no browser was opened, and no network or browser persistence authority is present.",
+    "Next: Open the private file locally, download a candidate, then run config plan against the active and candidate files.",
+  ].join("\n")
+}
+
 function renderConfigChange(
   report: ConfigChangePlanReport | ConfigChangeApplyReport,
 ): string {
@@ -2182,6 +2251,18 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "config": {
+        if (parsed.action === "workbench") {
+          const report = await dependencies.exportConfigWorkbenchHtml(
+            parsed.file,
+            parsed.htmlFile,
+          )
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderConfigWorkbench(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
         if (parsed.action === "plan") {
           const report = dependencies.planConfigChange({
             candidateFile: parsed.candidateFile,

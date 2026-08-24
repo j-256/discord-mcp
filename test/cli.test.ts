@@ -38,6 +38,11 @@ import {
   planConfigChange,
 } from "../src/config-review.js"
 import {
+  CONFIG_WORKBENCH_HTML_FORMAT,
+  CONFIG_WORKBENCH_HTML_SCHEMA_VERSION,
+  type DiscordConfigWorkbenchHtmlExportReport,
+} from "../src/config-workbench-html.js"
+import {
   CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
   explainConnectorConfig,
   summarizeConnectorConfigDocument,
@@ -372,6 +377,34 @@ function activityHtmlReport(
   }
 }
 
+function configWorkbenchHtmlReport(
+  file = "/output/discord-mcp-config-workbench.html",
+): DiscordConfigWorkbenchHtmlExportReport {
+  return {
+    activeConfigurationWritten: false,
+    activeDocumentDigest: `sha256:${"a".repeat(64)}`,
+    activeFile: CONFIG_FILE,
+    automaticNetwork: "disabled",
+    browserOpened: false,
+    bytes: 76543,
+    candidateAuthority: "explicit-download-only",
+    candidateFilename: "discord-mcp.candidate.json",
+    configurationEmbedded: true,
+    credentialsEmbedded: false,
+    discordContacted: false,
+    externalNavigationOrigins: [],
+    file,
+    format: CONFIG_WORKBENCH_HTML_FORMAT,
+    htmlDigest: `sha256:${"b".repeat(64)}`,
+    outputFileCreated: true,
+    schemaDigest: `sha256:${"c".repeat(64)}`,
+    schemaVersion: CONFIG_WORKBENCH_HTML_SCHEMA_VERSION,
+    secretValuesRead: false,
+    statePersistence: "disabled",
+    status: "ok",
+  }
+}
+
 function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
@@ -445,6 +478,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async exportCatalogHtml(file) {
       return catalogHtmlReport(file)
+    },
+    async exportConfigWorkbenchHtml(_activeFile, outputFile) {
+      return configWorkbenchHtmlReport(outputFile)
     },
     async exportOnboardingHtml(file) {
       return onboardingHtmlReport(file)
@@ -897,6 +933,20 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     name: "channel-publisher",
     planDigest: recipeDigest,
   })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "workbench",
+    "/configuration/discord.json",
+    "--html",
+    "./discord-workbench.html",
+    "--json",
+  ]), {
+    action: "workbench",
+    command: "config",
+    file: "/configuration/discord.json",
+    htmlFile: "./discord-workbench.html",
+    json: true,
+  })
   assert.deepEqual(parseCliArguments(["profile", "list", "--json"]), {
     action: "list",
     command: "profile",
@@ -975,7 +1025,23 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   )
   assert.throws(
     () => parseCliArguments(["config", "migrate", "/configuration/discord.json"]),
-    /config requires apply, explain, init, plan, show, or validate/,
+    /config requires apply, explain, init, plan, show, validate, or workbench/,
+  )
+  assert.throws(
+    () => parseCliArguments(["config", "workbench", "/configuration/discord.json"]),
+    /config workbench requires --html/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "config",
+      "workbench",
+      "/configuration/discord.json",
+      "--html",
+      "first.html",
+      "--html",
+      "second.html",
+    ]),
+    /Option --html may be provided only once/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -2529,6 +2595,43 @@ test("CLI routes config lifecycle commands without exposing credential values", 
   assert.match(output.value(), /secret values, and did not contact Discord/)
 })
 
+test("CLI exports a private configuration workbench without resolving secrets", async () => {
+  const active = "/configuration/discord-mcp.json"
+  const html = "/output/discord-mcp-workbench.html"
+  const environment = { [TOKEN_ALIAS]: TOKEN }
+  const calls: Array<[string, string]> = []
+  const workbenchDependencies = dependencies({
+    async exportConfigWorkbenchHtml(activeFile, outputFile) {
+      calls.push([activeFile, outputFile])
+      return configWorkbenchHtmlReport(outputFile)
+    },
+  })
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+
+  assert.equal(await runCli({
+    args: ["config", "workbench", active, "--html", html],
+    dependencies: workbenchDependencies,
+    environment,
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["config", "workbench", active, "--html", html, "--json"],
+    dependencies: workbenchDependencies,
+    environment,
+    stdout: jsonOutput.stream,
+  }), 0)
+
+  assert.deepEqual(calls, [[active, html], [active, html]])
+  assert.match(textOutput.value(), /configuration workbench:/)
+  assert.match(textOutput.value(), /memory-only edits/)
+  assert.match(textOutput.value(), /No secret value was read/)
+  assert.match(textOutput.value(), /no browser was opened/)
+  assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
+  assert.deepEqual(JSON.parse(jsonOutput.value()), configWorkbenchHtmlReport(html))
+  assert.doesNotMatch(jsonOutput.value(), new RegExp(TOKEN))
+})
+
 test("CLI plans and applies one exact candidate configuration without resolving secrets", async (context) => {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-config-review-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
@@ -2806,6 +2909,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(catalogHelpOutput.value(), /without replacing an existing file/)
   assert.doesNotMatch(configHelpOutput.value(), /migrate FILE/)
   assert.match(configHelpOutput.value(), /explain \[PATH\] \[--json\]/)
+  assert.match(configHelpOutput.value(), /workbench ACTIVE_FILE --html OUTPUT_FILE \[--json\]/)
   assert.match(configHelpOutput.value(), /plan ACTIVE_FILE CANDIDATE_FILE \[--json\]/)
   assert.match(configHelpOutput.value(), /--plan-digest DIGEST --confirm ACTIVE_NAME/)
   assert.match(configHelpOutput.value(), /--token-file FILE/)
