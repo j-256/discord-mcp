@@ -46,6 +46,7 @@ type McpToolWorkflow =
   | "channel-creation"
   | "channel-deletion"
   | "channel-metadata-change"
+  | "voice-channel-status-change"
   | "channel-ordering"
   | "channel-permission-overwrite"
   | "component-message"
@@ -195,6 +196,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["bitrate", "channel", "configure", "execute", "metadata", "name", "nsfw", "region", "slowmode", "topic", "user limit", "video", "voice"],
     toolset: "channel-metadata",
     workflow: "channel-metadata-change",
+  },
+  execute_voice_channel_status_change: {
+    keywords: ["channel", "ephemeral", "execute", "status", "voice"],
+    toolset: "channel-metadata",
+    workflow: "voice-channel-status-change",
   },
   execute_channel_order: {
     keywords: ["above", "below", "channel", "execute", "layout", "order", "position"],
@@ -486,6 +492,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["channel", "exact", "metadata", "name", "nsfw", "read", "slowmode", "topic"],
     toolset: "guilds",
   },
+  get_voice_channel_status: {
+    keywords: ["channel", "ephemeral", "exact", "get", "status", "voice"],
+    toolset: "channel-metadata",
+  },
   list_active_threads: {
     keywords: ["active", "forum", "list", "thread"],
     toolset: "threads",
@@ -684,6 +694,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["bitrate", "channel", "configure", "metadata", "name", "nsfw", "plan", "region", "review", "slowmode", "topic", "user limit", "video", "voice"],
     toolset: "channel-metadata",
     workflow: "channel-metadata-change",
+  },
+  plan_voice_channel_status_change: {
+    keywords: ["channel", "ephemeral", "plan", "review", "status", "voice"],
+    toolset: "channel-metadata",
+    workflow: "voice-channel-status-change",
   },
   plan_channel_order: {
     keywords: ["above", "below", "channel", "layout", "order", "plan", "position", "review"],

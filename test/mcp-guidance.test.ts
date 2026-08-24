@@ -58,6 +58,7 @@ const PRIVATE_GUILD_TEMPLATE_TOPIC = "private-template-topic"
 const PRIVATE_ONBOARDING_TEXT = "private-onboarding-member-copy"
 const PRIVATE_WELCOME_SCREEN_TEXT = "private-welcome-screen-copy"
 const PRIVATE_CHANNEL_TOPIC = "private-channel-roadmap"
+const PRIVATE_VOICE_CHANNEL_STATUS = "private-voice-channel-status"
 const PRIVATE_FORUM_TAG_NAME = "private-forum-tag"
 const EMOJI_ID = "370000000000000001"
 const APPLICATION_EMOJI_ID = "375000000000000001"
@@ -169,6 +170,7 @@ interface GuidanceCalls {
   channelAccess: number
   channelDeletions: number
   channelMetadata: number
+  voiceStatuses: number
   channelOrders: number
   channels: number
   forumTags: number
@@ -224,6 +226,7 @@ function guidanceService(options: {
     bans: 0,
     channelAccess: 0,
     channelMetadata: 0,
+    voiceStatuses: 0,
     channelOrders: 0,
     channelDeletions: 0,
     channels: 0,
@@ -668,6 +671,7 @@ function guidanceService(options: {
     executeAutoModerationChange: unexpected,
     executeChannelClone: unexpected,
     executeChannelMetadataChange: unexpected,
+    executeVoiceChannelStatusChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
     executeGuildIntegrationDeletion: unexpected,
@@ -833,6 +837,83 @@ function guidanceService(options: {
           rawPayloads: "omitted",
           text: "included",
           unknownFields: "counts-only",
+        },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
+    async getVoiceChannelStatus(guildId, channelId) {
+      calls.voiceStatuses += 1
+      calls.lastGuildId = guildId
+      calls.lastChannelId = channelId
+      return {
+        botConnection: "other",
+        channel: {
+          guildId,
+          id: channelId,
+          name: "Private operations voice",
+          type: "voice",
+        },
+        current: {
+          channelId,
+          evidence: {
+            discardedChannelEntries: 1,
+            responseUnknownFieldCount: 0,
+            returnedChannelEntries: 2,
+            statusRepresentation: "value",
+            targetUnknownFieldCount: 0,
+          },
+          freshness: {
+            gatewaySequence: 42,
+            observedAt: "2026-08-24T00:00:00.100Z",
+            requestedAt: "2026-08-24T00:00:00.000Z",
+            source: "gateway-request-channel-info",
+          },
+          guildId,
+          privacy: {
+            nonTargetStatusText: "discarded-before-projection",
+            persistence: "none",
+            rawPayloads: "omitted",
+            text: "transient-untrusted",
+          },
+          schemaVersion: 1,
+          status: PRIVATE_VOICE_CHANNEL_STATUS,
+        },
+        guild: { id: guildId, name: "Private guild name" },
+        permission: {
+          appliedRoleIds: [guildId],
+          authorizedForChange: true,
+          botAdministrator: false,
+          botConnection: "other",
+          botGuildOwner: false,
+          effectivePermissionNames: [
+            "VIEW_CHANNEL",
+            "SET_VOICE_CHANNEL_STATUS",
+            "MANAGE_CHANNELS",
+          ],
+          effectivePermissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.SET_VOICE_CHANNEL_STATUS
+            | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+          ).toString(),
+          manageChannelsRequired: true,
+          missingPermissions: [],
+          requiredPermissions: [
+            "VIEW_CHANNEL",
+            "SET_VOICE_CHANNEL_STATUS",
+            "MANAGE_CHANNELS",
+          ],
+          unknownPermissionBits: "0",
+          warnings: [],
+        },
+        privacy: {
+          auditReasonPersisted: false,
+          enumeration: "none",
+          nonTargetChannelIdsExposed: false,
+          nonTargetStatusText: "discarded-before-projection",
+          persistence: "content-free-outcomes-only",
+          rawPayloads: "omitted",
+          statusTextPersisted: false,
         },
         schemaVersion: 1,
         status: "ok",
@@ -1779,6 +1860,7 @@ function guidanceService(options: {
     planApplicationEmojiChange: unexpected,
     planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
+    planVoiceChannelStatusChange: unexpected,
     planChannelOrder: unexpected,
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
@@ -2541,6 +2623,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.channelAccess
     + calls.channelDeletions
     + calls.channelMetadata
+    + calls.voiceStatuses
     + calls.channelOrders
     + calls.channels
     + calls.forumTags
@@ -2673,6 +2756,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelStageInstance,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelStageInstance,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.channelVoiceStatus,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelVoiceStatus,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelWebhooks,
@@ -2823,6 +2910,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /permission-overwrite inventory is read-only/)
   assert.match(safety.text, /Global and exact-guild voice-region resources/)
   assert.match(safety.text, /fresh guild premium tier and VIP_REGIONS capability/)
+  assert.match(safety.text, /Voice channel status reads and changes reuse the exact channel-metadata scope/)
+  assert.match(safety.text, /SET_VOICE_CHANNEL_STATUS evidence plus MANAGE_CHANNELS/)
+  assert.match(safety.text, /discards every non-target channel entry before projection/)
   assert.match(safety.text, /Announcement subscriptions separate exact source and target allowlists/)
   assert.match(safety.text, /Guild scaffolds are additive-only/)
   assert.match(safety.text, /survive process restarts/)
@@ -3536,6 +3626,22 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(metadataPrivacy.rawPayloads, "omitted")
   assert.equal("permissionOverwrites" in metadata, false)
 
+  const voiceStatus = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/channels/${CHANNEL_ID}/voice-status`,
+  )
+  const voiceStatusData = voiceStatus.value.data as Record<string, unknown>
+  const voiceStatusCurrent = voiceStatusData.current as Record<string, unknown>
+  const voiceStatusPrivacy = voiceStatusData.privacy as Record<string, unknown>
+  assert.equal(voiceStatusCurrent.status, PRIVATE_VOICE_CHANNEL_STATUS)
+  assert.equal(voiceStatusPrivacy.statusTextPersisted, false)
+  assert.equal(voiceStatusPrivacy.nonTargetChannelIdsExposed, false)
+  assert.equal(
+    (voiceStatusCurrent.privacy as Record<string, unknown>).nonTargetStatusText,
+    "discarded-before-projection",
+  )
+  assert.equal(voiceStatus.content.mimeType, "application/json")
+
   const forumTags = await readJsonResource(
     client,
     `discord://channels/${CHANNEL_ID}/forum-tags`,
@@ -3600,6 +3706,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.channels, 1)
   assert.equal(calls.channelAccess, 1)
   assert.equal(calls.channelMetadata, 1)
+  assert.equal(calls.voiceStatuses, 1)
   assert.equal(calls.channelOrders, 1)
   assert.equal(calls.forumTags, 1)
   assert.equal(calls.messages, 1)
@@ -4269,6 +4376,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(channelMetadata, /Do not call execute_channel_metadata_change/)
   assert.match(channelMetadata, /complete current and desired metadata/)
   assert.match(channelMetadata, /VIEW_CHANNEL and MANAGE_CHANNELS/)
+
+  const voiceChannelStatusRequest = {
+    auditReason: "Reviewed voice channel status",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    status: "Reviewed incident room",
+  }
+  const voiceChannelStatus = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(voiceChannelStatusRequest) },
+    name: MCP_PROMPT_NAMES.reviewVoiceChannelStatusChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(voiceChannelStatus.split("\n")[1] || ""),
+    voiceChannelStatusRequest,
+  )
+  assert.match(voiceChannelStatus, /Call only plan_voice_channel_status_change/)
+  assert.match(
+    voiceChannelStatus,
+    /Do not call execute_voice_channel_status_change/,
+  )
+  assert.match(voiceChannelStatus, /SET_VOICE_CHANNEL_STATUS/)
+  assert.match(voiceChannelStatus, /conditional MANAGE_CHANNELS/)
+  assert.match(voiceChannelStatus, /Gateway freshness and projection evidence/)
 
   const applicationEmoji = promptText(await client.getPrompt({
     arguments: {

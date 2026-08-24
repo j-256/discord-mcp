@@ -89,6 +89,11 @@ import type {
   ChannelMetadataView,
 } from "../src/channel-metadata-service.js"
 import type {
+  VoiceChannelStatusChangeRequest,
+  VoiceChannelStatusPlan,
+  VoiceChannelStatusReadResult,
+} from "../src/voice-channel-status-service.js"
+import type {
   ChannelPermissionOverwritePlan,
   ChannelPermissionOverwriteRequest,
 } from "../src/channel-permission-overwrite-service.js"
@@ -264,6 +269,8 @@ import {
   ChannelDeletionOperationConflictError,
   ChannelMetadataExecutionError,
   ChannelMetadataOperationConflictError,
+  VoiceChannelStatusExecutionError,
+  VoiceChannelStatusOperationConflictError,
   ChannelOrderingExecutionError,
   ChannelOrderingOperationConflictError,
   ChannelPermissionOverwriteExecutionError,
@@ -505,6 +512,9 @@ const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
 const GUILD_SETTINGS_OPERATION_KEY = "guild-settings-change-attempt-0001"
 const GUILD_PROFILE_OPERATION_KEY = "guild-profile-change-attempt-0001"
 const CHANNEL_METADATA_OPERATION_KEY = "channel-metadata-attempt-0001"
+const VOICE_CHANNEL_STATUS_OPERATION_KEY = "voice-status-attempt-0001"
+const VOICE_CHANNEL_STATUS_CURRENT = "Private current incident status"
+const VOICE_CHANNEL_STATUS_DESIRED = "Private reviewed incident status"
 const ONBOARDING_PROMPT_TITLE = "Choose your community path"
 const ONBOARDING_OPTION_TITLE = "Community member"
 const ONBOARDING_OPTION_DESCRIPTION = "Join the community channels"
@@ -2641,6 +2651,142 @@ function channelMetadataPlan(
         }
       : null,
     writeRequired: changes.length > 0,
+  }
+}
+
+function voiceChannelStatusRequest(
+  overrides: Partial<VoiceChannelStatusChangeRequest> = {},
+): VoiceChannelStatusChangeRequest {
+  return {
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: VOICE_CHANNEL_STATUS_OPERATION_KEY,
+    status: VOICE_CHANNEL_STATUS_DESIRED,
+    ...overrides,
+  }
+}
+
+function voiceChannelStatusSnapshot(
+  status: string | null,
+): VoiceChannelStatusReadResult["current"] {
+  return {
+    channelId: CHANNEL_ID,
+    evidence: {
+      discardedChannelEntries: 1,
+      responseUnknownFieldCount: 0,
+      returnedChannelEntries: 2,
+      statusRepresentation: status === null ? "null" : "value",
+      targetUnknownFieldCount: 0,
+    },
+    freshness: {
+      gatewaySequence: 42,
+      observedAt: "2026-08-24T00:00:00.100Z",
+      requestedAt: "2026-08-24T00:00:00.000Z",
+      source: "gateway-request-channel-info",
+    },
+    guildId: GUILD_ID,
+    privacy: {
+      nonTargetStatusText: "discarded-before-projection",
+      persistence: "none",
+      rawPayloads: "omitted",
+      text: "transient-untrusted",
+    },
+    schemaVersion: 1,
+    status,
+  }
+}
+
+function voiceChannelStatusPrivacy(): VoiceChannelStatusReadResult["privacy"] {
+  return {
+    auditReasonPersisted: false,
+    enumeration: "none",
+    nonTargetChannelIdsExposed: false,
+    nonTargetStatusText: "discarded-before-projection",
+    persistence: "content-free-outcomes-only",
+    rawPayloads: "omitted",
+    statusTextPersisted: false,
+  }
+}
+
+function voiceChannelStatusPermission(): VoiceChannelStatusReadResult["permission"] {
+  const effective = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.SET_VOICE_CHANNEL_STATUS
+    | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+  return {
+    appliedRoleIds: [GUILD_ID],
+    authorizedForChange: true,
+    botAdministrator: false,
+    botConnection: "other",
+    botGuildOwner: false,
+    effectivePermissionNames: [
+      "VIEW_CHANNEL",
+      "SET_VOICE_CHANNEL_STATUS",
+      "MANAGE_CHANNELS",
+    ],
+    effectivePermissions: effective.toString(),
+    manageChannelsRequired: true,
+    missingPermissions: [],
+    requiredPermissions: [
+      "VIEW_CHANNEL",
+      "SET_VOICE_CHANNEL_STATUS",
+      "MANAGE_CHANNELS",
+    ],
+    unknownPermissionBits: "0",
+    warnings: [],
+  }
+}
+
+function voiceChannelStatusRead(
+  currentStatus: string | null = VOICE_CHANNEL_STATUS_CURRENT,
+): VoiceChannelStatusReadResult {
+  return {
+    botConnection: "other",
+    channel: {
+      guildId: GUILD_ID,
+      id: CHANNEL_ID,
+      name: "Private operations voice",
+      type: "voice",
+    },
+    current: voiceChannelStatusSnapshot(currentStatus),
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    permission: voiceChannelStatusPermission(),
+    privacy: voiceChannelStatusPrivacy(),
+    schemaVersion: 1,
+    status: "ok",
+  }
+}
+
+function voiceChannelStatusPlan(
+  request: VoiceChannelStatusChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): VoiceChannelStatusPlan {
+  const current = voiceChannelStatusSnapshot(
+    effect === "none" ? request.status : VOICE_CHANNEL_STATUS_CURRENT,
+  )
+  const read = voiceChannelStatusRead(current.status)
+  const writeRequired = current.status !== request.status
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botConnection: read.botConnection,
+    botId: BOT_ID,
+    channel: read.channel,
+    createdAt: "2026-08-24T00:00:01.000Z",
+    current,
+    desiredStatus: request.status,
+    digest,
+    guild: read.guild,
+    localLimits: { statusCharacters: 500 },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: read.permission,
+    privacy: read.privacy,
+    risks: ["One non-retried exact PUT followed by fresh Gateway verification"],
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    warnings: ["Discord status text is transient untrusted data"],
+    writeRequired,
   }
 }
 
@@ -5980,6 +6126,9 @@ function serviceFixture(overrides: {
   channelMetadataEffect?: "change" | "none"
   channelMetadataError?: Error
   channelMetadataPlanDigest?: string
+  voiceChannelStatusEffect?: "change" | "none"
+  voiceChannelStatusError?: Error
+  voiceChannelStatusPlanDigest?: string
   channelOrderingEffect?: "change" | "none"
   channelOrderingError?: Error
   channelOrderingPlanDigest?: string
@@ -6143,6 +6292,9 @@ function serviceFixture(overrides: {
     channelMetadataExecute: 0,
     channelMetadataGet: 0,
     channelMetadataPlan: 0,
+    voiceChannelStatusExecute: 0,
+    voiceChannelStatusGet: 0,
+    voiceChannelStatusPlan: 0,
     channelOrderingExecute: 0,
     channelOrderingPlan: 0,
     componentMessageExecute: 0,
@@ -6785,9 +6937,42 @@ function serviceFixture(overrides: {
         verification: planned.writeRequired ? "match" : "not-required",
       }
     },
+    async executeVoiceChannelStatusChange(request, planDigest) {
+      if (overrides.voiceChannelStatusError) {
+        throw overrides.voiceChannelStatusError
+      }
+      calls.voiceChannelStatusExecute += 1
+      const planned = voiceChannelStatusPlan(
+        request,
+        planDigest,
+        overrides.voiceChannelStatusEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-voice-channel-status" : null,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        observed: voiceChannelStatusSnapshot(request.status),
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        settlementEvent: planned.writeRequired ? "matched" : "not-observed",
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+      }
+    },
     async getChannel(channelId) {
       calls.channelMetadataGet += 1
       return channelMetadataRead(channelId)
+    },
+    async getVoiceChannelStatus(guildId, channelId) {
+      calls.voiceChannelStatusGet += 1
+      const read = voiceChannelStatusRead()
+      return {
+        ...read,
+        channel: { ...read.channel, guildId, id: channelId },
+        current: { ...read.current, channelId, guildId },
+        guild: { ...read.guild, id: guildId },
+      }
     },
     async listGuildVoiceRegions(guildId) {
       calls.guildVoiceRegions += 1
@@ -6845,6 +7030,14 @@ function serviceFixture(overrides: {
         request,
         overrides.channelMetadataPlanDigest || DIGEST,
         overrides.channelMetadataEffect,
+      )
+    },
+    async planVoiceChannelStatusChange(request) {
+      calls.voiceChannelStatusPlan += 1
+      return voiceChannelStatusPlan(
+        request,
+        overrides.voiceChannelStatusPlanDigest || DIGEST,
+        overrides.voiceChannelStatusEffect,
       )
     },
     async executeOnboardingChange(request, planDigest) {
@@ -9446,6 +9639,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_guilds",
       "list_channels",
       "get_channel",
+      "get_voice_channel_status",
       "list_voice_regions",
       "list_guild_voice_regions",
       "audit_forum_tags",
@@ -9563,6 +9757,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_stage_instance_change",
       "plan_channel_metadata_change",
       "execute_channel_metadata_change",
+      "plan_voice_channel_status_change",
+      "execute_voice_channel_status_change",
       "plan_forum_tag_change",
       "execute_forum_tag_change",
       "plan_channel_permission_overwrite",
@@ -9666,6 +9862,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const channelMetadata = result.tools.find((tool) => (
     tool.name === "execute_channel_metadata_change"
   ))
+  const voiceChannelStatus = result.tools.find((tool) => (
+    tool.name === "execute_voice_channel_status_change"
+  ))
   const permissionOverwrite = result.tools.find((tool) => (
     tool.name === "execute_channel_permission_overwrite"
   ))
@@ -9720,6 +9919,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     soundboard,
     scheduledEvent,
     channelMetadata,
+    voiceChannelStatus,
     permissionOverwrite,
     administration,
     memberNickname,
@@ -9848,12 +10048,14 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_scheduled_event",
     "list_scheduled_event_users",
     "get_channel",
+    "get_voice_channel_status",
     "audit_forum_tags",
     "audit_channel_order",
     "plan_channel_clone",
     "plan_channel_order",
     "plan_forum_tag_change",
     "plan_channel_metadata_change",
+    "plan_voice_channel_status_change",
     "plan_channel_permission_overwrite",
     "plan_message_pin",
     "plan_announcement_crosspost",
@@ -10116,6 +10318,61 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
     gateway: gateway(true, GUILD_ID),
     service,
   })
+  await server.close()
+})
+
+test("MCP server requires an exact operational Gateway source for voice channel status", async () => {
+  const environment = {
+    DISCORD_BOT_TOKEN: TOKEN,
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+    DISCORD_MCP_APPLICATION_ID: APPLICATION_ID,
+    DISCORD_MCP_BOT_ID: BOT_ID,
+    DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+  }
+  const service = serviceFixture().service
+  const store = (scopedChannels: number) => new GatewayEventStore({
+    allowedChannelIds: new Set(),
+    allowedGuildIds: new Set(),
+    cursorNamespace: `voicestatusscope${scopedChannels}`,
+    enabled: true,
+    eventFeedEnabled: false,
+    voiceChannelStatusChannelCount: scopedChannels,
+  })
+
+  assert.throws(
+    () => createDiscordMcpServer({
+      environment,
+      gateway: store(0),
+      service,
+    }),
+    /voice-channel status scope does not match configured exact channel scope/,
+  )
+  assert.throws(
+    () => createDiscordMcpServer({
+      environment,
+      gateway: store(1),
+      service,
+    }),
+    /requires an enabled Gateway channel-info source/,
+  )
+  const disabled = Object.assign(store(1), {
+    getVoiceChannelStatus: async () => Promise.reject(new Error("not called")),
+    voiceChannelStatusEnabled: false,
+    waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
+  })
+  assert.throws(
+    () => createDiscordMcpServer({ environment, gateway: disabled, service }),
+    /requires an enabled Gateway channel-info source/,
+  )
+
+  const enabled = Object.assign(store(1), {
+    getVoiceChannelStatus: async () => Promise.reject(new Error("not called")),
+    voiceChannelStatusEnabled: true,
+    waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
+  })
+  const server = createDiscordMcpServer({ environment, gateway: enabled, service })
   await server.close()
 })
 
@@ -11141,14 +11398,38 @@ test("progressive discovery enables the complete reviewed channel-metadata workf
   )
 })
 
-test("progressive discovery exposes voice-region reads with reviewed channel settings", async (context) => {
+test("progressive discovery enables the reviewed voice channel status pair", async (context) => {
+  const { client } = await connectedFixture(context, {
+    environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_voice_channel_status_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_voice_channel_status_change",
+    "plan_voice_channel_status_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_voice_channel_status_change",
+      "execute_voice_channel_status_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery exposes voice reads with reviewed channel settings", async (context) => {
   const { client } = await connectedFixture(context, {
     environment: { DISCORD_MCP_TOOL_SURFACE: "progressive" },
   })
 
   const discovery = structuredContent(await client.callTool({
     arguments: {
-      limit: 5,
+      limit: 7,
       query: "voice region bitrate video quality",
       toolset: "channel-metadata",
     },
@@ -11158,9 +11439,12 @@ test("progressive discovery exposes voice-region reads with reviewed channel set
 
   assert.deepEqual(enabled, [
     "execute_channel_metadata_change",
+    "execute_voice_channel_status_change",
+    "get_voice_channel_status",
     "list_guild_voice_regions",
     "list_voice_regions",
     "plan_channel_metadata_change",
+    "plan_voice_channel_status_change",
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name).sort(),
@@ -11327,6 +11611,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     channelMetadataExecute: 0,
     channelMetadataGet: 0,
     channelMetadataPlan: 0,
+    voiceChannelStatusExecute: 0,
+    voiceChannelStatusGet: 0,
+    voiceChannelStatusPlan: 0,
     channelOrderingExecute: 0,
     channelOrderingPlan: 0,
     componentMessageExecute: 0,
@@ -17792,6 +18079,245 @@ test("MCP channel metadata execution exposes uncertainty and content-free confli
   assert.equal(
     structuredContent(stateResult).status,
     "coordination-state-error",
+  )
+})
+
+test("MCP voice channel status read and plan preserve exact transient intent", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const read = await client.callTool({
+    arguments: { channelId: CHANNEL_ID, guildId: GUILD_ID },
+    name: "get_voice_channel_status",
+  })
+  const request = voiceChannelStatusRequest()
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_voice_channel_status_change",
+  })
+  const cleared = await client.callTool({
+    arguments: { ...voiceChannelStatusRequest({ status: null }) },
+    name: "plan_voice_channel_status_change",
+  })
+  const exactCodepointLimit = await client.callTool({
+    arguments: { ...voiceChannelStatusRequest({ status: "😀".repeat(500) }) },
+    name: "plan_voice_channel_status_change",
+  })
+  const invalid = await Promise.all([
+    client.callTool({
+      arguments: {
+        auditReason: AUDIT_REASON,
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        operationKey: VOICE_CHANNEL_STATUS_OPERATION_KEY,
+      },
+      name: "plan_voice_channel_status_change",
+    }),
+    client.callTool({
+      arguments: { ...voiceChannelStatusRequest({ status: " padded " }) },
+      name: "plan_voice_channel_status_change",
+    }),
+    client.callTool({
+      arguments: { ...voiceChannelStatusRequest({ status: "bad\nstatus" }) },
+      name: "plan_voice_channel_status_change",
+    }),
+    client.callTool({
+      arguments: { ...voiceChannelStatusRequest({ status: "😀".repeat(501) }) },
+      name: "plan_voice_channel_status_change",
+    }),
+    client.callTool({
+      arguments: { ...request, enumerate: true },
+      name: "plan_voice_channel_status_change",
+    }),
+  ])
+
+  const readContent = structuredContent(read)
+  assert.equal(
+    (readContent.current as Record<string, unknown>).status,
+    VOICE_CHANNEL_STATUS_CURRENT,
+  )
+  assert.equal(
+    (readContent.privacy as Record<string, unknown>).statusTextPersisted,
+    false,
+  )
+  assert.equal(structuredContent(planned).desiredStatus, VOICE_CHANNEL_STATUS_DESIRED)
+  assert.equal(structuredContent(cleared).desiredStatus, null)
+  assert.equal(
+    structuredContent(exactCodepointLimit).desiredStatus,
+    "😀".repeat(500),
+  )
+  for (const result of invalid) assert.equal(result.isError, true)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(VOICE_CHANNEL_STATUS_OPERATION_KEY))
+  assert.equal(calls.voiceChannelStatusGet, 1)
+  assert.equal(calls.voiceChannelStatusPlan, 3)
+})
+
+test("MCP voice channel status execution binds signed review and keeps summaries content-free", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      ...voiceChannelStatusRequest(),
+      planDigest: DIGEST,
+    },
+    name: "execute_voice_channel_status_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.voiceChannelStatusPlan, 1)
+  assert.equal(calls.voiceChannelStatusExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    OPERATION_KEY_HASH,
+    VOICE_CHANNEL_STATUS_CURRENT,
+    VOICE_CHANNEL_STATUS_DESIRED,
+    AUDIT_REASON,
+    DIGEST,
+    "SET_VOICE_CHANNEL_STATUS",
+    "MANAGE_CHANNELS",
+    "gateway-request-channel-info",
+    "discarded-before-projection",
+    "one non-retried exact PUT",
+  ]) assert.match(confirmationMessage, new RegExp(value))
+  assert.doesNotMatch(confirmationMessage, new RegExp(VOICE_CHANNEL_STATUS_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(VOICE_CHANNEL_STATUS_OPERATION_KEY))
+  const summary = (result.content?.[0] as { text?: string } | undefined)?.text || ""
+  assert.doesNotMatch(summary, new RegExp(VOICE_CHANNEL_STATUS_CURRENT))
+  assert.doesNotMatch(summary, new RegExp(VOICE_CHANNEL_STATUS_DESIRED))
+})
+
+test("MCP voice channel status execution skips no-op approval and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    ...voiceChannelStatusRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { voiceChannelStatusEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_voice_channel_status_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.voiceChannelStatusExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_voice_channel_status_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.voiceChannelStatusExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_voice_channel_status_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.voiceChannelStatusExecute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { voiceChannelStatusPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_voice_channel_status_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.calls.voiceChannelStatusExecute, 0)
+})
+
+test("MCP voice channel status errors expose uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...voiceChannelStatusRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      voiceChannelStatusError: new VoiceChannelStatusExecutionError(
+        "Discord voice channel status outcome is uncertain",
+        {
+          activityId: "activity-voice-channel-status",
+          channelId: CHANNEL_ID,
+          guildId: GUILD_ID,
+          operationKeyHash: OPERATION_KEY_HASH,
+          planDigest: DIGEST,
+          schemaVersion: 1,
+          status: "uncertain",
+        },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_voice_channel_status_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-voice-channel-status",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    resourceId: CHANNEL_ID,
+    status: "completed",
+    timestamp: "2026-08-24T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      voiceChannelStatusError: new VoiceChannelStatusOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_voice_channel_status_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), /Private .*status/u)
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(VOICE_CHANNEL_STATUS_OPERATION_KEY),
   )
 })
 
@@ -24834,6 +25360,9 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     getChannelLayoutStatus: () => feed.getChannelLayoutStatus(),
     getStatus: () => feed.getStatus(),
     listEvents: (options) => feed.listEvents(options),
+    async getVoiceChannelStatus() {
+      throw new Error("Voice channel status evidence is disabled")
+    },
     start() {
       lifecycle.push("gateway-start")
     },
@@ -24842,6 +25371,10 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     },
     subscribe: (listener) => feed.subscribe(listener),
     subscribeChannelLayouts: (listener) => feed.subscribeChannelLayouts(listener),
+    async waitForVoiceChannelStatusUpdate() {
+      throw new Error("Voice channel status evidence is disabled")
+    },
+    voiceChannelStatusEnabled: false,
   }
   const serviceData = serviceFixture()
   const handle = runDiscordMcpServer({
@@ -24899,6 +25432,9 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
     getChannelLayoutStatus: () => feed.getChannelLayoutStatus(),
     getStatus: () => feed.getStatus(),
     listEvents: (options) => feed.listEvents(options),
+    async getVoiceChannelStatus() {
+      throw new Error("Voice channel status evidence is disabled")
+    },
     start() {
       starts += 1
     },
@@ -24908,6 +25444,10 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
     },
     subscribe: (listener) => feed.subscribe(listener),
     subscribeChannelLayouts: (listener) => feed.subscribeChannelLayouts(listener),
+    async waitForVoiceChannelStatusUpdate() {
+      throw new Error("Voice channel status evidence is disabled")
+    },
+    voiceChannelStatusEnabled: false,
   }
   let flushes = 0
   let telemetryStops = 0

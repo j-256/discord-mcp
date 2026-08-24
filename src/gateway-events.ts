@@ -154,6 +154,12 @@ export interface GatewayStatusSnapshot {
     persistent: false
     privilegedIntentsRequested: false
   }
+  projections: {
+    voiceChannelStatus: {
+      enabled: boolean
+      scopedChannels: number
+    }
+  }
   schemaVersion: number
   status: "ok"
 }
@@ -177,6 +183,7 @@ export interface GatewayEventStoreOptions {
   enabled: boolean
   eventFeedEnabled?: boolean
   layoutGuildIds?: ReadonlySet<string>
+  voiceChannelStatusChannelCount?: number
 }
 
 interface StoredGatewayEvent extends ContentFreeGatewayEvent {
@@ -278,6 +285,7 @@ export class GatewayEventStore implements GatewayEventSource {
   readonly #channels = new Map<string, ChannelMapping>()
   readonly #clock: () => Date
   readonly #channelLayouts: GatewayChannelLayoutStore
+  readonly #voiceChannelStatusChannelCount: number
   #connectedAt: string | null = null
   #continuityGaps = 0
   readonly #cursorNamespace: string
@@ -294,6 +302,7 @@ export class GatewayEventStore implements GatewayEventSource {
   #state: GatewayConnectionState
   readonly enabled: boolean
   readonly eventFeedEnabled: boolean
+  readonly guildIntentRequired: boolean
   readonly layoutEnabled: boolean
 
   constructor(options: GatewayEventStoreOptions) {
@@ -312,6 +321,13 @@ export class GatewayEventStore implements GatewayEventSource {
       throw new RangeError("Gateway cursor namespace must contain 8-64 URL-safe characters")
     }
     const eventFeedEnabled = options.eventFeedEnabled ?? options.enabled
+    const voiceChannelStatusChannelCount = options.voiceChannelStatusChannelCount ?? 0
+    if (
+      !Number.isSafeInteger(voiceChannelStatusChannelCount)
+      || voiceChannelStatusChannelCount < 0
+    ) {
+      throw new RangeError("Gateway voice channel status scope count must be a nonnegative integer")
+    }
     if (eventFeedEnabled && !options.enabled) {
       throw new RangeError("Gateway event feed requires an enabled Gateway connection")
     }
@@ -327,6 +343,7 @@ export class GatewayEventStore implements GatewayEventSource {
       ?? (eventFeedEnabled ? options.allowedGuildIds : new Set<string>())
     this.enabled = options.enabled
     this.eventFeedEnabled = eventFeedEnabled
+    this.#voiceChannelStatusChannelCount = voiceChannelStatusChannelCount
     this.#allowedChannelIds = new Set(options.allowedChannelIds)
     this.#allowedGuildIds = new Set(options.allowedGuildIds)
     this.#bufferSize = bufferSize
@@ -337,6 +354,7 @@ export class GatewayEventStore implements GatewayEventSource {
       guildIds: layoutGuildIds,
     })
     this.layoutEnabled = this.#channelLayouts.layoutEnabled
+    this.guildIntentRequired = this.layoutEnabled || voiceChannelStatusChannelCount > 0
     this.#cursorNamespace = cursorNamespace
     this.#state = options.enabled ? "stopped" : "disabled"
   }
@@ -784,7 +802,7 @@ export class GatewayEventStore implements GatewayEventSource {
             "GUILD_MESSAGE_REACTIONS" as const,
             "GUILD_MESSAGE_POLLS" as const,
           ]
-        : this.layoutEnabled
+        : this.guildIntentRequired
           ? ["GUILDS" as const]
           : [],
       layout: this.#channelLayouts.getChannelLayoutStatus(),
@@ -792,6 +810,12 @@ export class GatewayEventStore implements GatewayEventSource {
         contentStored: false,
         persistent: false,
         privilegedIntentsRequested: false,
+      },
+      projections: {
+        voiceChannelStatus: {
+          enabled: this.#voiceChannelStatusChannelCount > 0,
+          scopedChannels: this.#voiceChannelStatusChannelCount,
+        },
       },
       schemaVersion: SCHEMA_VERSION,
       status: "ok",

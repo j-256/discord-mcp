@@ -12,7 +12,10 @@ import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import { loadConnectorConfig } from "../src/config.js"
-import { DISCORD_MESSAGE_FLAGS } from "../src/constants.js"
+import {
+  DISCORD_CHANNEL_TYPES,
+  DISCORD_MESSAGE_FLAGS,
+} from "../src/constants.js"
 import {
   DISCORD_AUTO_MODERATION_ACTION_TYPES,
   DISCORD_AUTO_MODERATION_EVENT_TYPES,
@@ -22,6 +25,7 @@ import {
   DISCORD_STAGE_INSTANCE_PRIVACY_LEVELS,
   type DiscordAutoModerationRuleSummary,
   type DiscordApplicationEmojiSummary,
+  type DiscordChannelMetadata,
   type DiscordGuildIntegrationSummary,
   type DiscordGuildTemplateSummary,
   type DiscordScheduledEventSummary,
@@ -40,6 +44,10 @@ import {
   PolicyError,
 } from "../src/errors.js"
 import { GatewayChannelLayoutStore } from "../src/gateway-channel-layout.js"
+import type {
+  GatewayVoiceChannelStatusSnapshot,
+  GatewayVoiceChannelStatusUpdate,
+} from "../src/gateway-voice-channel-status.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import type {
   ApplicationOperationReceipt,
@@ -323,6 +331,7 @@ function serviceFixture(overrides: {
   scheduledEventOptions?: ConnectorServiceOptions["scheduledEventOptions"]
   soundboardOptions?: ConnectorServiceOptions["soundboardOptions"]
   stageInstanceOptions?: ConnectorServiceOptions["stageInstanceOptions"]
+  voiceChannelStatusOptions?: ConnectorServiceOptions["voiceChannelStatusOptions"]
   threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
   threadGovernanceOptions?: ConnectorServiceOptions["threadGovernanceOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
@@ -538,6 +547,9 @@ function serviceFixture(overrides: {
     async getCurrentApplication() {
       calls.application += 1
       return overrides.application || application()
+    },
+    async getCurrentUserVoiceState() {
+      throw new Error("Unexpected current-user voice lookup")
     },
     async getApplicationEmoji() {
       throw new Error("Unexpected application emoji lookup")
@@ -865,6 +877,9 @@ function serviceFixture(overrides: {
     async searchGuildMembers() {
       return []
     },
+    async setVoiceChannelStatus() {
+      throw new Error("Unexpected voice channel status change")
+    },
     async unpinMessage() {},
   }
   Object.assign(client, overrides.client)
@@ -996,6 +1011,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.stageInstanceOptions
         ? { stageInstanceOptions: overrides.stageInstanceOptions }
+        : {}),
+      ...(overrides.voiceChannelStatusOptions
+        ? { voiceChannelStatusOptions: overrides.voiceChannelStatusOptions }
         : {}),
       ...(overrides.threadCreationOptions
         ? { threadCreationOptions: overrides.threadCreationOptions }
@@ -3350,6 +3368,306 @@ test("service pins identity through transient channel metadata reads and reviewe
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)
   assert.equal(operationStore.receipt, undefined)
+})
+
+test("service reads and executes record-free voice channel status no-ops", async () => {
+  const privateStatus = "Private incident room"
+  const operationStore = new MemoryOperationStore()
+  let gatewayReads = 0
+  let statusWrites = 0
+  let coordinationRuns = 0
+  const layout = completeChannelGateway([channel({
+    name: "Private voice channel",
+    type: DISCORD_CHANNEL_TYPES.voice,
+  })])
+  const gateway = Object.assign(layout, {
+    voiceChannelStatusEnabled: true,
+    async getVoiceChannelStatus(): Promise<GatewayVoiceChannelStatusSnapshot> {
+      gatewayReads += 1
+      return {
+        channelId: CHANNEL_ID,
+        evidence: {
+          discardedChannelEntries: 0,
+          responseUnknownFieldCount: 0,
+          returnedChannelEntries: 1,
+          statusRepresentation: "value",
+          targetUnknownFieldCount: 0,
+        },
+        freshness: {
+          gatewaySequence: gatewayReads,
+          observedAt: "2026-08-24T12:00:01.000Z",
+          requestedAt: "2026-08-24T12:00:00.000Z",
+          source: "gateway-request-channel-info",
+        },
+        guildId: GUILD_ID,
+        privacy: {
+          nonTargetStatusText: "discarded-before-projection",
+          persistence: "none",
+          rawPayloads: "omitted",
+          text: "transient-untrusted",
+        },
+        schemaVersion: 1,
+        status: privateStatus,
+      }
+    },
+    async waitForVoiceChannelStatusUpdate(): Promise<GatewayVoiceChannelStatusUpdate> {
+      throw new Error("Unexpected voice status settlement subscription")
+    },
+  })
+  const voiceMetadata: DiscordChannelMetadata = {
+    bitrate: 96_000,
+    defaultAutoArchiveDuration: null,
+    defaultThreadRateLimitPerUser: null,
+    guildId: GUILD_ID,
+    id: CHANNEL_ID,
+    name: "Private voice channel",
+    nsfw: false,
+    parentId: null,
+    permissionOverwrites: [],
+    position: 1,
+    rateLimitPerUser: 0,
+    rtcRegion: null,
+    topic: null,
+    type: DISCORD_CHANNEL_TYPES.voice,
+    unknownFieldCount: 0,
+    userLimit: 0,
+    videoQualityMode: 1,
+  }
+  const writeCoordinator: WriteCoordinator = {
+    run() {
+      coordinationRuns += 1
+      throw new Error("Unexpected write coordination for a no-op")
+    },
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async getCurrentUserVoiceState() {
+        return {
+          channelId: CHANNEL_ID,
+          deaf: false,
+          guildId: GUILD_ID,
+          mute: false,
+          unknownFieldCount: 0,
+          userId: BOT_ID,
+        }
+      },
+      async getGuildChannelMetadata() {
+        return voiceMetadata
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.SET_VOICE_CHANNEL_STATUS,
+          "@everyone",
+        )]
+      },
+      async setVoiceChannelStatus() {
+        statusWrites += 1
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    },
+    gateway,
+    operationStore,
+    voiceChannelStatusOptions: {
+      clock: () => new Date("2026-08-24T12:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(61),
+      randomId: () => "activity-voice-status",
+    },
+    writeCoordinator,
+  })
+  const change = {
+    auditReason: "Reviewed private status",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: "voice-status-service-noop-0001",
+    status: privateStatus,
+  }
+
+  const read = await service.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID)
+  const plan = await service.planVoiceChannelStatusChange(change)
+  const result = await service.executeVoiceChannelStatusChange(change, plan.digest)
+
+  assert.equal(read.current.status, privateStatus)
+  assert.equal(plan.status, "already-current")
+  assert.equal(result.status, "already-current")
+  assert.equal(result.activityId, null)
+  assert.equal(statusWrites, 0)
+  assert.equal(coordinationRuns, 0)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service coordinates exact voice channel status writes before final execution", async () => {
+  const oldStatus = "Private old voice status"
+  const desiredStatus = "Private desired voice status"
+  const auditReason = "Reviewed private voice status"
+  const operationStore = new MemoryOperationStore()
+  let currentStatus = oldStatus
+  let gatewaySequence = 1
+  let waiter: ((update: GatewayVoiceChannelStatusUpdate) => void) | undefined
+  let statusWrites = 0
+  const intents: WriteCoordinationIntent[] = []
+  const layout = completeChannelGateway([channel({
+    name: "Private voice channel",
+    type: DISCORD_CHANNEL_TYPES.voice,
+  })])
+  const gateway = Object.assign(layout, {
+    voiceChannelStatusEnabled: true,
+    async getVoiceChannelStatus(): Promise<GatewayVoiceChannelStatusSnapshot> {
+      return {
+        channelId: CHANNEL_ID,
+        evidence: {
+          discardedChannelEntries: 0,
+          responseUnknownFieldCount: 0,
+          returnedChannelEntries: 1,
+          statusRepresentation: currentStatus === null ? "null" : "value",
+          targetUnknownFieldCount: 0,
+        },
+        freshness: {
+          gatewaySequence: gatewaySequence++,
+          observedAt: "2026-08-24T12:00:01.000Z",
+          requestedAt: "2026-08-24T12:00:00.000Z",
+          source: "gateway-request-channel-info",
+        },
+        guildId: GUILD_ID,
+        privacy: {
+          nonTargetStatusText: "discarded-before-projection",
+          persistence: "none",
+          rawPayloads: "omitted",
+          text: "transient-untrusted",
+        },
+        schemaVersion: 1,
+        status: currentStatus,
+      }
+    },
+    waitForVoiceChannelStatusUpdate(): Promise<GatewayVoiceChannelStatusUpdate> {
+      return new Promise((resolve) => {
+        waiter = resolve
+      })
+    },
+  })
+  const voiceMetadata: DiscordChannelMetadata = {
+    bitrate: 96_000,
+    defaultAutoArchiveDuration: null,
+    defaultThreadRateLimitPerUser: null,
+    guildId: GUILD_ID,
+    id: CHANNEL_ID,
+    name: "Private voice channel",
+    nsfw: false,
+    parentId: null,
+    permissionOverwrites: [],
+    position: 1,
+    rateLimitPerUser: 0,
+    rtcRegion: null,
+    topic: null,
+    type: DISCORD_CHANNEL_TYPES.voice,
+    unknownFieldCount: 0,
+    userLimit: 0,
+    videoQualityMode: 1,
+  }
+  const writeCoordinator: WriteCoordinator = {
+    run(intent, operation) {
+      intents.push(intent)
+      return operation()
+    },
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async getCurrentUserVoiceState() {
+        return {
+          channelId: CHANNEL_ID,
+          deaf: false,
+          guildId: GUILD_ID,
+          mute: false,
+          unknownFieldCount: 0,
+          userId: BOT_ID,
+        }
+      },
+      async getGuildChannelMetadata() {
+        return voiceMetadata
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.SET_VOICE_CHANNEL_STATUS,
+          "@everyone",
+        )]
+      },
+      async setVoiceChannelStatus(channelId, status, reason) {
+        statusWrites += 1
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(status, desiredStatus)
+        assert.equal(reason, auditReason)
+        currentStatus = status
+        waiter?.({
+          channelId: CHANNEL_ID,
+          freshness: {
+            gatewaySequence: gatewaySequence++,
+            observedAt: "2026-08-24T12:00:02.000Z",
+            source: "gateway-voice-channel-status-update",
+          },
+          guildId: GUILD_ID,
+          status,
+          unknownFieldCount: 0,
+        })
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    },
+    gateway,
+    operationStore,
+    voiceChannelStatusOptions: {
+      clock: () => new Date("2026-08-24T12:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(62),
+      randomId: () => "activity-voice-status",
+    },
+    writeCoordinator,
+  })
+  const change = {
+    auditReason,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: "voice-status-service-write-0001",
+    status: desiredStatus,
+  }
+
+  const plan = await service.planVoiceChannelStatusChange(change)
+  const result = await service.executeVoiceChannelStatusChange(change, plan.digest)
+
+  assert.equal(result.status, "completed")
+  assert.equal(statusWrites, 1)
+  assert.equal(intents.length, 1)
+  assert.equal(intents[0]?.kind, "voice-channel-status-change")
+  assert.deepEqual(intents[0]?.targets, [
+    { id: CHANNEL_ID, kind: "channel" },
+    { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+  ])
+  assert.equal(calls.activityEntries.length, 2)
+  assert.equal(operationStore.receipt?.kind, "voice-channel-status-change")
+  const durable = JSON.stringify({
+    activity: calls.activityEntries,
+    receipt: operationStore.receipt,
+  })
+  for (const privateText of [oldStatus, desiredStatus, auditReason]) {
+    assert.equal(durable.includes(privateText), false)
+  }
 })
 
 test("service pins identity through global and guild voice-region inventories", async () => {

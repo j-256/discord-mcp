@@ -203,11 +203,16 @@ import {
   WebhookChangePlanChangedError,
   WebhookCreationPlanChangedError,
   WebhookDeletionPlanChangedError,
+  VoiceChannelStatusPlanChangedError,
 } from "./errors.js"
 import {
   GatewayChannelLayoutStore,
   type GatewayChannelLayoutSource,
 } from "./gateway-channel-layout.js"
+import {
+  DisabledGatewayVoiceChannelStatusSource,
+  type GatewayVoiceChannelStatusSource,
+} from "./gateway-voice-channel-status.js"
 import type {
   ForumPostPlan,
   ForumPostRequest,
@@ -478,6 +483,17 @@ import {
   StageInstanceService,
 } from "./stage-instance-service.js"
 import type {
+  VoiceChannelStatusChangeRequest,
+  VoiceChannelStatusPlan,
+  VoiceChannelStatusReadResult,
+  VoiceChannelStatusResult,
+  VoiceChannelStatusServiceOptions,
+} from "./voice-channel-status-service.js"
+import {
+  normalizeVoiceChannelStatusChangeRequest,
+  VoiceChannelStatusService,
+} from "./voice-channel-status-service.js"
+import type {
   WelcomeScreenAuditResult,
   WelcomeScreenChangePlan,
   WelcomeScreenChangeRequest,
@@ -658,6 +674,7 @@ export interface DiscordServiceClient {
   getGuildForumTags: DiscordClient["getGuildForumTags"]
   getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
+  getCurrentUserVoiceState: DiscordClient["getCurrentUserVoiceState"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
   getGuildProfile: DiscordClient["getGuildProfile"]
@@ -741,6 +758,7 @@ export interface DiscordServiceClient {
   syncGuildTemplate: DiscordClient["syncGuildTemplate"]
   searchGuildMessages: DiscordClient["searchGuildMessages"]
   searchGuildMembers: DiscordClient["searchGuildMembers"]
+  setVoiceChannelStatus: DiscordClient["setVoiceChannelStatus"]
   unpinMessage: DiscordClient["unpinMessage"]
 }
 
@@ -820,7 +838,7 @@ export interface ConnectorServiceOptions {
     ForumTagServiceOptions,
     "clock" | "planKey" | "randomId"
   >
-  gateway?: GatewayChannelLayoutSource
+  gateway?: GatewayChannelLayoutSource & Partial<GatewayVoiceChannelStatusSource>
   guildScaffoldOptions?: Pick<
     GuildScaffoldServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -910,6 +928,10 @@ export interface ConnectorServiceOptions {
   >
   stageInstanceOptions?: Pick<
     StageInstanceServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  voiceChannelStatusOptions?: Pick<
+    VoiceChannelStatusServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   threadCreationOptions?: Pick<
@@ -1017,6 +1039,19 @@ function normalizedGuildChannel(channel: DiscordChannel, guildId: string) {
   })
 }
 
+function voiceChannelStatusSource(
+  gateway: GatewayChannelLayoutSource,
+): GatewayVoiceChannelStatusSource {
+  const candidate = gateway as GatewayChannelLayoutSource
+    & Partial<GatewayVoiceChannelStatusSource>
+  if (
+    typeof candidate.voiceChannelStatusEnabled === "boolean"
+    && typeof candidate.getVoiceChannelStatus === "function"
+    && typeof candidate.waitForVoiceChannelStatusUpdate === "function"
+  ) return candidate as GatewayChannelLayoutSource & GatewayVoiceChannelStatusSource
+  return new DisabledGatewayVoiceChannelStatusSource()
+}
+
 export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
@@ -1070,6 +1105,7 @@ export class ConnectorService {
   readonly #threadCreationService: ThreadCreationService
   readonly #threadGovernanceService: ThreadGovernanceService
   readonly #voiceRegionService: VoiceRegionService
+  readonly #voiceChannelStatusService: VoiceChannelStatusService
   readonly #webhookService: WebhookService
   readonly #welcomeScreenService: WelcomeScreenService
   readonly #writeCoordinator: WriteCoordinator
@@ -1087,6 +1123,7 @@ export class ConnectorService {
       enabled: false,
       guildIds: new Set(),
     })
+    const voiceChannelStatusGateway = voiceChannelStatusSource(gateway)
     const operationStore = options.operationStore || new FileOperationStore(
       operationReceiptDirectory(options.config.auditFile),
     )
@@ -1165,6 +1202,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelMetadataOptions,
+    })
+    this.#voiceChannelStatusService = new VoiceChannelStatusService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      gateway: voiceChannelStatusGateway,
+      operationStore,
+      policy: this.#policy,
+      ...options.voiceChannelStatusOptions,
     })
     this.#voiceRegionService = new VoiceRegionService({
       client: this.#client,
@@ -1648,6 +1693,20 @@ export class ConnectorService {
     assertChannelMetadataChannelId(channelId)
     await this.#verifyIdentity(options)
     return this.#channelMetadataService.get(channelId, options)
+  }
+
+  async getVoiceChannelStatus(
+    guildId: string,
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<VoiceChannelStatusReadResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#voiceChannelStatusService.get(
+      identity.bot.id,
+      guildId,
+      channelId,
+      options,
+    )
   }
 
   async listVoiceRegions(
@@ -2982,6 +3041,20 @@ export class ConnectorService {
     )
   }
 
+  async planVoiceChannelStatusChange(
+    request: VoiceChannelStatusChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<VoiceChannelStatusPlan> {
+    normalizeVoiceChannelStatusChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#voiceChannelStatusService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planForumTagChange(
     request: ForumTagChangeRequest,
     options: RequestOptions = {},
@@ -3340,6 +3413,48 @@ export class ConnectorService {
         planDigest,
         options,
       ),
+    )
+  }
+
+  async executeVoiceChannelStatusChange(
+    request: VoiceChannelStatusChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<VoiceChannelStatusResult> {
+    normalizeVoiceChannelStatusChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord voice channel status plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#voiceChannelStatusService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new VoiceChannelStatusPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    const execute = () => this.#voiceChannelStatusService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+    if (!coordinationPlan.writeRequired) return execute()
+    return this.#coordinateWrite(
+      "voice-channel-status-change",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeGuildCollectionTarget("channels", request.guildId),
+      ],
+      execute,
     )
   }
 

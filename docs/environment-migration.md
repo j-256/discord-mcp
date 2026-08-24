@@ -98,8 +98,8 @@ The table below documents migration inputs. Except for referenced secrets and th
 | `DISCORD_MCP_ALLOW_CHANNEL_CLONING` | For channel cloning | Must be exactly `true` in addition to clone audit to enable reviewed atomic same-guild clones |
 | `DISCORD_MCP_CHANNEL_CLONE_GUILD_IDS` | For channel-clone planning or execution | Non-empty exact guild allowlist bounded to 100 IDs and a subset of the read guild allowlist when one exists |
 | `DISCORD_MCP_CHANNEL_CLONE_SOURCE_IDS` | For channel-clone planning or execution | Non-empty exact direct source-channel allowlist bounded to 100 IDs and a subset of ordinary readable scope |
-| `DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES` | For channel metadata changes | Must be exactly `true` to enable reviewed partial metadata changes |
-| `DISCORD_MCP_CHANNEL_METADATA_IDS` | For channel metadata changes | Non-empty exact non-thread guild-channel allowlist and a subset of the read channel allowlist when one exists |
+| `DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES` | For channel metadata and voice-status changes | Must be exactly `true` to enable reviewed partial metadata changes and exact ordinary voice-channel status reads or changes |
+| `DISCORD_MCP_CHANNEL_METADATA_IDS` | For channel metadata and voice-status changes | Non-empty exact non-thread guild-channel allowlist and a subset of the read channel allowlist when one exists; voice-status tools reject every type except ordinary voice |
 | `DISCORD_MCP_ALLOW_CHANNEL_ORDERING_AUDIT` | For channel-order audit | Must be exactly `true` to activate complete obfuscation-safe Gateway layout evidence for exact guilds; also requires pinned application and bot IDs |
 | `DISCORD_MCP_ALLOW_CHANNEL_ORDERING_CHANGES` | For channel-order changes | Must be exactly `true` in addition to channel-order audit to enable reviewed exact relative changes |
 | `DISCORD_MCP_CHANNEL_ORDERING_GUILD_IDS` | For channel-order audit or changes | Non-empty exact guild allowlist bounded to 100 IDs and a subset of the read guild allowlist when one exists |

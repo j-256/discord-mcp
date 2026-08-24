@@ -21,6 +21,7 @@ import {
   type ChannelCreationActivity,
   type ChannelDeletionActivity,
   type ChannelMetadataActivity,
+  type VoiceChannelStatusActivity,
   type ChannelOrderingActivity,
   type ChannelPermissionOverwriteActivity,
   type ComponentMessageActivity,
@@ -226,6 +227,31 @@ function channelMetadataChange(
     operationKeyHash: `sha256:${"d".repeat(64)}`,
     planDigest: `hmac-sha256:${"e".repeat(64)}`,
     requestedFields: ["name", "topic"],
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function voiceChannelStatusChange(
+  id: string,
+  status: VoiceChannelStatusActivity["status"],
+): VoiceChannelStatusActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "voice-channel-status-change",
+    operationKeyHash: `sha256:${"f".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -3328,6 +3354,62 @@ test("JSONL activity log keeps channel metadata evidence content-free", async (c
       "operationKeyHash",
       "planDigest",
       "requestedFields",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps voice channel status text content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-current-status",
+    "private-desired-status",
+    "private-operation-key",
+  ]
+
+  await store.append(voiceChannelStatusChange("1", "pending"))
+  await store.append({
+    ...voiceChannelStatusChange("2", "completed"),
+    auditReason: privateValues[0],
+    currentStatus: privateValues[1],
+    desiredStatus: privateValues[2],
+    operationKey: privateValues[3],
+  } as VoiceChannelStatusActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...voiceChannelStatusChange("3", "pending"),
+      verification: "match",
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
       "schemaVersion",
       "status",
       "timestamp",

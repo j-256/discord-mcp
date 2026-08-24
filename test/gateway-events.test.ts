@@ -103,6 +103,12 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
       persistent: false,
       privilegedIntentsRequested: false,
     },
+    projections: {
+      voiceChannelStatus: {
+        enabled: false,
+        scopedChannels: 0,
+      },
+    },
     schemaVersion: 1,
     status: "ok",
   })

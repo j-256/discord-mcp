@@ -996,6 +996,27 @@ export interface ChannelMetadataActivity {
   verification: "drift" | "match" | null
 }
 
+export type VoiceChannelStatusActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface VoiceChannelStatusActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "voice-channel-status-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: VoiceChannelStatusActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ChannelCloneActivityStatus =
   | "completed"
   | "failed"
@@ -1193,6 +1214,7 @@ export type ActivityEntry =
   | WebhookCreationActivity
   | WebhookDeletionActivity
   | WidgetSettingsActivity
+  | VoiceChannelStatusActivity
 
 export interface ActivityList {
   entries: ActivityEntry[]
@@ -2611,6 +2633,70 @@ function parseChannelMetadataActivity(
     requestedFields: [...record.requestedFields].sort(),
     schemaVersion: SCHEMA_VERSION,
     status: record.status as ChannelMetadataActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseVoiceChannelStatusActivity(
+  value: unknown,
+): VoiceChannelStatusActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "voice-channel-status-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.channelId !== "string"
+    || !positiveActivitySnowflake(record.channelId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+    ))
+    || (record.status === "completed-with-drift" && (
+      record.error !== null
+      || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "voice-channel-status-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as VoiceChannelStatusActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
@@ -4651,6 +4737,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseStageInstanceActivity(value)
     || parseChannelCreationActivity(value)
     || parseChannelMetadataActivity(value)
+    || parseVoiceChannelStatusActivity(value)
     || parseChannelCloneActivity(value)
     || parseChannelDeletionActivity(value)
     || parseRoleDeletionActivity(value)

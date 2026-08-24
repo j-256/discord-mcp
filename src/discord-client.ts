@@ -926,6 +926,7 @@ const WEBHOOK_TOKEN_CHARACTERS = 2_048
 const CREATE_WEBHOOK_INPUT_KEYS = ["name"] as const
 const MODIFY_WEBHOOK_INPUT_KEYS = ["channelId", "name"] as const
 const POLL_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const VOICE_CHANNEL_STATUS_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const POLL_EMOJI_CONTROL_OR_SPACE_PATTERN = /[\u0000-\u0020\u007F]/u
 const POLL_EMOJI_CODE_POINT_PATTERN = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3)/u
 const ALLOWED_MENTION_PARSE_KEYS = ["parse", "replied_user"] as const
@@ -1396,6 +1397,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "edit_original_interaction_response",
   "follow_announcement_channel",
   "get_application_emoji",
+  "get_current_user_voice_state",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_profile",
@@ -1443,6 +1445,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
+  "set_voice_channel_status",
   "sync_guild_template",
   "remove_thread_member",
 ])
@@ -8789,6 +8792,25 @@ export class DiscordClient {
     return projectVoiceState(response, guildId, userId)
   }
 
+  async getCurrentUserVoiceState(
+    guildId: string,
+    botId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordVoiceStateSummary> {
+    assertPositiveSnowflake(guildId, "Discord current-user voice guild ID")
+    assertPositiveSnowflake(botId, "Discord current-user voice bot ID")
+    const response = await this.#request<unknown>(
+      "get_current_user_voice_state",
+      `/guilds/${guildId}/voice-states/@me`,
+      {
+        ...options,
+        diagnosticRoute: "/guilds/{guild.id}/voice-states/@me",
+        suppressFailureCause: true,
+      },
+    )
+    return projectVoiceState(response, guildId, botId)
+  }
+
   listGuildMembers(
     guildId: string,
     options: GuildMemberPageOptions = {},
@@ -10436,6 +10458,44 @@ export class DiscordClient {
       },
     )
     return projectGuildChannelMetadata(response, channelId)
+  }
+
+  async setVoiceChannelStatus(
+    channelId: string,
+    status: string | null,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord voice channel status ID")
+    if (
+      status !== null
+      && (
+        typeof status !== "string"
+        || status.length < 1
+        || [...status].length > DISCORD_LIMITS.voiceChannelStatusCharacters
+        || status.trim() !== status
+        || VOICE_CHANNEL_STATUS_CONTROL_PATTERN.test(status)
+      )
+    ) {
+      throw new RangeError(
+        `Discord voice channel status must be null or contain 1-${DISCORD_LIMITS.voiceChannelStatusCharacters} trimmed characters without controls`,
+      )
+    }
+    if (status !== null) assertValidUnicode(status, "Discord voice channel status")
+    encodeDiscordAuditReason(auditReason)
+    await this.#request<void>(
+      "set_voice_channel_status",
+      `/channels/${channelId}/voice-status`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { status },
+        diagnosticRoute: "/channels/{channel.id}/voice-status",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async getGuildForumTags(

@@ -1582,6 +1582,175 @@ test("Discord client rejects raw or ambiguous member voice evidence and never re
   assert.equal(sleeps, 0)
 })
 
+test("Discord client projects current-user voice state and sets one exact status", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const method = init?.method || "GET"
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (method === "PUT") return new Response(null, { status: 204 })
+      return jsonResponse({
+        channel_id: "200",
+        deaf: false,
+        future_voice_field: "discarded",
+        guild_id: "100",
+        member: { user: { id: "400", username: "discarded" } },
+        mute: false,
+        session_id: "discarded-session",
+        user_id: "400",
+      })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    sleep: async () => {
+      throw new Error("Voice channel status PUT must not retry")
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getCurrentUserVoiceState("100", "400"), {
+    channelId: "200",
+    deaf: false,
+    guildId: "100",
+    mute: false,
+    unknownFieldCount: 1,
+    userId: "400",
+  })
+  await client.setVoiceChannelStatus("200", "Incident room", "Reviewed status / case 42")
+  await client.setVoiceChannelStatus("200", null, "Reviewed status removal")
+
+  assert.deepEqual(requests, [
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/guilds/100/voice-states/@me`,
+    },
+    {
+      body: { status: "Incident room" },
+      method: "PUT",
+      reason: "Reviewed%20status%20%2F%20case%2042",
+      url: `${API_BASE_URL}/channels/200/voice-status`,
+    },
+    {
+      body: { status: null },
+      method: "PUT",
+      reason: "Reviewed%20status%20removal",
+      url: `${API_BASE_URL}/channels/200/voice-status`,
+    },
+  ])
+  assert.deepEqual(records.map(({ operation, retries }) => ({ operation, retries })), [
+    { operation: "get_current_user_voice_state", retries: 0 },
+    { operation: "set_voice_channel_status", retries: 0 },
+    { operation: "set_voice_channel_status", retries: 0 },
+  ])
+})
+
+test("Discord client validates and redacts voice channel status operations", async () => {
+  let requests = 0
+  let sleeps = 0
+  const privateText = "private voice channel status"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(client.setVoiceChannelStatus("invalid", "status", "Reviewed"))
+  await assert.rejects(
+    client.setVoiceChannelStatus("200", "x".repeat(501), "Reviewed"),
+    /1-500 trimmed characters without controls/,
+  )
+  for (const status of ["", " padded", "line\nbreak", "contains\0nul"]) {
+    await assert.rejects(
+      client.setVoiceChannelStatus("200", status, "Reviewed"),
+      /1-500 trimmed characters without controls/,
+    )
+  }
+  await assert.rejects(
+    client.setVoiceChannelStatus("200", "\ud800", "Reviewed"),
+    /invalid Unicode/,
+  )
+  await assert.rejects(
+    client.setVoiceChannelStatus("200", "status", " "),
+    /must not be blank/,
+  )
+  assert.equal(requests, 0)
+
+  const unexpectedStatus = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ status: privateText }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    unexpectedStatus.setVoiceChannelStatus("200", privateText, "Reviewed"),
+    (error: unknown) => {
+      assert(error instanceof Error)
+      assert.match(error.message, /unexpected success status/)
+      assert.equal(error.message.includes(privateText), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: privateText, retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.setVoiceChannelStatus("200", privateText, "Reviewed"),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes(privateText), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+
+  const readFailure = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateText)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    readFailure.getCurrentUserVoiceState("100", "400"),
+    (error: unknown) => {
+      assert(error instanceof Error)
+      assert.equal(error.message.includes(privateText), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+})
+
 test("Discord client projects exact thread state and membership with one-field writes", async () => {
   const requests: Array<{
     body: unknown

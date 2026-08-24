@@ -449,6 +449,7 @@ function toolService(): DiscordToolService {
     executeChannelClone: unexpected,
     executeChannelOrder: unexpected,
     executeChannelMetadataChange: unexpected,
+    executeVoiceChannelStatusChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
     executeForumPost: unexpected,
     executeThreadCreation: unexpected,
@@ -462,6 +463,7 @@ function toolService(): DiscordToolService {
     explainPrincipalPermissions: unexpected,
     getGuildAuditEntry: unexpected,
     getChannel: unexpected,
+    getVoiceChannelStatus: unexpected,
     getGuildBan: unexpected,
     getGuildMember: unexpected,
     getMemberVoiceState: unexpected,
@@ -495,6 +497,7 @@ function toolService(): DiscordToolService {
     planChannelDeletion: unexpected,
     planChannelClone: unexpected,
     planChannelMetadataChange: unexpected,
+    planVoiceChannelStatusChange: unexpected,
     planChannelOrder: unexpected,
     planChannelPermissionOverwrite: unexpected,
     planForumPost: unexpected,
@@ -2038,9 +2041,27 @@ test("doctor and setup explain reviewed exact-channel metadata changes", async (
   assert.match(policy?.summary || "", /1 exact channels/)
   assert.match(policy?.summary || "", /partial one-shot execution/)
   assert.match(policy?.summary || "", /complete response plus fresh readback/)
+  const voiceStatus = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.voiceChannelStatusPolicy,
+  )
+  assert.equal(voiceStatus?.status, "pass")
+  assert.match(voiceStatus?.summary || "", /1 exact metadata-scope candidates/)
+  assert.match(voiceStatus?.summary || "", /ordinary voice type at read time/)
+  assert.match(voiceStatus?.summary || "", /connection-sensitive permission proof/)
+  assert.match(voiceStatus?.summary || "", /GUILDS-only Gateway channel-info evidence/)
+  const gateway = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.gatewayPolicy,
+  )
+  assert.match(gateway?.summary || "", /1 exact voice-status candidates/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.channelMetadataPolicy,
+    )?.status,
+    "warn",
+  )
+  assert.equal(
+    warning.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.voiceChannelStatusPolicy,
     )?.status,
     "warn",
   )
@@ -4239,6 +4260,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_soundboard_change",
     "review_stage_instance_change",
     "review_thread_change",
+    "review_voice_channel_status_change",
     "review_webhook_change",
     "review_webhook_creation",
     "review_webhook_deletion",
@@ -4277,6 +4299,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/channels",
     "discord://guilds/{guildId}/channels/{channelId}/deletion-readiness",
     "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
+    "discord://guilds/{guildId}/channels/{channelId}/voice-status",
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/integrations",
     "discord://guilds/{guildId}/invites/{inviteRef}",
@@ -4339,6 +4362,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_scheduled_event_change",
     "execute_stage_instance_change",
     "execute_thread_change",
+    "execute_voice_channel_status_change",
     "execute_webhook_change",
     "execute_webhook_creation",
     "execute_webhook_deletion",
@@ -4351,6 +4375,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("audit_channel_order"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_clone"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_order"), true)
+  assert.equal(report.readOnlyTools.includes("get_voice_channel_status"), true)
+  assert.equal(report.readOnlyTools.includes("plan_voice_channel_status_change"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_post"), true)
   assert.equal(report.readOnlyTools.includes("audit_forum_tags"), true)
   assert.equal(report.readOnlyTools.includes("plan_forum_tag_change"), true)
@@ -4381,6 +4407,30 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
       service: toolServiceWithoutScopedGuilds(),
     }),
     /no accessible guilds/,
+  )
+})
+
+test("MCP smoke validates voice-channel status policy without opening its Gateway", async () => {
+  const report = await smokeConnector({
+    environment: environment({
+      DISCORD_MCP_ALLOW_CHANNEL_METADATA_CHANGES: "true",
+      DISCORD_MCP_CHANNEL_METADATA_IDS: CHANNEL_ID,
+    }),
+    service: toolService(),
+  })
+
+  assert.equal(report.status, "ok")
+  assert.equal(report.readOnlyTools.includes("get_voice_channel_status"), true)
+  assert.equal(report.readOnlyTools.includes("plan_voice_channel_status_change"), true)
+  assert.equal(
+    report.promptNames.includes("review_voice_channel_status_change"),
+    true,
+  )
+  assert.equal(
+    report.resourceTemplateUris.includes(
+      "discord://guilds/{guildId}/channels/{channelId}/voice-status",
+    ),
+    true,
   )
 })
 

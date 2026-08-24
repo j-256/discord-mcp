@@ -73,7 +73,7 @@
         },
         "channelMetadataChanges": {
           "type": "boolean",
-          "description": "Enable channel metadata changes policy"
+          "description": "Enable reviewed channel metadata and exact ordinary voice-channel status policy"
         },
         "channelOrderingAudit": {
           "type": "boolean",
@@ -808,7 +808,7 @@
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
           },
-          "description": "Exact Discord ID allowlist for channel metadata ids"
+          "description": "Exact Discord ID allowlist for reviewed channel metadata and ordinary voice-channel status"
         },
         "channelOrderingGuildIds": {
           "minItems": 0,

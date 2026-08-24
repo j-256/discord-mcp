@@ -320,4 +320,21 @@ test("configuration metadata covers every runtime field and emits a strict schem
   assert.equal(schemaVersion?.const, 2)
   assert.equal(schemaVersion?.type, "number")
   assert.equal(schemaVersion?.description, "Configuration format version")
+  const properties = schema.properties as Record<string, Record<string, unknown>>
+  const capabilities = (properties.capabilities as Record<string, unknown>).properties as Record<
+    string,
+    Record<string, unknown>
+  >
+  const scopes = (properties.scopes as Record<string, unknown>).properties as Record<
+    string,
+    Record<string, unknown>
+  >
+  assert.match(
+    String(capabilities.channelMetadataChanges?.description),
+    /channel metadata and exact ordinary voice-channel status/,
+  )
+  assert.match(
+    String(scopes.channelMetadataIds?.description),
+    /channel metadata and ordinary voice-channel status/,
+  )
 })

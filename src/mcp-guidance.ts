@@ -17,6 +17,7 @@ export type DiscordGuidanceService = Pick<
   | "auditRoleOrder"
   | "explainChannelAccess"
   | "getChannel"
+  | "getVoiceChannelStatus"
   | "getApplicationEmoji"
   | "getApplicationPosture"
   | "getGuildMember"

@@ -36,8 +36,10 @@ import {
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
+import { DiscordGateway, type GatewayRuntime } from "./discord-gateway.js"
 import { ConfigurationError, errorMessage, redactText } from "./errors.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
+import { voiceChannelStatusChannelIds } from "./gateway-voice-channel-status.js"
 import {
   MCP_RESOURCE_TEMPLATE_URIS,
   MCP_RESOURCE_URIS,
@@ -68,7 +70,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 20
+export const OPERATOR_REPORT_SCHEMA_VERSION = 21
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -94,6 +96,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   channelCloneChangePolicy: "channel-clone-change-policy",
   channelCreationPolicy: "channel-creation-policy",
   channelMetadataPolicy: "channel-metadata-policy",
+  voiceChannelStatusPolicy: "voice-channel-status-policy",
   channelScope: "channel-scope",
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
@@ -1146,6 +1149,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.channelMetadataPolicy,
         "pass",
         `Reviewed channel metadata changes are constrained to ${config.channelMetadataIds.size} exact channels with partial one-shot execution and complete response plus fresh readback verification`,
+      ))
+    }
+    if (!config.allowChannelMetadataChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.voiceChannelStatusPolicy,
+        "pass",
+        "Voice channel status reads and changes are disabled with channel metadata changes",
+      ))
+    } else if (config.channelMetadataIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.voiceChannelStatusPolicy,
+        "warn",
+        "Voice channel status is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.voiceChannelStatusPolicy,
+        "pass",
+        `Voice channel status is constrained to ${config.channelMetadataIds.size} exact metadata-scope candidates, enforces ordinary voice type at read time, requires connection-sensitive permission proof, and uses privacy-minimized GUILDS-only Gateway channel-info evidence`,
       ))
     }
     if (!config.allowChannelOrderingAudit) {
@@ -2557,17 +2579,20 @@ export async function diagnoseConnector(
       ))
     }
     const layoutGuildCount = guildChannelLayoutGuildIds(config).size
+    const voiceChannelStatusCount = config.allowChannelMetadataChanges
+      ? config.channelMetadataIds.size
+      : 0
     checks.push(config.allowGateway
       ? check(
           DOCTOR_CHECK_IDS.gatewayPolicy,
           "pass",
-          `Discord Gateway events are enabled with a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, and only nonprivileged intents`,
+          `Discord Gateway events are enabled with a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, ${voiceChannelStatusCount} exact voice-status candidates, and only nonprivileged intents`,
         )
-      : layoutGuildCount > 0
+      : layoutGuildCount > 0 || voiceChannelStatusCount > 0
         ? check(
             DOCTOR_CHECK_IDS.gatewayPolicy,
             "pass",
-            `Discord Gateway events are disabled; a GUILDS-only channel-layout connection covers ${layoutGuildCount} exact guilds for continuity-safe metadata evidence`,
+            `Discord Gateway events are disabled; a GUILDS-only evidence connection covers ${layoutGuildCount} exact layout guilds and ${voiceChannelStatusCount} exact voice-status candidates`,
           )
         : check(
             DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -3195,16 +3220,32 @@ function assertExactCatalog(
   }
 }
 
+function smokeGateway(config: ConnectorConfig): GatewayRuntime | undefined {
+  if (voiceChannelStatusChannelIds(config).size === 0) return undefined
+  if (!config.expectedApplicationId || !config.expectedBotId) {
+    throw new ConfigurationError(
+      "Voice-channel status smoke validation requires pinned application and bot IDs",
+    )
+  }
+  return new DiscordGateway({
+    applicationId: config.expectedApplicationId,
+    config,
+    interactionHandler: { ingestInteraction() {} },
+  })
+}
+
 export async function smokeConnector(
   options: SmokeOptions = {},
 ): Promise<SmokeReport> {
   const environment = options.environment || process.env
   const config = loadConnectorConfig(environment)
   const service = options.service || new ConnectorService({ config })
+  const gateway = smokeGateway(config)
   const selectedToolNames = selectedCanonicalMcpToolNames(config.mcpToolsets)
   const expectedToolNames = [...selectedToolNames, MCP_DISCOVERY_TOOL_NAME]
   const server = createDiscordMcpServer({
     environment,
+    ...(gateway ? { gateway } : {}),
     service,
   })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()

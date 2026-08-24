@@ -399,6 +399,7 @@ export const DISCORD_LIMITS = Object.freeze({
   guildIntegrations: 50,
   guildStickers: 100,
   guildChannels: 500,
+  voiceChannelStatusCharacters: 500,
   emojiBytes: 256 * 1_024,
   emojiNameCharacters: 32,
   messageContentCharacters: 2_000,
@@ -642,6 +643,7 @@ export type SoundboardAction = typeof SOUNDBOARD_ACTIONS[number]
 
 export const GATEWAY_DEFAULTS = Object.freeze({
   authenticationTimeoutMs: 30_000,
+  channelInfoTimeoutMs: 10_000,
   connectionTimeoutMs: 30_000,
   eventBufferSize: 100,
   eventPage: 50,
@@ -653,6 +655,7 @@ export const GATEWAY_DEFAULTS = Object.freeze({
   maximumPayloadBytes: 1_048_576,
   reconnectMaximumMs: 30_000,
   reconnectMinimumMs: 1_000,
+  voiceChannelStatusUpdateTimeoutMs: 1_500,
 })
 
 export const OBSERVABILITY_DEFAULTS = Object.freeze({

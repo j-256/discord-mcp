@@ -289,11 +289,26 @@ const headerReferenceSchema = z.strictObject({
     .regex(HEADER_ENVIRONMENT_PATTERN, "must name an uppercase header environment variable"),
 }).describe("Environment reference for an OTLP header string")
 
+const CHANNEL_METADATA_CAPABILITY_DESCRIPTION = "Enable reviewed channel metadata and exact ordinary voice-channel status policy"
+const CHANNEL_METADATA_SCOPE_DESCRIPTION = "Exact Discord ID allowlist for reviewed channel metadata and ordinary voice-channel status"
+
+function capabilityDescription(documentKey: string): string {
+  return documentKey === "channelMetadataChanges"
+    ? CHANNEL_METADATA_CAPABILITY_DESCRIPTION
+    : `Enable ${humanizeConfigKey(documentKey)} policy`
+}
+
+function scopeDescription(documentKey: string): string {
+  return documentKey === "channelMetadataIds"
+    ? CHANNEL_METADATA_SCOPE_DESCRIPTION
+    : `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
+}
+
 const capabilityShape = Object.fromEntries(
   CONFIG_CAPABILITY_MAPPINGS.map((entry) => [
     entry.documentKey,
     z.boolean()
-      .describe(`Enable ${humanizeConfigKey(entry.documentKey)} policy`)
+      .describe(capabilityDescription(entry.documentKey))
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodBoolean>>
@@ -302,7 +317,7 @@ const scopeShape = Object.fromEntries(
   CONFIG_SCOPE_MAPPINGS.map((entry) => [
     entry.documentKey,
     snowflakeArraySchema(0, CONFIG_SCOPE_ENTRIES)
-      .describe(`Exact Discord ID allowlist for ${humanizeConfigKey(entry.documentKey)}`)
+      .describe(scopeDescription(entry.documentKey))
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodType<string[]>>>
@@ -1311,7 +1326,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     },
     ...CONFIG_CAPABILITY_MAPPINGS.map((entry) => ({
       defaultValue: false,
-      description: `Enable ${humanizeConfigKey(entry.documentKey)} policy`,
+      description: capabilityDescription(entry.documentKey),
       environmentVariable: entry.environmentVariable,
       kind: "boolean" as const,
       path: `$.capabilities.${entry.documentKey}`,
@@ -1319,7 +1334,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...CONFIG_SCOPE_MAPPINGS.map((entry) => ({
       defaultValue: [],
-      description: `Exact Discord ID allowlist for ${humanizeConfigKey(entry.documentKey)}`,
+      description: scopeDescription(entry.documentKey),
       environmentVariable: entry.environmentVariable,
       kind: "snowflakes" as const,
       path: `$.scopes.${entry.documentKey}`,

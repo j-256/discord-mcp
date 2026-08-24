@@ -51,6 +51,28 @@ function receipt(
   }
 }
 
+function voiceChannelStatusReceipt(
+  status: OperationReceipt["status"] = "pending",
+): OperationReceipt {
+  return {
+    activityId: "voice-status-activity-0001",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: GUILD_ID,
+    kind: "voice-channel-status-change",
+    operationKeyHash: operationKeyHash("voice-channel-status-operation-0001"),
+    planDigest: PLAN_DIGEST,
+    resourceId: status === "completed" ? CHANNEL_ID : null,
+    schemaVersion: 1,
+    status,
+    timestamp: status === "pending"
+      ? "2026-08-24T00:00:00.000Z"
+      : "2026-08-24T00:00:01.000Z",
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
 function applicationReceipt(
   status: ApplicationOperationReceipt["status"] = "pending",
 ): ApplicationOperationReceipt {
@@ -122,6 +144,39 @@ test("file operation store reserves once and records a private terminal receipt"
   for (const file of receiptFiles) {
     assert.equal((await lstat(file)).mode & 0o777, 0o600)
   }
+})
+
+test("file operation store accepts voice status receipts and rejects status text", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-voice-status-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = voiceChannelStatusReceipt()
+
+  await assert.rejects(
+    store.reserve({
+      ...pending,
+      desiredStatus: "private-voice-status",
+    } as OperationReceipt),
+    /invalid shape/,
+  )
+  assert.deepEqual(await store.reserve(pending), {
+    created: true,
+    receipt: pending,
+  })
+  await store.finish(voiceChannelStatusReceipt("completed"))
+  assert.deepEqual(
+    await store.get(pending.kind, pending.operationKeyHash),
+    voiceChannelStatusReceipt("completed"),
+  )
+
+  const operationDirectories = await readdir(directory)
+  const operationDirectory = join(directory, operationDirectories[0] as string)
+  const text = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.doesNotMatch(text, /private-voice-status|status text|audit reason/u)
 })
 
 test("file operation store keeps application receipts application-scoped and content-free", async (context) => {

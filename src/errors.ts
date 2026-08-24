@@ -329,6 +329,52 @@ export class VoiceRegionEvidenceError extends Error {
   override name = "VoiceRegionEvidenceError"
 }
 
+export class GatewayVoiceChannelStatusError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GatewayVoiceChannelStatusError"
+  }
+}
+
+export class VoiceChannelStatusEvidenceError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "VoiceChannelStatusEvidenceError"
+  }
+}
+
+export class VoiceChannelStatusExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "VoiceChannelStatusExecutionError"
+    this.result = result
+  }
+}
+
+export class VoiceChannelStatusOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord voice channel status operation key has already been reserved")
+    this.name = "VoiceChannelStatusOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class VoiceChannelStatusPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("Discord voice channel status plan changed before execution")
+    this.name = "VoiceChannelStatusPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
 export class ApplicationPostureEvidenceError extends Error {
   override name = "ApplicationPostureEvidenceError"
 }

@@ -6,6 +6,7 @@ import {
   DISCORD_GATEWAY_INTENT_MASK,
   DISCORD_GATEWAY_INTENTS,
   DISCORD_GATEWAY_URL,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GATEWAY_DEFAULTS,
 } from "./constants.js"
@@ -15,6 +16,7 @@ import type {
   GatewayChannelLayoutStatus,
 } from "./gateway-channel-layout.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
+import { GatewayVoiceChannelStatusError } from "./errors.js"
 import {
   GatewayEventStore,
   type GatewayChangeListener,
@@ -23,8 +25,19 @@ import {
   type GatewayEventSource,
   type GatewayStatusSnapshot,
 } from "./gateway-events.js"
+import {
+  channelInfoGuildId,
+  projectGatewayVoiceChannelStatus,
+  projectGatewayVoiceChannelStatusUpdate,
+  voiceChannelStatusChannelIds,
+  voiceChannelStatusUpdateTarget,
+  type GatewayVoiceChannelStatusRequestOptions,
+  type GatewayVoiceChannelStatusSnapshot,
+  type GatewayVoiceChannelStatusSource,
+  type GatewayVoiceChannelStatusUpdate,
+} from "./gateway-voice-channel-status.js"
 
-export interface GatewayRuntime extends GatewayEventSource {
+export interface GatewayRuntime extends GatewayEventSource, GatewayVoiceChannelStatusSource {
   start(): void
   stop(): Promise<void>
 }
@@ -61,12 +74,14 @@ export interface DiscordGatewayOptions {
     | "token"
   > & Partial<Pick<
     ConnectorConfig,
+    | "allowChannelMetadataChanges"
     | "allowChannelOrderingAudit"
     | "allowGuildTemplateAudit"
     | "allowMemberRoleChanges"
     | "allowNativeInteractions"
     | "allowOnboardingAudit"
     | "channelOrderingGuildIds"
+    | "channelMetadataIds"
     | "guildTemplateGuildIds"
     | "memberRoleGuildIds"
     | "onboardingGuildIds"
@@ -92,6 +107,27 @@ interface PendingReconnect {
   errorCategory?: GatewayErrorCategory
 }
 
+interface PendingChannelInfo {
+  abortListener?: () => void
+  channelId: string
+  guildId: string
+  reject: (error: Error) => void
+  requestedAt: string
+  resolve: (snapshot: GatewayVoiceChannelStatusSnapshot) => void
+  signal?: AbortSignal
+  timeoutHandle: unknown
+}
+
+interface PendingVoiceChannelStatusUpdate {
+  abortListener?: () => void
+  channelId: string
+  guildId: string
+  reject: (error: Error) => void
+  resolve: (snapshot: GatewayVoiceChannelStatusUpdate) => void
+  signal?: AbortSignal
+  timeoutHandle: unknown
+}
+
 const GATEWAY_OPCODES = Object.freeze({
   dispatch: 0,
   heartbeat: 1,
@@ -101,6 +137,7 @@ const GATEWAY_OPCODES = Object.freeze({
   invalidSession: 9,
   reconnect: 7,
   resume: 6,
+  requestChannelInfo: 43,
 })
 const SOCKET_STATES = Object.freeze({
   connecting: 0,
@@ -156,6 +193,17 @@ function safeString(value: unknown, maximum: number): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= maximum
     ? value
     : undefined
+}
+
+function positiveSnowflake(value: unknown): value is string {
+  return typeof value === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(value)
+    && BigInt(value) >= 1n
+    && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+}
+
+function voiceChannelStatusTargetKey(guildId: string, channelId: string): string {
+  return `${guildId}\0${channelId}`
 }
 
 export function normalizeGatewayResumeUrl(value: unknown): string | undefined {
@@ -227,6 +275,7 @@ export class DiscordGateway implements GatewayRuntime {
   #identifyTimer: unknown
   readonly #interactionHandler: GatewayInteractionHandler | undefined
   readonly #logger: (message: string) => void
+  readonly #pendingChannelInfo = new Map<string, PendingChannelInfo>()
   #pendingReconnect: PendingReconnect | undefined
   #phaseTimer: unknown
   readonly #random: () => number
@@ -241,7 +290,14 @@ export class DiscordGateway implements GatewayRuntime {
   #socket: GatewaySocket | undefined
   #terminal = false
   readonly #token: string
+  readonly #voiceChannelStatusIds: ReadonlySet<string>
+  readonly #voiceChannelStatusQueueTails = new Map<string, Promise<void>>()
+  readonly #voiceChannelStatusUpdateWaiters = new Map<
+    string,
+    Set<PendingVoiceChannelStatusUpdate>
+  >()
   readonly #webSocketFactory: (url: string) => GatewaySocket
+  readonly voiceChannelStatusEnabled: boolean
 
   constructor(options: DiscordGatewayOptions) {
     if (!DISCORD_SNOWFLAKE_PATTERN.test(options.applicationId)) {
@@ -265,9 +321,15 @@ export class DiscordGateway implements GatewayRuntime {
       )
     }
     const layoutGuildIds = guildChannelLayoutGuildIds(options.config)
+    const voiceChannelStatusIds = voiceChannelStatusChannelIds({
+      allowChannelMetadataChanges: options.config.allowChannelMetadataChanges ?? false,
+      channelMetadataIds: options.config.channelMetadataIds ?? new Set(),
+    })
+    const voiceChannelStatusEnabled = voiceChannelStatusIds.size > 0
     const connectionEnabled = options.config.allowGateway
       || layoutGuildIds.size > 0
       || options.config.allowNativeInteractions === true
+      || voiceChannelStatusEnabled
     this.#applicationId = options.applicationId
     this.#botId = botId
     this.#clock = options.clock || Date.now
@@ -278,11 +340,14 @@ export class DiscordGateway implements GatewayRuntime {
       enabled: connectionEnabled,
       eventFeedEnabled: options.config.allowGateway,
       layoutGuildIds,
+      voiceChannelStatusChannelCount: voiceChannelStatusIds.size,
     })
     if (
       this.#eventStore.enabled !== connectionEnabled
       || this.#eventStore.eventFeedEnabled !== options.config.allowGateway
       || this.#eventStore.getChannelLayoutStatus().guilds.scoped !== layoutGuildIds.size
+      || this.#eventStore.getStatus().projections.voiceChannelStatus.scopedChannels
+        !== voiceChannelStatusIds.size
     ) {
       throw new RangeError("Gateway runtime and event store enabled states must match")
     }
@@ -296,6 +361,8 @@ export class DiscordGateway implements GatewayRuntime {
     this.#random = options.random || Math.random
     this.#scheduler = options.scheduler || defaultScheduler()
     this.#token = options.config.token
+    this.#voiceChannelStatusIds = new Set(voiceChannelStatusIds)
+    this.voiceChannelStatusEnabled = voiceChannelStatusEnabled
     this.#webSocketFactory = options.webSocketFactory || defaultWebSocketFactory
   }
 
@@ -331,6 +398,83 @@ export class DiscordGateway implements GatewayRuntime {
     return this.#eventStore.subscribe(listener)
   }
 
+  getVoiceChannelStatus(
+    guildId: string,
+    channelId: string,
+    options: GatewayVoiceChannelStatusRequestOptions = {},
+  ): Promise<GatewayVoiceChannelStatusSnapshot> {
+    this.#assertVoiceChannelStatusTarget(guildId, channelId)
+    const prior = this.#voiceChannelStatusQueueTails.get(guildId) ?? Promise.resolve()
+    let release: () => void = () => undefined
+    const tail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.#voiceChannelStatusQueueTails.set(guildId, tail)
+    return prior
+      .catch(() => undefined)
+      .then(() => this.#requestVoiceChannelStatus(guildId, channelId, options))
+      .finally(() => {
+        release()
+        if (this.#voiceChannelStatusQueueTails.get(guildId) === tail) {
+          this.#voiceChannelStatusQueueTails.delete(guildId)
+        }
+      })
+  }
+
+  waitForVoiceChannelStatusUpdate(
+    guildId: string,
+    channelId: string,
+    options: GatewayVoiceChannelStatusRequestOptions = {},
+  ): Promise<GatewayVoiceChannelStatusUpdate> {
+    this.#assertVoiceChannelStatusTarget(guildId, channelId)
+    if (options.signal?.aborted) {
+      return Promise.reject(new GatewayVoiceChannelStatusError(
+        "Discord Gateway voice channel status update evidence was cancelled",
+      ))
+    }
+    if (
+      !this.#running
+      || this.#terminal
+      || this.#eventStore.getStatus().connection.state !== "ready"
+    ) {
+      return Promise.reject(new GatewayVoiceChannelStatusError(
+        "Discord Gateway is not ready for voice channel status update evidence",
+      ))
+    }
+    return new Promise<GatewayVoiceChannelStatusUpdate>((resolve, reject) => {
+      let pending: PendingVoiceChannelStatusUpdate
+      const timeoutHandle = this.#scheduler.setTimeout(() => {
+        this.#finishVoiceChannelStatusUpdate(
+          pending,
+          new GatewayVoiceChannelStatusError(
+            "Discord Gateway voice channel status update evidence timed out",
+          ),
+        )
+      }, GATEWAY_DEFAULTS.voiceChannelStatusUpdateTimeoutMs)
+      pending = {
+        channelId,
+        guildId,
+        reject,
+        resolve,
+        ...(options.signal ? { signal: options.signal } : {}),
+        timeoutHandle,
+      }
+      if (options.signal) {
+        pending.abortListener = () => this.#finishVoiceChannelStatusUpdate(
+          pending,
+          new GatewayVoiceChannelStatusError(
+            "Discord Gateway voice channel status update evidence was cancelled",
+          ),
+        )
+        options.signal.addEventListener("abort", pending.abortListener, { once: true })
+      }
+      const key = voiceChannelStatusTargetKey(guildId, channelId)
+      const waiters = this.#voiceChannelStatusUpdateWaiters.get(key) ?? new Set()
+      waiters.add(pending)
+      this.#voiceChannelStatusUpdateWaiters.set(key, waiters)
+    })
+  }
+
   start(): void {
     if (!this.enabled || this.#running) return
     this.#running = true
@@ -342,6 +486,7 @@ export class DiscordGateway implements GatewayRuntime {
     this.#running = false
     this.#terminal = false
     this.#pendingReconnect = undefined
+    this.#rejectPendingVoiceEvidence("Discord Gateway voice channel status evidence stopped")
     this.#clearTimer("heartbeat")
     this.#clearTimer("identify")
     this.#clearTimer("phase")
@@ -363,6 +508,128 @@ export class DiscordGateway implements GatewayRuntime {
       } catch {}
     }
     if (this.enabled) this.#eventStore.transition("stopped")
+  }
+
+  #assertVoiceChannelStatusTarget(guildId: string, channelId: string): void {
+    if (!positiveSnowflake(guildId) || !positiveSnowflake(channelId)) {
+      throw new RangeError("Gateway voice channel status target IDs must be positive snowflakes")
+    }
+    if (!this.voiceChannelStatusEnabled || !this.#voiceChannelStatusIds.has(channelId)) {
+      throw new GatewayVoiceChannelStatusError(
+        "Discord channel is outside the exact Gateway voice channel status scope",
+      )
+    }
+  }
+
+  #requestVoiceChannelStatus(
+    guildId: string,
+    channelId: string,
+    options: GatewayVoiceChannelStatusRequestOptions,
+  ): Promise<GatewayVoiceChannelStatusSnapshot> {
+    if (options.signal?.aborted) {
+      return Promise.reject(new GatewayVoiceChannelStatusError(
+        "Discord Gateway voice channel status evidence was cancelled",
+      ))
+    }
+    if (
+      !this.#running
+      || this.#terminal
+      || this.#eventStore.getStatus().connection.state !== "ready"
+    ) {
+      return Promise.reject(new GatewayVoiceChannelStatusError(
+        "Discord Gateway is not ready for voice channel status evidence",
+      ))
+    }
+    if (this.#pendingChannelInfo.has(guildId)) {
+      return Promise.reject(new GatewayVoiceChannelStatusError(
+        "Discord Gateway already has pending channel-info evidence for this guild",
+      ))
+    }
+    const requestedAt = new Date(this.#clock()).toISOString()
+    return new Promise<GatewayVoiceChannelStatusSnapshot>((resolve, reject) => {
+      let pending: PendingChannelInfo
+      const timeoutHandle = this.#scheduler.setTimeout(() => {
+        this.#finishChannelInfo(
+          pending,
+          new GatewayVoiceChannelStatusError(
+            "Discord Gateway voice channel status evidence timed out",
+          ),
+        )
+      }, GATEWAY_DEFAULTS.channelInfoTimeoutMs)
+      pending = {
+        channelId,
+        guildId,
+        reject,
+        requestedAt,
+        resolve,
+        ...(options.signal ? { signal: options.signal } : {}),
+        timeoutHandle,
+      }
+      if (options.signal) {
+        pending.abortListener = () => this.#finishChannelInfo(
+          pending,
+          new GatewayVoiceChannelStatusError(
+            "Discord Gateway voice channel status evidence was cancelled",
+          ),
+        )
+        options.signal.addEventListener("abort", pending.abortListener, { once: true })
+      }
+      this.#pendingChannelInfo.set(guildId, pending)
+      if (!this.#send({
+        d: {
+          fields: ["status"],
+          guild_id: guildId,
+        },
+        op: GATEWAY_OPCODES.requestChannelInfo,
+      })) {
+        this.#finishChannelInfo(
+          pending,
+          new GatewayVoiceChannelStatusError(
+            "Discord Gateway could not request voice channel status evidence",
+          ),
+        )
+      }
+    })
+  }
+
+  #finishChannelInfo(
+    pending: PendingChannelInfo,
+    result: GatewayVoiceChannelStatusSnapshot | Error,
+  ): void {
+    if (this.#pendingChannelInfo.get(pending.guildId) !== pending) return
+    this.#pendingChannelInfo.delete(pending.guildId)
+    this.#scheduler.clearTimeout(pending.timeoutHandle)
+    if (pending.abortListener && pending.signal) {
+      pending.signal.removeEventListener("abort", pending.abortListener)
+    }
+    if (result instanceof Error) pending.reject(result)
+    else pending.resolve(result)
+  }
+
+  #finishVoiceChannelStatusUpdate(
+    pending: PendingVoiceChannelStatusUpdate,
+    result: GatewayVoiceChannelStatusUpdate | Error,
+  ): void {
+    const key = voiceChannelStatusTargetKey(pending.guildId, pending.channelId)
+    const waiters = this.#voiceChannelStatusUpdateWaiters.get(key)
+    if (!waiters?.delete(pending)) return
+    if (waiters.size === 0) this.#voiceChannelStatusUpdateWaiters.delete(key)
+    this.#scheduler.clearTimeout(pending.timeoutHandle)
+    if (pending.abortListener && pending.signal) {
+      pending.signal.removeEventListener("abort", pending.abortListener)
+    }
+    if (result instanceof Error) pending.reject(result)
+    else pending.resolve(result)
+  }
+
+  #rejectPendingVoiceEvidence(message: string): void {
+    const error = new GatewayVoiceChannelStatusError(message)
+    for (const pending of [...this.#pendingChannelInfo.values()]) {
+      this.#finishChannelInfo(pending, error)
+    }
+    for (const waiters of [...this.#voiceChannelStatusUpdateWaiters.values()]) {
+      for (const pending of [...waiters]) this.#finishVoiceChannelStatusUpdate(pending, error)
+    }
   }
 
   #clearTimer(kind: "heartbeat" | "identify" | "phase" | "reconnect"): void {
@@ -435,6 +702,9 @@ export class DiscordGateway implements GatewayRuntime {
     socket.onclose = (event) => {
       if (this.#socket !== socket) return
       this.#socket = undefined
+      this.#rejectPendingVoiceEvidence(
+        "Discord Gateway continuity changed during voice channel status evidence collection",
+      )
       this.#clearTimer("heartbeat")
       this.#clearTimer("identify")
       this.#clearTimer("phase")
@@ -555,7 +825,7 @@ export class DiscordGateway implements GatewayRuntime {
       d: {
         intents: this.#eventStore.eventFeedEnabled
           ? DISCORD_GATEWAY_INTENT_MASK
-          : this.#eventStore.layoutEnabled
+          : this.#eventStore.guildIntentRequired
             ? DISCORD_GATEWAY_INTENTS.guilds
             : 0,
         properties: {
@@ -624,6 +894,14 @@ export class DiscordGateway implements GatewayRuntime {
       return
     }
     if (!this.#resuming && this.#eventStore.getStatus().connection.state !== "ready") return
+    if (eventName === "CHANNEL_INFO") {
+      this.#onChannelInfo(payload.d, sequence)
+      return
+    }
+    if (eventName === "VOICE_CHANNEL_STATUS_UPDATE") {
+      this.#onVoiceChannelStatusUpdate(payload.d, sequence)
+      return
+    }
     if (eventName === "INTERACTION_CREATE" && this.#interactionHandler) {
       try {
         void Promise.resolve(this.#interactionHandler.ingestInteraction(payload.d))
@@ -634,6 +912,64 @@ export class DiscordGateway implements GatewayRuntime {
       return
     }
     this.#eventStore.ingestDispatch(eventName, payload.d)
+  }
+
+  #onChannelInfo(data: unknown, sequence: number): void {
+    const guildId = channelInfoGuildId(data)
+    if (!guildId) {
+      if (this.#pendingChannelInfo.size > 0) {
+        this.#rejectPendingVoiceEvidence(
+          "Discord Gateway returned malformed channel-info evidence",
+        )
+      }
+      return
+    }
+    const pending = this.#pendingChannelInfo.get(guildId)
+    if (!pending) return
+    try {
+      this.#finishChannelInfo(pending, projectGatewayVoiceChannelStatus({
+        channelId: pending.channelId,
+        gatewaySequence: sequence,
+        guildId,
+        observedAt: new Date(this.#clock()).toISOString(),
+        requestedAt: pending.requestedAt,
+        value: data,
+      }))
+    } catch (error) {
+      this.#finishChannelInfo(
+        pending,
+        error instanceof Error
+          ? error
+          : new GatewayVoiceChannelStatusError(
+            "Discord Gateway channel-info evidence could not be projected",
+          ),
+      )
+    }
+  }
+
+  #onVoiceChannelStatusUpdate(data: unknown, sequence: number): void {
+    const target = voiceChannelStatusUpdateTarget(data)
+    if (!target || !this.#voiceChannelStatusIds.has(target.channelId)) return
+    const key = voiceChannelStatusTargetKey(target.guildId, target.channelId)
+    const waiters = this.#voiceChannelStatusUpdateWaiters.get(key)
+    if (!waiters || waiters.size === 0) return
+    let result: GatewayVoiceChannelStatusUpdate | Error
+    try {
+      result = projectGatewayVoiceChannelStatusUpdate({
+        channelId: target.channelId,
+        gatewaySequence: sequence,
+        guildId: target.guildId,
+        observedAt: new Date(this.#clock()).toISOString(),
+        value: data,
+      })
+    } catch (error) {
+      result = error instanceof Error
+        ? error
+        : new GatewayVoiceChannelStatusError(
+          "Discord Gateway voice channel status update could not be projected",
+        )
+    }
+    for (const pending of [...waiters]) this.#finishVoiceChannelStatusUpdate(pending, result)
   }
 
   #onReady(data: unknown): void {
@@ -706,6 +1042,9 @@ export class DiscordGateway implements GatewayRuntime {
 
   #requestReconnect(options: PendingReconnect): void {
     if (!this.#running || this.#terminal || this.#pendingReconnect) return
+    this.#rejectPendingVoiceEvidence(
+      "Discord Gateway continuity changed during voice channel status evidence collection",
+    )
     this.#eventStore.suspendChannelLayoutsForResume()
     this.#pendingReconnect = options
     const socket = this.#socket
@@ -764,6 +1103,9 @@ export class DiscordGateway implements GatewayRuntime {
   #fail(category: GatewayErrorCategory, closeSocket = true): void {
     if (this.#terminal) return
     this.#terminal = true
+    this.#rejectPendingVoiceEvidence(
+      "Discord Gateway failed during voice channel status evidence collection",
+    )
     this.#clearTimer("heartbeat")
     this.#clearTimer("identify")
     this.#clearTimer("phase")

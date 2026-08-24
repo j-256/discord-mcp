@@ -67,6 +67,7 @@ export const OPERATION_KINDS = [
   "stage-instance-change",
   "thread-create",
   "thread-governance-change",
+  "voice-channel-status-change",
   "welcome-screen-change",
   "webhook-change",
   "webhook-creation",

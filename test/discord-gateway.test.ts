@@ -24,6 +24,7 @@ const MEMBER_ROLE_GUILD_ID = "200000000000000003"
 const ONBOARDING_GUILD_ID = "200000000000000004"
 const TEMPLATE_GUILD_ID = "200000000000000005"
 const CHANNEL_ID = "300000000000000001"
+const SECOND_CHANNEL_ID = "300000000000000002"
 const MESSAGE_ID = "400000000000000001"
 const TOKEN = "test-discord-token"
 
@@ -408,6 +409,178 @@ test("Layout-only Gateway requests only GUILDS and ingests a content-free seed",
   assert.equal(gateway.getChannelLayout(GUILD_ID).channels[0]?.obfuscated, true)
   assert.deepEqual(gateway.listEvents().events, [])
   assert.doesNotMatch(JSON.stringify(gateway.getChannelLayout(GUILD_ID)), new RegExp(TOKEN))
+  await gateway.stop()
+})
+
+test("Voice-status-only Gateway serializes exact guild queries and discards non-target text", async () => {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const statusIds = new Set([CHANNEL_ID, SECOND_CHANNEL_ID])
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: statusIds,
+    allowedGuildIds: new Set([GUILD_ID]),
+    bufferSize: 10,
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "voicestatus1",
+    enabled: true,
+    eventFeedEnabled: false,
+    voiceChannelStatusChannelCount: statusIds.size,
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: statusIds,
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowChannelMetadataChanges: true,
+      allowGateway: false,
+      channelMetadataIds: statusIds,
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+    eventStore,
+    random: () => 0,
+    scheduler,
+    webSocketFactory() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  assert.equal(
+    ((payloads(socket)[0]?.d as Record<string, unknown>).intents),
+    DISCORD_GATEWAY_INTENTS.guilds,
+  )
+  ready(socket)
+  assert.equal(gateway.voiceChannelStatusEnabled, true)
+  assert.deepEqual(gateway.getStatus().projections.voiceChannelStatus, {
+    enabled: true,
+    scopedChannels: 2,
+  })
+
+  const first = gateway.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID)
+  const second = gateway.getVoiceChannelStatus(GUILD_ID, SECOND_CHANNEL_ID)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.deepEqual(payloads(socket).filter(({ op }) => op === 43), [{
+    d: { fields: ["status"], guild_id: GUILD_ID },
+    op: 43,
+  }])
+  socket.message({
+    d: {
+      channels: [
+        { id: CHANNEL_ID, status: "Office hours" },
+        { id: SECOND_CHANNEL_ID, status: TOKEN },
+      ],
+      guild_id: GUILD_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "CHANNEL_INFO",
+  })
+  const firstResult = await first
+  assert.equal(firstResult.status, "Office hours")
+  assert.doesNotMatch(JSON.stringify(firstResult), new RegExp(TOKEN))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(payloads(socket).filter(({ op }) => op === 43).length, 2)
+  socket.message({
+    d: {
+      channels: [
+        { id: CHANNEL_ID, status: TOKEN },
+        { id: SECOND_CHANNEL_ID, status: "Planning" },
+      ],
+      guild_id: GUILD_ID,
+    },
+    op: 0,
+    s: 3,
+    t: "CHANNEL_INFO",
+  })
+  assert.equal((await second).status, "Planning")
+
+  const update = gateway.waitForVoiceChannelStatusUpdate(GUILD_ID, CHANNEL_ID)
+  socket.message({
+    d: { guild_id: GUILD_ID, id: CHANNEL_ID, status: null },
+    op: 0,
+    s: 4,
+    t: "VOICE_CHANNEL_STATUS_UPDATE",
+  })
+  assert.equal((await update).status, null)
+  assert.deepEqual(gateway.listEvents().events, [])
+  assert.throws(
+    () => gateway.getVoiceChannelStatus(GUILD_ID, "300000000000000099"),
+    /outside the exact Gateway voice channel status scope/,
+  )
+  assert.throws(
+    () => gateway.getVoiceChannelStatus(GUILD_ID, 42 as unknown as string),
+    /target IDs must be positive snowflakes/,
+  )
+  await gateway.stop()
+})
+
+test("Gateway voice status evidence rejects cancellation, timeout, and continuity loss", async () => {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "voicestatus2",
+    enabled: true,
+    eventFeedEnabled: false,
+    voiceChannelStatusChannelCount: 1,
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowChannelMetadataChanges: true,
+      allowGateway: false,
+      channelMetadataIds: new Set([CHANNEL_ID]),
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+    eventStore,
+    random: () => 0,
+    scheduler,
+    webSocketFactory() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+  gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  ready(socket)
+
+  const controller = new AbortController()
+  const cancelled = gateway.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID, {
+    signal: controller.signal,
+  })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  controller.abort()
+  await assert.rejects(cancelled, /was cancelled/)
+
+  const timedOut = gateway.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  scheduler.runNext()
+  socket.message({ d: null, op: 11, s: null, t: null })
+  assert.equal(scheduler.runNext(), 10_000)
+  await assert.rejects(timedOut, /timed out/)
+
+  const disconnected = gateway.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  socket.serverClose(1_006)
+  await assert.rejects(disconnected, /continuity changed/)
   await gateway.stop()
 })
 
