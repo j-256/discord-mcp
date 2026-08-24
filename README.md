@@ -116,6 +116,23 @@ Operational commands require `--config FILE`, `--profile NAME`, or the non-secre
 
 Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
 
+### Review any policy replacement
+
+Keep the active policy unchanged while editing a separate candidate, then review and apply only an exact fresh plan:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.0 config plan \
+  ./discord-mcp.json \
+  ./discord-mcp.candidate.json
+npx --yes @j-256/discord-mcp@0.1.0 config apply \
+  ./discord-mcp.json \
+  ./discord-mcp.candidate.json \
+  --plan-digest SHA256_FROM_THE_PLAN \
+  --confirm ACTIVE_POLICY_NAME
+```
+
+Planning reads two protected non-secret documents and reports every exact field change, its authority or operational impact, canonical tool additions and removals, warnings, both document digests, the complete candidate, and structured post-application checks. It never resolves a referenced secret or contacts Discord. Application rereads both files, requires the exact digest and active-policy-name confirmation, rejects identity drift or either stale document, preserves a recoverable backup, and leaves the candidate untouched. The active document remains the only policy source; there is no legacy environment fallback or migration layer.
+
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
 ```sh
@@ -216,6 +233,8 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, completion routes, app source, instructions, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
+| `discord-mcp config plan ACTIVE CANDIDATE --json` | Complete candidate policy, exact semantic changes, authority impacts, tool exposure, warnings, identity lock, and fresh path-bound digest | None |
+| `discord-mcp config apply ACTIVE CANDIDATE --plan-digest DIGEST --confirm ACTIVE_NAME` | Exact fresh local policy replacement with stale-file rejection, atomic publication, and a recoverable prior version | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
 | `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
 | `discord-mcp activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |

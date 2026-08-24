@@ -2,6 +2,22 @@ export class ConfigurationError extends Error {
   override name = "ConfigurationError"
 }
 
+export type ConfigChangeErrorReason = "active" | "candidate" | "identity" | "review"
+
+export class ConfigChangeError extends ConfigurationError {
+  readonly reason: ConfigChangeErrorReason
+
+  constructor(
+    message: string,
+    reason: ConfigChangeErrorReason,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = "ConfigChangeError"
+    this.reason = reason
+  }
+}
+
 export class ConfigDocumentError extends ConfigurationError {
   override name = "ConfigDocumentError"
 }

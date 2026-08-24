@@ -34,6 +34,10 @@ import {
   type DiscordOnboardingHtmlExportReport,
 } from "../src/onboarding-html.js"
 import {
+  applyConfigChange,
+  planConfigChange,
+} from "../src/config-review.js"
+import {
   CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
   explainConnectorConfig,
   summarizeConnectorConfigDocument,
@@ -430,6 +434,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
         profile,
       }
     },
+    applyConfigChange,
     applyRecipe: applyConfigRecipe,
     catalog() {},
     async checkCatalog() {
@@ -484,6 +489,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async prepareSetup() {
       return setupReport()
     },
+    planConfigChange,
     planRecipe: planConfigRecipe,
     async reviewActivity() {
       return activityReviewReport()
@@ -677,6 +683,38 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "config",
     file: "/configuration/discord.json",
     json: false,
+  })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "plan",
+    "/configuration/discord.json",
+    "/configuration/candidate.json",
+    "--json",
+  ]), {
+    action: "plan",
+    candidateFile: "/configuration/candidate.json",
+    command: "config",
+    file: "/configuration/discord.json",
+    json: true,
+  })
+  const configChangeDigest = `sha256:${"b".repeat(64)}`
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "apply",
+    "/configuration/discord.json",
+    "/configuration/candidate.json",
+    "--plan-digest",
+    configChangeDigest,
+    "--confirm",
+    "support-bot",
+  ]), {
+    action: "apply",
+    candidateFile: "/configuration/candidate.json",
+    command: "config",
+    confirmation: "support-bot",
+    file: "/configuration/discord.json",
+    json: false,
+    planDigest: configChangeDigest,
   })
   assert.deepEqual(parseCliArguments([
     "config",
@@ -937,7 +975,29 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   )
   assert.throws(
     () => parseCliArguments(["config", "migrate", "/configuration/discord.json"]),
-    /config requires explain, init, show, or validate/,
+    /config requires apply, explain, init, plan, show, or validate/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "config",
+      "apply",
+      "/configuration/discord.json",
+      "/configuration/candidate.json",
+      "--confirm",
+      "support-bot",
+    ]),
+    /requires --plan-digest/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "config",
+      "apply",
+      "/configuration/discord.json",
+      "/configuration/candidate.json",
+      "--plan-digest",
+      configChangeDigest,
+    ]),
+    /requires --confirm/,
   )
   assert.throws(
     () => parseCliArguments(["setup", "--client", "legacy"]),
@@ -2469,6 +2529,98 @@ test("CLI routes config lifecycle commands without exposing credential values", 
   assert.match(output.value(), /secret values, and did not contact Discord/)
 })
 
+test("CLI plans and applies one exact candidate configuration without resolving secrets", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-config-review-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "active.json")
+  const candidateFile = join(root, "candidate.json")
+  const current = connectorProfile()
+  const candidate = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    capabilities: { interactions: true },
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "reviewed-bot",
+    scopes: { interactionChannelIds: [CHANNEL_ID] },
+    toolsets: ["connector", "interactions", "messages"],
+    toolSurface: "progressive",
+  })
+  await writeConnectorConfigDocumentFile(file, current)
+  await writeConnectorConfigDocumentFile(candidateFile, candidate)
+
+  const planOutput = outputStream()
+  assert.equal(await runCli({
+    args: ["config", "plan", file, candidateFile, "--json"],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: planOutput.stream,
+  }), 0)
+  const plan = JSON.parse(planOutput.value())
+  assert.equal(plan.action, "plan")
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.execution.secretValuesRead, false)
+  assert.equal(plan.execution.discordContacted, false)
+  assert.equal(plan.candidateDocument.name, "reviewed-bot")
+  assert.doesNotMatch(planOutput.value(), new RegExp(TOKEN))
+
+  const applyOutput = outputStream()
+  assert.equal(await runCli({
+    args: [
+      "config",
+      "apply",
+      file,
+      candidateFile,
+      "--plan-digest",
+      plan.planDigest,
+      "--confirm",
+      "support-bot",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: applyOutput.stream,
+  }), 0)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), candidate)
+  assert.match(applyOutput.value(), /configuration change apply: applied/)
+  assert.match(applyOutput.value(), /Recoverable prior version:/)
+  assert.match(applyOutput.value(), /Canonical tools added:/)
+  assert.match(applyOutput.value(), /No secret value was read and Discord was not contacted/)
+  assert.doesNotMatch(applyOutput.value(), new RegExp(TOKEN))
+
+  await writeFile(candidateFile, `${JSON.stringify({
+    ...candidate,
+    name: "next-reviewed-bot",
+  }, null, 2)}\n`)
+  const staleOutput = outputStream()
+  const staleError = outputStream()
+  assert.equal(await runCli({
+    args: [
+      "config",
+      "apply",
+      file,
+      candidateFile,
+      "--plan-digest",
+      plan.planDigest,
+      "--confirm",
+      "reviewed-bot",
+      "--json",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stderr: staleError.stream,
+    stdout: staleOutput.stream,
+  }), 2)
+  const stale = JSON.parse(staleOutput.value())
+  assert.equal(staleError.value(), "")
+  assert.equal(stale.error.category, "configuration")
+  assert.match(stale.error.message, /stale or does not match/)
+  assert.match(stale.error.recovery.action, /Rerun discord-mcp config plan/)
+  assert.equal(stale.error.recovery.retry, "after-correction")
+  assert.doesNotMatch(staleOutput.value(), new RegExp(TOKEN))
+})
+
 test("CLI explains only the typed configuration contract", async () => {
   const output = outputStream()
 
@@ -2654,6 +2806,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(catalogHelpOutput.value(), /without replacing an existing file/)
   assert.doesNotMatch(configHelpOutput.value(), /migrate FILE/)
   assert.match(configHelpOutput.value(), /explain \[PATH\] \[--json\]/)
+  assert.match(configHelpOutput.value(), /plan ACTIVE_FILE CANDIDATE_FILE \[--json\]/)
+  assert.match(configHelpOutput.value(), /--plan-digest DIGEST --confirm ACTIVE_NAME/)
   assert.match(configHelpOutput.value(), /--token-file FILE/)
   assert.match(configHelpOutput.value(), /one strict non-secret configuration file/)
   assert.match(recipeHelpOutput.value(), /plan NAME FILE/)

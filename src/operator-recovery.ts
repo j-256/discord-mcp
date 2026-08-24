@@ -1,4 +1,5 @@
 import {
+  ConfigChangeError,
   ConfigurationError,
   DiscordApiError,
   errorMessage,
@@ -99,6 +100,21 @@ export function classifyCliFailure(
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
       "Create a policy with discord-mcp config init or setup --preset, then select it with --config or --profile.",
+      OPERATOR_REFERENCES.configuration,
+      OPERATOR_RETRY.afterCorrection,
+    )
+  }
+  if (error instanceof ConfigChangeError) {
+    const action = error.reason === "active"
+      ? "Run discord-mcp config validate ACTIVE_FILE, correct the active policy, and create a fresh config plan before retrying."
+      : error.reason === "candidate"
+        ? "Run discord-mcp config validate CANDIDATE_FILE, correct the candidate policy, and create a fresh config plan before retrying."
+        : error.reason === "identity"
+          ? "Keep the active application and bot IDs unchanged, or create a separate configuration for the different Discord bot."
+          : "Rerun discord-mcp config plan ACTIVE_FILE CANDIDATE_FILE, review the fresh digest and changes, then apply only that exact plan."
+    return guidance(
+      CLI_FAILURE_CATEGORIES.configuration,
+      action,
       OPERATOR_REFERENCES.configuration,
       OPERATOR_RETRY.afterCorrection,
     )

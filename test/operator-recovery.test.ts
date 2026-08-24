@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  ConfigChangeError,
   ConfigDocumentError,
   ConfigurationError,
   DiscordApiError,
@@ -71,6 +72,30 @@ test("operator recovery distinguishes configuration, profile, and usage correcti
   assert.equal(safeCliFailureMessage(profile, COMMAND_CONTEXT), "Profile not found")
   assert.equal(safeCliFailureMessage(configuration, COMMAND_CONTEXT), "Configuration is invalid")
   assert.equal(safeCliFailureMessage(new Error("argument secret"), usage), "Invalid command usage")
+})
+
+test("operator recovery directs config changes through fresh candidate review", () => {
+  const active = classifyCliFailure(
+    new ConfigChangeError("active failed", "active"),
+    COMMAND_CONTEXT,
+  )
+  const candidate = classifyCliFailure(
+    new ConfigChangeError("candidate failed", "candidate"),
+    COMMAND_CONTEXT,
+  )
+  const identity = classifyCliFailure(
+    new ConfigChangeError("identity failed", "identity"),
+    COMMAND_CONTEXT,
+  )
+  const reviewError = new ConfigChangeError("stale", "review")
+  const review = classifyCliFailure(reviewError, COMMAND_CONTEXT)
+
+  assert.match(active.recovery.action, /config validate ACTIVE_FILE/)
+  assert.match(candidate.recovery.action, /config validate CANDIDATE_FILE/)
+  assert.match(identity.recovery.action, /create a separate configuration/)
+  assert.match(review.recovery.action, /config plan ACTIVE_FILE CANDIDATE_FILE/)
+  assert.equal(review.recovery.retry, "after-correction")
+  assert.equal(safeCliFailureMessage(reviewError, COMMAND_CONTEXT), "stale")
 })
 
 test("operator recovery requires inspection for every coordination error", () => {

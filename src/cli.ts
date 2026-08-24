@@ -40,6 +40,14 @@ import {
   type ConnectorConfig,
 } from "./config.js"
 import {
+  applyConfigChange,
+  planConfigChange,
+  type ConfigChangeApplyOptions,
+  type ConfigChangeApplyReport,
+  type ConfigChangePlanOptions,
+  type ConfigChangePlanReport,
+} from "./config-review.js"
+import {
   loadConnectorConfigDocumentFile,
   type ConnectorConfigDocument,
 } from "./config-document.js"
@@ -157,6 +165,15 @@ export type ParsedCliArguments =
   }
   | { check: boolean; command: "catalog"; htmlFile?: string; json: boolean }
   | {
+    action: "apply"
+    candidateFile: string
+    command: "config"
+    confirmation: string
+    file: string
+    json: boolean
+    planDigest: string
+  }
+  | {
     action: "explain"
     command: "config"
     json: boolean
@@ -176,6 +193,13 @@ export type ParsedCliArguments =
     name: string
     overwrite: boolean
     preset?: string
+  }
+  | {
+    action: "plan"
+    candidateFile: string
+    command: "config"
+    file: string
+    json: boolean
   }
   | {
     action: "show" | "validate"
@@ -291,6 +315,7 @@ export interface CliDependencies {
     name: string,
     options: ProfileLocationOptions,
   ): Promise<ActivatedProfile>
+  applyConfigChange(options: ConfigChangeApplyOptions): Promise<ConfigChangeApplyReport>
   catalog(options: {
     stderr: Pick<NodeJS.WriteStream, "write">
   }): unknown
@@ -319,6 +344,7 @@ export interface CliDependencies {
   ): Promise<DiscordActivityReviewReport>
   applyRecipe(options: ConfigRecipeApplyOptions): Promise<ConfigRecipeApplyReport>
   planRecipe(options: ConfigRecipePlanOptions): ConfigRecipePlanReport
+  planConfigChange(options: ConfigChangePlanOptions): ConfigChangePlanReport
   resolveCoordination(
     activityFile: string,
     claimId: string,
@@ -360,6 +386,7 @@ export interface CliErrorReport {
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
   activateProfile,
+  applyConfigChange,
   applyRecipe: applyConfigRecipe,
   catalog: runDiscordMcpCatalog,
   checkCatalog: checkDiscordCatalog,
@@ -380,6 +407,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   loadConfigDocument: loadConnectorConfigDocumentFile,
   loadProfile,
   prepareSetup,
+  planConfigChange,
   planRecipe: planConfigRecipe,
   reviewActivity: reviewDiscordActivity,
   resolveCoordination: async (auditFile, claimId, confirmation) => {
@@ -533,10 +561,70 @@ function parseConfigCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "config" }> {
   const action = args[0]
-  if (!action || !["explain", "init", "show", "validate"].includes(action)) {
+  if (!action || !["apply", "explain", "init", "plan", "show", "validate"].includes(action)) {
     throw new ConfigurationError(
-      "config requires explain, init, show, or validate",
+      "config requires apply, explain, init, plan, show, or validate",
     )
+  }
+  if (action === "plan" || action === "apply") {
+    const file = args[1]
+    const candidateFile = args[2]
+    if (!file || file.startsWith("--")) {
+      throw new ConfigurationError(`config ${action} requires an active file path`)
+    }
+    if (!candidateFile || candidateFile.startsWith("--")) {
+      throw new ConfigurationError(`config ${action} requires a candidate file path`)
+    }
+    if (action === "plan") {
+      const options = parseBooleanOptions(args.slice(3), new Set(["--json"]))
+      return {
+        action,
+        candidateFile,
+        command: "config",
+        file,
+        json: options.has("--json"),
+      }
+    }
+    let confirmation: string | undefined
+    let json = false
+    let planDigest: string | undefined
+    const seen = new Set<string>()
+    for (let index = 3; index < args.length; index += 1) {
+      const argument = args[index]
+      if (!argument || !["--confirm", "--json", "--plan-digest"].includes(argument)) {
+        throw new ConfigurationError(`Unknown option ${argument || ""}`)
+      }
+      if (seen.has(argument)) {
+        throw new ConfigurationError(`Option ${argument} may be provided only once`)
+      }
+      seen.add(argument)
+      if (argument === "--json") {
+        json = true
+        continue
+      }
+      const value = args[index + 1]
+      if (!value || value.startsWith("--")) {
+        throw new ConfigurationError(`Option ${argument} requires a value`)
+      }
+      index += 1
+      if (argument === "--confirm") confirmation = value
+      if (argument === "--plan-digest") planDigest = value
+    }
+    if (!planDigest) {
+      throw new ConfigurationError("config apply requires --plan-digest")
+    }
+    if (!confirmation) {
+      throw new ConfigurationError("config apply requires --confirm")
+    }
+    return {
+      action,
+      candidateFile,
+      command: "config",
+      confirmation,
+      file,
+      json,
+      planDigest,
+    }
   }
   if (action === "explain") {
     const path = args[1]?.startsWith("--") ? undefined : args[1]
@@ -1152,8 +1240,10 @@ function helpText(topic: CliCommand | undefined): string {
       "  validate FILE [--json]",
       "  show FILE [--json]",
       "  explain [PATH] [--json]",
+      "  plan ACTIVE_FILE CANDIDATE_FILE [--json]",
+      "  apply ACTIVE_FILE CANDIDATE_FILE --plan-digest DIGEST --confirm ACTIVE_NAME [--json]",
       "",
-      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. Validation does not read secret values or contact Discord. Replacement preserves a recoverable backup and cannot change the pinned Discord identity.",
+      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. Validation and change planning do not read secret values or contact Discord. Applying a reviewed change fresh-checks both files, preserves a recoverable backup, and cannot change the pinned Discord identity.",
     ].join("\n")
   }
   if (topic === "doctor") {
@@ -1224,7 +1314,7 @@ function helpText(topic: CliCommand | undefined): string {
     "Commands:",
     "  activity  Review content-free write outcomes and durable claims",
     "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
-    "  config   Create, validate, and inspect one non-secret policy file",
+    "  config   Create, validate, inspect, and review one non-secret policy file",
     "  coordination  Inspect or resolve one policy's durable reviewed-write claims",
     "  serve    Run the stdio MCP server with a selected policy (default)",
     "  setup    Create or verify a policy and generate safe client configuration",
@@ -1827,6 +1917,54 @@ function renderConfigWrite(report: ConfigWriteReport): string {
   ].join("\n")
 }
 
+function renderConfigChange(
+  report: ConfigChangePlanReport | ConfigChangeApplyReport,
+): string {
+  const changes = report.changes.length === 0
+    ? ["  none"]
+    : report.changes.flatMap((change) => [
+        `  ${change.path} [${change.category}; ${change.impact}]`,
+        `    Before: ${JSON.stringify(change.before)}`,
+        `    After: ${JSON.stringify(change.after)}`,
+      ])
+  const addedTools = report.tools.added.length > 0
+    ? report.tools.added.join(", ")
+    : "none"
+  const removedTools = report.tools.removed.length > 0
+    ? report.tools.removed.join(", ")
+    : "none"
+  return [
+    `Discord MCP configuration change ${report.action}: ${report.status}`,
+    `Active file: ${report.file}`,
+    `Candidate file: ${report.candidateFile}`,
+    `Current document digest: ${report.currentDocumentDigest}`,
+    `Candidate document digest: ${report.candidateDocumentDigest}`,
+    `Plan digest: ${report.planDigest}`,
+    `Required confirmation: ${report.confirmation.requiredValue}`,
+    `Configuration written: ${report.execution.configurationWritten ? "yes" : "no"}`,
+    ...(report.action === "apply" && report.backupFile
+      ? [`Recoverable prior version: ${report.backupFile}`]
+      : []),
+    `Impact: expansions=${report.impact.authorityExpansions}, reductions=${report.impact.authorityReductions}, redistributions=${report.impact.authorityRedistributions}, operational=${report.impact.operationalChanges}, metadata=${report.impact.metadataOnly}`,
+    `Canonical tools added: ${addedTools}`,
+    `Canonical tools removed: ${removedTools}`,
+    "Changes:",
+    ...changes,
+    "Warnings:",
+    ...report.warnings.map((warning) => `  - ${warning}`),
+    "",
+    "Complete candidate non-secret configuration:",
+    JSON.stringify(report.candidateDocument, null, 2),
+    "",
+    "Post-application checks as structured commands:",
+    ...report.nextChecks.map((next) => (
+      `  ${JSON.stringify({ args: next.args, command: next.command })}`
+    )),
+    "",
+    "No secret value was read and Discord was not contacted.",
+  ].join("\n")
+}
+
 function renderSmoke(report: SmokeReport): string {
   return [
     "Discord MCP smoke: ok",
@@ -2044,6 +2182,32 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "config": {
+        if (parsed.action === "plan") {
+          const report = dependencies.planConfigChange({
+            candidateFile: parsed.candidateFile,
+            file: parsed.file,
+          })
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderConfigChange(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
+        if (parsed.action === "apply") {
+          const report = await dependencies.applyConfigChange({
+            candidateFile: parsed.candidateFile,
+            confirmation: parsed.confirmation,
+            file: parsed.file,
+            planDigest: parsed.planDigest,
+          })
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderConfigChange(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
         if (parsed.action === "explain") {
           const report = dependencies.explainConfig(parsed.path)
           safeWrite(
