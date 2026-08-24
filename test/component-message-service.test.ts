@@ -9,6 +9,7 @@ import type {
   DiscordStaticComponent,
 } from "../src/component-layout.js"
 import {
+  componentMessageRequestDigest,
   componentMessageNonce,
   ComponentMessageService,
   normalizeComponentMessageRequest,
@@ -28,6 +29,7 @@ import {
 } from "../src/errors.js"
 import { InteractionLimiter } from "../src/interaction-limiter.js"
 import type {
+  ComponentMessageOperationReceipt,
   OperationReceipt,
   OperationReservation,
   OperationStore,
@@ -44,10 +46,12 @@ import type {
 } from "../src/types.js"
 
 const APPLICATION_ID = "100000000000000001"
+const OTHER_APPLICATION_ID = "100000000000000002"
 const GUILD_ID = "200000000000000001"
 const OWNER_ID = "200000000000000002"
 const BOT_ID = "300000000000000001"
 const BOT_ROLE_ID = "300000000000000002"
+const OTHER_BOT_ID = "300000000000000003"
 const CHANNEL_ID = "400000000000000001"
 const PARENT_CHANNEL_ID = "400000000000000002"
 const REPLY_ID = "500000000000000001"
@@ -55,6 +59,7 @@ const REPLY_AUTHOR_ID = "500000000000000002"
 const EXISTING_ID = "600000000000000001"
 const CREATED_ID = "600000000000000002"
 const OPERATION_KEY = "component-operation-0001"
+const PLAN_DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const NOW = "2026-08-22T00:00:00.000Z"
 const EDITED = "2026-08-22T00:01:00.000Z"
 const CURRENT_LAYOUT = [{ content: "Before", kind: "text" as const }]
@@ -276,10 +281,12 @@ interface FixtureState {
   activityFailureAt: number | null
   botMember: DiscordGuildMember
   channel: DiscordChannel
+  created: DiscordMessage | null
   current: DiscordMessage
   guild: DiscordGuild
   mutationError: unknown
   parent: DiscordChannel
+  readbackError: unknown
   readbackOverrides: Partial<DiscordMessage>
   reply: DiscordMessage
   responseOverrides: Partial<DiscordMessage>
@@ -288,18 +295,22 @@ interface FixtureState {
 }
 
 function fixture(options: {
+  operationStore?: MemoryOperationStore
   policyOptions?: Parameters<typeof configuredPolicy>[0]
   state?: Partial<FixtureState>
+  verificationKey?: Uint8Array
 } = {}) {
   const configured = configuredPolicy(options.policyOptions)
   const state: FixtureState = {
     activityFailureAt: null,
     botMember: botMember(),
     channel: channel(),
+    created: null,
     current: componentMessage(EXISTING_ID, wireLayout(CURRENT_LAYOUT)),
     guild: guild(),
     mutationError: undefined,
     parent: channel({ id: PARENT_CHANNEL_ID }),
+    readbackError: undefined,
     readbackOverrides: {},
     reply: replyMessage(),
     responseOverrides: {},
@@ -332,7 +343,7 @@ function fixture(options: {
       return { entries: activities, file: "/memory/activity.jsonl", skippedLines: 0 }
     },
   }
-  const operationStore = new MemoryOperationStore(events)
+  const operationStore = options.operationStore ?? new MemoryOperationStore(events)
 
   const createdMessage = (overrides: Partial<DiscordMessage> = {}) => {
     if (!createInput) throw new Error("missing component create input")
@@ -382,13 +393,17 @@ function fixture(options: {
       events.push("write:create")
       if (state.mutationError) throw state.mutationError
       createInput = input
-      return createdMessage(state.responseOverrides)
+      const response = createdMessage(state.responseOverrides)
+      state.created = response
+      return response
     },
     async editComponentMessage(_channelId, _messageId, input) {
       events.push("write:edit")
       if (state.mutationError) throw state.mutationError
       editInput = input
-      return editedMessage(state.responseOverrides)
+      const response = editedMessage(state.responseOverrides)
+      state.current = response
+      return response
     },
     async getChannel(channelId) {
       events.push(`read:channel:${channelId}`)
@@ -414,11 +429,14 @@ function fixture(options: {
       }
       if (messageId === CREATED_ID) {
         events.push("read:created")
+        if (state.readbackError) throw state.readbackError
+        if (state.created) return { ...state.created, ...state.readbackOverrides }
         return createdMessage(state.readbackOverrides)
       }
       events.push(editInput ? "read:edited" : "read:current")
+      if (state.readbackError) throw state.readbackError
       return editInput
-        ? editedMessage(state.readbackOverrides)
+        ? { ...state.current, ...state.readbackOverrides }
         : state.current
     },
     async getThreadMember() {
@@ -439,6 +457,9 @@ function fixture(options: {
     planKey: new Uint8Array(32).fill(8),
     policy: configured.policy,
     randomId: () => "activity-component-1",
+    ...(options.verificationKey === undefined
+      ? {}
+      : { verificationKey: options.verificationKey }),
   })
   return {
     activities,
@@ -452,6 +473,35 @@ function fixture(options: {
     operationStore,
     service,
     state,
+  }
+}
+
+function verificationReceipt(
+  request: ComponentMessageRequest,
+  verificationKey: Uint8Array,
+  status: ComponentMessageOperationReceipt["status"],
+): ComponentMessageOperationReceipt {
+  const normalized = normalizeComponentMessageRequest(request)
+  return {
+    activityId: "activity-component-1",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: GUILD_ID,
+    kind: "component-message",
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest: PLAN_DIGEST,
+    requestDigest: componentMessageRequestDigest(
+      verificationKey,
+      APPLICATION_ID,
+      BOT_ID,
+      normalized,
+    ),
+    resourceId: ["completed", "uncertain"].includes(status) ? CREATED_ID : null,
+    schemaVersion: 2,
+    status,
+    timestamp: NOW,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -665,6 +715,242 @@ test("component-message create reserves, audits, writes once, and verifies readb
   ]) {
     assert.equal(persisted.includes(privateValue), false)
   }
+})
+
+test("component-message verification is restart-safe, request-bound, and read-only", async () => {
+  const verificationKey = new Uint8Array(32).fill(9)
+  const current = fixture({ verificationKey })
+  const request = createRequest({
+    notifyReplyAuthor: true,
+    replyToMessageId: REPLY_ID,
+  })
+  const plan = await current.service.plan(APPLICATION_ID, BOT_ID, "enabled", request)
+  await current.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+    plan.digest,
+  )
+  const eventCount = current.events.length
+  const activityCount = current.activities.length
+  const result = await current.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.deepEqual({
+    messageId: result.messageId,
+    readbackMatched: result.readbackMatched,
+    reason: result.reason,
+    requestMatched: result.requestMatched,
+    status: result.status,
+  }, {
+    messageId: CREATED_ID,
+    readbackMatched: true,
+    reason: null,
+    requestMatched: true,
+    status: "verified",
+  })
+  assert.equal(current.activities.length, activityCount)
+  assert.equal(
+    current.events.slice(eventCount).some((event) => (
+      event.startsWith("activity:")
+      || event.startsWith("operation:")
+      || event.startsWith("write:")
+    )),
+    false,
+  )
+
+  const restarted = fixture({
+    operationStore: current.operationStore,
+    state: { created: current.state.created },
+    verificationKey: new Uint8Array(verificationKey),
+  })
+  assert.equal((await restarted.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )).status, "verified")
+
+  const readOnlyRestart = fixture({
+    operationStore: current.operationStore,
+    policyOptions: {
+      permissions: DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY,
+    },
+    state: { created: current.state.created },
+    verificationKey: new Uint8Array(verificationKey),
+  })
+  assert.equal((await readOnlyRestart.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )).status, "verified")
+
+  const changedRequest = createRequest({
+    components: [{ content: "Different", kind: "text" }],
+    notifyReplyAuthor: true,
+    notifyUserIds: [],
+    replyToMessageId: REPLY_ID,
+  })
+  const readsBeforeMismatch = restarted.events.filter((event) => event.startsWith("read:")).length
+  const mismatch = await restarted.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    changedRequest,
+  )
+  assert.equal(mismatch.status, "blocked")
+  assert.equal(mismatch.reason, "request-mismatch")
+  assert.equal(mismatch.requestMatched, false)
+  assert.equal(
+    restarted.events.filter((event) => event.startsWith("read:")).length,
+    readsBeforeMismatch,
+  )
+
+  for (const [applicationId, botId] of [
+    [OTHER_APPLICATION_ID, BOT_ID],
+    [APPLICATION_ID, OTHER_BOT_ID],
+  ] as const) {
+    const readsBeforeIdentityMismatch = restarted.events.filter(
+      (event) => event.startsWith("read:"),
+    ).length
+    const identityMismatch = await restarted.service.verify(
+      applicationId,
+      botId,
+      "enabled",
+      request,
+    )
+    assert.equal(identityMismatch.status, "blocked")
+    assert.equal(identityMismatch.reason, "request-mismatch")
+    assert.equal(
+      restarted.events.filter((event) => event.startsWith("read:")).length,
+      readsBeforeIdentityMismatch,
+    )
+  }
+
+  const rotated = fixture({
+    operationStore: current.operationStore,
+    state: { created: current.state.created },
+    verificationKey: new Uint8Array(32).fill(10),
+  })
+  const rotatedResult = await rotated.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(rotatedResult.status, "blocked")
+  assert.equal(rotatedResult.reason, "request-mismatch")
+  assert.equal(rotated.events.some((event) => event.startsWith("read:")), false)
+})
+
+test("component-message verification fails closed before Discord for absent and incomplete receipts", async () => {
+  const verificationKey = new Uint8Array(32).fill(9)
+  const request = createRequest()
+  const absent = fixture({ verificationKey })
+  const absentResult = await absent.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(absentResult.status, "not-found")
+  assert.equal(absentResult.reason, "operation-not-found")
+  assert.equal(absent.events.some((event) => event.startsWith("read:")), false)
+
+  for (const status of ["pending", "failed", "uncertain"] as const) {
+    const current = fixture({ verificationKey })
+    current.operationStore.receipt = verificationReceipt(request, verificationKey, status)
+    const result = await current.service.verify(
+      APPLICATION_ID,
+      BOT_ID,
+      "enabled",
+      request,
+    )
+    assert.equal(result.status, "blocked")
+    assert.equal(result.reason, `operation-${status}`)
+    assert.equal(result.requestMatched, true)
+    assert.equal(current.events.some((event) => event.startsWith("read:")), false)
+  }
+})
+
+test("component-message verification distinguishes exact edit state from live drift", async () => {
+  const verificationKey = new Uint8Array(32).fill(9)
+  const edited = fixture({ verificationKey })
+  const request = editRequest()
+  const plan = await edited.service.plan(APPLICATION_ID, BOT_ID, "enabled", request)
+  await edited.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+    plan.digest,
+  )
+  assert.equal((await edited.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )).status, "verified")
+
+  edited.state.current = componentMessage(EXISTING_ID, wireLayout(CURRENT_LAYOUT))
+  const drifted = await edited.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(drifted.status, "drifted")
+  assert.equal(drifted.reason, "message-state-mismatch")
+
+  const receipt = edited.operationStore.receipt
+  assert.ok(receipt?.kind === "component-message")
+  edited.operationStore.receipt = { ...receipt, resourceId: CREATED_ID }
+  const eventCount = edited.events.length
+  const targetMismatch = await edited.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(targetMismatch.status, "blocked")
+  assert.equal(targetMismatch.reason, "receipt-target-mismatch")
+  assert.equal(edited.events.length, eventCount)
+})
+
+test("component-message verification reports an exact missing receipt-bound message", async () => {
+  const verificationKey = new Uint8Array(32).fill(9)
+  const current = fixture({ verificationKey })
+  const request = createRequest()
+  const plan = await current.service.plan(APPLICATION_ID, BOT_ID, "enabled", request)
+  await current.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+    plan.digest,
+  )
+  current.state.readbackError = new DiscordApiError({
+    code: 10_008,
+    message: "Unknown Message",
+    method: "GET",
+    route: `/channels/${CHANNEL_ID}/messages/${CREATED_ID}`,
+    status: 404,
+  })
+  const result = await current.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(result.status, "drifted")
+  assert.equal(result.reason, "message-missing")
+  assert.equal(result.url, null)
 })
 
 test("component-message edit preserves flags and skips an exact notification-free no-op", async () => {

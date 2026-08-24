@@ -886,6 +886,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "interactions",
     workflow: "component-message",
   },
+  verify_component_message: {
+    keywords: ["component", "drift", "message", "receipt", "recover", "verify", "v2"],
+    toolset: "interactions",
+    workflow: "component-message",
+  },
   read_messages: {
     keywords: ["channel", "history", "list", "message", "read"],
     toolset: "messages",

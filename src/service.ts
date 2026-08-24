@@ -72,8 +72,12 @@ import type {
   ComponentMessageRequest,
   ComponentMessageResult,
   ComponentMessageServiceOptions,
+  ComponentMessageVerificationResult,
 } from "./component-message-service.js"
-import { ComponentMessageService } from "./component-message-service.js"
+import {
+  componentMessageVerificationKey,
+  ComponentMessageService,
+} from "./component-message-service.js"
 import type {
   AutoModerationChangeRequest,
   AutoModerationInventoryResult,
@@ -1267,6 +1271,7 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.componentMessageOptions,
+      verificationKey: componentMessageVerificationKey(options.config.token),
     })
     this.#automodService = new AutoModerationService({
       activityStore: this.#activityStore,
@@ -3405,6 +3410,20 @@ export class ConnectorService {
   ): Promise<ComponentMessagePlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#componentMessageService.plan(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
+  async verifyComponentMessage(
+    request: ComponentMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<ComponentMessageVerificationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#componentMessageService.verify(
       identity.application.id,
       identity.bot.id,
       applicationMessageContentIntent(identity.application),

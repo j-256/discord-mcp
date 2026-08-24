@@ -78,22 +78,34 @@ export const OPERATION_KINDS = [
 export type OperationKind = typeof OPERATION_KINDS[number]
 export type ApplicationOperationKind = "application-emoji-change"
 export type GuildOperationKind = Exclude<OperationKind, ApplicationOperationKind>
+export type StandardGuildOperationKind = Exclude<GuildOperationKind, "component-message">
 export type OperationReceiptStatus = "completed" | "failed" | "pending" | "uncertain"
 export type OperationVerification = "drift" | "match" | null
 
-export interface OperationReceipt {
+interface OperationReceiptFields {
   activityId: string
   error: string | null
   guildId: string
-  kind: GuildOperationKind
   operationKeyHash: string
   planDigest: string
   resourceId: string | null
-  schemaVersion: 1
   status: OperationReceiptStatus
   timestamp: string
   verification: OperationVerification
 }
+
+export interface StandardOperationReceipt extends OperationReceiptFields {
+  kind: StandardGuildOperationKind
+  schemaVersion: 1
+}
+
+export interface ComponentMessageOperationReceipt extends OperationReceiptFields {
+  kind: "component-message"
+  requestDigest: string
+  schemaVersion: 2
+}
+
+export type OperationReceipt = StandardOperationReceipt | ComponentMessageOperationReceipt
 
 export interface ApplicationOperationReceipt {
   activityId: string
@@ -149,6 +161,7 @@ const GUILD_OPERATION_KINDS = OPERATION_KINDS.filter(
 )
 
 const OPERATION_RECEIPT_SCHEMA_VERSION = 1
+const COMPONENT_MESSAGE_RECEIPT_SCHEMA_VERSION = 2
 const RECEIPT_KEYS = [
   "activityId",
   "error",
@@ -161,6 +174,10 @@ const RECEIPT_KEYS = [
   "status",
   "timestamp",
   "verification",
+] as const
+const COMPONENT_MESSAGE_RECEIPT_KEYS = [
+  ...RECEIPT_KEYS,
+  "requestDigest",
 ] as const
 
 const APPLICATION_RECEIPT_KEYS = [
@@ -192,9 +209,17 @@ function parseReceipt(value: unknown): OperationReceipt {
     throw new OperationStoreError("Discord operation receipt is not an object")
   }
   const record = value as Record<string, unknown>
+  const componentMessage = record.kind === "component-message"
+  const expectedKeys = componentMessage
+    ? COMPONENT_MESSAGE_RECEIPT_KEYS
+    : RECEIPT_KEYS
   if (
-    Object.keys(record).sort().join("\0") !== [...RECEIPT_KEYS].sort().join("\0")
-    || record.schemaVersion !== OPERATION_RECEIPT_SCHEMA_VERSION
+    Object.keys(record).sort().join("\0") !== [...expectedKeys].sort().join("\0")
+    || (componentMessage
+      ? record.schemaVersion !== COMPONENT_MESSAGE_RECEIPT_SCHEMA_VERSION
+        || typeof record.requestDigest !== "string"
+        || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.requestDigest)
+      : record.schemaVersion !== OPERATION_RECEIPT_SCHEMA_VERSION)
     || !GUILD_OPERATION_KINDS.includes(record.kind as GuildOperationKind)
     || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
     || typeof record.activityId !== "string"
@@ -256,18 +281,29 @@ function parseReceipt(value: unknown): OperationReceipt {
   ) {
     throw new OperationStoreError("Discord exact-message receipt cannot contain drift verification")
   }
-  return {
+  const common = {
     activityId: record.activityId,
     error: record.error,
     guildId: record.guildId,
-    kind: record.kind as GuildOperationKind,
     operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,
     resourceId: record.resourceId,
-    schemaVersion: OPERATION_RECEIPT_SCHEMA_VERSION,
     status: record.status as OperationReceiptStatus,
     timestamp: record.timestamp,
     verification: record.verification as OperationVerification,
+  }
+  if (componentMessage) {
+    return {
+      ...common,
+      kind: "component-message",
+      requestDigest: record.requestDigest as string,
+      schemaVersion: COMPONENT_MESSAGE_RECEIPT_SCHEMA_VERSION,
+    }
+  }
+  return {
+    ...common,
+    kind: record.kind as StandardGuildOperationKind,
+    schemaVersion: OPERATION_RECEIPT_SCHEMA_VERSION,
   }
 }
 
@@ -364,6 +400,11 @@ function assertIdentity(
     || pending.kind !== terminal.kind
     || pending.operationKeyHash !== terminal.operationKeyHash
     || pending.planDigest !== terminal.planDigest
+    || pending.schemaVersion !== terminal.schemaVersion
+    || (pending.kind === "component-message" && (
+      terminal.kind !== "component-message"
+      || pending.requestDigest !== terminal.requestDigest
+    ))
   ) {
     throw new OperationStoreError("Discord operation terminal receipt changed reserved identity")
   }
@@ -380,8 +421,13 @@ function sameTerminal(left: OperationReceipt, right: OperationReceipt): boolean 
     && left.operationKeyHash === right.operationKeyHash
     && left.planDigest === right.planDigest
     && left.resourceId === right.resourceId
+    && left.schemaVersion === right.schemaVersion
     && left.status === right.status
     && left.verification === right.verification
+    && (left.kind !== "component-message" || (
+      right.kind === "component-message"
+      && left.requestDigest === right.requestDigest
+    ))
 }
 
 function assertApplicationIdentity(

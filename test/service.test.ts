@@ -4543,6 +4543,14 @@ test("service verifies identity before reviewed local-file attachment execution"
 test("service verifies component messages and shares the interaction limiter", async () => {
   const operationStore = new MemoryOperationStore()
   let created: DiscordMessage | undefined
+  const environment = {
+    DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+    DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "1",
+    DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
+  }
   const { calls, service } = serviceFixture({
     client: {
       async createComponentMessage(channelId, input) {
@@ -4590,14 +4598,7 @@ test("service verifies component messages and shares the interaction limiter", a
       planKey: new Uint8Array(32).fill(12),
       randomId: () => "activity-component-create",
     },
-    environment: {
-      DISCORD_MCP_ALLOWED_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
-      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
-      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
-      DISCORD_MCP_INTERACTION_MAX_WRITES_PER_MINUTE: "1",
-      DISCORD_MCP_INTERACTION_MIN_WRITE_INTERVAL_MS: "0",
-    },
+    environment,
     operationStore,
   })
   const request = {
@@ -4627,6 +4628,34 @@ test("service verifies component messages and shares the interaction limiter", a
   const persisted = JSON.stringify(operationStore.receipt)
   assert.equal(persisted.includes(request.operationKey), false)
   assert.equal(persisted.includes("Reviewed component"), false)
+
+  const restarted = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        assert.ok(created)
+        return created
+      },
+    },
+    environment,
+    operationStore,
+  })
+  const verification = await restarted.service.verifyComponentMessage(request)
+  assert.equal(verification.status, "verified")
+  assert.equal(verification.messageId, MESSAGE_ID)
+  assert.equal(restarted.calls.activityAppends, 0)
+  assert.equal(restarted.calls.createComponentMessage, 0)
+  assert.equal(restarted.calls.editComponentMessage, 0)
 })
 
 test("service coordinates component edits only when the exact message changes", async () => {

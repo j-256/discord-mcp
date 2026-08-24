@@ -176,6 +176,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   search_messages: "discord-read",
   search_guild_members: "discord-read",
   send_message: "interaction-write",
+  verify_component_message: "discord-read",
   respond_to_discord_interaction: "interaction-write",
 })
 

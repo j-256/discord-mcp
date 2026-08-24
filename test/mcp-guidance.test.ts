@@ -2570,6 +2570,7 @@ function guidanceService(options: {
     planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
     planComponentMessage: unexpected,
+    verifyComponentMessage: unexpected,
     planForumPost: unexpected,
     planForumTagChange: unexpected,
     planThreadCreation: unexpected,

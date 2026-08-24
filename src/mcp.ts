@@ -6935,6 +6935,7 @@ export interface DiscordToolService {
   searchMessages: ConnectorService["searchMessages"]
   searchGuildMembers: ConnectorService["searchGuildMembers"]
   sendMessage: ConnectorService["sendMessage"]
+  verifyComponentMessage: ConnectorService["verifyComponentMessage"]
 }
 
 export interface DiscordMcpOptions {
@@ -13810,7 +13811,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Message interactions require a separate exact channel allowlist and suppress notifications unless exact user IDs are explicitly authorized.",
       "Reuse one stable idempotency key for every retry of the same send, especially after an uncertain result.",
       "Local file attachment messages use a separate exact channel and canonical directory scope: call plan_attachment_message, review the exact path, bytes, message fields, reply, notifications, permissions, one-shot operation key hash, warnings, and keyed digest, then call execute_attachment_message with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Static Components V2 messages use the interaction channel scope and require confirmed Message Content intent. Call preview_component_layout locally, then plan_component_message, review the exact create or edit target, static text, separators, containers, notifications, permissions, irreversible V2 flag, one-shot operation key hash, warnings, and keyed digest, then call execute_component_message with identical inputs and the digest. Buttons, selects, callbacks, raw Discord component JSON, remote media, and attachments are unsupported. Execution requires signed interactive approval, one non-retried mutation, and exact fresh readback; never retry after reservation or uncertainty.",
+      "Static Components V2 messages use the interaction channel scope and require confirmed Message Content intent. Call preview_component_layout locally, then plan_component_message, review the exact create or edit target, static text, separators, containers, notifications, permissions, irreversible V2 flag, one-shot operation key hash, warnings, and keyed digest, then call execute_component_message with identical inputs and the digest. After a completed operation or process restart, call verify_component_message with the exact caller-retained request to compare its content-free keyed receipt with fresh exact Discord state. Buttons, selects, callbacks, raw Discord component JSON, remote media, and attachments are unsupported. Execution requires signed interactive approval, one non-retried mutation, and exact fresh readback; never retry after reservation or uncertainty.",
       "Message pins use the current paginated Discord pin endpoint for reads and a separate exact channel scope for changes: call plan_message_pin, review the exact application, bot, guild, channel, message state, permissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_message_pin with identical inputs and the digest. Pin and unpin are both treated as destructive reviewed changes; never retry with the same operation key after reservation or an uncertain outcome.",
       "Announcement crossposts use a separate exact direct-channel scope and require confirmed Message Content intent: call plan_announcement_crosspost, review the exact application, bot, guild, announcement channel, default non-poll non-forwarded message, authorship-sensitive permissions, unknown follower fanout, one-shot operation key hash, warnings, and keyed digest, then call execute_announcement_crosspost with identical inputs and the digest. Execution requires signed interactive approval, sends one non-retried request, accepts only the expected CROSSPOSTED flag transition, and verifies an exact fresh readback. Never retry after reservation or an uncertain outcome.",
       "Message forwarding uses separate exact direct-channel source and target scopes and requires confirmed Message Content intent. Call plan_message_forward and review the exact application, bot, source and target guilds and channels, age-restriction boundary, forwardable source snapshot, both complete permission decisions including unknown bits, cross-guild boundary, forced empty mentions, notification suppression, deterministic nonce, one-shot operation key hash, warnings, and keyed digest before execute_message_forward. Age-restricted source content cannot move into a non-age-restricted target. Execution requires signed interactive approval, durable source-message and target-channel coordination, pending content-free records, one non-retried create request, strict immutable-snapshot response validation, and exact target readback. Never retry after reservation or an uncertain outcome.",
@@ -20372,6 +20373,30 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord component-message ${result.action} plan ${result.digest} is ${result.status} for channel ${result.channel.id}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("verify_component_message", server.registerTool(
+    "verify_component_message",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Verify one exact caller-retained static Components V2 create or edit request against its content-free keyed operation receipt and the receipt-bound exact Discord message. Returns only operation status, exact IDs, hashes, timestamps, and fresh match state. It does not write, reserve an operation, append activity, consume the write limiter, persist or return component content, scan message history, or trust a caller-supplied message ID for create recovery.",
+      inputSchema: componentMessagePlanInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Verify Discord component message operation",
+    },
+    safeToolHandler("verify_component_message", async (
+      input: z.infer<typeof componentMessagePlanInputSchema>,
+      context,
+    ) => {
+      const result = await service.verifyComponentMessage(
+        componentMessageRequest(input),
+        { signal: context.mcpReq.signal },
+      )
+      return toolResult(
+        result,
+        `Discord component-message verification is ${result.status} for operation ${result.operationKeyHash}; message=${result.messageId ?? "none"}; reason=${result.reason ?? "none"}`,
       )
     }, secrets, observability),
   ))

@@ -6448,6 +6448,8 @@ function serviceFixture(overrides: {
   channelOrderingPlanDigest?: string
   componentMessageError?: Error
   componentMessagePlanDigest?: string
+  componentMessageVerificationError?: Error
+  componentMessageVerificationStatus?: "blocked" | "drifted" | "not-found" | "verified"
   componentMessageWriteRequired?: boolean
   deletionError?: Error
   forumPostError?: Error
@@ -6619,6 +6621,7 @@ function serviceFixture(overrides: {
     componentMessageExecute: 0,
     componentMessagePlan: 0,
     componentMessagePreview: 0,
+    componentMessageVerify: 0,
     delete: 0,
     edit: 0,
     forumPostExecute: 0,
@@ -9532,6 +9535,39 @@ function serviceFixture(overrides: {
         overrides.componentMessageWriteRequired ?? true,
       )
     },
+    async verifyComponentMessage(request) {
+      if (overrides.componentMessageVerificationError) {
+        throw overrides.componentMessageVerificationError
+      }
+      calls.componentMessageVerify += 1
+      const status = overrides.componentMessageVerificationStatus ?? "verified"
+      const messageId = request.messageId ?? MESSAGE_ID
+      return {
+        action: request.action,
+        activityId: status === "not-found" ? null : "activity-component-message",
+        channelId: request.channelId,
+        guildId: status === "not-found" ? null : GUILD_ID,
+        messageId: status === "not-found" ? null : messageId,
+        operationKeyHash: operationKeyHash(request.operationKey),
+        planDigest: status === "not-found" ? null : DIGEST,
+        readbackMatched: status === "verified",
+        reason: status === "verified"
+          ? null
+          : status === "not-found"
+            ? "operation-not-found" as const
+            : status === "drifted"
+              ? "message-state-mismatch" as const
+              : "operation-uncertain" as const,
+        receiptStatus: status === "not-found" ? null : "completed" as const,
+        requestMatched: !["blocked", "not-found"].includes(status),
+        schemaVersion: 1,
+        status,
+        timestamp: status === "not-found" ? null : "2026-08-22T00:00:00.000Z",
+        url: status === "verified"
+          ? `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${messageId}`
+          : null,
+      }
+    },
     previewComponentLayout(components, notifyUserIds) {
       calls.componentMessagePreview += 1
       return reviewComponentLayout(components, notifyUserIds)
@@ -10165,6 +10201,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_thread_creation",
       "preview_component_layout",
       "plan_component_message",
+      "verify_component_message",
       "execute_component_message",
       "plan_attachment_message",
       "execute_attachment_message",
@@ -10466,6 +10503,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_poll_end",
     "plan_thread_creation",
     "plan_component_message",
+    "verify_component_message",
     "plan_member_role_change",
     "plan_webhook_change",
     "plan_webhook_creation",
@@ -11178,12 +11216,14 @@ test("progressive discovery enables the complete reviewed component-message work
     "execute_component_message",
     "plan_component_message",
     "preview_component_layout",
+    "verify_component_message",
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
       "preview_component_layout",
       "plan_component_message",
+      "verify_component_message",
       "execute_component_message",
       "discover_discord_tools",
     ],
@@ -12079,6 +12119,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     componentMessageExecute: 0,
     componentMessagePlan: 0,
     componentMessagePreview: 0,
+    componentMessageVerify: 0,
     delete: 0,
     edit: 0,
     explain: 1,
@@ -13576,6 +13617,52 @@ test("MCP component-message planning enforces exact create and edit shapes", asy
   assert.equal(mixedCreate.isError, true)
   assert.equal(mixedEdit.isError, true)
   assert.equal(calls.componentMessagePlan, 2)
+})
+
+test("MCP component-message verification is read-only and uses the exact request shape", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+  })
+  const argumentsValue = {
+    action: "create" as const,
+    channelId: CHANNEL_ID,
+    components: COMPONENT_LAYOUT,
+    notifyReplyAuthor: true,
+    notifyUserIds: [USER_ID],
+    operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+    replyToMessageId: MESSAGE_ID,
+  }
+  const verified = await client.callTool({
+    arguments: argumentsValue,
+    name: "verify_component_message",
+  })
+  const extraPlanDigest = await client.callTool({
+    arguments: { ...argumentsValue, planDigest: DIGEST },
+    name: "verify_component_message",
+  })
+
+  assert.equal(structuredContent(verified).status, "verified")
+  assert.equal(structuredContent(verified).messageId, MESSAGE_ID)
+  assert.equal(extraPlanDigest.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.componentMessageVerify, 1)
+  assert.equal(calls.componentMessagePlan, 0)
+  assert.equal(calls.componentMessageExecute, 0)
+
+  const drifted = await connectedFixture(context, {
+    serviceOverrides: { componentMessageVerificationStatus: "drifted" },
+  })
+  const driftResult = await drifted.client.callTool({
+    arguments: argumentsValue,
+    name: "verify_component_message",
+  })
+  assert.equal(structuredContent(driftResult).status, "drifted")
+  assert.equal(structuredContent(driftResult).reason, "message-state-mismatch")
+  assert.equal(driftResult.isError, undefined)
 })
 
 test("MCP component messages bind signed approval to the exact normalized layout", async (context) => {

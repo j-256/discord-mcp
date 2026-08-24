@@ -1,6 +1,8 @@
 import {
   createHash,
+  createHmac,
   randomUUID,
+  timingSafeEqual,
 } from "node:crypto"
 
 import type {
@@ -244,6 +246,34 @@ export interface ComponentMessageResult {
   url: string
 }
 
+export type ComponentMessageVerificationReason =
+  | "message-missing"
+  | "message-state-mismatch"
+  | "operation-failed"
+  | "operation-not-found"
+  | "operation-pending"
+  | "operation-uncertain"
+  | "receipt-target-mismatch"
+  | "request-mismatch"
+
+export interface ComponentMessageVerificationResult {
+  action: ComponentMessageAction
+  activityId: string | null
+  channelId: string
+  guildId: string | null
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string | null
+  readbackMatched: boolean
+  reason: ComponentMessageVerificationReason | null
+  receiptStatus: OperationReceipt["status"] | null
+  requestMatched: boolean
+  schemaVersion: number
+  status: "blocked" | "drifted" | "not-found" | "verified"
+  timestamp: string | null
+  url: string | null
+}
+
 export interface ComponentMessageServiceClient extends Pick<
   DiscordClient,
   | "createComponentMessage"
@@ -265,6 +295,7 @@ export interface ComponentMessageServiceOptions {
   planKey?: Uint8Array
   policy: ScopePolicy
   randomId?: () => string
+  verificationKey?: Uint8Array
 }
 
 interface ExistingComponentMessage {
@@ -293,6 +324,14 @@ interface BuiltComponentMessagePlan {
   plan: ComponentMessagePlan
   state: ComponentMessageState
 }
+
+interface ComponentMessageStateOptions {
+  allowOperationReceipt?: boolean
+  includeCurrent?: boolean
+  permissionMode?: ComponentMessagePermissionMode
+}
+
+type ComponentMessagePermissionMode = "read" | "write"
 
 function evidenceError(message: string, cause?: unknown): ComponentMessageEvidenceError {
   return new ComponentMessageEvidenceError(
@@ -401,6 +440,48 @@ export function componentMessageNonce(
     .update(operationKey)
     .digest("base64url")
     .slice(0, DISCORD_LIMITS.messageNonceCharacters)
+}
+
+export function componentMessageVerificationKey(token: string): Uint8Array {
+  if (typeof token !== "string" || !token.trim()) {
+    throw new RangeError("Discord component-message verification requires a non-empty secret")
+  }
+  return createHmac("sha256", token)
+    .update("discord-mcp-component-message-verification-key.v1\0")
+    .digest()
+}
+
+export function componentMessageRequestDigest(
+  key: Uint8Array,
+  applicationId: string,
+  botId: string,
+  request: NormalizedComponentMessageRequest,
+): string {
+  assertPositiveSnowflake(applicationId, "Discord connector application ID")
+  assertPositiveSnowflake(botId, "Discord connector bot ID")
+  return reviewedPlanDigest(key, {
+    applicationId,
+    botId,
+    domain: "discord-mcp-component-message-request.v1",
+    request: {
+      action: request.action,
+      channelId: request.channelId,
+      components: request.components,
+      messageId: request.messageId,
+      notifyReplyAuthor: request.notifyReplyAuthor,
+      notifyUserIds: request.notifyUserIds,
+      operationKeyHash: request.operationKeyHash,
+      replyToMessageId: request.replyToMessageId,
+    },
+  })
+}
+
+function matchingDigest(left: string, right: string): boolean {
+  if (
+    !REVIEWED_PLAN_DIGEST_PATTERN.test(left)
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(right)
+  ) return false
+  return timingSafeEqual(Buffer.from(left), Buffer.from(right))
 }
 
 function channelSnapshot(channel: DiscordChannel) {
@@ -600,26 +681,35 @@ function exactPrivateThreadMember(
   }
 }
 
-function requiredPermissions(channel: DiscordChannel): DiscordPermissionName[] {
-  return [
+function requiredPermissions(
+  channel: DiscordChannel,
+  mode: ComponentMessagePermissionMode = "write",
+): DiscordPermissionName[] {
+  const readPermissions: DiscordPermissionName[] = [
     "VIEW_CHANNEL",
     "READ_MESSAGE_HISTORY",
-    THREAD_CHANNEL_TYPES.has(channel.type)
-      ? "SEND_MESSAGES_IN_THREADS"
-      : "SEND_MESSAGES",
   ]
+  return mode === "read"
+    ? readPermissions
+    : [
+        ...readPermissions,
+        THREAD_CHANNEL_TYPES.has(channel.type)
+          ? "SEND_MESSAGES_IN_THREADS"
+          : "SEND_MESSAGES",
+      ]
 }
 
 function exactPermissions(
   permission: BotChannelPermissionResult,
   channel: DiscordChannel,
+  mode: ComponentMessagePermissionMode = "write",
 ): BotChannelPermissionResult & { confidence: "complete" } {
   if (permission.confidence !== "complete" || permission.canReadMessages !== true) {
     throw evidenceError(
       `Discord returned incomplete component-message permission evidence: ${permission.warnings.join("; ")}`,
     )
   }
-  const required = requiredPermissions(channel)
+  const required = requiredPermissions(channel, mode)
   const effective = BigInt(permission.effectivePermissions)
   const missing = permission.administrator
     ? []
@@ -1003,6 +1093,7 @@ function operationReceipt(options: {
   error?: string | null
   messageId?: string | null
   plan: ComponentMessagePlan
+  requestDigest: string
   request: NormalizedComponentMessageRequest
   status: OperationReceipt["status"]
   timestamp: string
@@ -1015,8 +1106,9 @@ function operationReceipt(options: {
     kind: "component-message",
     operationKeyHash: options.request.operationKeyHash,
     planDigest: options.plan.digest,
+    requestDigest: options.requestDigest,
     resourceId: options.messageId ?? null,
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: options.status,
     timestamp: options.timestamp,
     verification: options.verification ?? null,
@@ -1075,6 +1167,7 @@ export class ComponentMessageService {
   readonly #planKey: Uint8Array
   readonly #policy: ScopePolicy
   readonly #randomId: () => string
+  readonly #verificationKey: Uint8Array
 
   constructor(options: ComponentMessageServiceOptions) {
     this.#activityStore = options.activityStore
@@ -1085,6 +1178,7 @@ export class ComponentMessageService {
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId || randomUUID
+    this.#verificationKey = options.verificationKey || this.#planKey
   }
 
   async #state(
@@ -1092,6 +1186,7 @@ export class ComponentMessageService {
     intent: ComponentMessageContentIntentStatus,
     request: NormalizedComponentMessageRequest,
     options: RequestOptions,
+    stateOptions: ComponentMessageStateOptions = {},
   ): Promise<ComponentMessageState> {
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     if (intent !== "enabled") {
@@ -1099,12 +1194,14 @@ export class ComponentMessageService {
         "Discord component-message planning requires confirmed Message Content intent",
       )
     }
-    const receipt = await this.#operationStore.get(
-      "component-message",
-      request.operationKeyHash,
-    )
-    if (receipt) {
-      throw new ComponentMessageOperationConflictError(receiptView(receipt))
+    if (!stateOptions.allowOperationReceipt) {
+      const receipt = await this.#operationStore.get(
+        "component-message",
+        request.operationKeyHash,
+      )
+      if (receipt) {
+        throw new ComponentMessageOperationConflictError(receiptView(receipt))
+      }
     }
     const channel = exactChannel(
       await this.#client.getChannel(request.channelId, options),
@@ -1138,7 +1235,7 @@ export class ComponentMessageService {
       request.replyToMessageId === null
         ? Promise.resolve(null)
         : this.#client.getMessage(request.channelId, request.replyToMessageId, options),
-      request.messageId === null
+      request.messageId === null || stateOptions.includeCurrent === false
         ? Promise.resolve(null)
         : this.#client.getMessage(request.channelId, request.messageId, options),
     ])
@@ -1158,7 +1255,11 @@ export class ComponentMessageService {
     } catch (error) {
       throw evidenceError("Discord returned invalid component-message permission evidence", error)
     }
-    const permission = exactPermissions(rawPermission, channel)
+    const permission = exactPermissions(
+      rawPermission,
+      channel,
+      stateOptions.permissionMode,
+    )
     this.#policy.assertNotificationUsers(request.notifyUserIds)
     const reply = rawReply === null
       ? null
@@ -1349,6 +1450,215 @@ export class ComponentMessageService {
     ).then(({ plan }) => plan)
   }
 
+  async verify(
+    applicationId: string,
+    botId: string,
+    intent: ComponentMessageContentIntentStatus,
+    request: ComponentMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<ComponentMessageVerificationResult> {
+    const normalized = normalizeComponentMessageRequest(request)
+    if (intent !== "enabled") {
+      throw evidenceError(
+        "Discord component-message verification requires confirmed Message Content intent",
+      )
+    }
+    const requestDigest = componentMessageRequestDigest(
+      this.#verificationKey,
+      applicationId,
+      botId,
+      normalized,
+    )
+    const base = {
+      action: normalized.action,
+      channelId: normalized.channelId,
+      operationKeyHash: normalized.operationKeyHash,
+      schemaVersion: SCHEMA_VERSION,
+    }
+    const receipt = await this.#operationStore.get(
+      "component-message",
+      normalized.operationKeyHash,
+    )
+    if (!receipt) {
+      return {
+        ...base,
+        activityId: null,
+        guildId: null,
+        messageId: null,
+        planDigest: null,
+        readbackMatched: false,
+        reason: "operation-not-found",
+        receiptStatus: null,
+        requestMatched: false,
+        status: "not-found",
+        timestamp: null,
+        url: null,
+      }
+    }
+    if (receipt.kind !== "component-message") {
+      throw evidenceError("Discord returned a mismatched component-message operation receipt")
+    }
+    if (!matchingDigest(receipt.requestDigest, requestDigest)) {
+      return {
+        ...base,
+        activityId: null,
+        guildId: null,
+        messageId: null,
+        planDigest: null,
+        readbackMatched: false,
+        reason: "request-mismatch",
+        receiptStatus: receipt.status,
+        requestMatched: false,
+        status: "blocked",
+        timestamp: null,
+        url: null,
+      }
+    }
+    if (receipt.status !== "completed") {
+      const reason: ComponentMessageVerificationReason = receipt.status === "pending"
+        ? "operation-pending"
+        : receipt.status === "failed"
+          ? "operation-failed"
+          : "operation-uncertain"
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        guildId: receipt.guildId,
+        messageId: receipt.resourceId,
+        planDigest: receipt.planDigest,
+        readbackMatched: false,
+        reason,
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        status: "blocked",
+        timestamp: receipt.timestamp,
+        url: null,
+      }
+    }
+    const messageId = receipt.resourceId
+    if (
+      !positiveSnowflake(messageId)
+      || normalized.action === "edit" && normalized.messageId !== messageId
+    ) {
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        guildId: receipt.guildId,
+        messageId,
+        planDigest: receipt.planDigest,
+        readbackMatched: false,
+        reason: "receipt-target-mismatch",
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        status: "blocked",
+        timestamp: receipt.timestamp,
+        url: null,
+      }
+    }
+
+    const state = await this.#state(
+      botId,
+      intent,
+      normalized,
+      options,
+      {
+        allowOperationReceipt: true,
+        includeCurrent: false,
+        permissionMode: "read",
+      },
+    )
+    if (receipt.guildId !== state.guildId) {
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        guildId: receipt.guildId,
+        messageId,
+        planDigest: receipt.planDigest,
+        readbackMatched: false,
+        reason: "receipt-target-mismatch",
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        status: "blocked",
+        timestamp: receipt.timestamp,
+        url: null,
+      }
+    }
+
+    try {
+      const rawMessage = await this.#client.getMessage(
+        normalized.channelId,
+        messageId,
+        options,
+      )
+      if (normalized.action === "create") {
+        exactCreatedMessage(
+          rawMessage,
+          botId,
+          normalized,
+          state.guildId,
+          messageId,
+          expectedCreateParsedUserMentionIds(normalized, state.reply),
+          false,
+        )
+      } else {
+        const current = exactExistingMessage(
+          rawMessage,
+          botId,
+          normalized.channelId,
+          state.guildId,
+          messageId,
+        )
+        if (
+          !componentLayoutsEqual(current.layout, normalized.components)
+          || JSON.stringify(current.parsedUserMentionIds)
+            !== JSON.stringify(normalized.notifyUserIds)
+        ) {
+          throw evidenceError(
+            "Discord component-message verification found changed layout or mention state",
+          )
+        }
+      }
+    } catch (error) {
+      if (
+        error instanceof ComponentMessageEvidenceError
+        || error instanceof DiscordApiError && error.status === 404
+      ) {
+        return {
+          ...base,
+          activityId: receipt.activityId,
+          guildId: state.guildId,
+          messageId,
+          planDigest: receipt.planDigest,
+          readbackMatched: false,
+          reason: error instanceof DiscordApiError
+            ? "message-missing"
+            : "message-state-mismatch",
+          receiptStatus: receipt.status,
+          requestMatched: true,
+          status: "drifted",
+          timestamp: receipt.timestamp,
+          url: null,
+        }
+      }
+      throw error
+    }
+
+    return {
+      ...base,
+      activityId: receipt.activityId,
+      guildId: state.guildId,
+      messageId,
+      planDigest: receipt.planDigest,
+      readbackMatched: true,
+      reason: null,
+      receiptStatus: receipt.status,
+      requestMatched: true,
+      status: "verified",
+      timestamp: receipt.timestamp,
+      url: discordMessageUrl(state.guildId, normalized.channelId, messageId),
+    }
+  }
+
   async execute(
     applicationId: string,
     botId: string,
@@ -1358,6 +1668,12 @@ export class ComponentMessageService {
     options: RequestOptions = {},
   ): Promise<ComponentMessageResult> {
     const normalized = normalizeComponentMessageRequest(request)
+    const requestDigest = componentMessageRequestDigest(
+      this.#verificationKey,
+      applicationId,
+      botId,
+      normalized,
+    )
     if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
       throw new RangeError("Discord component-message plan digest is invalid")
     }
@@ -1412,6 +1728,7 @@ export class ComponentMessageService {
     const reservation = await this.#operationStore.reserve(operationReceipt({
       activityId,
       plan,
+      requestDigest,
       request: normalized,
       status: "pending",
       timestamp: this.#clock().toISOString(),
@@ -1434,6 +1751,7 @@ export class ComponentMessageService {
           activityId,
           error: safeErrorCode(error),
           plan,
+          requestDigest,
           request: normalized,
           status: "failed",
           timestamp: this.#clock().toISOString(),
@@ -1547,6 +1865,7 @@ export class ComponentMessageService {
           error: errorCode,
           messageId,
           plan,
+          requestDigest,
           request: normalized,
           status,
           timestamp: this.#clock().toISOString(),
@@ -1615,6 +1934,7 @@ export class ComponentMessageService {
         activityId,
         messageId,
         plan,
+        requestDigest,
         request: normalized,
         status: "completed",
         timestamp: this.#clock().toISOString(),

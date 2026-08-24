@@ -540,6 +540,7 @@ function toolService(): DiscordToolService {
     planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
     planComponentMessage: unexpected,
+    verifyComponentMessage: unexpected,
     planChannelCreation: unexpected,
     planChannelDeletion: unexpected,
     planChannelClone: unexpected,

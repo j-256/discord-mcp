@@ -32,6 +32,7 @@ import {
   type OperationReceipt,
   type OperationReservation,
   type OperationStore,
+  type StandardGuildOperationKind,
 } from "../src/operation-store.js"
 import {
   FileWriteCoordinator,
@@ -110,7 +111,7 @@ function intent(
 function receipt(
   status: OperationReceipt["status"],
   options: {
-    kind?: OperationReceipt["kind"]
+    kind?: StandardGuildOperationKind
     operationKey?: string
     planDigest?: string
   } = {},

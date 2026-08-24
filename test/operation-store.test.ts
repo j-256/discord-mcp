@@ -19,19 +19,22 @@ import {
   FileOperationStore,
   operationKeyHash,
   type ApplicationOperationReceipt,
+  type ComponentMessageOperationReceipt,
   type OperationReceipt,
+  type StandardOperationReceipt,
 } from "../src/operation-store.js"
 
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const PLAN_DIGEST = `hmac-sha256:${"a".repeat(64)}`
+const REQUEST_DIGEST = `hmac-sha256:${"b".repeat(64)}`
 const OPERATION_KEY = "channel-create-operation-0001"
 const INVITE_REF = `iref_hmac_sha256_${"b".repeat(64)}`
 const GUILD_TEMPLATE_REF = `tref_hmac_sha256_${"c".repeat(64)}`
 
 function receipt(
   status: OperationReceipt["status"] = "pending",
-): OperationReceipt {
+): StandardOperationReceipt {
   return {
     activityId: "activity-0001",
     error: ["failed", "uncertain"].includes(status)
@@ -48,6 +51,17 @@ function receipt(
       ? "2026-08-20T00:00:00.000Z"
       : "2026-08-20T00:00:01.000Z",
     verification: status === "completed" ? "match" : null,
+  }
+}
+
+function componentReceipt(
+  status: OperationReceipt["status"] = "pending",
+): ComponentMessageOperationReceipt {
+  return {
+    ...receipt(status),
+    kind: "component-message",
+    requestDigest: REQUEST_DIGEST,
+    schemaVersion: 2,
   }
 }
 
@@ -146,6 +160,60 @@ test("file operation store reserves once and records a private terminal receipt"
   }
 })
 
+test("component-message receipts strictly bind a content-free keyed request digest", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-component-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = componentReceipt()
+
+  assert.deepEqual(await store.reserve(pending), {
+    created: true,
+    receipt: pending,
+  })
+  await assert.rejects(
+    store.finish({
+      ...componentReceipt("completed"),
+      requestDigest: `hmac-sha256:${"c".repeat(64)}`,
+    }),
+    /changed reserved identity/,
+  )
+  await store.finish(componentReceipt("completed"))
+  assert.deepEqual(
+    await store.get("component-message", pending.operationKeyHash),
+    componentReceipt("completed"),
+  )
+
+  const operationDirectory = join(directory, (await readdir(directory))[0] as string)
+  const durableText = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.match(durableText, new RegExp(REQUEST_DIGEST))
+  assert.doesNotMatch(durableText, /private component text|component tree|raw operation key/)
+
+  const malformedStore = new FileOperationStore(join(root, "malformed"))
+  await assert.rejects(
+    malformedStore.reserve({
+      ...componentReceipt(),
+      schemaVersion: 1,
+    } as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+  const { requestDigest: _requestDigest, ...missingDigest } = componentReceipt()
+  await assert.rejects(
+    malformedStore.reserve(missingDigest as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+  await assert.rejects(
+    malformedStore.reserve({
+      ...receipt(),
+      requestDigest: REQUEST_DIGEST,
+    } as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+})
+
 test("file operation store accepts voice status receipts and rejects status text", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-voice-status-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
@@ -157,7 +225,7 @@ test("file operation store accepts voice status receipts and rejects status text
     store.reserve({
       ...pending,
       desiredStatus: "private-voice-status",
-    } as OperationReceipt),
+    } as unknown as OperationReceipt),
     /invalid shape/,
   )
   assert.deepEqual(await store.reserve(pending), {
@@ -267,7 +335,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const channelClone = { ...receipt(), kind: "channel-clone" as const }
   const announcementCrosspost = { ...receipt(), kind: "announcement-crosspost" as const }
   const attachment = { ...receipt(), kind: "attachment-message" as const }
-  const component = { ...receipt(), kind: "component-message" as const }
+  const component = componentReceipt()
   const automod = { ...receipt(), kind: "automod-change" as const }
   const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }
@@ -493,12 +561,11 @@ test("file operation store rejects identity changes and divergent terminal state
     }),
     /exact-message receipt cannot contain drift verification/,
   )
-  const component = { ...receipt(), kind: "component-message" as const }
+  const component = componentReceipt()
   await store.reserve(component)
   await assert.rejects(
     () => store.finish({
-      ...receipt("completed"),
-      kind: "component-message",
+      ...componentReceipt("completed"),
       verification: "drift",
     }),
     /exact-message receipt cannot contain drift verification/,
