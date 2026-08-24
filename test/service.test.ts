@@ -5521,6 +5521,127 @@ test("service dispatches one guild-blueprint frontier through existing durable c
   assert.equal(operationStore.receipt, undefined)
 })
 
+test("service dispatches a guild-blueprint Welcome Screen frontier through its domain coordinator", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_GUILD
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: ["COMMUNITY"],
+          owner_id: "700000000000000009",
+        }
+      },
+      async getGuildChannels() {
+        return [channel({
+          default_auto_archive_duration: 1_440,
+          name: "welcome",
+          nsfw: false,
+          parent_id: null,
+          rate_limit_per_user: 0,
+          topic: null,
+        })]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, permissions, "@everyone"),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+      async getGuildWelcomeScreen() {
+        return {
+          description: null,
+          unknownFieldCount: 0,
+          welcomeChannels: [],
+        }
+      },
+      async listGuildEmojis() {
+        return []
+      },
+    },
+    environment: {
+      DISCORD_MCP_ALLOWED_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_ALLOW_GUILD_SCAFFOLDS: "true",
+      DISCORD_MCP_ALLOW_WELCOME_SCREEN_AUDIT: "true",
+      DISCORD_MCP_ALLOW_WELCOME_SCREEN_CHANGES: "true",
+      DISCORD_MCP_GUILD_SCAFFOLD_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_WELCOME_SCREEN_GUILD_IDS: GUILD_ID,
+    },
+    guildBlueprintOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-blueprint-scaffold",
+    },
+    operationStore,
+    welcomeScreenOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(7),
+      randomId: () => "activity-guild-blueprint-welcome-screen",
+    },
+    writeCoordinator,
+  })
+  const operationKey = "guild-blueprint-welcome-screen-attempt-0001"
+  const request = {
+    auditReason: "Reviewed coordinated Welcome Screen",
+    guildId: GUILD_ID,
+    operationKey,
+    scaffold: {
+      channels: [{ key: "welcome-channel", kind: "text" as const, name: "welcome" }],
+      roles: [{ key: "support-role", name: "Support" }],
+    },
+    welcomeScreen: {
+      channels: [{
+        channel: { key: "welcome-channel", kind: "scaffold" as const },
+        description: "Read the community guide",
+        emoji: { kind: "unicode" as const, unicode: "👋" },
+      }],
+      description: "Welcome to the community",
+      enabled: true,
+    },
+  }
+  const plan = await service.planGuildBlueprint(request)
+
+  assert.equal(plan.frontier?.kind, "welcome-screen")
+  assert.deepEqual(plan.steps.map((step) => [step.kind, step.state]), [
+    ["structure", "satisfied"],
+    ["welcome-screen", "ready"],
+  ])
+  await assert.rejects(
+    () => service.executeGuildBlueprint(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  const nestedOperationKey = guildBlueprintStepOperationKey(
+    operationKey,
+    "welcome-screen",
+  )
+  assert.equal(writeCoordinator.intents.length, 1)
+  assert.equal(writeCoordinator.intents[0]?.kind, "welcome-screen-change")
+  assert.equal(
+    writeCoordinator.intents[0]?.operationKeyHash,
+    operationKeyHash(nestedOperationKey),
+  )
+  assert.deepEqual(writeCoordinator.intents[0]?.targets, [{
+    collection: "welcome-screen",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  }])
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
 test("service pins identity through native poll audit and reviewed creation", async () => {
   const operationStore = new MemoryOperationStore()
   const question = "Which direction should we take?"

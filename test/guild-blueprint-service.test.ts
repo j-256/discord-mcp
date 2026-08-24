@@ -27,6 +27,11 @@ import type {
   GuildSettingsChangeResult,
 } from "../src/guild-settings-service.js"
 import { operationKeyHash } from "../src/operation-store.js"
+import type {
+  WelcomeScreenChangePlan,
+  WelcomeScreenChangeRequest,
+  WelcomeScreenChangeResult,
+} from "../src/welcome-screen-service.js"
 
 const APPLICATION_ID = "100000000000000001"
 const GUILD_ID = "200000000000000001"
@@ -37,6 +42,8 @@ const CATEGORY_ID = "600000000000000001"
 const CHANNEL_ID = "700000000000000001"
 const OPERATION_KEY = "guild-blueprint-operation-0001"
 const AUDIT_REASON = "Private blueprint audit reason"
+const WELCOME_DESCRIPTION = "Private Welcome Screen description"
+const WELCOME_CHANNEL_DESCRIPTION = "Private welcome channel description"
 const NOW = "2026-08-24T12:00:00.000Z"
 const PLAN_KEY = new Uint8Array(32).fill(17)
 
@@ -82,6 +89,21 @@ function request(
       verificationLevel: "medium",
     },
     ...overrides,
+  }
+}
+
+function welcomeScreen(): NonNullable<GuildBlueprintRequest["welcomeScreen"]> {
+  return {
+    channels: [{
+      channel: {
+        key: "private-system-channel",
+        kind: "scaffold",
+      },
+      description: WELCOME_CHANNEL_DESCRIPTION,
+      emoji: { kind: "unicode", unicode: "\u{1F44B}" },
+    }],
+    description: WELCOME_DESCRIPTION,
+    enabled: true,
   }
 }
 
@@ -192,16 +214,33 @@ function settingsPlan(
   } as GuildSettingsChangePlan
 }
 
+function welcomeScreenPlan(
+  value: WelcomeScreenChangeRequest,
+  writeRequired: boolean,
+): WelcomeScreenChangePlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    digest: `hmac-sha256:${(writeRequired ? "b" : "c").repeat(64)}`,
+    guild: { id: GUILD_ID, name: "Private Guild" },
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as WelcomeScreenChangePlan
+}
+
 interface FixtureOptions {
   profileWrite?: boolean
   scaffoldTransform?: (plan: GuildScaffoldPlan) => GuildScaffoldPlan
   scaffoldStatus?: GuildScaffoldPlan["status"]
   settingsWrite?: boolean
+  welcomeScreenWrite?: boolean
 }
 
 function fixture(options: FixtureOptions = {}) {
   const calls: string[] = []
   let resolvedSettings: GuildSettingsChangeRequest | null = null
+  let resolvedWelcomeScreen: WelcomeScreenChangeRequest | null = null
   const domains: GuildBlueprintDomainServices = {
     profile: {
       async plan(_applicationId, _botId, value) {
@@ -223,6 +262,13 @@ function fixture(options: FixtureOptions = {}) {
         return settingsPlan(value, options.settingsWrite ?? false)
       },
     },
+    welcomeScreen: {
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-welcome-screen")
+        resolvedWelcomeScreen = value
+        return welcomeScreenPlan(value, options.welcomeScreenWrite ?? false)
+      },
+    },
   }
   const service = new GuildBlueprintService({
     clock: () => new Date(NOW),
@@ -233,6 +279,9 @@ function fixture(options: FixtureOptions = {}) {
     calls,
     get resolvedSettings() {
       return resolvedSettings
+    },
+    get resolvedWelcomeScreen() {
+      return resolvedWelcomeScreen
     },
     service,
   }
@@ -285,6 +334,18 @@ function executors(calls: string[]): GuildBlueprintExecutors {
         warnings: [],
       } as GuildSettingsChangeResult
     },
+    async executeWelcomeScreen(value, planDigest) {
+      calls.push(`execute-welcome-screen:${planDigest}`)
+      return {
+        activityId: "activity-welcome-screen",
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        verification: "match",
+      } as WelcomeScreenChangeResult
+    },
   }
 }
 
@@ -313,7 +374,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   delete noPostPhase.settings
   assert.throws(
     () => normalizeGuildBlueprintRequest(noPostPhase),
-    /requires a profile or settings phase/u,
+    /requires a profile, settings, or Welcome Screen phase/u,
   )
   const unknownReference = request({
     settings: {
@@ -379,9 +440,66 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   )
 })
 
+test("guild blueprint accepts Welcome Screen as its only post-scaffold phase", () => {
+  const manifest = request({ welcomeScreen: welcomeScreen() })
+  delete manifest.profile
+  delete manifest.settings
+  const normalized = normalizeGuildBlueprintRequest(manifest)
+  assert.equal(normalized.profile, undefined)
+  assert.equal(normalized.settings, undefined)
+  assert.deepEqual(
+    normalized.welcomeScreen?.channels.map((entry) => entry.channel),
+    [{ key: "private-system-channel", kind: "scaffold" }],
+  )
+  assert.notEqual(
+    guildBlueprintStepOperationKey(OPERATION_KEY, "welcome-screen"),
+    guildBlueprintStepOperationKey(OPERATION_KEY, "settings"),
+  )
+  const changedManifest = request({
+    welcomeScreen: {
+      ...welcomeScreen(),
+      description: "Different private Welcome Screen description",
+    },
+  })
+  delete changedManifest.profile
+  delete changedManifest.settings
+  assert.notEqual(
+    guildBlueprintRequestDigest(manifest),
+    guildBlueprintRequestDigest(changedManifest),
+  )
+
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      welcomeScreen: {
+        ...welcomeScreen(),
+        channels: [{
+          channel: { key: "private-category", kind: "scaffold" },
+          description: WELCOME_CHANNEL_DESCRIPTION,
+          emoji: { kind: "none" },
+        }],
+      },
+    })),
+    /Welcome Screen channel scaffold key is not a compatible requested channel/u,
+  )
+  const desired = welcomeScreen()
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      welcomeScreen: {
+        ...desired,
+        channels: [...desired.channels, ...desired.channels],
+      },
+    })),
+    /Welcome Screen channel references must be unique/u,
+  )
+})
+
 test("guild blueprint exposes only the structure frontier before later planning", async () => {
   const state = fixture({ scaffoldStatus: "planned" })
-  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  const plan = await state.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request({ welcomeScreen: welcomeScreen() }),
+  )
   assert.equal(plan.status, "planned")
   assert.equal(plan.frontier?.kind, "structure")
   assert.deepEqual(state.calls, ["plan-structure"])
@@ -391,6 +509,7 @@ test("guild blueprint exposes only the structure frontier before later planning"
       ["structure", "ready"],
       ["profile", "waiting"],
       ["settings", "waiting"],
+      ["welcome-screen", "waiting"],
     ],
   )
   assert.deepEqual(plan.bindings, [])
@@ -398,7 +517,11 @@ test("guild blueprint exposes only the structure frontier before later planning"
 
 test("guild blueprint stops at profile before planning settings", async () => {
   const state = fixture({ profileWrite: true })
-  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  const plan = await state.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request({ welcomeScreen: welcomeScreen() }),
+  )
   assert.equal(plan.frontier?.kind, "profile")
   assert.deepEqual(state.calls, ["plan-structure", "plan-profile"])
   assert.equal(plan.bindings.length, 3)
@@ -408,19 +531,82 @@ test("guild blueprint stops at profile before planning settings", async () => {
       ["structure", "satisfied"],
       ["profile", "ready"],
       ["settings", "waiting"],
+      ["welcome-screen", "waiting"],
     ],
   )
 })
 
 test("guild blueprint resolves settings only from exact scaffold evidence", async () => {
   const state = fixture({ settingsWrite: true })
-  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, request())
+  const plan = await state.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request({ welcomeScreen: welcomeScreen() }),
+  )
   assert.equal(plan.frontier?.kind, "settings")
   assert.deepEqual(state.calls, ["plan-structure", "plan-profile", "plan-settings"])
   assert.equal(state.resolvedSettings?.systemChannelId, CHANNEL_ID)
   assert.equal(
     state.resolvedSettings?.operationKey,
     guildBlueprintStepOperationKey(OPERATION_KEY, "settings"),
+  )
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "satisfied"],
+      ["profile", "satisfied"],
+      ["settings", "ready"],
+      ["welcome-screen", "waiting"],
+    ],
+  )
+  assert.equal(state.resolvedWelcomeScreen, null)
+})
+
+test("guild blueprint resolves and plans Welcome Screen only after earlier phases", async () => {
+  const state = fixture({ welcomeScreenWrite: true })
+  const manifest = request({ welcomeScreen: welcomeScreen() })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(plan.frontier?.kind, "welcome-screen")
+  assert.deepEqual(state.calls, [
+    "plan-structure",
+    "plan-profile",
+    "plan-settings",
+    "plan-welcome-screen",
+  ])
+  assert.equal(state.resolvedWelcomeScreen?.channels[0]?.channelId, CHANNEL_ID)
+  assert.equal(
+    state.resolvedWelcomeScreen?.operationKey,
+    guildBlueprintStepOperationKey(OPERATION_KEY, "welcome-screen"),
+  )
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "satisfied"],
+      ["profile", "satisfied"],
+      ["settings", "satisfied"],
+      ["welcome-screen", "ready"],
+    ],
+  )
+})
+
+test("guild blueprint rejects Welcome Screen references that resolve to one channel", async () => {
+  const state = fixture()
+  const desired = welcomeScreen()
+  await assert.rejects(
+    () => state.service.plan(APPLICATION_ID, BOT_ID, request({
+      welcomeScreen: {
+        ...desired,
+        channels: [
+          ...desired.channels,
+          {
+            channel: { channelId: CHANNEL_ID, kind: "exact" },
+            description: "Another private channel description",
+            emoji: { kind: "none" },
+          },
+        ],
+      },
+    })),
+    /Welcome Screen channel IDs must be unique/u,
   )
 })
 
@@ -464,7 +650,11 @@ test("guild blueprint rejects duplicate or mismatched scaffold evidence", async 
 
 test("guild blueprint verification is live and content-free", async () => {
   const state = fixture()
-  const result = await state.service.verify(APPLICATION_ID, BOT_ID, request())
+  const result = await state.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    request({ welcomeScreen: welcomeScreen() }),
+  )
   assert.equal(result.status, "verified")
   assert.equal(result.resources.length, 3)
   const serialized = JSON.stringify(result)
@@ -477,6 +667,9 @@ test("guild blueprint verification is live and content-free", async () => {
     "private-system-channel",
     "Private channel topic",
     "private-role",
+    WELCOME_DESCRIPTION,
+    WELCOME_CHANNEL_DESCRIPTION,
+    "\u{1F44B}",
   ]) assert.equal(serialized.includes(privateValue), false)
 })
 
@@ -501,6 +694,23 @@ test("guild blueprint execution dispatches exactly one fresh frontier", async ()
   ])
   assert.equal(state.calls.filter((call) => call.startsWith("execute-")).length, 1)
   assert.match(state.calls.at(-1) as string, /^execute-settings:/u)
+})
+
+test("guild blueprint execution dispatches one Welcome Screen frontier", async () => {
+  const state = fixture({ welcomeScreenWrite: true })
+  const manifest = request({ welcomeScreen: welcomeScreen() })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  state.calls.length = 0
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(state.calls),
+  )
+  assert.equal(result.executedPhase, "welcome-screen")
+  assert.equal(state.calls.filter((call) => call.startsWith("execute-")).length, 1)
+  assert.match(state.calls.at(-1) as string, /^execute-welcome-screen:/u)
 })
 
 test("guild blueprint execution rejects a changed aggregate plan", async () => {

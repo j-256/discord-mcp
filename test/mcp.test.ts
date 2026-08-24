@@ -5969,6 +5969,7 @@ function guildBlueprintPlan(
   request: GuildBlueprintRequest,
   digest = DIGEST,
   writeRequired = true,
+  welcomeScreenFrontier = false,
 ): GuildBlueprintPlan {
   const requestDigest = `hmac-sha256:${"b".repeat(64)}`
   const nested = guildScaffoldPlan({
@@ -5981,9 +5982,33 @@ function guildBlueprintPlan(
       ? {}
       : { stepLimit: request.scaffold.stepLimit }),
   })
+  const desiredWelcomeScreen = request.welcomeScreen === undefined
+    ? null
+    : welcomeScreenPlan({
+        auditReason: request.auditReason,
+        channels: request.welcomeScreen.channels.map((entry) => ({
+          channelId: entry.channel.kind === "exact"
+            ? entry.channel.channelId
+            : CHANNEL_ID,
+          description: entry.description,
+          emoji: entry.emoji,
+        })),
+        description: request.welcomeScreen.description,
+        enabled: request.welcomeScreen.enabled,
+        guildId: request.guildId,
+        operationKey: request.operationKey,
+      })
+  const useWelcomeScreenFrontier = writeRequired
+    && welcomeScreenFrontier
+    && desiredWelcomeScreen !== null
+  const postPhase = request.welcomeScreen !== undefined
+    && request.profile === undefined
+    && request.settings === undefined
+    ? "welcome-screen"
+    : "settings"
   return {
     applicationId: APPLICATION_ID,
-    bindings: writeRequired
+    bindings: writeRequired && !useWelcomeScreenFrontier
       ? []
       : [{
           index: 0,
@@ -6000,7 +6025,9 @@ function guildBlueprintPlan(
     createdAt: "2026-08-24T00:00:00.000Z",
     digest,
     frontier: writeRequired
-      ? { kind: "structure", plan: nested, writeRequired: true }
+      ? useWelcomeScreenFrontier
+        ? { kind: "welcome-screen", plan: desiredWelcomeScreen, writeRequired: true }
+        : { kind: "structure", plan: nested, writeRequired: true }
       : null,
     guild: {
       id: request.guildId,
@@ -6018,14 +6045,28 @@ function guildBlueprintPlan(
     schemaVersion: 1,
     status: writeRequired ? "planned" : "already-current",
     steps: writeRequired
-      ? [{
+      ? useWelcomeScreenFrontier
+        ? [{
+            kind: "structure",
+            nestedPlanDigest: nested.digest,
+            operationKeyHash: OPERATION_KEY_HASH,
+            state: "satisfied",
+            writeRequired: false,
+          }, {
+            kind: "welcome-screen",
+            nestedPlanDigest: desiredWelcomeScreen.digest,
+            operationKeyHash: OPERATION_KEY_HASH,
+            state: "ready",
+            writeRequired: true,
+          }]
+        : [{
           kind: "structure",
           nestedPlanDigest: nested.digest,
           operationKeyHash: OPERATION_KEY_HASH,
           state: "ready",
           writeRequired: true,
         }, {
-          kind: "settings",
+          kind: postPhase,
           nestedPlanDigest: null,
           operationKeyHash: OPERATION_KEY_HASH,
           state: "waiting",
@@ -6038,8 +6079,10 @@ function guildBlueprintPlan(
           state: "satisfied",
           writeRequired: false,
         }, {
-          kind: "settings",
-          nestedPlanDigest: DIGEST,
+          kind: postPhase,
+          nestedPlanDigest: postPhase === "welcome-screen"
+            ? desiredWelcomeScreen?.digest ?? DIGEST
+            : DIGEST,
           operationKeyHash: OPERATION_KEY_HASH,
           state: "satisfied",
           writeRequired: false,
@@ -6072,6 +6115,22 @@ function guildBlueprintToolInput(planDigest?: string) {
     },
     settings: {
       verificationLevel: "medium",
+    },
+  }
+}
+
+function guildBlueprintWelcomeScreenToolInput(planDigest?: string) {
+  const { settings: _settings, ...input } = guildBlueprintToolInput(planDigest)
+  return {
+    ...input,
+    welcomeScreen: {
+      channels: [{
+        channel: { channelId: CHANNEL_ID, kind: "exact" as const },
+        description: WELCOME_SCREEN_CHANNEL_DESCRIPTION,
+        emoji: { kind: "unicode" as const, unicode: "👋" },
+      }],
+      description: WELCOME_SCREEN_DESCRIPTION,
+      enabled: true,
     },
   }
 }
@@ -6311,6 +6370,7 @@ function serviceFixture(overrides: {
   forumTagPlanDigest?: string
   guildBlueprintError?: Error
   guildBlueprintPlanDigest?: string
+  guildBlueprintWelcomeScreenFrontier?: boolean
   guildBlueprintWriteRequired?: boolean
   guildScaffoldError?: Error
   guildScaffoldPlanDigest?: string
@@ -8319,10 +8379,15 @@ function serviceFixture(overrides: {
       if (overrides.guildBlueprintError) throw overrides.guildBlueprintError
       calls.guildBlueprintExecute += 1
       const writeRequired = overrides.guildBlueprintWriteRequired ?? true
-      const planned = guildBlueprintPlan(request, planDigest, writeRequired)
+      const planned = guildBlueprintPlan(
+        request,
+        planDigest,
+        writeRequired,
+        overrides.guildBlueprintWelcomeScreenFrontier ?? false,
+      )
       const result: GuildBlueprintResult = {
         digest: planned.digest,
-        executedPhase: writeRequired ? "structure" : null,
+        executedPhase: planned.frontier?.kind ?? null,
         guildId: request.guildId,
         nestedResult: null,
         nextAction: writeRequired ? "replan" : "done",
@@ -9427,6 +9492,7 @@ function serviceFixture(overrides: {
         request,
         overrides.guildBlueprintPlanDigest || DIGEST,
         overrides.guildBlueprintWriteRequired ?? true,
+        overrides.guildBlueprintWelcomeScreenFrontier ?? false,
       )
     },
     async verifyGuildBlueprint(request) {
@@ -9435,6 +9501,7 @@ function serviceFixture(overrides: {
         request,
         overrides.guildBlueprintPlanDigest || DIGEST,
         overrides.guildBlueprintWriteRequired ?? true,
+        overrides.guildBlueprintWelcomeScreenFrontier ?? false,
       )
       const result: GuildBlueprintVerification = {
         applicationId: planned.applicationId,
@@ -21781,6 +21848,10 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     arguments: guildBlueprintToolInput(),
     name: "plan_guild_blueprint",
   })
+  const plannedWelcomeScreen = await client.callTool({
+    arguments: guildBlueprintWelcomeScreenToolInput(),
+    name: "plan_guild_blueprint",
+  })
   const { settings: _settings, ...withoutPostPhase } = guildBlueprintToolInput()
   const missingPostPhase = await client.callTool({
     arguments: withoutPostPhase,
@@ -21809,13 +21880,43 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     },
     name: "plan_guild_blueprint",
   })
+  const incompatibleWelcomeScreenChannel = await client.callTool({
+    arguments: {
+      ...guildBlueprintWelcomeScreenToolInput(),
+      welcomeScreen: {
+        ...guildBlueprintWelcomeScreenToolInput().welcomeScreen,
+        channels: [{
+          channel: { key: "review-category", kind: "scaffold" },
+          description: WELCOME_SCREEN_CHANNEL_DESCRIPTION,
+          emoji: { kind: "none" },
+        }],
+      },
+    },
+    name: "plan_guild_blueprint",
+  })
+  const duplicateWelcomeScreenChannel = await client.callTool({
+    arguments: {
+      ...guildBlueprintWelcomeScreenToolInput(),
+      welcomeScreen: {
+        ...guildBlueprintWelcomeScreenToolInput().welcomeScreen,
+        channels: [
+          ...guildBlueprintWelcomeScreenToolInput().welcomeScreen.channels,
+          ...guildBlueprintWelcomeScreenToolInput().welcomeScreen.channels,
+        ],
+      },
+    },
+    name: "plan_guild_blueprint",
+  })
 
   assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(structuredContent(plannedWelcomeScreen).status, "planned")
   assert.equal(missingPostPhase.isError, true)
   assert.equal(emptySettings.isError, true)
   assert.equal(unknownManifestField.isError, true)
   assert.equal(incompatibleSystemChannel.isError, true)
-  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(incompatibleWelcomeScreenChannel.isError, true)
+  assert.equal(duplicateWelcomeScreenChannel.isError, true)
+  assert.equal(calls.guildBlueprintPlan, 2)
 })
 
 test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
@@ -21888,6 +21989,32 @@ test("MCP guild blueprints bind approval to one reviewed frontier with digest-on
   assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(futureProfileName))
 })
 
+test("MCP guild blueprints review and execute a Welcome Screen frontier", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintWelcomeScreenFrontier: true },
+  })
+  const result = await client.callTool({
+    arguments: guildBlueprintWelcomeScreenToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(result).executedPhase, "welcome-screen")
+  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(calls.guildBlueprintExecute, 1)
+  assert.match(confirmationMessage, /Frontier phase: welcome-screen/u)
+  assert.match(confirmationMessage, /complete Discord Welcome Screen configuration/u)
+  assert.match(confirmationMessage, new RegExp(WELCOME_SCREEN_DESCRIPTION))
+  assert.match(confirmationMessage, new RegExp(WELCOME_SCREEN_CHANNEL_DESCRIPTION))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, /MANAGE_GUILD/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
+})
+
 test("MCP guild blueprints stop on refusal or drift and skip approval for no-op completion", async (context) => {
   const declined = await connectedFixture(context, {
     elicitationHandler: async () => ({ action: "decline" }),
@@ -21953,6 +22080,10 @@ test("MCP guild blueprint signed state rejects every changed manifest binding", 
     { ...request, operationKey: "guild-blueprint-attempt-0002" },
     { ...request, planDigest: DIFFERENT_DIGEST },
     { ...request, settings: { verificationLevel: "high" } },
+    {
+      ...request,
+      welcomeScreen: guildBlueprintWelcomeScreenToolInput().welcomeScreen,
+    },
     {
       ...request,
       scaffold: {

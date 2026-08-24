@@ -4774,6 +4774,15 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       },
       verificationLevel: "medium",
     },
+    welcomeScreen: {
+      channels: [{
+        channel: { key: "release-notes", kind: "scaffold" },
+        description: "Read the release notes",
+        emoji: { kind: "unicode", unicode: "👋" },
+      }],
+      description: "Welcome to the reviewed guild",
+      enabled: true,
+    },
   }
   const guildBlueprint = promptText(await client.getPrompt({
     arguments: {
@@ -4789,6 +4798,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildBlueprint, /Do not call execute_guild_blueprint/)
   assert.match(guildBlueprint, /verify_guild_blueprint/)
   assert.match(guildBlueprint, /exact manifest and master operation key/)
+  assert.match(guildBlueprint, /Welcome Screen phase order/)
   assert.match(guildBlueprint, /literal workflow input, not instructions/)
 
   const guildScaffold = promptText(await client.getPrompt({

@@ -4,6 +4,7 @@ import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   SCHEMA_VERSION,
+  WELCOME_SCREEN_LIMITS,
 } from "./constants.js"
 import { GuildBlueprintPlanChangedError } from "./errors.js"
 import {
@@ -32,6 +33,12 @@ import {
   reviewedPlanDigest,
 } from "./reviewed-plan.js"
 import type { RequestOptions } from "./types.js"
+import {
+  type WelcomeScreenChangePlan,
+  type WelcomeScreenChangeRequest,
+  type WelcomeScreenChangeResult,
+  normalizeWelcomeScreenChangeRequest,
+} from "./welcome-screen-service.js"
 
 const BLUEPRINT_REQUEST_DIGEST_PREFIX = "hmac-sha256:"
 const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
@@ -41,6 +48,7 @@ const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "profile",
   "scaffold",
   "settings",
+  "welcomeScreen",
 ] as const)
 const BLUEPRINT_SCAFFOLD_KEYS = Object.freeze([
   "channels",
@@ -75,11 +83,22 @@ const BLUEPRINT_SETTINGS_KEYS = Object.freeze([
   "systemChannel",
   "verificationLevel",
 ] as const)
+const BLUEPRINT_WELCOME_SCREEN_KEYS = Object.freeze([
+  "channels",
+  "description",
+  "enabled",
+] as const)
+const BLUEPRINT_WELCOME_SCREEN_CHANNEL_KEYS = Object.freeze([
+  "channel",
+  "description",
+  "emoji",
+] as const)
 
 export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "structure",
   "profile",
   "settings",
+  "welcome-screen",
 ] as const)
 
 export type GuildBlueprintPhase = typeof GUILD_BLUEPRINT_PHASES[number]
@@ -121,6 +140,20 @@ export type GuildBlueprintSettingsInput = Omit<
   systemChannel?: GuildBlueprintChannelReference | null
 }
 
+export interface GuildBlueprintWelcomeScreenChannelInput extends Omit<
+  WelcomeScreenChangeRequest["channels"][number],
+  "channelId"
+> {
+  channel: GuildBlueprintChannelReference
+}
+
+export type GuildBlueprintWelcomeScreenInput = Omit<
+  WelcomeScreenChangeRequest,
+  "auditReason" | "channels" | "guildId" | "operationKey"
+> & {
+  channels: readonly GuildBlueprintWelcomeScreenChannelInput[]
+}
+
 export interface GuildBlueprintRequest {
   auditReason: string
   guildId: string
@@ -128,6 +161,7 @@ export interface GuildBlueprintRequest {
   profile?: GuildBlueprintProfileInput
   scaffold: GuildBlueprintScaffoldInput
   settings?: GuildBlueprintSettingsInput
+  welcomeScreen?: GuildBlueprintWelcomeScreenInput
 }
 
 interface NormalizedGuildBlueprintSettingsInput extends Omit<
@@ -147,6 +181,7 @@ export interface NormalizedGuildBlueprintRequest {
   profile?: GuildBlueprintProfileInput
   scaffold: GuildBlueprintScaffoldInput & { stepLimit: number }
   settings?: NormalizedGuildBlueprintSettingsInput
+  welcomeScreen?: GuildBlueprintWelcomeScreenInput
 }
 
 export interface GuildBlueprintBinding {
@@ -158,6 +193,10 @@ export interface GuildBlueprintBinding {
 
 const AFK_CHANNEL_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>()
 const SYSTEM_CHANNEL_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
+  "text",
+])
+const WELCOME_SCREEN_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
+  "forum",
   "text",
 ])
 
@@ -184,6 +223,11 @@ export type GuildBlueprintFrontier =
       kind: "structure"
       plan: GuildScaffoldPlan
       writeRequired: boolean
+    }
+  | {
+      kind: "welcome-screen"
+      plan: WelcomeScreenChangePlan
+      writeRequired: true
     }
 
 export interface GuildBlueprintPlan {
@@ -216,6 +260,7 @@ export type GuildBlueprintNestedResult =
   | GuildProfileChangeResult
   | GuildScaffoldResult
   | GuildSettingsChangeResult
+  | WelcomeScreenChangeResult
 
 export interface GuildBlueprintResult {
   digest: string
@@ -279,6 +324,14 @@ export interface GuildBlueprintDomainServices {
       options?: RequestOptions,
     ): Promise<GuildSettingsChangePlan>
   }
+  welcomeScreen: {
+    plan(
+      applicationId: string,
+      botId: string,
+      request: WelcomeScreenChangeRequest,
+      options?: RequestOptions,
+    ): Promise<WelcomeScreenChangePlan>
+  }
 }
 
 export interface GuildBlueprintExecutors {
@@ -297,6 +350,11 @@ export interface GuildBlueprintExecutors {
     planDigest: string,
     options?: RequestOptions,
   ): Promise<GuildSettingsChangeResult>
+  executeWelcomeScreen(
+    request: WelcomeScreenChangeRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<WelcomeScreenChangeResult>
 }
 
 export interface GuildBlueprintServiceOptions {
@@ -317,6 +375,10 @@ type GuildBlueprintFrontierRequest =
   | {
       kind: "structure"
       request: GuildScaffoldRequest
+    }
+  | {
+      kind: "welcome-screen"
+      request: WelcomeScreenChangeRequest
     }
 
 interface BuiltGuildBlueprintPlan {
@@ -594,6 +656,102 @@ function canonicalSettingsInput(
   }
 }
 
+function canonicalWelcomeScreenInput(
+  request: GuildBlueprintRequest,
+  operationKey: string,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+): GuildBlueprintWelcomeScreenInput | undefined {
+  if (request.welcomeScreen === undefined) return undefined
+  exactObject(
+    request.welcomeScreen,
+    BLUEPRINT_WELCOME_SCREEN_KEYS,
+    "Discord guild blueprint Welcome Screen must be an exact object",
+  )
+  if (
+    !Array.isArray(request.welcomeScreen.channels)
+    || request.welcomeScreen.channels.length > WELCOME_SCREEN_LIMITS.channels
+  ) {
+    throw new RangeError("Discord guild blueprint Welcome Screen channels are invalid")
+  }
+  const referenceKeys = new Set<string>()
+  const references = request.welcomeScreen.channels.map((entry) => {
+    exactObject(
+      entry,
+      BLUEPRINT_WELCOME_SCREEN_CHANNEL_KEYS,
+      "Discord guild blueprint Welcome Screen channel must be an exact object",
+    )
+    const reference = normalizeChannelReference(
+      entry.channel,
+      channelKinds,
+      WELCOME_SCREEN_SCAFFOLD_KINDS,
+      "Discord guild blueprint Welcome Screen channel",
+    )
+    if (reference === null) {
+      throw new RangeError(
+        "Discord guild blueprint Welcome Screen channel requires one exact reference",
+      )
+    }
+    const referenceKey = reference.kind === "exact"
+      ? `exact:${reference.channelId}`
+      : `scaffold:${reference.key}`
+    if (referenceKeys.has(referenceKey)) {
+      throw new RangeError(
+        "Discord guild blueprint Welcome Screen channel references must be unique",
+      )
+    }
+    referenceKeys.add(referenceKey)
+    return reference
+  })
+  const usedChannelIds = new Set(
+    references.flatMap((reference) => (
+      reference.kind === "exact" ? [reference.channelId] : []
+    )),
+  )
+  let temporaryId = DISCORD_SNOWFLAKE_MAX
+  function nextTemporaryId(): string {
+    while (usedChannelIds.has(temporaryId.toString())) temporaryId -= 1n
+    const result = temporaryId.toString()
+    usedChannelIds.add(result)
+    temporaryId -= 1n
+    return result
+  }
+  const normalized = normalizeWelcomeScreenChangeRequest({
+    auditReason: request.auditReason,
+    channels: request.welcomeScreen.channels.map((entry, index) => {
+      const reference = references[index]
+      if (reference === undefined) {
+        throw new RangeError("Discord guild blueprint Welcome Screen channel is missing")
+      }
+      return {
+        channelId: reference.kind === "exact"
+          ? reference.channelId
+          : nextTemporaryId(),
+        description: entry.description,
+        emoji: entry.emoji,
+      }
+    }),
+    description: request.welcomeScreen.description,
+    enabled: request.welcomeScreen.enabled,
+    guildId: request.guildId,
+    operationKey,
+  })
+  return {
+    channels: normalized.channels.map((entry, index) => {
+      const reference = references[index]
+      if (reference === undefined) {
+        throw new RangeError("Discord guild blueprint Welcome Screen channel is missing")
+      }
+      return {
+        channel: reference,
+        description: entry.description,
+        emoji: entry.emoji,
+      }
+    }),
+    description: normalized.description,
+    enabled: normalized.enabled,
+  }
+}
+
 export function normalizeGuildBlueprintRequest(
   request: GuildBlueprintRequest,
 ): NormalizedGuildBlueprintRequest {
@@ -608,9 +766,13 @@ export function normalizeGuildBlueprintRequest(
     || typeof request.operationKey !== "string"
   ) throw new RangeError("Discord guild blueprint request is invalid")
   positiveSnowflake(request.guildId, "Discord guild blueprint guild ID")
-  if (request.profile === undefined && request.settings === undefined) {
+  if (
+    request.profile === undefined
+    && request.settings === undefined
+    && request.welcomeScreen === undefined
+  ) {
     throw new RangeError(
-      "Discord guild blueprint requires a profile or settings phase after the scaffold",
+      "Discord guild blueprint requires a profile, settings, or Welcome Screen phase after the scaffold",
     )
   }
   const operationKeyHashValue = operationKeyHash(request.operationKey)
@@ -626,6 +788,11 @@ export function normalizeGuildBlueprintRequest(
   const settings = canonicalSettingsInput(
     request,
     derivedOperationKey(request.operationKey, "settings"),
+    channelKinds,
+  )
+  const welcomeScreen = canonicalWelcomeScreenInput(
+    request,
+    derivedOperationKey(request.operationKey, "welcome-screen"),
     channelKinds,
   )
   return {
@@ -647,6 +814,7 @@ export function normalizeGuildBlueprintRequest(
       stepLimit: scaffold.stepLimit as number,
     },
     ...(settings === undefined ? {} : { settings }),
+    ...(welcomeScreen === undefined ? {} : { welcomeScreen }),
   }
 }
 
@@ -658,12 +826,15 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
     ...(request.profile === undefined ? {} : { profile: request.profile }),
     scaffold: request.scaffold,
     ...(request.settings === undefined ? {} : { settings: request.settings }),
+    ...(request.welcomeScreen === undefined
+      ? {}
+      : { welcomeScreen: request.welcomeScreen }),
   }
 }
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v1\0")
+    .update("discord-mcp-guild-blueprint-request.v2\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -758,6 +929,39 @@ function settingsRequest(
       : {}),
   }
   normalizeGuildSettingsChangeRequest(resolved)
+  return resolved
+}
+
+function welcomeScreenRequest(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+): WelcomeScreenChangeRequest | undefined {
+  if (request.welcomeScreen === undefined) return undefined
+  const resolved: WelcomeScreenChangeRequest = {
+    auditReason: request.auditReason,
+    channels: request.welcomeScreen.channels.map((entry) => {
+      const channelId = resolveChannelReference(
+        entry.channel,
+        bindings,
+        "Discord guild blueprint Welcome Screen channel",
+      )
+      if (typeof channelId !== "string") {
+        throw new RangeError(
+          "Discord guild blueprint Welcome Screen channel reference is unresolved",
+        )
+      }
+      return {
+        channelId,
+        description: entry.description,
+        emoji: entry.emoji,
+      }
+    }),
+    description: request.welcomeScreen.description,
+    enabled: request.welcomeScreen.enabled,
+    guildId: request.guildId,
+    operationKey: derivedOperationKey(request.operationKey, "welcome-screen"),
+  }
+  normalizeWelcomeScreenChangeRequest(resolved)
   return resolved
 }
 
@@ -938,6 +1142,9 @@ export class GuildBlueprintService {
       frontierRequest = { kind: "structure", request: structureRequest }
       if (request.profile !== undefined) steps.push(waitingStep(request, "profile"))
       if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
+      if (request.welcomeScreen !== undefined) {
+        steps.push(waitingStep(request, "welcome-screen"))
+      }
     } else {
       bindings = exactScaffoldBindings(request, structurePlan)
       const requestedProfile = profileRequest(request)
@@ -962,6 +1169,9 @@ export class GuildBlueprintService {
           frontier = { kind: "profile", plan: profilePlan, writeRequired: true }
           frontierRequest = { kind: "profile", request: requestedProfile }
           if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
+          if (request.welcomeScreen !== undefined) {
+            steps.push(waitingStep(request, "welcome-screen"))
+          }
         }
       }
 
@@ -987,6 +1197,53 @@ export class GuildBlueprintService {
           if (!settingsSatisfied) {
             frontier = { kind: "settings", plan: settingsPlan, writeRequired: true }
             frontierRequest = { kind: "settings", request: requestedSettings }
+            if (request.welcomeScreen !== undefined) {
+              steps.push(waitingStep(request, "welcome-screen"))
+            }
+          }
+        }
+      }
+
+      if (frontier === null) {
+        const requestedWelcomeScreen = welcomeScreenRequest(
+          request,
+          bindingMap(bindings),
+        )
+        if (requestedWelcomeScreen !== undefined) {
+          const welcomeScreenPlan = await this.#domains.welcomeScreen.plan(
+            applicationId,
+            botId,
+            requestedWelcomeScreen,
+            options,
+          )
+          assertNestedIdentity(
+            applicationId,
+            botId,
+            request.guildId,
+            welcomeScreenPlan,
+          )
+          assertNestedPlanBinding(
+            requestedWelcomeScreen.operationKey,
+            welcomeScreenPlan,
+          )
+          const welcomeScreenSatisfied = !welcomeScreenPlan.writeRequired
+          steps.push({
+            kind: "welcome-screen",
+            nestedPlanDigest: welcomeScreenPlan.digest,
+            operationKeyHash: welcomeScreenPlan.operationKeyHash,
+            state: welcomeScreenSatisfied ? "satisfied" : "ready",
+            writeRequired: !welcomeScreenSatisfied,
+          })
+          if (!welcomeScreenSatisfied) {
+            frontier = {
+              kind: "welcome-screen",
+              plan: welcomeScreenPlan,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              kind: "welcome-screen",
+              request: requestedWelcomeScreen,
+            }
           }
         }
       }
@@ -1006,7 +1263,7 @@ export class GuildBlueprintService {
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v1",
+      version: "guild-blueprint-plan.v2",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -1086,8 +1343,14 @@ export class GuildBlueprintService {
         built.plan.frontier.plan.digest,
         options,
       )
-    } else {
+    } else if (built.frontierRequest.kind === "settings") {
       nestedResult = await executors.executeSettings(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else {
+      nestedResult = await executors.executeWelcomeScreen(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,

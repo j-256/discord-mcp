@@ -1522,6 +1522,7 @@ export class ConnectorService {
         profile: this.#guildProfileService,
         scaffold: this.#guildScaffoldService,
         settings: this.#guildSettingsService,
+        welcomeScreen: this.#welcomeScreenService,
       },
       ...options.guildBlueprintOptions,
     })
@@ -4008,6 +4009,13 @@ export class ConnectorService {
         ),
         executeSettings: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeGuildSettingsChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeWelcomeScreen: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeWelcomeScreenChange(
             nestedRequest,
             nestedDigest,
             nestedOptions,
