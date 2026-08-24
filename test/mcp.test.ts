@@ -3196,6 +3196,7 @@ function inviteCreationPlan(
   request: InviteCreationRequest,
   digest = DIGEST,
 ): InviteCreationPlan {
+  const exactUsers = request.acceptance.kind === "exact-users"
   return {
     access: {
       appliedRoleIds: [GUILD_ID],
@@ -3203,9 +3204,18 @@ function inviteCreationPlan(
       botIsGuildOwner: false,
       complete: true,
       createInstantInvite: true,
-      effectivePermissionNames: ["CREATE_INSTANT_INVITE", "VIEW_CHANNEL"],
-      effectivePermissions: "1025",
-      requiredPermissions: ["CREATE_INSTANT_INVITE", "VIEW_CHANNEL"],
+      effectivePermissionNames: [
+        "CREATE_INSTANT_INVITE",
+        ...(exactUsers ? ["MANAGE_GUILD" as const] : []),
+        "VIEW_CHANNEL",
+      ],
+      effectivePermissions: exactUsers ? "1057" : "1025",
+      manageGuild: exactUsers,
+      requiredPermissions: [
+        "CREATE_INSTANT_INVITE",
+        ...(exactUsers ? ["MANAGE_GUILD" as const] : []),
+        "VIEW_CHANNEL",
+      ],
       unknownPermissionBits: "0",
       viewChannel: true,
     },
@@ -3215,7 +3225,7 @@ function inviteCreationPlan(
     botId: BOT_ID,
     createdAt: "2026-08-24T00:00:00.000Z",
     delivery: {
-      format: "discord-invite-capability.v1",
+      format: "discord-invite-capability.v2",
       outputFile: request.outputFile,
       review: {
         canonicalPath: request.outputFile,
@@ -3231,6 +3241,7 @@ function inviteCreationPlan(
     digest,
     guild: { id: request.guildId, name: "Private guild name" },
     intent: {
+      acceptance: request.acceptance,
       maxAgeSeconds: request.maxAgeSeconds,
       maxUses: request.maxUses,
       temporaryMembership: request.temporaryMembership,
@@ -8021,6 +8032,12 @@ function serviceFixture(overrides: {
       if (overrides.inviteCreationError) throw overrides.inviteCreationError
       calls.inviteCreationExecute += 1
       return overrides.inviteCreationResult ?? {
+        acceptance: {
+          kind: request.acceptance.kind,
+          targetUserCount: request.acceptance.kind === "exact-users"
+            ? request.acceptance.userIds.length
+            : 0,
+        },
         activityId: "activity-invite-creation",
         capabilityFileWritten: true as const,
         channelId: request.channelId,
@@ -16955,6 +16972,7 @@ test("MCP integration deletion stops on refusal, plan drift, uncertainty, and re
 test("MCP invite creation plans require finite acknowledged private delivery", async (context) => {
   const { calls, client } = await connectedFixture(context)
   const request = {
+    acceptance: { kind: "bearer" },
     acknowledgeBearerCapability: true,
     auditReason: AUDIT_REASON,
     channelId: CHANNEL_ID,
@@ -16967,6 +16985,34 @@ test("MCP invite creation plans require finite acknowledged private delivery", a
   }
   const planned = await client.callTool({
     arguments: request,
+    name: "plan_invite_creation",
+  })
+  const exactUsers = await client.callTool({
+    arguments: {
+      ...request,
+      acceptance: { kind: "exact-users", userIds: [USER_ID, "400000000000000002"] },
+    },
+    name: "plan_invite_creation",
+  })
+  const emptyExactUsers = await client.callTool({
+    arguments: {
+      ...request,
+      acceptance: { kind: "exact-users", userIds: [] },
+    },
+    name: "plan_invite_creation",
+  })
+  const duplicateExactUsers = await client.callTool({
+    arguments: {
+      ...request,
+      acceptance: { kind: "exact-users", userIds: [USER_ID, USER_ID] },
+    },
+    name: "plan_invite_creation",
+  })
+  const noncanonicalExactUsers = await client.callTool({
+    arguments: {
+      ...request,
+      acceptance: { kind: "exact-users", userIds: ["0400000000000000001"] },
+    },
     name: "plan_invite_creation",
   })
   const unacknowledged = await client.callTool({
@@ -17000,6 +17046,10 @@ test("MCP invite creation plans require finite acknowledged private delivery", a
   const content = structuredContent(planned)
   assert.equal(content.status, "planned")
   assert.equal((content.intent as Record<string, unknown>).unique, true)
+  assert.deepEqual(
+    (structuredContent(exactUsers).intent as Record<string, unknown>).acceptance,
+    { kind: "exact-users", userIds: [USER_ID, "400000000000000002"] },
+  )
   assert.equal(
     ((content.delivery as Record<string, unknown>).review as Record<string, unknown>).fileMode,
     "0600",
@@ -17010,7 +17060,10 @@ test("MCP invite creation plans require finite acknowledged private delivery", a
   assert.equal(noncanonical.isError, true)
   assert.equal(controlCharacter.isError, true)
   assert.equal(capabilityInput.isError, true)
-  assert.equal(calls.inviteCreationPlan, 1)
+  assert.equal(emptyExactUsers.isError, true)
+  assert.equal(duplicateExactUsers.isError, true)
+  assert.equal(noncanonicalExactUsers.isError, true)
+  assert.equal(calls.inviteCreationPlan, 2)
   assert.doesNotMatch(JSON.stringify(planned), new RegExp(PRIVATE_INVITE_CODE))
 })
 
@@ -17026,6 +17079,10 @@ test("MCP invite creation binds signed approval to exact private capability deli
   })
   const result = await client.callTool({
     arguments: {
+      acceptance: {
+        kind: "exact-users",
+        userIds: [USER_ID, "400000000000000002"],
+      },
       acknowledgeBearerCapability: true,
       auditReason: AUDIT_REASON,
       channelId: CHANNEL_ID,
@@ -17056,8 +17113,17 @@ test("MCP invite creation binds signed approval to exact private capability deli
   }
   assert.match(confirmationMessage, /Maximum age seconds: 3600/)
   assert.match(confirmationMessage, /Maximum uses: 1/)
+  assert.match(confirmationMessage, /Acceptance kind: exact-users/)
+  assert.match(confirmationMessage, /Exact target user count: 2/)
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, /400000000000000002/)
   assert.match(confirmationMessage, /Bot VIEW_CHANNEL: true/)
   assert.match(confirmationMessage, /Bot CREATE_INSTANT_INVITE: true/)
+  assert.match(confirmationMessage, /Bot MANAGE_GUILD: true/)
+  assert.match(
+    confirmationMessage,
+    /Required permissions: CREATE_INSTANT_INVITE, MANAGE_GUILD, VIEW_CHANNEL/,
+  )
   assert.match(confirmationMessage, /Private file mode: 0600/)
   assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
   assert.doesNotMatch(confirmationMessage, new RegExp(INVITE_CREATION_OPERATION_KEY))
@@ -17069,6 +17135,7 @@ test("MCP invite creation binds signed approval to exact private capability deli
 test("MCP invite creation signed state rejects every changed intent field", async (context) => {
   const fixture = await connectedModernStdioFixture(context)
   const request = {
+    acceptance: { kind: "bearer" } as const,
     acknowledgeBearerCapability: true as const,
     auditReason: AUDIT_REASON,
     channelId: CHANNEL_ID,
@@ -17093,6 +17160,13 @@ test("MCP invite creation signed state rejects every changed intent field", asyn
   assert.equal(initial.resultType, "input_required")
   assert.equal(typeof initial.requestState, "string")
   for (const changed of [
+    {
+      ...request,
+      acceptance: {
+        kind: "exact-users" as const,
+        userIds: [USER_ID],
+      },
+    },
     { ...request, auditReason: "Different reviewed reason" },
     { ...request, channelId: PARENT_ID },
     { ...request, guildId: OTHER_GUILD_ID },
@@ -17130,6 +17204,7 @@ test("MCP invite creation stops on drift and exposes uncertain or one-shot confl
     content: { approve: true },
   })
   const argumentsValue = {
+    acceptance: { kind: "bearer" },
     acknowledgeBearerCapability: true,
     auditReason: AUDIT_REASON,
     channelId: CHANNEL_ID,
@@ -17206,6 +17281,7 @@ test("MCP invite creation stops on drift and exposes uncertain or one-shot confl
     elicitationHandler: approve,
     serviceOverrides: {
       inviteCreationResult: {
+        acceptance: { kind: "bearer", targetUserCount: 0 },
         activityId: "activity-invite-creation",
         capabilityFileWritten: true,
         channelId: CHANNEL_ID,

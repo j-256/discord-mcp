@@ -421,7 +421,18 @@ export type DiscordDeletedInviteSummary = DiscordInviteIdentitySummary
 export interface CreateChannelInviteInput {
   maxAgeSeconds: number
   maxUses: number
+  targetUserIds: readonly string[] | null
   temporaryMembership: boolean
+}
+
+export interface DiscordInviteTargetUsersJobStatus {
+  completedAt: string | null
+  createdAt: string
+  errorPresent: boolean
+  processedUsers: number
+  status: 0 | 1 | 2 | 3
+  totalUsers: number
+  unknownFieldCount: number
 }
 
 export interface DiscordGuildTemplateSummary {
@@ -1305,13 +1316,16 @@ export type ModifyGuildMemberVoiceInput =
   | { mute: boolean }
 
 interface RequestParameters extends RequestOptions {
+  accept?: string
   authentication?: "bot" | "none"
   auditReason?: string
   automaticRateLimitRetry?: boolean
   body?: unknown
   diagnosticRoute?: string
   expectedSuccessStatus?: number
+  maxResponseBytes?: number
   multipartBody?: FormData
+  responseFormat?: "json" | "text"
   suppressFailureCause?: boolean
 }
 
@@ -1439,6 +1453,8 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_onboarding",
   "get_guild_welcome_screen",
   "get_invite",
+  "get_invite_target_users",
+  "get_invite_target_users_job_status",
   "list_guild_invites",
   "list_guild_integrations",
   "list_application_emojis",
@@ -1737,11 +1753,102 @@ function projectInviteIdentity(value: unknown): DiscordInviteIdentitySummary {
   }
 }
 
+const INVITE_TARGET_USERS_JOB_KEYS: ReadonlySet<string> = new Set([
+  "completed_at",
+  "created_at",
+  "error_message",
+  "processed_users",
+  "status",
+  "total_users",
+])
+
+function projectInviteTargetUsersJobStatus(
+  value: unknown,
+): DiscordInviteTargetUsersJobStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw inviteEvidenceError()
+  }
+  const record = value as Record<string, unknown>
+  const status = inviteInteger(record.status, 3)
+  const totalUsers = inviteInteger(record.total_users, INVITE_LIMITS.targetUserIds)
+  const processedUsers = inviteInteger(
+    record.processed_users,
+    INVITE_LIMITS.targetUserIds,
+  )
+  const errorMessage = record.error_message
+  if (
+    processedUsers > totalUsers
+    || !(errorMessage === null || (
+      typeof errorMessage === "string"
+      && errorMessage.length <= INVITE_LIMITS.capabilityFileBytes
+    ))
+  ) {
+    throw inviteEvidenceError()
+  }
+  return {
+    completedAt: inviteTimestamp(record.completed_at, true),
+    createdAt: inviteTimestamp(record.created_at, false) as string,
+    errorPresent: errorMessage !== null,
+    processedUsers,
+    status: status as DiscordInviteTargetUsersJobStatus["status"],
+    totalUsers,
+    unknownFieldCount: countUnknownFields(
+      record,
+      [...INVITE_TARGET_USERS_JOB_KEYS],
+    ),
+  }
+}
+
+function projectInviteTargetUserIds(value: string): string[] {
+  const lines = value.split(/\r?\n/u)
+  if (lines.at(-1) === "") lines.pop()
+  if (
+    lines[0] !== "user_id"
+    || lines.length < 2
+    || lines.length > INVITE_LIMITS.targetUserIds + 1
+  ) {
+    throw inviteEvidenceError()
+  }
+  const ids = lines.slice(1)
+  try {
+    for (const id of ids) {
+      assertPositiveSnowflake(id, "Discord invite target user ID")
+      if (BigInt(id).toString() !== id) throw inviteEvidenceError()
+    }
+  } catch {
+    throw inviteEvidenceError()
+  }
+  if (new Set(ids).size !== ids.length) throw inviteEvidenceError()
+  return ids.sort(compareDiscordSnowflakes)
+}
+
 const CREATE_CHANNEL_INVITE_INPUT_KEYS: ReadonlySet<string> = new Set([
   "maxAgeSeconds",
   "maxUses",
+  "targetUserIds",
   "temporaryMembership",
 ])
+
+function canonicalInviteTargetUserIds(value: unknown): boolean {
+  if (value === null) return true
+  if (
+    !Array.isArray(value)
+    || value.length < 1
+    || value.length > INVITE_LIMITS.targetUserIds
+  ) return false
+  try {
+    for (const id of value) {
+      assertPositiveSnowflake(id, "Discord invite target user ID")
+      if (BigInt(id).toString() !== id) return false
+    }
+  } catch {
+    return false
+  }
+  if (new Set(value).size !== value.length) return false
+  return value.every((id, index) => (
+    index === 0 || compareDiscordSnowflakes(value[index - 1] as string, id) < 0
+  ))
+}
 
 function assertCreateChannelInviteInput(input: CreateChannelInviteInput): void {
   if (
@@ -1758,10 +1865,11 @@ function assertCreateChannelInviteInput(input: CreateChannelInviteInput): void {
     || !Number.isInteger(input.maxUses)
     || input.maxUses < 1
     || input.maxUses > INVITE_LIMITS.maxUses
+    || !canonicalInviteTargetUserIds(input.targetUserIds)
     || typeof input.temporaryMembership !== "boolean"
   ) {
     throw new RangeError(
-      "Discord invite creation requires finite age, finite uses, and explicit temporary membership",
+      "Discord invite creation requires finite age, finite uses, canonical acceptance, and explicit temporary membership",
     )
   }
 }
@@ -1781,6 +1889,10 @@ function encodedInviteCode(code: string, description: string): string {
   } catch {
     throw new RangeError(`${description} code is invalid`)
   }
+}
+
+function inviteTargetUsersCsv(ids: readonly string[]): string {
+  return `user_id\n${ids.join("\n")}\n`
 }
 
 function projectInvite(value: unknown): DiscordInviteSummary {
@@ -7972,7 +8084,7 @@ export class DiscordClient {
     const diagnosticRoute = parameters.diagnosticRoute ?? route.replace(/\?.*$/u, "")
     const contentSensitive = CONTENT_SENSITIVE_REST_OPERATIONS.has(operation)
     const headers = new Headers({
-      Accept: "application/json",
+      Accept: parameters.accept ?? "application/json",
       "User-Agent": DISCORD_USER_AGENT,
     })
     if (parameters.authentication !== "none") {
@@ -8039,6 +8151,16 @@ export class DiscordClient {
         } catch (error) {
           throw transportFailure(error)
         }
+        if (
+          parameters.maxResponseBytes !== undefined
+          && new TextEncoder().encode(responseText).byteLength
+            > parameters.maxResponseBytes
+        ) {
+          throw new DiscordTransportError(
+            `Discord API ${method} ${diagnosticRoute} exceeded its local response bound`,
+            "discord-client-error",
+          )
+        }
         const parsedBody = parseJson(responseText)
         const discordError = errorBody(parsedBody)
         const retryAfterMs = response.status === 429
@@ -8086,7 +8208,9 @@ export class DiscordClient {
           )
         }
 
-        return parsedBody as T
+        return (parameters.responseFormat === "text"
+          ? responseText
+          : parsedBody) as T
       }
       throw new DiscordTransportError(
         `Discord API ${method} ${diagnosticRoute} exhausted retries`,
@@ -10249,6 +10373,22 @@ export class DiscordClient {
     assertPositiveSnowflake(channelId, "Discord invite-creation channel ID")
     assertCreateChannelInviteInput(input)
     encodeDiscordAuditReason(auditReason)
+    const payload = {
+      max_age: input.maxAgeSeconds,
+      max_uses: input.maxUses,
+      temporary: input.temporaryMembership,
+      unique: true,
+    }
+    let multipartBody: FormData | undefined
+    if (input.targetUserIds !== null) {
+      multipartBody = new FormData()
+      multipartBody.append("payload_json", JSON.stringify(payload))
+      multipartBody.append(
+        "target_users_file",
+        new Blob([inviteTargetUsersCsv(input.targetUserIds)], { type: "text/csv" }),
+        "target-users.csv",
+      )
+    }
     const response = await this.#request<unknown>(
       "create_channel_invite",
       `/channels/${channelId}/invites`,
@@ -10256,12 +10396,9 @@ export class DiscordClient {
         ...options,
         auditReason,
         automaticRateLimitRetry: false,
-        body: {
-          max_age: input.maxAgeSeconds,
-          max_uses: input.maxUses,
-          temporary: input.temporaryMembership,
-          unique: true,
-        },
+        ...(multipartBody === undefined
+          ? { body: payload }
+          : { multipartBody }),
         diagnosticRoute: "/channels/{channel.id}/invites",
         suppressFailureCause: true,
       },
@@ -10285,6 +10422,47 @@ export class DiscordClient {
       },
     )
     return projectInviteIdentity(response)
+  }
+
+  async getInviteTargetUsersJobStatus(
+    code: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordInviteTargetUsersJobStatus> {
+    const encodedCode = encodedInviteCode(
+      code,
+      "Discord invite target-user job lookup",
+    )
+    const response = await this.#request<unknown>(
+      "get_invite_target_users_job_status",
+      `/invites/${encodedCode}/target-users/job-status`,
+      {
+        ...options,
+        diagnosticRoute: "/invites/{invite.code}/target-users/job-status",
+        maxResponseBytes: INVITE_LIMITS.targetUsersCsvBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectInviteTargetUsersJobStatus(response)
+  }
+
+  async getInviteTargetUserIds(
+    code: string,
+    options: RequestOptions = {},
+  ): Promise<string[]> {
+    const encodedCode = encodedInviteCode(code, "Discord invite target-user lookup")
+    const response = await this.#request<string>(
+      "get_invite_target_users",
+      `/invites/${encodedCode}/target-users`,
+      {
+        ...options,
+        accept: "text/csv",
+        diagnosticRoute: "/invites/{invite.code}/target-users",
+        maxResponseBytes: INVITE_LIMITS.targetUsersCsvBytes,
+        responseFormat: "text",
+        suppressFailureCause: true,
+      },
+    )
+    return projectInviteTargetUserIds(response)
   }
 
   async listGuildTemplates(

@@ -724,6 +724,8 @@ export interface DiscordServiceClient {
   getGuildWelcomeScreen: DiscordClient["getGuildWelcomeScreen"]
   getGuildWidgetSettings: DiscordClient["getGuildWidgetSettings"]
   getInvite: DiscordClient["getInvite"]
+  getInviteTargetUserIds: DiscordClient["getInviteTargetUserIds"]
+  getInviteTargetUsersJobStatus: DiscordClient["getInviteTargetUsersJobStatus"]
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoleMemberCounts: DiscordClient["getGuildRoleMemberCounts"]

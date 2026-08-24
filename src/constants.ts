@@ -346,6 +346,10 @@ export const INVITE_LIMITS = Object.freeze({
   maxUses: 100,
   minAgeSeconds: 60,
   roleIds: 250,
+  targetUserIds: 100,
+  targetUsersCsvBytes: 4_096,
+  targetUsersPollAttempts: 40,
+  targetUsersPollIntervalMs: 250,
 })
 
 export const INVITE_REFERENCE_PATTERN = /^iref_hmac_sha256_[a-f0-9]{64}$/

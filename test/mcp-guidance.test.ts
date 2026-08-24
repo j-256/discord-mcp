@@ -1017,6 +1017,7 @@ function guidanceService(options: {
             "roleVisuals",
             "stageInstance",
             "targetApplicationMetadata",
+            "targetUserAcceptance",
             "targetUserProfile",
             "url",
           ],
@@ -4331,6 +4332,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
 
   const inviteCreation = promptText(await client.getPrompt({
     arguments: {
+      acceptanceKind: "exact-users",
       acknowledgeBearerCapability: "true",
       auditReason: "Reviewed invite creation",
       channelId: CHANNEL_ID,
@@ -4339,11 +4341,16 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       maxUses: "1",
       operationKey: OPERATION_KEY,
       outputFile: "/private/invite.json",
+      targetUserIds: `${USER_ID},500000000000000002`,
       temporaryMembership: "false",
     },
     name: MCP_PROMPT_NAMES.reviewInviteCreation,
   }))
   assert.deepEqual(JSON.parse(inviteCreation.split("\n")[1] || ""), {
+    acceptance: {
+      kind: "exact-users",
+      userIds: [USER_ID, "500000000000000002"],
+    },
     acknowledgeBearerCapability: true,
     auditReason: "Reviewed invite creation",
     channelId: CHANNEL_ID,
@@ -4358,6 +4365,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(inviteCreation, /Do not call execute_invite_creation/)
   assert.match(inviteCreation, /VIEW_CHANNEL and CREATE_INSTANT_INVITE/)
   assert.match(inviteCreation, /private file/)
+  assert.match(inviteCreation, /target-user CSV/)
   assert.doesNotMatch(inviteCreation, new RegExp(PRIVATE_INVITE_CODE))
 
   const inviteDeletion = promptText(await client.getPrompt({
@@ -5325,6 +5333,7 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const invalidRequests = [
     {
       arguments: {
+        acceptanceKind: "bearer",
         acknowledgeBearerCapability: "true",
         auditReason: "Reviewed invite creation",
         channelId: CHANNEL_ID,
@@ -5333,6 +5342,23 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         maxUses: "1",
         operationKey: OPERATION_KEY,
         outputFile: "/private/nested/../invite.json",
+        targetUserIds: "",
+        temporaryMembership: "false",
+      },
+      name: MCP_PROMPT_NAMES.reviewInviteCreation,
+    },
+    {
+      arguments: {
+        acceptanceKind: "exact-users",
+        acknowledgeBearerCapability: "true",
+        auditReason: "Reviewed invite creation",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        maxAgeSeconds: "3600",
+        maxUses: "1",
+        operationKey: OPERATION_KEY,
+        outputFile: "/private/invite.json",
+        targetUserIds: "0400000000000000001",
         temporaryMembership: "false",
       },
       name: MCP_PROMPT_NAMES.reviewInviteCreation,

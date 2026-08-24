@@ -155,7 +155,12 @@ test("Discord client creates one unique finite invite without automatic retry", 
 
   const created = await client.createChannelInvite(
     "200",
-    { maxAgeSeconds: 3_600, maxUses: 2, temporaryMembership: true },
+    {
+      maxAgeSeconds: 3_600,
+      maxUses: 2,
+      targetUserIds: null,
+      temporaryMembership: true,
+    },
     "Reviewed temporary access",
   )
 
@@ -173,6 +178,130 @@ test("Discord client creates one unique finite invite without automatic retry", 
     reason: "Reviewed%20temporary%20access",
     url: `${API_BASE_URL}/channels/200/invites`,
   }])
+})
+
+test("Discord client creates exact-user invites from generated multipart data", async () => {
+  const requests: Array<{
+    authorization: string | null
+    fileName: string
+    fileText: string
+    payload: unknown
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      assert.ok(init?.body instanceof FormData)
+      const payload = init.body.get("payload_json")
+      const file = init.body.get("target_users_file")
+      assert.equal(typeof payload, "string")
+      if (typeof payload !== "string") throw new Error("Missing multipart payload")
+      assert.ok(file instanceof File)
+      requests.push({
+        authorization: new Headers(init.headers).get("authorization"),
+        fileName: file.name,
+        fileText: await file.text(),
+        payload: JSON.parse(payload) as unknown,
+        url: String(input),
+      })
+      return jsonResponse({
+        channel: { id: "200" },
+        code: PRIVATE_CODE,
+        created_at: "2026-08-21T12:00:00.000Z",
+        expires_at: "2026-08-21T13:00:00.000Z",
+        flags: 0,
+        guild: { id: "100" },
+        inviter: { id: "300" },
+        max_age: 3_600,
+        max_uses: 2,
+        roles: [],
+        temporary: false,
+        type: 0,
+        uses: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  await client.createChannelInvite(
+    "200",
+    {
+      maxAgeSeconds: 3_600,
+      maxUses: 2,
+      targetUserIds: ["301", "302"],
+      temporaryMembership: false,
+    },
+    "Reviewed exact-user access",
+  )
+
+  assert.deepEqual(requests, [{
+    authorization: `Bot ${TOKEN}`,
+    fileName: "target-users.csv",
+    fileText: "user_id\n301\n302\n",
+    payload: {
+      max_age: 3_600,
+      max_uses: 2,
+      temporary: false,
+      unique: true,
+    },
+    url: `${API_BASE_URL}/channels/200/invites`,
+  }])
+})
+
+test("Discord client projects exact target-user job and CSV evidence", async () => {
+  const requests: Array<{
+    accept: string | null
+    authorization: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const headers = new Headers(init?.headers)
+      requests.push({
+        accept: headers.get("accept"),
+        authorization: headers.get("authorization"),
+        url: String(input),
+      })
+      if (String(input).endsWith("/job-status")) {
+        return jsonResponse({
+          completed_at: "2026-08-21T12:00:01.000Z",
+          created_at: "2026-08-21T12:00:00.000Z",
+          error_message: null,
+          processed_users: 2,
+          status: 2,
+          total_users: 2,
+        })
+      }
+      return new Response("user_id\r\n302\r\n301\r\n", {
+        headers: { "content-type": "text/csv" },
+      })
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getInviteTargetUsersJobStatus(PRIVATE_CODE), {
+    completedAt: "2026-08-21T12:00:01.000Z",
+    createdAt: "2026-08-21T12:00:00.000Z",
+    errorPresent: false,
+    processedUsers: 2,
+    status: 2,
+    totalUsers: 2,
+    unknownFieldCount: 0,
+  })
+  assert.deepEqual(await client.getInviteTargetUserIds(PRIVATE_CODE), ["301", "302"])
+  assert.deepEqual(requests, [
+    {
+      accept: "application/json",
+      authorization: `Bot ${TOKEN}`,
+      url: `${API_BASE_URL}/invites/private%2FA%3Fcode/target-users/job-status`,
+    },
+    {
+      accept: "text/csv",
+      authorization: `Bot ${TOKEN}`,
+      url: `${API_BASE_URL}/invites/private%2FA%3Fcode/target-users`,
+    },
+  ])
 })
 
 test("Discord client verifies an exact invite without sending bot authentication", async () => {
@@ -276,6 +405,38 @@ test("Discord client never exposes an invite code through invite failures", asyn
       return true
     },
   )
+  for (const lookup of [
+    () => networkClient.getInviteTargetUsersJobStatus(PRIVATE_CODE),
+    () => networkClient.getInviteTargetUserIds(PRIVATE_CODE),
+  ]) {
+    await assert.rejects(
+      lookup,
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+        assert.doesNotMatch(error.message, /private%2FA%3Fcode/)
+        assert.equal((error as Error & { cause?: unknown }).cause, undefined)
+        return true
+      },
+    )
+  }
+
+  const targetUserErrorClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      message: `rejected ${PRIVATE_CODE}`,
+    }, 403),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => targetUserErrorClient.getInviteTargetUsersJobStatus(PRIVATE_CODE),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.equal(error.route, "/invites/{invite.code}/target-users/job-status")
+      assert.doesNotMatch(error.message, /private/)
+      return true
+    },
+  )
 
   let requests = 0
   const apiClient = new DiscordClient({
@@ -309,7 +470,12 @@ test("Discord client never exposes an invite code through invite failures", asyn
   await assert.rejects(
     () => creationClient.createChannelInvite(
       "200",
-      { maxAgeSeconds: 60, maxUses: 1, temporaryMembership: false },
+      {
+        maxAgeSeconds: 60,
+        maxUses: 1,
+        targetUserIds: null,
+        temporaryMembership: false,
+      },
       "Reviewed access",
     ),
     (error: unknown) => {
@@ -342,7 +508,12 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
   await assert.rejects(
     () => client.createChannelInvite(
       "200",
-      { maxAgeSeconds: 0, maxUses: 1, temporaryMembership: false },
+      {
+        maxAgeSeconds: 0,
+        maxUses: 1,
+        targetUserIds: null,
+        temporaryMembership: false,
+      },
       "Reviewed access",
     ),
     /finite age/,
@@ -350,10 +521,54 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
   await assert.rejects(
     () => client.createChannelInvite(
       "200",
-      { maxAgeSeconds: 60, maxUses: 0, temporaryMembership: false },
+      {
+        maxAgeSeconds: 60,
+        maxUses: 0,
+        targetUserIds: null,
+        temporaryMembership: false,
+      },
       "Reviewed access",
     ),
     /finite age/,
+  )
+  await assert.rejects(
+    () => client.createChannelInvite(
+      "200",
+      {
+        maxAgeSeconds: 60,
+        maxUses: 1,
+        targetUserIds: ["302", "301"],
+        temporaryMembership: false,
+      },
+      "Reviewed access",
+    ),
+    /canonical acceptance/,
+  )
+  await assert.rejects(
+    () => client.createChannelInvite(
+      "200",
+      {
+        maxAgeSeconds: 60,
+        maxUses: 1,
+        targetUserIds: ["0301"],
+        temporaryMembership: false,
+      },
+      "Reviewed access",
+    ),
+    /canonical acceptance/,
+  )
+  await assert.rejects(
+    () => client.createChannelInvite(
+      "200",
+      {
+        maxAgeSeconds: 60,
+        maxUses: 1,
+        targetUserIds: ["301", "301"],
+        temporaryMembership: false,
+      },
+      "Reviewed access",
+    ),
+    /canonical acceptance/,
   )
   assert.equal(requests, 1)
 
@@ -375,4 +590,82 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
       /invalid guild invite inventory/,
     )
   }
+
+  for (const response of [
+    jsonResponse({
+      completed_at: null,
+      created_at: "2026-08-21T12:00:00.000Z",
+      error_message: null,
+      processed_users: 2,
+      status: 2,
+      total_users: 1,
+    }),
+    jsonResponse({
+      completed_at: null,
+      created_at: "2026-08-21T12:00:00.000Z",
+      error_message: null,
+      processed_users: 0,
+      status: 4,
+      total_users: 1,
+    }),
+  ]) {
+    const malformedClient = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => response.clone(),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => malformedClient.getInviteTargetUsersJobStatus(PRIVATE_CODE),
+      /invalid guild invite inventory/,
+    )
+  }
+
+  for (const csv of [
+    "wrong\n301\n",
+    "user_id\n",
+    "user_id\n301\n301\n",
+    "user_id\n0\n",
+    "user_id\n0301\n",
+  ]) {
+    const malformedClient = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => new Response(csv),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => malformedClient.getInviteTargetUserIds(PRIVATE_CODE),
+      /invalid guild invite inventory/,
+    )
+  }
+
+  const oversizedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(`user_id\n${"1".repeat(5_000)}\n`),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => oversizedClient.getInviteTargetUserIds(PRIVATE_CODE),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /exceeded its local response bound/)
+      assert.doesNotMatch(error.message, /private|%2F/)
+      return true
+    },
+  )
+
+  const failedJobClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      completed_at: null,
+      created_at: "2026-08-21T12:00:00.000Z",
+      error_message: "private target-user failure",
+      processed_users: 1,
+      status: 3,
+      total_users: 2,
+    }),
+    token: TOKEN,
+  })
+  const failedJob = await failedJobClient.getInviteTargetUsersJobStatus(PRIVATE_CODE)
+  assert.equal(failedJob.errorPresent, true)
+  assert.doesNotMatch(JSON.stringify(failedJob), /private target-user failure/)
 })

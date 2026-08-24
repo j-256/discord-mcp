@@ -606,6 +606,12 @@ function serviceFixture(overrides: {
     async getInvite() {
       throw new Error("Unexpected exact invite lookup")
     },
+    async getInviteTargetUserIds() {
+      throw new Error("Unexpected invite target-user lookup")
+    },
+    async getInviteTargetUsersJobStatus() {
+      throw new Error("Unexpected invite target-user job lookup")
+    },
     async getGuildIncidentActions() {
       throw new Error("Unexpected guild incident-action lookup")
     },
@@ -1742,6 +1748,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     operationKey,
   }, digest))
   await captured(() => service.executeInviteCreation({
+    acceptance: { kind: "bearer" },
     acknowledgeBearerCapability: true,
     auditReason: "reviewed",
     channelId: CHANNEL_ID,

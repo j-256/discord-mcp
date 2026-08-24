@@ -1695,7 +1695,34 @@ const inviteCapabilityOutputFileSchema = z.string()
   ), {
     message: "outputFile must be one exact absolute canonical path without control characters",
   })
+const inviteTargetUserIdSchema = positiveSnowflakeSchema.refine(
+  (value) => (
+    DISCORD_SNOWFLAKE_PATTERN.test(value)
+    && BigInt(value).toString() === value
+  ),
+  "Discord target user ID must be canonical",
+)
+const inviteExactUserIdsSchema = z.array(inviteTargetUserIdSchema)
+  .min(1)
+  .max(INVITE_LIMITS.targetUserIds)
+  .superRefine((ids, context) => {
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({
+        code: "custom",
+        message: "userIds must contain unique exact Discord user IDs",
+      })
+    }
+  })
+const inviteAcceptanceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("bearer") }),
+  z.strictObject({
+    kind: z.literal("exact-users"),
+    userIds: inviteExactUserIdsSchema,
+  }),
+])
 const inviteCreationFields = {
+  acceptance: inviteAcceptanceSchema
+    .describe("Explicit finite bearer acceptance or a bounded exact-user acceptance set"),
   acknowledgeBearerCapability: z.literal(true)
     .describe("Explicitly acknowledge that the private output file contains a bearer access capability"),
   auditReason: auditReasonSchema,
@@ -5403,7 +5430,7 @@ const inviteCreationConfirmationRequestSchema: {
 } = {
   properties: {
     approve: {
-      description: "Set true only after reviewing the exact application, bot, guild, direct channel, finite age and use limits, temporary-membership intent, unique invite requirement, complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, private output-file checks, bearer-capability acknowledgement, privacy boundary, audit reason, one-shot operation key hash, warnings, and plan digest",
+      description: "Set true only after reviewing the exact application, bot, guild, direct channel, bearer or exact-user acceptance, finite age and use limits, temporary-membership intent, unique invite requirement, complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, conditional MANAGE_GUILD evidence for exact users, private output-file checks, bearer-capability acknowledgement, privacy boundary, audit reason, one-shot operation key hash, warnings, and plan digest",
       title: "Approve invite creation",
       type: "boolean",
     },
@@ -5815,6 +5842,7 @@ const integrationDeletionRequestStateSchema = z.strictObject({
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
 })
 const inviteCreationRequestStateSchema = z.strictObject({
+  acceptance: inviteAcceptanceSchema,
   acknowledgeBearerCapability: z.literal(true),
   auditReason: auditReasonSchema,
   channelId: positiveSnowflakeSchema,
@@ -6774,7 +6802,18 @@ const inviteCreationConflictReceiptSchema = z.strictObject({
   timestamp: z.iso.datetime({ offset: true }),
   verification: z.literal("match").nullable(),
 })
+const inviteCreationAcceptanceResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("bearer"),
+    targetUserCount: z.literal(0),
+  }),
+  z.strictObject({
+    kind: z.literal("exact-users"),
+    targetUserCount: z.number().int().min(1).max(INVITE_LIMITS.targetUserIds),
+  }),
+])
 const inviteCreationResultSchema = z.strictObject({
+  acceptance: inviteCreationAcceptanceResultSchema,
   activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN),
   capabilityFileWritten: z.literal(true),
   channelId: positiveSnowflakeSchema,
@@ -6796,6 +6835,7 @@ const inviteCreationExecutionStatusSchema = z.enum([
   "uncertain",
 ])
 const inviteCreationExecutionResultSchema = z.strictObject({
+  acceptance: inviteCreationAcceptanceResultSchema,
   activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN).optional(),
   activityRecordError: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable().optional(),
   capabilityFileDiscarded: z.boolean().optional(),
@@ -10166,6 +10206,7 @@ function inviteCreationRequest(
     | z.infer<typeof inviteCreationExecuteInputSchema>,
 ): InviteCreationRequest {
   return {
+    acceptance: input.acceptance,
     acknowledgeBearerCapability: input.acknowledgeBearerCapability,
     auditReason: input.auditReason,
     channelId: input.channelId,
@@ -10192,12 +10233,21 @@ function inviteCreationConfirmationMessage(
     `Channel name: ${reviewLiteral(plan.target.name)}`,
     `Channel type: ${plan.target.type}`,
     `Permission overwrites: ${plan.target.permissionOverwriteCount}`,
+    `Acceptance kind: ${plan.intent.acceptance.kind}`,
+    ...(plan.intent.acceptance.kind === "exact-users"
+      ? [
+          `Exact target user count: ${plan.intent.acceptance.userIds.length}`,
+          `Exact target user IDs: ${plan.intent.acceptance.userIds.join(", ")}`,
+        ]
+      : []),
     `Maximum age seconds: ${plan.intent.maxAgeSeconds}`,
     `Maximum uses: ${plan.intent.maxUses}`,
     `Temporary membership: ${plan.intent.temporaryMembership}`,
     `Unique invite: ${plan.intent.unique}`,
     `Bot VIEW_CHANNEL: ${plan.access.viewChannel}`,
     `Bot CREATE_INSTANT_INVITE: ${plan.access.createInstantInvite}`,
+    `Bot MANAGE_GUILD: ${plan.access.manageGuild}`,
+    `Required permissions: ${plan.access.requiredPermissions.join(", ")}`,
     `Bot administrator: ${plan.access.botAdministrator}`,
     `Bot is guild owner: ${plan.access.botIsGuildOwner}`,
     `Private output file: ${reviewLiteral(plan.delivery.outputFile)}`,
@@ -10221,6 +10271,7 @@ function inviteCreationConfirmationMessage(
 function inviteCreationRequestStatePayload(request: InviteCreationRequest) {
   const normalized = normalizeInviteCreationRequest(request)
   return {
+    acceptance: normalized.acceptance,
     acknowledgeBearerCapability: normalized.acknowledgeBearerCapability,
     auditReason: normalized.auditReason,
     channelId: normalized.channelId,
@@ -18312,7 +18363,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_invite_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan to create one finite unique Discord invite in a separately allowlisted direct guild channel. Verifies pinned identity, complete guild, member, role, channel, overwrite, VIEW_CHANNEL, and CREATE_INSTANT_INVITE evidence plus an absent canonical private output target without creating a capability or file.",
+      description: "Prepare a process-bound keyed plan to create one finite unique Discord invite with explicit bearer or exact-user acceptance in a separately allowlisted direct guild channel. Verifies pinned identity, complete guild, member, role, channel, overwrite, VIEW_CHANNEL, and CREATE_INSTANT_INVITE evidence, plus Discord's conditional MANAGE_GUILD requirement for exact-user acceptance and an absent canonical private output target, without creating a capability or file.",
       inputSchema: inviteCreationPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan private Discord invite creation",
@@ -18336,7 +18387,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_invite_creation",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
-      description: "Create one reviewed finite unique Discord invite after a fresh matching plan, signed interactive approval, durable channel and invite-collection exclusion, one-shot records, exclusive 0600 private-file reservation, one non-retried mutation, strict response validation, private capability write, and exact unauthenticated identity verification. The invite code and URL never enter MCP results, errors, diagnostics, observability, receipts, or activity records.",
+      description: "Create one reviewed finite unique Discord invite after a fresh matching plan, signed interactive approval, durable channel and invite-collection exclusion, one-shot records, exclusive 0600 private-file reservation, one non-retried mutation, exact identity verification, optional bounded target-user job polling and CSV readback, and a final private capability write. The invite code, URL, and target-user CSV never enter MCP results, errors, diagnostics, observability, receipts, or activity records.",
       inputSchema: inviteCreationExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed private Discord invite creation",
@@ -18357,7 +18408,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
             request,
             input.planDigest,
             "confirmation-invalid",
-            "Signed confirmation state does not match the exact guild, channel, finite invite intent, private output file, audit reason, one-shot operation key, or plan digest",
+            "Signed confirmation state does not match the exact guild, channel, acceptance set, finite invite intent, private output file, audit reason, one-shot operation key, or plan digest",
           )
           return toolResult(result, result.reason, { isError: true })
         }
@@ -18403,9 +18454,15 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
           )
         }
         const result = parsedResult.data
+        const acceptanceSummary = result.acceptance.kind === "exact-users"
+          ? `exact-user acceptance for ${result.acceptance.targetUserCount} reviewed users`
+          : "finite bearer acceptance"
+        const verification = result.acceptance.kind === "exact-users"
+          ? "its exact identity and target-user acceptance were verified"
+          : "its exact identity was verified"
         return toolResult(
           result,
-          `Discord invite creation completed for channel ${result.channelId}; the capability was written to ${result.outputFile} and its exact identity was verified`,
+          `Discord invite creation completed for channel ${result.channelId} with ${acceptanceSummary}; the capability was written to ${result.outputFile} after ${verification}`,
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {

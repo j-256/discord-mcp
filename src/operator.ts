@@ -2121,7 +2121,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.inviteCreationPolicy,
         "pass",
-        `Invite creation is constrained to ${config.inviteCreationChannelIds.size} exact channels and ${config.inviteCapabilityRoots.length} private-file roots with complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, finite unique invites, exclusive 0600 delivery, and no bearer capability in MCP results or lifecycle records`,
+        `Invite creation is constrained to ${config.inviteCreationChannelIds.size} exact channels and ${config.inviteCapabilityRoots.length} private-file roots with complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, conditional MANAGE_GUILD for exact-user acceptance, explicit finite acceptance, exclusive 0600 delivery after verification, and no invite capability in MCP results or lifecycle records`,
       ))
     }
     if (!config.allowOnboardingAudit) {

@@ -276,6 +276,12 @@ function fixture(options: {
     async getInvite() {
       throw new Error("Unexpected exact invite lookup")
     },
+    async getInviteTargetUserIds() {
+      throw new Error("Unexpected invite target-user lookup")
+    },
+    async getInviteTargetUsersJobStatus() {
+      throw new Error("Unexpected invite target-user job lookup")
+    },
     async listGuildInvites() {
       events.push(mutationCompleted ? "read:readback" : "read:invites")
       if (mutationCompleted && state.readbackError) throw state.readbackError

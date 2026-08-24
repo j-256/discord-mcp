@@ -255,6 +255,8 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   get_guild: "GET",
   get_guild_incident_actions: "GET",
   get_invite: "GET",
+  get_invite_target_users: "GET",
+  get_invite_target_users_job_status: "GET",
   get_guild_profile: "GET",
   get_guild_auto_moderation_rule: "GET",
   get_guild_audit_log: "GET",

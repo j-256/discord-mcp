@@ -22,6 +22,7 @@ import type {
   CreateChannelInviteInput,
   DiscordInviteIdentitySummary,
   DiscordInviteSummary,
+  DiscordInviteTargetUsersJobStatus,
 } from "../src/discord-client.js"
 import {
   DiscordApiError,
@@ -95,8 +96,13 @@ interface FixtureState {
   channel: DiscordChannel
   createError: unknown
   created: DiscordInviteSummary
+  inventoryVerification: DiscordInviteSummary[]
+  inventoryVerificationError: unknown
   member: DiscordGuildMember
   roles: DiscordRole[]
+  targetUserIds: string[]
+  targetUserJobStatuses: DiscordInviteTargetUsersJobStatus[]
+  targetUserVerificationError: unknown
   verification: DiscordInviteIdentitySummary
   verificationError: unknown
 }
@@ -160,6 +166,8 @@ async function fixture(
     channel: channel(),
     createError: undefined,
     created: createdInvite(),
+    inventoryVerification: [createdInvite()],
+    inventoryVerificationError: undefined,
     member: {
       roles: [BOT_ROLE_ID],
       user: { bot: true, id: BOT_ID, username: "connector" },
@@ -173,6 +181,17 @@ async function fixture(
         10,
       ),
     ],
+    targetUserIds: ["600000000000000001", "600000000000000002"],
+    targetUserJobStatuses: [{
+      completedAt: "2026-08-24T00:00:01.000Z",
+      createdAt: CREATED_AT,
+      errorPresent: false,
+      processedUsers: 2,
+      status: 2,
+      totalUsers: 2,
+      unknownFieldCount: 0,
+    }],
+    targetUserVerificationError: undefined,
     verification: {
       channelId: CHANNEL_ID,
       code: PRIVATE_CODE,
@@ -220,7 +239,9 @@ async function fixture(
       input: CreateChannelInviteInput,
       auditReason: string,
     ) {
-      events.push(`write:create:${channelId}:${input.maxAgeSeconds}:${auditReason}`)
+      events.push(
+        `write:create:${channelId}:${input.maxAgeSeconds}:${input.targetUserIds?.join(",") ?? "bearer"}:${auditReason}`,
+      )
       if (state.createError) throw state.createError
       return state.created
     },
@@ -249,8 +270,24 @@ async function fixture(
       if (state.verificationError) throw state.verificationError
       return state.verification
     },
+    async getInviteTargetUserIds(code: string) {
+      events.push("read:target-users")
+      assert.equal(code, PRIVATE_CODE)
+      if (state.targetUserVerificationError) throw state.targetUserVerificationError
+      return state.targetUserIds
+    },
+    async getInviteTargetUsersJobStatus(code: string) {
+      events.push("read:target-user-job")
+      assert.equal(code, PRIVATE_CODE)
+      const index = events.filter((event) => event === "read:target-user-job").length - 1
+      return state.targetUserJobStatuses[
+        Math.min(index, state.targetUserJobStatuses.length - 1)
+      ]!
+    },
     async listGuildInvites() {
-      throw new Error("Unexpected invite inventory")
+      events.push("read:inventory-verify")
+      if (state.inventoryVerificationError) throw state.inventoryVerificationError
+      return state.inventoryVerification
     },
   }
   const service = new InviteService({
@@ -262,6 +299,9 @@ async function fixture(
     planKey: new Uint8Array(32).fill(17),
     policy,
     randomId: () => "activity-creation-0001",
+    sleep: async () => {
+      events.push("sleep:target-user-job")
+    },
   })
   return {
     activities,
@@ -276,6 +316,7 @@ async function fixture(
 
 function request(outputFile: string, overrides: Partial<InviteCreationRequest> = {}) {
   return {
+    acceptance: { kind: "bearer" } as const,
     acknowledgeBearerCapability: true as const,
     auditReason: AUDIT_REASON,
     channelId: CHANNEL_ID,
@@ -311,15 +352,18 @@ test("invite creation plans and delivers one finite capability only through a pr
   )
 
   assert.equal(plan.access.createInstantInvite, true)
+  assert.equal(plan.access.manageGuild, false)
   assert.equal(plan.access.viewChannel, true)
   assert.equal(plan.access.complete, true)
   assert.deepEqual(plan.access.requiredPermissions, [
     "CREATE_INSTANT_INVITE",
     "VIEW_CHANNEL",
   ])
+  assert.equal(plan.delivery.format, "discord-invite-capability.v2")
   assert.equal(plan.delivery.outputFile, outputFile)
   assert.equal(plan.delivery.review.fileMode, "0600")
   assert.deepEqual(plan.intent, {
+    acceptance: { kind: "bearer" },
     maxAgeSeconds: 3_600,
     maxUses: 1,
     temporaryMembership: false,
@@ -331,6 +375,7 @@ test("invite creation plans and delivers one finite capability only through a pr
   assert.equal(JSON.stringify(result).includes(PRIVATE_CODE), false)
   const capability = JSON.parse(await readFile(outputFile, "utf8")) as Record<string, unknown>
   assert.deepEqual(capability, {
+    acceptance: { kind: "bearer", targetUserCount: 0 },
     channelId: CHANNEL_ID,
     code: PRIVATE_CODE,
     createdAt: CREATED_AT,
@@ -339,7 +384,7 @@ test("invite creation plans and delivers one finite capability only through a pr
     kind: "discord-invite-capability",
     maxAgeSeconds: 3_600,
     maxUses: 1,
-    schemaVersion: 1,
+    schemaVersion: 2,
     temporaryMembership: false,
     url: `https://discord.gg/${PRIVATE_CODE}`,
   })
@@ -350,16 +395,117 @@ test("invite creation plans and delivers one finite capability only through a pr
   assert.deepEqual(events.slice(-6), [
     "operation:reserve",
     "activity:pending",
-    `write:create:${CHANNEL_ID}:3600:${AUDIT_REASON}`,
+    `write:create:${CHANNEL_ID}:3600:bearer:${AUDIT_REASON}`,
     "read:verify",
     "operation:completed",
     "activity:completed",
   ])
 })
 
+test("invite creation withholds exact-user capability until job and CSV verification", async (context) => {
+  const setup = await fixture(context, {
+    roles: [
+      role(GUILD_ID, 0n, 0),
+      role(
+        BOT_ROLE_ID,
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+          | DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE
+          | DISCORD_PERMISSIONS.MANAGE_GUILD,
+        10,
+      ),
+    ],
+    targetUserJobStatuses: [
+      {
+        completedAt: null,
+        createdAt: CREATED_AT,
+        errorPresent: false,
+        processedUsers: 0,
+        status: 1,
+        totalUsers: 2,
+        unknownFieldCount: 0,
+      },
+      {
+        completedAt: "2026-08-24T00:00:01.000Z",
+        createdAt: CREATED_AT,
+        errorPresent: false,
+        processedUsers: 2,
+        status: 2,
+        totalUsers: 2,
+        unknownFieldCount: 0,
+      },
+    ],
+  })
+  const input = request(setup.outputFile, {
+    acceptance: {
+      kind: "exact-users",
+      userIds: ["600000000000000002", "600000000000000001"],
+    },
+  })
+
+  const plan = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+  const result = await setup.service.executeCreation(
+    APPLICATION_ID,
+    BOT_ID,
+    input,
+    plan.digest,
+  )
+
+  assert.deepEqual(plan.intent.acceptance, {
+    kind: "exact-users",
+    userIds: ["600000000000000001", "600000000000000002"],
+  })
+  assert.equal(plan.access.manageGuild, true)
+  assert.deepEqual(plan.access.requiredPermissions, [
+    "CREATE_INSTANT_INVITE",
+    "MANAGE_GUILD",
+    "VIEW_CHANNEL",
+  ])
+  assert.deepEqual(result.acceptance, {
+    kind: "exact-users",
+    targetUserCount: 2,
+  })
+  const capability = JSON.parse(
+    await readFile(setup.outputFile, "utf8"),
+  ) as Record<string, unknown>
+  assert.deepEqual(capability.acceptance, {
+    kind: "exact-users",
+    targetUserCount: 2,
+  })
+  assert.doesNotMatch(
+    JSON.stringify(capability),
+    /600000000000000001|600000000000000002/,
+  )
+  assert.deepEqual(setup.events.slice(-10), [
+    "operation:reserve",
+    "activity:pending",
+    `write:create:${CHANNEL_ID}:3600:600000000000000001,600000000000000002:${AUDIT_REASON}`,
+    "read:inventory-verify",
+    "read:target-user-job",
+    "sleep:target-user-job",
+    "read:target-user-job",
+    "read:target-users",
+    "operation:completed",
+    "activity:completed",
+  ])
+  assert.doesNotMatch(
+    JSON.stringify(setup.activities),
+    /600000000000000001|600000000000000002/,
+  )
+})
+
 test("invite creation normalizes exact finite acknowledged intent", () => {
   const valid = request("/private/invite.json")
   assert.match(normalizeInviteCreationRequest(valid).operationKeyHash, /^sha256:/)
+  assert.deepEqual(normalizeInviteCreationRequest({
+    ...valid,
+    acceptance: {
+      kind: "exact-users",
+      userIds: ["600000000000000002", "600000000000000001"],
+    },
+  }).acceptance, {
+    kind: "exact-users",
+    userIds: ["600000000000000001", "600000000000000002"],
+  })
   assert.throws(
     () => normalizeInviteCreationRequest({
       ...valid,
@@ -389,6 +535,21 @@ test("invite creation normalizes exact finite acknowledged intent", () => {
     }),
     /must not contain an invite URL/,
   )
+  for (const acceptance of [
+    { kind: "exact-users", userIds: [] },
+    { kind: "exact-users", userIds: ["600000000000000001", "600000000000000001"] },
+    { kind: "exact-users", userIds: ["0"] },
+    { kind: "exact-users", userIds: ["0600000000000000001"] },
+    { kind: "bearer", userIds: ["600000000000000001"] },
+  ]) {
+    assert.throws(
+      () => normalizeInviteCreationRequest({
+        ...valid,
+        acceptance,
+      } as InviteCreationRequest),
+      /acceptance|canonical|unique|snowflake/,
+    )
+  }
 })
 
 test("invite creation rejects incomplete permissions and unsupported channels before mutation", async (context) => {
@@ -404,6 +565,25 @@ test("invite creation rejects incomplete permissions and unsupported channels be
     /CREATE_INSTANT_INVITE/,
   )
   assert.equal(missingPermission.events.some((entry) => entry.startsWith("write:")), false)
+
+  const missingManageGuild = await fixture(context)
+  await assert.rejects(
+    () => missingManageGuild.service.planCreation(
+      APPLICATION_ID,
+      BOT_ID,
+      request(missingManageGuild.outputFile, {
+        acceptance: {
+          kind: "exact-users",
+          userIds: ["600000000000000001"],
+        },
+      }),
+    ),
+    /MANAGE_GUILD/,
+  )
+  assert.equal(
+    missingManageGuild.events.some((entry) => entry.startsWith("write:")),
+    false,
+  )
 
   const category = await fixture(context, {
     channel: { ...channel(), type: DISCORD_CHANNEL_TYPES.category },
@@ -664,7 +844,7 @@ test("invite creation quarantines a mismatched mutation response without leaking
   )
 })
 
-test("invite creation retains a written capability when exact verification is uncertain", async (context) => {
+test("invite creation withholds capability when exact verification is uncertain", async (context) => {
   const setup = await fixture(context, {
     verification: {
       channelId: "500000000000000002",
@@ -691,15 +871,86 @@ test("invite creation retains a written capability when exact verification is un
         status: string
       }
       assert.equal(result.status, "uncertain")
-      assert.equal(result.capabilityFileWritten, true)
+      assert.equal(result.capabilityFileWritten, false)
       assert.match(result.inviteRef, INVITE_REFERENCE_PATTERN)
       assert.doesNotMatch(JSON.stringify(error), new RegExp(PRIVATE_CODE))
       return true
     },
   )
-  assert.match(await readFile(setup.outputFile, "utf8"), new RegExp(PRIVATE_CODE))
+  await assert.rejects(() => lstat(setup.outputFile), { code: "ENOENT" })
   assert.equal(setup.activities.at(-1)?.status, "uncertain")
   assert.doesNotMatch(JSON.stringify(setup.activities), new RegExp(PRIVATE_CODE))
+})
+
+test("invite creation withholds exact-user capability after job or CSV failure", async (context) => {
+  const failures: Partial<FixtureState>[] = [
+    {
+      inventoryVerification: [createdInvite({ channelId: "500000000000000002" })],
+    },
+    {
+      targetUserJobStatuses: [{
+        completedAt: null,
+        createdAt: CREATED_AT,
+        errorPresent: false,
+        processedUsers: 0,
+        status: 1,
+        totalUsers: 2,
+        unknownFieldCount: 0,
+      }],
+    },
+    {
+      targetUserJobStatuses: [{
+        completedAt: "2026-08-24T00:00:01.000Z",
+        createdAt: CREATED_AT,
+        errorPresent: true,
+        processedUsers: 1,
+        status: 3,
+        totalUsers: 2,
+        unknownFieldCount: 0,
+      }],
+    },
+    { targetUserIds: ["600000000000000003"] },
+    { targetUserVerificationError: new Error(`private CSV ${PRIVATE_CODE}`) },
+  ]
+  for (const overrides of failures) {
+    const setup = await fixture(context, {
+      ...overrides,
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(
+          BOT_ROLE_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE
+            | DISCORD_PERMISSIONS.MANAGE_GUILD,
+          10,
+        ),
+      ],
+    })
+    const input = request(setup.outputFile, {
+      acceptance: {
+        kind: "exact-users",
+        userIds: ["600000000000000001", "600000000000000002"],
+      },
+    })
+    const plan = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+
+    await assert.rejects(
+      () => setup.service.executeCreation(
+        APPLICATION_ID,
+        BOT_ID,
+        input,
+        plan.digest,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof InviteCreationExecutionError)
+        assert.equal((error.result as { status: string }).status, "uncertain")
+        assert.doesNotMatch(JSON.stringify(error), new RegExp(PRIVATE_CODE))
+        return true
+      },
+    )
+    await assert.rejects(() => lstat(setup.outputFile), { code: "ENOENT" })
+    assert.equal(setup.activities.at(-1)?.status, "uncertain")
+  }
 })
 
 test("invite creation fresh-checks output absence before reserving any write", async (context) => {

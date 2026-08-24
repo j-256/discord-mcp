@@ -2071,9 +2071,11 @@ test("doctor and setup explain capability-safe invite creation, audit, and revoc
   assert.equal(creation?.status, "pass")
   assert.match(creation?.summary || "", /1 exact channels and 1 private-file roots/)
   assert.match(creation?.summary || "", /VIEW_CHANNEL and CREATE_INSTANT_INVITE/)
-  assert.match(creation?.summary || "", /finite unique invites/)
+  assert.match(creation?.summary || "", /conditional MANAGE_GUILD/)
+  assert.match(creation?.summary || "", /explicit finite acceptance/)
+  assert.match(creation?.summary || "", /delivery after verification/)
   assert.match(creation?.summary || "", /exclusive 0600 delivery/)
-  assert.match(creation?.summary || "", /no bearer capability in MCP results or lifecycle records/)
+  assert.match(creation?.summary || "", /no invite capability in MCP results or lifecycle records/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.inviteAuditPolicy,

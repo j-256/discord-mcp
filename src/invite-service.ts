@@ -3,6 +3,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto"
+import { setTimeout as wait } from "node:timers/promises"
 
 import type {
   ActivityStore,
@@ -24,7 +25,6 @@ import {
 } from "./constants.js"
 import {
   encodeDiscordAuditReason,
-  type CreateChannelInviteInput,
   type DiscordClient,
   type DiscordDeletedInviteSummary,
   type DiscordInviteIdentitySummary,
@@ -90,7 +90,8 @@ const INVITE_CURSOR_PREFIX = "icur_hmac_sha256_"
 const STATE_UNAVAILABLE = "invite-state-unavailable"
 const CREATION_STATE_UNAVAILABLE = "invite-creation-state-unavailable"
 const DISCORD_INVITE_BASE_URL = "https://discord.gg"
-const INVITE_CAPABILITY_FILE_SCHEMA_VERSION = 1
+const INVITE_CAPABILITY_FILE_FORMAT = "discord-invite-capability.v2"
+const INVITE_CAPABILITY_FILE_SCHEMA_VERSION = 2
 const INVITE_CREATION_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
   DISCORD_CHANNEL_TYPES.forum,
@@ -99,8 +100,13 @@ const INVITE_CREATION_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.text,
   DISCORD_CHANNEL_TYPES.voice,
 ])
-const INVITE_CREATION_REQUIRED_PERMISSIONS = Object.freeze([
+const INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS = Object.freeze([
   "CREATE_INSTANT_INVITE",
+  "VIEW_CHANNEL",
+] as const satisfies readonly DiscordPermissionName[])
+const INVITE_CREATION_EXACT_USER_REQUIRED_PERMISSIONS = Object.freeze([
+  "CREATE_INSTANT_INVITE",
+  "MANAGE_GUILD",
   "VIEW_CHANNEL",
 ] as const satisfies readonly DiscordPermissionName[])
 const HIGH_RISK_ROLE_PERMISSIONS: ReadonlySet<DiscordPermissionName> = new Set([
@@ -120,6 +126,7 @@ export const INVITE_OMITTED_FIELDS = Object.freeze([
   "roleVisuals",
   "stageInstance",
   "targetApplicationMetadata",
+  "targetUserAcceptance",
   "targetUserProfile",
   "url",
 ] as const)
@@ -268,6 +275,9 @@ export interface InviteDeletionResult {
 }
 
 export interface InviteCreationRequest {
+  acceptance:
+    | { kind: "bearer" }
+    | { kind: "exact-users"; userIds: string[] }
   acknowledgeBearerCapability: true
   auditReason: string
   channelId: string
@@ -279,7 +289,13 @@ export interface InviteCreationRequest {
   temporaryMembership: boolean
 }
 
-export interface NormalizedInviteCreationRequest extends InviteCreationRequest {
+export interface NormalizedInviteCreationRequest extends Omit<
+  InviteCreationRequest,
+  "acceptance"
+> {
+  acceptance:
+    | { kind: "bearer" }
+    | { kind: "exact-users"; userIds: string[] }
   operationKeyHash: string
 }
 
@@ -291,7 +307,8 @@ export interface InviteCreationAccessEvidence {
   createInstantInvite: true
   effectivePermissionNames: DiscordPermissionName[]
   effectivePermissions: string
-  requiredPermissions: typeof INVITE_CREATION_REQUIRED_PERMISSIONS
+  manageGuild: boolean
+  requiredPermissions: readonly DiscordPermissionName[]
   unknownPermissionBits: string
   viewChannel: true
 }
@@ -304,7 +321,7 @@ export interface InviteCreationPlan {
   botId: string
   createdAt: string
   delivery: {
-    format: "discord-invite-capability.v1"
+    format: typeof INVITE_CAPABILITY_FILE_FORMAT
     outputFile: string
     review: PrivateCapabilityTargetReview
   }
@@ -313,7 +330,13 @@ export interface InviteCreationPlan {
     id: string
     name: string
   }
-  intent: CreateChannelInviteInput & { unique: true }
+  intent: {
+    acceptance: NormalizedInviteCreationRequest["acceptance"]
+    maxAgeSeconds: number
+    maxUses: number
+    temporaryMembership: boolean
+    unique: true
+  }
   operationKeyHash: string
   privacy: {
     capabilityDelivery: "private-file-only"
@@ -336,6 +359,10 @@ export interface InviteCreationPlan {
 }
 
 export interface InviteCreationResult {
+  acceptance: {
+    kind: "bearer" | "exact-users"
+    targetUserCount: number
+  }
   activityId: string
   capabilityFileWritten: true
   channelId: string
@@ -358,6 +385,8 @@ export interface InviteServiceClient extends Pick<
   | "getGuildMember"
   | "getGuildRoles"
   | "getInvite"
+  | "getInviteTargetUserIds"
+  | "getInviteTargetUsersJobStatus"
   | "listGuildInvites"
 > {}
 
@@ -376,6 +405,7 @@ export interface InviteServiceOptions {
   >
   privateFileSystem?: PrivateCapabilityFileSystem
   randomId?: () => string
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
 }
 
 interface ValidatedRole {
@@ -428,6 +458,10 @@ interface InviteCursorPayload {
 
 function evidenceError(message: string): InviteEvidenceError {
   return new InviteEvidenceError(message)
+}
+
+function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return wait(milliseconds, undefined, signal ? { signal } : undefined)
 }
 
 function positiveSnowflake(value: unknown): value is string {
@@ -507,6 +541,7 @@ export function normalizeInviteDeletionRequest(
 }
 
 const INVITE_CREATION_REQUEST_KEYS: ReadonlySet<string> = new Set([
+  "acceptance",
   "acknowledgeBearerCapability",
   "auditReason",
   "channelId",
@@ -517,6 +552,49 @@ const INVITE_CREATION_REQUEST_KEYS: ReadonlySet<string> = new Set([
   "outputFile",
   "temporaryMembership",
 ])
+
+function compareSnowflakes(left: string, right: string): number {
+  const leftValue = BigInt(left)
+  const rightValue = BigInt(right)
+  return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0
+}
+
+function normalizeInviteCreationAcceptance(
+  value: unknown,
+): NormalizedInviteCreationRequest["acceptance"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord invite acceptance must be one exact object")
+  }
+  const acceptance = value as Record<string, unknown>
+  if (
+    acceptance.kind === "bearer"
+    && Object.keys(acceptance).length === 1
+  ) return { kind: "bearer" }
+  if (
+    acceptance.kind !== "exact-users"
+    || Object.keys(acceptance).sort().join("\0") !== "kind\0userIds"
+    || !Array.isArray(acceptance.userIds)
+    || acceptance.userIds.length < 1
+    || acceptance.userIds.length > INVITE_LIMITS.targetUserIds
+  ) {
+    throw new RangeError(
+      "Discord exact-user invite acceptance requires one bounded nonempty user ID list",
+    )
+  }
+  for (const userId of acceptance.userIds) {
+    assertPositiveSnowflake(userId, "Discord invite target user ID")
+    if (BigInt(userId).toString() !== userId) {
+      throw new RangeError("Discord invite target user IDs must be canonical")
+    }
+  }
+  if (new Set(acceptance.userIds).size !== acceptance.userIds.length) {
+    throw new RangeError("Discord invite target user IDs must be unique")
+  }
+  return {
+    kind: "exact-users",
+    userIds: [...acceptance.userIds].sort(compareSnowflakes),
+  }
+}
 
 export function normalizeInviteCreationRequest(
   request: InviteCreationRequest,
@@ -530,6 +608,7 @@ export function normalizeInviteCreationRequest(
   ) {
     throw new RangeError("Discord invite creation request must be one exact object")
   }
+  const acceptance = normalizeInviteCreationAcceptance(request.acceptance)
   assertPositiveSnowflake(request.guildId, "Discord invite-creation guild ID")
   assertPositiveSnowflake(request.channelId, "Discord invite-creation channel ID")
   if (request.acknowledgeBearerCapability !== true) {
@@ -572,6 +651,7 @@ export function normalizeInviteCreationRequest(
   }
   return {
     ...request,
+    acceptance,
     operationKeyHash: operationKeyHash(request.operationKey),
   }
 }
@@ -823,6 +903,7 @@ function inviteCreationAccessEvidence(
   member: DiscordGuildMember,
   roles: readonly ValidatedRole[],
   channel: InviteCreationState["channel"],
+  acceptanceKind: NormalizedInviteCreationRequest["acceptance"]["kind"],
 ): InviteCreationAccessEvidence {
   let permissions: BotChannelPermissionResult
   try {
@@ -850,12 +931,22 @@ function inviteCreationAccessEvidence(
   const effectivePermissionNames = botIsGuildOwner
     ? [...DISCORD_PERMISSION_NAMES]
     : [...permissions.effectivePermissionNames]
-  for (const permission of INVITE_CREATION_REQUIRED_PERMISSIONS) {
+  const guildPermissions = completePermissions(member, guild.id, roles)
+  const manageGuild = botIsGuildOwner || hasGuildPermission(guildPermissions, "MANAGE_GUILD")
+  const requiredPermissions = acceptanceKind === "exact-users"
+    ? INVITE_CREATION_EXACT_USER_REQUIRED_PERMISSIONS
+    : INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS
+  for (const permission of INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS) {
     if (!effectivePermissionNames.includes(permission)) {
       throw evidenceError(
         `Discord connector bot lacks channel-level ${permission} for invite creation`,
       )
     }
+  }
+  if (acceptanceKind === "exact-users" && !manageGuild) {
+    throw evidenceError(
+      "Discord connector bot lacks guild-level MANAGE_GUILD for exact-user invite creation",
+    )
   }
   return {
     appliedRoleIds: [...permissions.appliedRoleIds].sort(),
@@ -865,7 +956,8 @@ function inviteCreationAccessEvidence(
     createInstantInvite: true,
     effectivePermissionNames,
     effectivePermissions,
-    requiredPermissions: INVITE_CREATION_REQUIRED_PERMISSIONS,
+    manageGuild,
+    requiredPermissions,
     unknownPermissionBits: permissions.unknownPermissionBits,
     viewChannel: true,
   }
@@ -1283,11 +1375,23 @@ function assertInviteVerification(
   }
 }
 
+function inviteAcceptanceSummary(
+  request: NormalizedInviteCreationRequest,
+): InviteCreationResult["acceptance"] {
+  return {
+    kind: request.acceptance.kind,
+    targetUserCount: request.acceptance.kind === "exact-users"
+      ? request.acceptance.userIds.length
+      : 0,
+  }
+}
+
 function inviteCapabilityContent(
   invite: DiscordInviteSummary,
   request: NormalizedInviteCreationRequest,
 ): string {
   return `${JSON.stringify({
+    acceptance: inviteAcceptanceSummary(request),
     channelId: request.channelId,
     code: invite.code,
     createdAt: invite.createdAt,
@@ -1392,6 +1496,7 @@ export class InviteService {
   readonly #policy: InviteServiceOptions["policy"]
   readonly #privateFileSystem: PrivateCapabilityFileSystem
   readonly #randomId: () => string
+  readonly #sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>
   readonly #creationTargetLocks = new Map<string, Promise<InviteTargetOutcome>>()
   readonly #targetLocks = new Map<string, Promise<InviteTargetOutcome>>()
 
@@ -1406,6 +1511,7 @@ export class InviteService {
     this.#privateFileSystem = options.privateFileSystem
       ?? DEFAULT_PRIVATE_CAPABILITY_FILE_SYSTEM
     this.#randomId = options.randomId || randomUUID
+    this.#sleep = options.sleep || defaultSleep
   }
 
   async #creationState(
@@ -1444,8 +1550,85 @@ export class InviteService {
       botMember,
       roles,
       channel,
+      request.acceptance.kind,
     )
     return { access, channel, channels, guild, roles }
+  }
+
+  async #verifyInviteAcceptance(
+    code: string,
+    request: NormalizedInviteCreationRequest,
+    options: RequestOptions,
+  ): Promise<void> {
+    if (request.acceptance.kind === "bearer") return
+    const expectedIds = request.acceptance.userIds
+    for (let attempt = 1; attempt <= INVITE_LIMITS.targetUsersPollAttempts; attempt += 1) {
+      const status = await this.#client.getInviteTargetUsersJobStatus(code, options)
+      if (
+        status.unknownFieldCount !== 0
+        || status.totalUsers > expectedIds.length
+        || status.processedUsers > expectedIds.length
+      ) {
+        throw evidenceError(
+          "Discord returned mismatched invite target-user processing evidence",
+        )
+      }
+      if (status.status === 2) {
+        if (
+          status.completedAt === null
+          || status.errorPresent
+          || status.totalUsers !== expectedIds.length
+          || status.processedUsers !== expectedIds.length
+        ) {
+          throw evidenceError(
+            "Discord returned incomplete invite target-user completion evidence",
+          )
+        }
+        const observedIds = await this.#client.getInviteTargetUserIds(code, options)
+        if (stableString(observedIds) !== stableString(expectedIds)) {
+          throw evidenceError(
+            "Discord returned mismatched invite target-user acceptance evidence",
+          )
+        }
+        return
+      }
+      if (
+        status.status === 3
+        || status.completedAt !== null
+        || status.errorPresent
+      ) {
+        throw evidenceError("Discord invite target-user processing failed")
+      }
+      if (attempt < INVITE_LIMITS.targetUsersPollAttempts) {
+        await this.#sleep(INVITE_LIMITS.targetUsersPollIntervalMs, options.signal)
+      }
+    }
+    throw evidenceError("Discord invite target-user processing did not complete in time")
+  }
+
+  async #verifyCreatedInviteIdentity(
+    invite: DiscordInviteSummary,
+    botId: string,
+    request: NormalizedInviteCreationRequest,
+    options: RequestOptions,
+  ): Promise<void> {
+    if (request.acceptance.kind === "bearer") {
+      const observed = await this.#client.getInvite(invite.code, options)
+      assertInviteVerification(observed, invite, request)
+      return
+    }
+    const inventory = await this.#client.listGuildInvites(request.guildId, options)
+    if (!Array.isArray(inventory) || inventory.length > INVITE_LIMITS.inventory) {
+      throw evidenceError("Discord returned an excessive invite-creation inventory")
+    }
+    const matches = inventory.filter((candidate) => candidate.code === invite.code)
+    const match = matches[0]
+    if (matches.length !== 1 || !match) {
+      throw evidenceError(
+        "Discord returned mismatched exact-user invite identity evidence",
+      )
+    }
+    assertCreatedInvite(match, botId, request)
   }
 
   async #buildCreationPlan(
@@ -1465,11 +1648,12 @@ export class InviteService {
       ),
     ])
     const delivery: InviteCreationPlan["delivery"] = {
-      format: "discord-invite-capability.v1",
+      format: INVITE_CAPABILITY_FILE_FORMAT,
       outputFile: request.outputFile,
       review: targetReview,
     }
     const intent: InviteCreationPlan["intent"] = {
+      acceptance: request.acceptance,
       maxAgeSeconds: request.maxAgeSeconds,
       maxUses: request.maxUses,
       temporaryMembership: request.temporaryMembership,
@@ -1495,12 +1679,23 @@ export class InviteService {
     }
     const warnings = [
       ...(state.access.botAdministrator
-        ? ["Discord connector bot has ADMINISTRATOR; replace it with channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE"]
+        ? [
+            request.acceptance.kind === "exact-users"
+              ? "Discord connector bot has ADMINISTRATOR; replace it with MANAGE_GUILD plus channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE"
+              : "Discord connector bot has ADMINISTRATOR; replace it with channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE",
+          ]
         : []),
       ...(state.access.botIsGuildOwner
         ? ["Discord connector bot owns the guild and therefore bypasses narrower channel permission controls"]
         : []),
-      "The created invite is a bearer capability; anyone who obtains the private file can use it within the reviewed limits",
+      ...(request.acceptance.kind === "bearer"
+        ? ["Anyone who obtains the private file can use the invite within the reviewed finite limits"]
+        : [
+            "Discord must complete and exactly verify the reviewed target-user set before the connector writes the private capability file",
+            "Discord exposes no conditional target-user snapshot, so prevent external invite administration between verification and private capability delivery",
+            "A failed or incomplete target-user job can leave a remote invite whose undisclosed code requires manual invite inventory review",
+          ]),
+      "The created invite remains a bearer capability even when Discord also restricts acceptance to exact users",
       "The connector exclusively creates one private file and never returns the invite code or URL through MCP",
       "The output target must remain absent, canonical, process-owned, and inside the configured private root until execution",
       "Invite creation performs one non-retried Discord mutation and cannot be rolled back automatically",
@@ -1514,7 +1709,7 @@ export class InviteService {
       applicationId,
       botId,
       delivery,
-      domain: "discord-mcp-invite-creation-plan.v1",
+      domain: "discord-mcp-invite-creation-plan.v2",
       guild: {
         id: state.guild.id,
         name: state.guild.name,
@@ -1597,6 +1792,7 @@ export class InviteService {
       () => new InviteCreationExecutionError(
         "Discord invite creation was blocked because a prior same-channel operation ended with an uncertain outcome",
         {
+          acceptance: inviteAcceptanceSummary(normalized),
           capabilityFileWritten: false,
           channelId: normalized.channelId,
           guildId: normalized.guildId,
@@ -1644,6 +1840,7 @@ export class InviteService {
       throw new InviteCreationPlanChangedError(expectedDigest, plan.digest)
     }
     const baseResult = {
+      acceptance: inviteAcceptanceSummary(request),
       capabilityFileWritten: false,
       channelId: request.channelId,
       guildId: request.guildId,
@@ -1716,6 +1913,9 @@ export class InviteService {
         {
           maxAgeSeconds: request.maxAgeSeconds,
           maxUses: request.maxUses,
+          targetUserIds: request.acceptance.kind === "exact-users"
+            ? request.acceptance.userIds
+            : null,
           temporaryMembership: request.temporaryMembership,
         },
         request.auditReason,
@@ -1723,10 +1923,10 @@ export class InviteService {
       )
       assertCreatedInvite(invite, botId, request)
       inviteRef = createInviteReference(this.#planKey, request.guildId, invite.code)
+      await this.#verifyCreatedInviteIdentity(invite, botId, request, options)
+      await this.#verifyInviteAcceptance(invite.code, request, options)
       await capabilityFile.write(inviteCapabilityContent(invite, request))
       capabilityFileWritten = true
-      const observed = await this.#client.getInvite(invite.code, options)
-      assertInviteVerification(observed, invite, request)
     } catch (error) {
       const definiteFailure = !mutationDispatched || (
         inviteRef === null
@@ -1799,6 +1999,7 @@ export class InviteService {
       )
     }
     const result: InviteCreationResult = {
+      acceptance: inviteAcceptanceSummary(request),
       activityId,
       capabilityFileWritten: true,
       channelId: request.channelId,
