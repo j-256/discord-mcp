@@ -1,4 +1,5 @@
 export * from "./activity-log.js"
+export * from "./activity-review.js"
 export * from "./announcement-crosspost-service.js"
 export * from "./announcement-subscription-service.js"
 export * from "./application-emoji-service.js"

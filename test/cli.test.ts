@@ -10,6 +10,16 @@ import {
   type CliDependencies,
 } from "../src/cli.js"
 import {
+  ACTIVITY_HTML_FORMAT,
+  ACTIVITY_HTML_SCHEMA_VERSION,
+  type DiscordActivityHtmlExportReport,
+} from "../src/activity-html.js"
+import {
+  ACTIVITY_REVIEW_FORMAT,
+  ACTIVITY_REVIEW_SCHEMA_VERSION,
+  type DiscordActivityReviewReport,
+} from "../src/activity-review.js"
+import {
   createBotInstallPlan,
   type BotInstallPlan,
 } from "../src/bot-install.js"
@@ -285,6 +295,79 @@ function onboardingHtmlReport(
   }
 }
 
+function activityReviewReport(
+  outcome: "attention" | "clear" = "clear",
+): DiscordActivityReviewReport {
+  return {
+    activityRecordsCreated: false,
+    attention: [],
+    browserOpened: false,
+    claims: [],
+    contentExcluded: [
+      "credentials",
+      "message-content",
+      "attachment-urls",
+      "embeds",
+      "components",
+      "discord-names",
+      "audit-reasons",
+      "raw-operation-keys",
+      "local-paths",
+    ],
+    credentialRead: false,
+    credentialsRequired: false,
+    discordContacted: false,
+    format: ACTIVITY_REVIEW_FORMAT,
+    gatewayOpened: false,
+    limit: 25,
+    activityFilePathExposed: false,
+    outcome,
+    records: [],
+    reportDigest: `sha256:${"d".repeat(64)}`,
+    schemaVersion: ACTIVITY_REVIEW_SCHEMA_VERSION,
+    skippedLines: outcome === "attention" ? 1 : 0,
+    snapshotConsistency: "independent-local-reads",
+    activityStateChanged: false,
+    status: "ok",
+    summary: {
+      attentionActivities: 0,
+      currentActivities: 0,
+      dispositions: [],
+      kinds: [],
+      records: 0,
+      reviewRequiredClaims: 0,
+      statuses: [],
+      unmatchedClaims: 0,
+    },
+    telemetryStarted: false,
+    unmatchedClaimIds: [],
+  }
+}
+
+function activityHtmlReport(
+  file = "/output/discord-mcp-activity.html",
+): DiscordActivityHtmlExportReport {
+  return {
+    activityRecordsCreated: false,
+    activityStateChanged: false,
+    automaticNetwork: "disabled",
+    browserOpened: false,
+    bytes: 65432,
+    credentialsEmbedded: false,
+    credentialsRequired: false,
+    discordContacted: false,
+    externalNavigationOrigins: [],
+    file,
+    format: ACTIVITY_HTML_FORMAT,
+    htmlDigest: `sha256:${"e".repeat(64)}`,
+    outputFileCreated: true,
+    reportDigest: `sha256:${"d".repeat(64)}`,
+    schemaVersion: ACTIVITY_HTML_SCHEMA_VERSION,
+    statePersistence: "disabled",
+    status: "ok",
+  }
+}
+
 function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
@@ -352,6 +435,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async checkCatalog() {
       return catalogReport()
     },
+    async exportActivityHtml(file) {
+      return activityHtmlReport(file)
+    },
     async exportCatalogHtml(file) {
       return catalogHtmlReport(file)
     },
@@ -399,6 +485,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
       return setupReport()
     },
     planRecipe: planConfigRecipe,
+    async reviewActivity() {
+      return activityReviewReport()
+    },
     async resolveCoordination(_environment, claimId) {
       return {
         claimId,
@@ -450,6 +539,27 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "catalog",
     htmlFile: "./catalog.html",
     json: false,
+  })
+  assert.deepEqual(parseCliArguments(["activity"]), {
+    command: "activity",
+    json: false,
+    limit: 25,
+  })
+  assert.deepEqual(parseCliArguments([
+    "activity",
+    "--profile",
+    "support-bot",
+    "--limit",
+    "10",
+    "--html",
+    "./activity.html",
+    "--json",
+  ]), {
+    command: "activity",
+    htmlFile: "./activity.html",
+    json: true,
+    limit: 10,
+    profileName: "support-bot",
   })
   assert.deepEqual(parseCliArguments([
     "coordination",
@@ -790,6 +900,42 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     /mutually exclusive/,
   )
   assert.throws(
+    () => parseCliArguments([
+      "activity",
+      "--config",
+      "/configuration/discord.json",
+      "--profile",
+      "support-bot",
+    ]),
+    /mutually exclusive/,
+  )
+  assert.throws(
+    () => parseCliArguments(["activity", "--limit", "0"]),
+    /integer between 1 and 100/,
+  )
+  assert.throws(
+    () => parseCliArguments(["activity", "--limit", "101"]),
+    /integer between 1 and 100/,
+  )
+  assert.throws(
+    () => parseCliArguments(["activity", "--limit", "1.5"]),
+    /integer between 1 and 100/,
+  )
+  assert.throws(
+    () => parseCliArguments(["activity", "--html"]),
+    /Option --html requires a value/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "activity",
+      "--html",
+      "first.html",
+      "--html",
+      "second.html",
+    ]),
+    /Option --html may be provided only once/,
+  )
+  assert.throws(
     () => parseCliArguments(["config", "migrate", "/configuration/discord.json"]),
     /config requires explain, init, show, or validate/,
   )
@@ -1128,6 +1274,98 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
   assert.match(htmlOutput.value(), new RegExp(CATALOG_HTML_FORMAT))
   assert.match(htmlOutput.value(), /Credentials required: no/)
   assert.match(htmlOutput.value(), /Discord execution: disabled/)
+})
+
+test("CLI reviews activity and optionally exports the exact private HTML report", async () => {
+  const activityFile = "/test/discord-mcp-cli-activity.jsonl"
+  const htmlFile = "/output/discord-mcp-activity.html"
+  const textOutput = outputStream()
+  const jsonOutput = outputStream()
+  const events: string[] = []
+  const clear = activityReviewReport()
+  const attention = activityReviewReport("attention")
+  const reviewDependencies = dependencies({
+    async activateProfile() {
+      throw new Error("Activity review must not activate a profile")
+    },
+    async exportActivityHtml(file, report) {
+      assert.equal(file, htmlFile)
+      assert.equal(report, attention)
+      events.push("html")
+      return activityHtmlReport(file)
+    },
+    loadConfig() {
+      throw new Error("Activity review must not resolve a credential")
+    },
+    async reviewActivity(file, limit) {
+      assert.equal(file, activityFile)
+      events.push(`review:${limit}`)
+      return limit === 10 ? clear : attention
+    },
+    showConfig() {
+      return configShowReport(connectorProfile({ auditFile: activityFile }))
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["activity", "--config", CONFIG_FILE, "--limit", "10"],
+    dependencies: reviewDependencies,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: textOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [
+      "activity",
+      "--config",
+      CONFIG_FILE,
+      "--html",
+      htmlFile,
+      "--json",
+    ],
+    dependencies: reviewDependencies,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stdout: jsonOutput.stream,
+  }), 1)
+
+  assert.match(textOutput.value(), /Discord MCP activity review: clear/)
+  assert.match(textOutput.value(), /Credentials read: no/)
+  assert.match(textOutput.value(), /Discord contacted: no/)
+  assert.match(textOutput.value(), /Activity\/coordination state changed: no/)
+  assert.match(textOutput.value(), /Activity-file path exposed: no/)
+  assert.match(textOutput.value(), /Snapshot consistency: independent-local-reads/)
+  assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
+  const json = JSON.parse(jsonOutput.value())
+  assert.equal(json.outcome, "attention")
+  assert.deepEqual(json.html, activityHtmlReport(htmlFile))
+  assert.equal(JSON.stringify(json).includes(TOKEN), false)
+  assert.deepEqual(events, ["review:10", "review:25", "html"])
+})
+
+test("CLI activity review uses selected policy without resolving credentials or creating state", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-activity-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const activityFile = join(root, "activity.jsonl")
+  const configFile = join(root, "discord-mcp.json")
+  const profile = connectorProfile({ auditFile: activityFile })
+  assert.equal(profile.schemaVersion, 2)
+  await writeConnectorConfigDocumentFile(configFile, profile)
+  const stdout = outputStream()
+
+  assert.equal(await runCli({
+    args: ["activity", "--config", configFile, "--json"],
+    environment: {},
+    stdout: stdout.stream,
+  }), 0)
+
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.format, ACTIVITY_REVIEW_FORMAT)
+  assert.equal(report.outcome, "clear")
+  assert.deepEqual(report.records, [])
+  assert.deepEqual(report.claims, [])
+  assert.equal(report.activityFilePathExposed, false)
+  assert.match(report.reportDigest, /^sha256:[a-f0-9]{64}$/)
+  assert.equal(JSON.stringify(report).includes(root), false)
 })
 
 test("CLI inspects and resolves coordination without credentials or Discord access", async () => {
@@ -2363,6 +2601,7 @@ test("CLI profile lifecycle is credential-free, recoverable, and exactly confirm
 test("CLI renders smoke, help, and version output", async () => {
   const smokeOutput = outputStream()
   const helpOutput = outputStream()
+  const activityHelpOutput = outputStream()
   const catalogHelpOutput = outputStream()
   const configHelpOutput = outputStream()
   const recipeHelpOutput = outputStream()
@@ -2377,6 +2616,11 @@ test("CLI renders smoke, help, and version output", async () => {
     args: ["help", "doctor"],
     dependencies: dependencies(),
     stdout: helpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["activity", "--help"],
+    dependencies: dependencies(),
+    stdout: activityHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
     args: ["catalog", "--help"],
@@ -2403,6 +2647,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
+  assert.match(activityHelpOutput.value(), /activity \[--config FILE \| --profile NAME\]/)
+  assert.match(activityHelpOutput.value(), /changes no activity or coordination state/)
+  assert.match(activityHelpOutput.value(), /Exit status is 0 when clear, 1 when evidence needs attention/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\] \[--html FILE\]/)
   assert.match(catalogHelpOutput.value(), /without replacing an existing file/)
   assert.doesNotMatch(configHelpOutput.value(), /migrate FILE/)

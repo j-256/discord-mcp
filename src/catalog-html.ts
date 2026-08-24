@@ -1,6 +1,3 @@
-import { open, unlink } from "node:fs/promises"
-import { resolve } from "node:path"
-
 import {
   inspectDiscordCatalog,
   type DiscordCatalogSnapshot,
@@ -9,11 +6,15 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   SCHEMA_VERSION,
 } from "./constants.js"
-import { ConfigurationError } from "./errors.js"
 import { MCP_COMPLETION_VALUE_LIMIT } from "./mcp-completions.js"
 import {
   MCP_PLAN_REVIEW_APP_URI,
 } from "./mcp-plan-review-app.js"
+import {
+  resolveExclusivePrivateFile,
+  writeExclusivePrivateFile,
+  type ExclusivePrivateFileSystem,
+} from "./exclusive-private-file.js"
 import {
   MCP_TOOL_CATALOG,
   type CanonicalMcpToolName,
@@ -32,19 +33,8 @@ const ANNOTATION_NAMES = [
   "openWorldHint",
 ] as const
 
-interface CatalogHtmlFileHandle {
-  close(): Promise<void>
-  sync(): Promise<void>
-  writeFile(data: string, encoding: BufferEncoding): Promise<void>
-}
-
-interface CatalogHtmlFileSystem {
-  open(file: string, flags: "wx", mode: number): Promise<CatalogHtmlFileHandle>
-  unlink(file: string): Promise<void>
-}
-
 export interface DiscordCatalogHtmlExportOptions {
-  fileSystem?: CatalogHtmlFileSystem
+  fileSystem?: ExclusivePrivateFileSystem
   inspect?: () => Promise<DiscordCatalogSnapshot>
 }
 
@@ -67,10 +57,11 @@ interface ToolMetadata {
   workflow: string
 }
 
-const DEFAULT_FILE_SYSTEM: CatalogHtmlFileSystem = {
-  open: (file, flags, mode) => open(file, flags, mode),
-  unlink,
-}
+const CATALOG_HTML_FILE_MESSAGES = Object.freeze({
+  exists: "Catalog HTML target already exists; choose a new path or move the existing file",
+  failure: "Catalog HTML export could not be written",
+  invalidPath: "Catalog HTML export requires a valid file path",
+})
 
 function escapeHtml(value: string): string {
   return value
@@ -368,47 +359,18 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
 `
 }
 
-async function writeExclusiveCatalogHtml(
-  file: string,
-  content: string,
-  fileSystem: CatalogHtmlFileSystem,
-): Promise<void> {
-  let created = false
-  let handle: CatalogHtmlFileHandle | undefined
-  let closed = false
-  try {
-    handle = await fileSystem.open(file, "wx", 0o600)
-    created = true
-    await handle.writeFile(content, "utf8")
-    await handle.sync()
-    await handle.close()
-    closed = true
-  } catch (error) {
-    if (handle && !closed) await handle.close().catch(() => undefined)
-    if (created) await fileSystem.unlink(file).catch(() => undefined)
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new ConfigurationError(
-        "Catalog HTML target already exists; choose a new path or move the existing file",
-      )
-    }
-    throw new ConfigurationError("Catalog HTML export could not be written", { cause: error })
-  }
-}
-
 export async function exportDiscordCatalogHtml(
   file: string,
   options: DiscordCatalogHtmlExportOptions = {},
 ): Promise<DiscordCatalogHtmlExportReport> {
-  if (!file.trim() || file.includes("\0")) {
-    throw new ConfigurationError("Catalog HTML export requires a valid file path")
-  }
-  const target = resolve(file)
+  const target = resolveExclusivePrivateFile(file, CATALOG_HTML_FILE_MESSAGES)
   const snapshot = await (options.inspect || inspectDiscordCatalog)()
   const content = renderDiscordCatalogHtml(snapshot)
-  await writeExclusiveCatalogHtml(
+  await writeExclusivePrivateFile(
     target,
     content,
-    options.fileSystem || DEFAULT_FILE_SYSTEM,
+    CATALOG_HTML_FILE_MESSAGES,
+    options.fileSystem,
   )
   return {
     activityRecordsCreated: false,

@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto"
-import { open, unlink } from "node:fs/promises"
-import { resolve } from "node:path"
 
 import {
   createBotInstallPlan,
@@ -8,23 +6,17 @@ import {
 } from "./bot-install.js"
 import { CONNECTOR_VERSION } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
+import {
+  resolveExclusivePrivateFile,
+  writeExclusivePrivateFile,
+  type ExclusivePrivateFileSystem,
+} from "./exclusive-private-file.js"
 
 export const ONBOARDING_HTML_FORMAT = "discord-mcp.onboarding-html.v1"
 export const ONBOARDING_HTML_SCHEMA_VERSION = 1
 
-interface OnboardingHtmlFileHandle {
-  close(): Promise<void>
-  sync(): Promise<void>
-  writeFile(data: string, encoding: BufferEncoding): Promise<void>
-}
-
-interface OnboardingHtmlFileSystem {
-  open(file: string, flags: "wx", mode: number): Promise<OnboardingHtmlFileHandle>
-  unlink(file: string): Promise<void>
-}
-
 export interface DiscordOnboardingHtmlExportOptions {
-  fileSystem?: OnboardingHtmlFileSystem
+  fileSystem?: ExclusivePrivateFileSystem
 }
 
 export interface DiscordOnboardingHtmlExportReport {
@@ -46,10 +38,11 @@ export interface DiscordOnboardingHtmlExportReport {
   status: "ok"
 }
 
-const DEFAULT_FILE_SYSTEM: OnboardingHtmlFileSystem = {
-  open: (file, flags, mode) => open(file, flags, mode),
-  unlink,
-}
+const ONBOARDING_HTML_FILE_MESSAGES = Object.freeze({
+  exists: "Onboarding HTML target already exists; choose a new path or move the existing file",
+  failure: "Onboarding HTML export could not be written",
+  invalidPath: "Onboarding HTML export requires a valid file path",
+})
 
 const ONBOARDING_SCRIPT = `(function () {
   'use strict';
@@ -287,53 +280,19 @@ export function renderDiscordOnboardingHtml(plan: BotInstallPlan): string {
 `
 }
 
-async function writeExclusiveOnboardingHtml(
-  file: string,
-  content: string,
-  fileSystem: OnboardingHtmlFileSystem,
-): Promise<void> {
-  let created = false
-  let handle: OnboardingHtmlFileHandle | undefined
-  let closed = false
-  try {
-    handle = await fileSystem.open(file, "wx", 0o600)
-    created = true
-    await handle.writeFile(content, "utf8")
-    await handle.sync()
-    await handle.close()
-    closed = true
-  } catch (error) {
-    if (handle && !closed) await handle.close().catch(() => undefined)
-    if (created) await fileSystem.unlink(file).catch(() => undefined)
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new ConfigurationError(
-        "Onboarding HTML target already exists; choose a new path or move the existing file",
-      )
-    }
-    throw new ConfigurationError(
-      "Onboarding HTML export could not be written",
-      { cause: error },
-    )
-  }
-}
-
 export async function exportDiscordOnboardingHtml(
   file: string,
   plan: BotInstallPlan,
   options: DiscordOnboardingHtmlExportOptions = {},
 ): Promise<DiscordOnboardingHtmlExportReport> {
-  if (!file.trim() || file.includes("\0")) {
-    throw new ConfigurationError(
-      "Onboarding HTML export requires a valid file path",
-    )
-  }
-  const target = resolve(file)
+  const target = resolveExclusivePrivateFile(file, ONBOARDING_HTML_FILE_MESSAGES)
   const canonical = exactPlan(plan)
   const content = renderDiscordOnboardingHtml(canonical)
-  await writeExclusiveOnboardingHtml(
+  await writeExclusivePrivateFile(
     target,
     content,
-    options.fileSystem || DEFAULT_FILE_SYSTEM,
+    ONBOARDING_HTML_FILE_MESSAGES,
+    options.fileSystem,
   )
   return {
     activityRecordsCreated: false,

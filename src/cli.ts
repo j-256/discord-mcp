@@ -3,6 +3,14 @@
 import { resolve } from "node:path"
 
 import {
+  exportDiscordActivityHtml,
+  type DiscordActivityHtmlExportReport,
+} from "./activity-html.js"
+import {
+  reviewDiscordActivity,
+  type DiscordActivityReviewReport,
+} from "./activity-review.js"
+import {
   checkDiscordCatalog,
   runDiscordMcpCatalog,
   type DiscordCatalogCheckReport,
@@ -23,6 +31,7 @@ import {
   CONNECTOR_NAME,
   CONNECTOR_VERSION,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  CONNECTOR_LIMITS,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
 } from "./constants.js"
 import {
@@ -114,6 +123,7 @@ import {
 } from "./setup-presets.js"
 
 const CLI_COMMANDS = Object.freeze([
+  "activity",
   "catalog",
   "config",
   "coordination",
@@ -137,6 +147,14 @@ const CLI_EXIT_CODES = Object.freeze({
 type CliCommand = typeof CLI_COMMANDS[number]
 
 export type ParsedCliArguments =
+  | {
+    command: "activity"
+    configFile?: string
+    htmlFile?: string
+    json: boolean
+    limit: number
+    profileName?: string
+  }
   | { check: boolean; command: "catalog"; htmlFile?: string; json: boolean }
   | {
     action: "explain"
@@ -277,6 +295,10 @@ export interface CliDependencies {
     stderr: Pick<NodeJS.WriteStream, "write">
   }): unknown
   checkCatalog(): Promise<DiscordCatalogCheckReport>
+  exportActivityHtml(
+    file: string,
+    report: DiscordActivityReviewReport,
+  ): Promise<DiscordActivityHtmlExportReport>
   exportCatalogHtml(file: string): Promise<DiscordCatalogHtmlExportReport>
   exportOnboardingHtml(
     file: string,
@@ -291,6 +313,10 @@ export interface CliDependencies {
   loadConfigDocument(file: string): ConnectorConfigDocument
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
+  reviewActivity(
+    activityFile: string,
+    limit: number,
+  ): Promise<DiscordActivityReviewReport>
   applyRecipe(options: ConfigRecipeApplyOptions): Promise<ConfigRecipeApplyReport>
   planRecipe(options: ConfigRecipePlanOptions): ConfigRecipePlanReport
   resolveCoordination(
@@ -338,6 +364,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   catalog: runDiscordMcpCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
+  exportActivityHtml: exportDiscordActivityHtml,
   exportCatalogHtml: exportDiscordCatalogHtml,
   exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
@@ -354,6 +381,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   loadProfile,
   prepareSetup,
   planRecipe: planConfigRecipe,
+  reviewActivity: reviewDiscordActivity,
   resolveCoordination: async (auditFile, claimId, confirmation) => {
     return new FileWriteCoordinator(
       writeCoordinationDirectory(auditFile),
@@ -876,6 +904,69 @@ function parseProfileCommand(
   }
 }
 
+function parseActivityCommand(
+  args: readonly string[],
+): Extract<ParsedCliArguments, { command: "activity" }> {
+  let configFile: string | undefined
+  let htmlFile: string | undefined
+  let json = false
+  let limit: number = CONNECTOR_LIMITS.activityPageDefault
+  let profileName: string | undefined
+  const seen = new Set<string>()
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (
+      argument !== "--config"
+      && argument !== "--html"
+      && argument !== "--json"
+      && argument !== "--limit"
+      && argument !== "--profile"
+    ) {
+      throw new ConfigurationError(`Unknown option ${argument || ""}`)
+    }
+    if (seen.has(argument)) {
+      throw new ConfigurationError(`Option ${argument} may be provided only once`)
+    }
+    seen.add(argument)
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) {
+      throw new ConfigurationError(`Option ${argument} requires a value`)
+    }
+    if (argument === "--config") configFile = value
+    if (argument === "--html") htmlFile = value
+    if (argument === "--profile") profileName = value
+    if (argument === "--limit") {
+      if (!/^[1-9][0-9]*$/.test(value)) {
+        throw new ConfigurationError(
+          `Option --limit must be an integer between 1 and ${CONNECTOR_LIMITS.activityEntries}`,
+        )
+      }
+      limit = Number(value)
+      if (limit > CONNECTOR_LIMITS.activityEntries) {
+        throw new ConfigurationError(
+          `Option --limit must be an integer between 1 and ${CONNECTOR_LIMITS.activityEntries}`,
+        )
+      }
+    }
+    index += 1
+  }
+  if (configFile && profileName) {
+    throw new ConfigurationError("Options --config and --profile are mutually exclusive")
+  }
+  return {
+    command: "activity",
+    ...(configFile ? { configFile } : {}),
+    ...(htmlFile ? { htmlFile } : {}),
+    json,
+    limit,
+    ...(profileName ? { profileName } : {}),
+  }
+}
+
 function parseCoordinationCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "coordination" }> {
@@ -996,6 +1087,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
       ...(options.profileName ? { profileName: options.profileName } : {}),
     }
   }
+  if (command === "activity") return parseActivityCommand(rest)
   if (command === "catalog") {
     let check = false
     let htmlFile: string | undefined
@@ -1045,6 +1137,9 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
 }
 
 function helpText(topic: CliCommand | undefined): string {
+  if (topic === "activity") {
+    return "Usage: discord-mcp activity [--config FILE | --profile NAME] [--limit N] [--html FILE] [--json]\n\nReview bounded recent content-free write lifecycles together with durable coordination claims. The command resolves no credential, contacts no network or Discord endpoint, changes no activity or coordination state, and omits the local activity-file path. Optional HTML exclusively creates the requested private output file from the exact digest-bound report. Exit status is 0 when clear, 1 when evidence needs attention, and 2 on command failure."
+  }
   if (topic === "catalog") {
     return "Usage: discord-mcp catalog [--check] [--json] [--html FILE]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check. Add --html FILE to perform the same check and exclusively write a standalone interactive contract explorer without replacing an existing file."
   }
@@ -1127,6 +1222,7 @@ function helpText(topic: CliCommand | undefined): string {
     `Usage: ${CONNECTOR_NAME} <command> [options]`,
     "",
     "Commands:",
+    "  activity  Review content-free write outcomes and durable claims",
     "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
     "  config   Create, validate, and inspect one non-secret policy file",
     "  coordination  Inspect or resolve one policy's durable reviewed-write claims",
@@ -1186,6 +1282,78 @@ function renderCatalogHtmlExport(report: DiscordCatalogHtmlExportReport): string
     "Credentials required: no",
     "Discord execution: disabled",
     "Activity records created: no",
+  ].join("\n")
+}
+
+function renderActivityReview(report: DiscordActivityReviewReport): string {
+  const lines = [
+    `Discord MCP activity review: ${report.outcome}`,
+    `Report digest: ${report.reportDigest}`,
+    `Recent records: ${report.summary.records} (limit ${report.limit})`,
+    `Current activities: ${report.summary.currentActivities}`,
+    `Activities needing attention: ${report.summary.attentionActivities}`,
+    `Durable claims: ${report.claims.length} (${report.summary.reviewRequiredClaims} review required, ${report.summary.unmatchedClaims} without recent activity)`,
+    `Skipped recent lines: ${report.skippedLines}`,
+    `Snapshot consistency: ${report.snapshotConsistency}`,
+    "Credentials read: no",
+    "Discord contacted: no",
+    "Activity/coordination state changed: no",
+    "Activity-file path exposed: no",
+  ]
+  if (report.records.length === 0) {
+    lines.push("", "No content-free write activity exists in this recent window.")
+  } else {
+    lines.push("", "Recent activity lifecycles (newest first):")
+    for (const record of report.records) {
+      lines.push(
+        `${record.current ? "CURRENT" : "HISTORY"} ${record.entry.timestamp} ${record.entry.kind}/${record.entry.status} [${record.disposition}]`,
+        `  Activity: ${record.entry.id}`,
+        `  Claims: ${record.claimIds.length > 0 ? record.claimIds.join(", ") : "none in recent correlation"}`,
+        `  Next: ${record.guidance}`,
+        `  Evidence: ${JSON.stringify(record.entry)}`,
+      )
+    }
+  }
+  if (report.claims.length === 0) {
+    lines.push("", "Durable claims: none")
+  } else {
+    lines.push("", "Durable claims:")
+    for (const claim of report.claims) {
+      lines.push(
+        `${claim.state.toUpperCase()} ${claim.claimId} ${claim.kind}`,
+        `  Owner: ${claim.ownerState} / PID ${claim.ownerPid}`,
+        `  Receipt: ${claim.receiptState}`,
+        `  Targets: ${JSON.stringify(claim.targets)}`,
+        `  Recent activity correlation: ${report.unmatchedClaimIds.includes(claim.claimId) ? "none in bounded window" : "matched by operation-key hash and plan digest"}`,
+        `  Next: ${claim.state === "review-required" ? "Stop the owner, inspect exact Discord state and audit log, then use coordination resolve with exact confirmation" : claim.state === "active" ? "Do not interfere with or retry the active operation" : "A later writer may reclaim only through existing safe receipt evidence"}`,
+      )
+    }
+  }
+  if (report.skippedLines > 0) {
+    lines.push(
+      "",
+      "WARNING: Recent non-empty journal lines failed the strict content-free schema. Treat this review as incomplete.",
+    )
+  }
+  return lines.join("\n")
+}
+
+function renderActivityHtmlExport(
+  report: DiscordActivityHtmlExportReport,
+): string {
+  return [
+    "Discord MCP activity HTML: ok",
+    `File: ${report.file}`,
+    `Format: ${report.format}`,
+    `Review digest: ${report.reportDigest}`,
+    `HTML digest: ${report.htmlDigest}`,
+    `Bytes: ${report.bytes}`,
+    "Output file created: yes",
+    "Credentials embedded: no",
+    "Automatic network: disabled",
+    "Browser opened: no",
+    "Activity state changed: no",
+    "State persistence: disabled",
   ].join("\n")
 }
 
@@ -1777,7 +1945,7 @@ async function doctorSelection(
   }
 }
 
-async function coordinationActivityFile(
+async function selectedActivityFile(
   selection: { configFile?: string; profileName?: string },
   environment: NodeJS.ProcessEnv,
   dependencies: CliDependencies,
@@ -1810,6 +1978,33 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
   try {
     parsed = parseCliArguments(args)
     switch (parsed.command) {
+      case "activity": {
+        const activityFile = await selectedActivityFile(
+          parsed,
+          environment,
+          dependencies,
+        )
+        const report = await dependencies.reviewActivity(
+          activityFile,
+          parsed.limit,
+        )
+        const html = parsed.htmlFile
+          ? await dependencies.exportActivityHtml(parsed.htmlFile, report)
+          : undefined
+        safeWrite(
+          stdout,
+          parsed.json
+            ? jsonReport({ ...report, ...(html ? { html } : {}) })
+            : [
+                renderActivityReview(report),
+                ...(html ? [renderActivityHtmlExport(html)] : []),
+              ].join("\n\n"),
+          environment,
+        )
+        return report.outcome === "attention"
+          ? CLI_EXIT_CODES.warning
+          : CLI_EXIT_CODES.success
+      }
       case "catalog": {
         if (parsed.htmlFile) {
           const report = await dependencies.exportCatalogHtml(parsed.htmlFile)
@@ -1903,7 +2098,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "coordination": {
-        const activityFile = await coordinationActivityFile(
+        const activityFile = await selectedActivityFile(
           parsed,
           environment,
           dependencies,

@@ -116,6 +116,16 @@ Operational commands require `--config FILE`, `--profile NAME`, or the non-secre
 
 Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
 
+Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.0 activity \
+  --config ./discord-mcp.json \
+  --html ./discord-mcp-activity.html
+```
+
+The bounded review collapses each activity ID into its newest current outcome while retaining older records as superseded history. Pending, uncertain, failed, drifted, malformed, and review-required evidence produces warning exit status instead of looking like a clean run. Matching reviewed operations are joined to durable claims only through both their content-free operation-key hash and plan digest, while claims without a match in the bounded window remain explicitly labeled. The digest binds the exact collected report, while its independent-read marker avoids implying that separate local files were captured under one global state lock. The optional private standalone explorer adds search and filters but cannot contact Discord, resolve a claim, retry an operation, persist browser state, or expose the selected activity-file path. Use the separate exact-confirmation `coordination resolve` command only after stopping the owning process and checking the exact Discord state and audit log.
+
 New feature policy follows the same document shape. For example, reviewed role retirement uses `capabilities.roleDeletionAudit`, `capabilities.roleDeletions`, `scopes.roleDeletionIds`, `gateway.enabled`, and the `role-deletion` toolset. No equivalent environment-policy interface exists.
 
 Use `channel-reader` only when bounded message history and native search are needed. It requires at least one exact channel:
@@ -167,7 +177,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | Guild structure | Privacy-minimized two-pass capture into caller-retained declarative guild blueprints across additive structure, guild profile, named settings, complete Welcome Screens, complete onboarding, and ordered restart-verifiable static Components V2 publications; additive channels and roles; reviewed exact channel and standard-role retirement; resumable scaffolds; atomic channel cloning; relative channel and role ordering; boost-aware voice and Stage channel metadata; connection-sensitive voice-channel status changes; permission overwrites; forum tags; and exact role configuration with reviewed local or Unicode icons |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, time-bounded incident actions, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
-| Operations | Full or progressive tool discovery, resources, prompts, policy-aware exact-ID completion, optional display-only MCP App plan review, strict non-secret policy files and managed profiles, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
+| Operations | Full or progressive tool discovery, resources, prompts, policy-aware exact-ID completion, optional display-only MCP App plan review, strict non-secret policy files and managed profiles, deterministic read-only presets, review-first additive policy recipes, privacy-safe application posture audits, digest-bound content-free activity review with optional private HTML, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).
 
@@ -208,6 +218,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
 | `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
+| `discord-mcp activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |
 | `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
 | `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
