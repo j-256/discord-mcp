@@ -42,7 +42,7 @@ import {
 } from "./profile.js"
 import { getSetupPreset } from "./setup-presets.js"
 
-export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 1
+export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 2
 
 const FILE_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
@@ -92,12 +92,18 @@ export interface ConfigShowReport extends ConfigValidationReport {
   document: ConnectorConfigDocument
 }
 
-export interface ConfigExplainEntry extends ConfigDocumentField {
+export interface ConfigExplainEntry extends Omit<ConfigDocumentField, "environmentVariable"> {
+  migrationEnvironmentVariable?: string
   schema: unknown
+}
+
+export interface ConfigExplainOptions {
+  includeMigrationAliases?: boolean
 }
 
 export interface ConfigExplainReport {
   fields: readonly ConfigExplainEntry[]
+  migrationAliasesIncluded: boolean
   query: string
   schemaId: string
   schemaVersion: number
@@ -277,17 +283,22 @@ function normalizedExplainQuery(value: string | undefined): string {
 
 export function explainConnectorConfig(
   path?: string,
+  options: ConfigExplainOptions = {},
 ): ConfigExplainReport {
   const query = normalizedExplainQuery(path)
   const schema = connectorConfigJsonSchema()
+  const includeMigrationAliases = options.includeMigrationAliases === true
   const fields = connectorConfigFields()
     .filter((field) => (
       query === "$"
       || field.path === query
       || field.path.startsWith(`${query}.`)
     ))
-    .map((field) => ({
+    .map(({ environmentVariable, ...field }) => ({
       ...field,
+      ...(includeMigrationAliases && environmentVariable
+        ? { migrationEnvironmentVariable: environmentVariable }
+        : {}),
       schema: schemaAtPath(schema, field.path),
     }))
   if (fields.length === 0) {
@@ -295,6 +306,7 @@ export function explainConnectorConfig(
   }
   return {
     fields,
+    migrationAliasesIncluded: includeMigrationAliases,
     query,
     schemaId: CONFIG_DOCUMENT_SCHEMA_ID,
     schemaVersion: CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,

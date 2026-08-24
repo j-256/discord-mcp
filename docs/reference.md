@@ -434,6 +434,7 @@ node dist/cli.js setup --config ./discord-mcp.json
 node dist/cli.js config validate ./discord-mcp.json
 node dist/cli.js config show ./discord-mcp.json
 node dist/cli.js config explain capabilities.deletions
+node dist/cli.js config explain capabilities.deletions --migration
 node dist/cli.js config migrate ./migrated.json --name migrated
 node dist/cli.js setup --profile observer --preset server-observer --guild-id GUILD_ID
 node dist/cli.js setup --profile observer
@@ -481,7 +482,7 @@ Run `node dist/cli.js help` for the complete command summary.
 
 ## Configuration
 
-The operational interface is one strict versioned non-secret JSON document plus environment variables only for referenced secrets. The document covers verified identity, read scope, tool selection, Gateway behavior, every capability and exact feature scope, bounded limits, owned local storage roots, runtime settings, and credential-free observability. Its `$schema` field points at the published [JSON Schema](../discord-mcp.config.schema.json) for editor support.
+The operational interface is one strict versioned non-secret JSON document plus only the secrets referenced by that document. A typical deployment therefore has one policy file and one bot-token secret. The document covers verified identity, read scope, tool selection, Gateway behavior, every capability and exact feature scope, bounded limits, owned local storage roots, runtime settings, and credential-free observability. Its `$schema` field points at the published [JSON Schema](../discord-mcp.config.schema.json) for editor support.
 
 Create and verify the first file directly against the caller-owned bot:
 
@@ -496,11 +497,11 @@ discord-mcp doctor --config ./discord-mcp.json --online
 discord-mcp smoke --config ./discord-mcp.json
 ```
 
-`config init FILE` creates a preset-backed file from caller-supplied public IDs without contacting Discord. `config migrate FILE --name NAME` converts legacy environment policy, while `config migrate FILE --profile NAME` converts a schema-v1 managed profile. `config validate FILE` uses placeholder secrets to check strict structure and every cross-field policy without reading secret values or contacting Discord. `config show FILE` returns the canonical document and a bounded summary; `config explain [PATH]` returns schema-backed descriptions for the whole document or one field. Add `--json` for versioned reports. `--force` retains a recoverable hidden backup and cannot replace the pinned application or bot identity. See the [environment-policy migration guide](environment-migration.md) for the legacy input catalog and conversion procedure.
+`config init FILE` creates a preset-backed file from caller-supplied public IDs without contacting Discord. `config migrate FILE --name NAME` converts legacy environment policy, while `config migrate FILE --profile NAME` converts a schema-v1 managed profile. `config validate FILE` uses placeholder secrets to check strict structure and every cross-field policy without reading secret values or contacting Discord. `config show FILE` returns the canonical document and a bounded summary; `config explain [PATH]` returns schema-backed descriptions for the whole document or one field without advertising migration aliases. Add `--migration` only when mapping legacy environment policy, and add `--json` for versioned reports. `--force` retains a recoverable hidden backup and cannot replace the pinned application or bot identity. See the [legacy environment-policy migration guide](environment-migration.md) for the compatibility catalog and conversion procedure.
 
-### Environment-policy migration
+### Legacy environment-policy migration
 
-Operational commands do not accept ambient policy as their authority. Use [the environment-policy migration guide](environment-migration.md) to convert legacy variables or a schema-v1 profile into one strict schema-v2 document. Only referenced secret variables and the optional `DISCORD_MCP_CONFIG_FILE` selector remain in the operational environment.
+Operational commands do not accept ambient policy as their authority. Use [the legacy environment-policy migration guide](environment-migration.md) to convert legacy variables or a schema-v1 profile into one strict schema-v2 document. Only referenced secret variables and the optional `DISCORD_MCP_CONFIG_FILE` selector remain in the operational environment.
 
 Selecting a file with `--config FILE` or `DISCORD_MCP_CONFIG_FILE` makes that document the exclusive policy source. Startup permits only the selector and the exact secret variables referenced by the document. It rejects every other populated recognized policy variable, unknown `DISCORD_MCP_*` variable, and unknown `OTEL_*` variable so ambient state cannot override, extend, or ambiguously combine with file policy. A config file and profile are mutually exclusive.
 

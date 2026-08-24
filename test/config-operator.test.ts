@@ -265,11 +265,27 @@ test("legacy profile migration preserves its effective compatibility policy", as
 test("configuration explanation returns bounded schema-backed field metadata", () => {
   const report = explainConnectorConfig("capabilities.deletions")
   assert.equal(report.query, "$.capabilities.deletions")
+  assert.equal(report.migrationAliasesIncluded, false)
   assert.equal(report.fields.length, 1)
-  assert.equal(report.fields[0]?.environmentVariable, ENVIRONMENT_NAMES.allowDeletions)
+  assert.equal(report.fields[0]?.migrationEnvironmentVariable, undefined)
+  assert.equal(Object.hasOwn(report.fields[0] ?? {}, "environmentVariable"), false)
   assert.equal(
     (report.fields[0]?.schema as { type?: string }).type,
     "boolean",
+  )
+
+  const migrationReport = explainConnectorConfig(
+    "capabilities.deletions",
+    { includeMigrationAliases: true },
+  )
+  assert.equal(migrationReport.migrationAliasesIncluded, true)
+  assert.equal(
+    migrationReport.fields[0]?.migrationEnvironmentVariable,
+    ENVIRONMENT_NAMES.allowDeletions,
+  )
+  assert.equal(
+    Object.hasOwn(migrationReport.fields[0] ?? {}, "environmentVariable"),
+    false,
   )
   assert.throws(
     () => explainConnectorConfig("capabilities.notReal"),

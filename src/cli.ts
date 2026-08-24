@@ -27,6 +27,7 @@ import {
   migrateConnectorConfigFile,
   showConnectorConfigFile,
   validateConnectorConfigFile,
+  type ConfigExplainOptions,
   type ConfigExplainReport,
   type ConfigInitOptions,
   type ConfigMigrateOptions,
@@ -117,6 +118,7 @@ export type ParsedCliArguments =
     action: "explain"
     command: "config"
     json: boolean
+    migrationAliases: boolean
     path?: string
   }
   | {
@@ -229,7 +231,7 @@ export interface CliDependencies {
   }): unknown
   checkCatalog(): Promise<DiscordCatalogCheckReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
-  explainConfig(path?: string): ConfigExplainReport
+  explainConfig(path?: string, options?: ConfigExplainOptions): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
   listCoordination(activityFile: string): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
@@ -440,12 +442,13 @@ function parseConfigCommand(
     const path = args[1]?.startsWith("--") ? undefined : args[1]
     const options = parseBooleanOptions(
       args.slice(path ? 2 : 1),
-      new Set(["--json"]),
+      new Set(["--json", "--migration"]),
     )
     return {
       action,
       command: "config",
       json: options.has("--json"),
+      migrationAliases: options.has("--migration"),
       ...(path ? { path } : {}),
     }
   }
@@ -881,16 +884,16 @@ function helpText(topic: CliCommand | undefined): string {
       "",
       "Actions:",
       "  init FILE --name NAME --application-id ID --bot-id ID --guild-id ID... [--preset PRESET] [--channel-id ID...] [--token-env VARIABLE] [--force] [--json]",
-      "  migrate FILE (--name NAME [--token-env VARIABLE] | --profile NAME) [--force] [--json]",
+      "  migrate FILE (--name NAME [--token-env VARIABLE] | --profile NAME) [--force] [--json]  Convert legacy policy",
       "  validate FILE [--json]",
       "  show FILE [--json]",
-      "  explain [PATH] [--json]",
+      "  explain [PATH] [--migration] [--json]",
       "",
-      "Create, migrate, validate, and inspect strict non-secret configuration files. Validation does not read secret values or contact Discord. Replacement preserves a recoverable backup and cannot change the pinned Discord identity.",
+      "Normal operation uses one strict non-secret configuration file plus only the secrets it references. Add --migration to explain only while translating legacy environment policy. Validation does not read secret values or contact Discord. Replacement preserves a recoverable backup and cannot change the pinned Discord identity.",
     ].join("\n")
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy. Add --online to verify Discord identity and scoped guild access. DISCORD_MCP_CONFIG_FILE may select the file instead. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy. Add --online to verify Discord identity and scoped guild access. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "coordination") {
     return [
@@ -907,10 +910,10 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
-    return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool. DISCORD_MCP_CONFIG_FILE may select the file instead."
+    return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
   }
   if (topic === "serve") {
-    return "Usage: discord-mcp serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. DISCORD_MCP_CONFIG_FILE may select the file instead."
+    return "Usage: discord-mcp serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
   }
   if (topic === "profile") {
     return [
@@ -1298,6 +1301,11 @@ function renderConfigExplain(report: ConfigExplainReport): string {
   return [
     `Discord MCP configuration fields: ${report.query}`,
     `Schema: ${report.schemaId}`,
+    "Operational policy source: one selected schema-v2 configuration document",
+    "Secret values: external references only; never stored in the policy document",
+    report.migrationAliasesIncluded
+      ? "Migration aliases: included for one-time legacy conversion only; operational commands reject them"
+      : "Migration aliases: hidden; add --migration only while converting legacy environment policy",
     "",
     ...report.fields.flatMap((field, index) => [
       ...(index > 0 ? [""] : []),
@@ -1306,7 +1314,9 @@ function renderConfigExplain(report: ConfigExplainReport): string {
       `  Type: ${field.kind}`,
       `  Required: ${field.required ? "yes" : "no"}`,
       `  Default: ${field.defaultValue === undefined ? "none" : JSON.stringify(field.defaultValue)}`,
-      `  Legacy environment: ${field.environmentVariable ?? "none"}`,
+      ...(field.migrationEnvironmentVariable
+        ? [`  Migration-only input: ${field.migrationEnvironmentVariable}`]
+        : []),
     ]),
   ].join("\n")
 }
@@ -1478,7 +1488,9 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
       }
       case "config": {
         if (parsed.action === "explain") {
-          const report = dependencies.explainConfig(parsed.path)
+          const report = dependencies.explainConfig(parsed.path, {
+            includeMigrationAliases: parsed.migrationAliases,
+          })
           safeWrite(
             stdout,
             parsed.json ? jsonReport(report) : renderConfigExplain(report),

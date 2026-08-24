@@ -508,8 +508,8 @@ async function checkDocumentation(packageJson) {
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
-  invariant(reference.includes("[environment-policy migration guide](environment-migration.md)"), "complete reference migration link is invalid")
-  invariant(migration.startsWith("# Migrate environment policy to a configuration file\n"), "environment migration heading is invalid")
+  invariant(reference.includes("[legacy environment-policy migration guide](environment-migration.md)"), "complete reference migration link is invalid")
+  invariant(migration.startsWith("# Migrate legacy environment policy to a configuration file\n"), "environment migration heading is invalid")
   const documentedCompatibilityEnvironmentNames = [
     ...migration.matchAll(/^\| `([A-Z0-9_]+)`(?:, `([A-Z0-9_]+)`)?(?:, `([A-Z0-9_]+)`)? \|/gm),
   ].flatMap((match) => match.slice(1).filter(Boolean)).sort()

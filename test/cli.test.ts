@@ -287,8 +287,8 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async diagnose() {
       return doctorReport()
     },
-    explainConfig(path) {
-      return explainConnectorConfig(path)
+    explainConfig(path, options) {
+      return explainConnectorConfig(path, options)
     },
     async initializeConfig() {
       return configWriteReport("init")
@@ -457,11 +457,13 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "config",
     "explain",
     "capabilities.deletions",
+    "--migration",
     "--json",
   ]), {
     action: "explain",
     command: "config",
     json: true,
+    migrationAliases: true,
     path: "capabilities.deletions",
   })
   assert.throws(
@@ -746,6 +748,10 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(() => parseCliArguments(["smoke", "--other"]), /Unknown option/)
   assert.throws(() => parseCliArguments(["catalog", "--json"]), /requires --check/)
   assert.throws(() => parseCliArguments(["catalog", "--check", "--check"]), /only once/)
+  assert.throws(
+    () => parseCliArguments(["config", "explain", "--migration", "--migration"]),
+    /only once/,
+  )
   assert.throws(() => parseCliArguments(["coordination"]), /requires list or resolve/)
   assert.throws(
     () => parseCliArguments(["coordination", "resolve", `claim_${"a".repeat(32)}`]),
@@ -1619,9 +1625,9 @@ test("CLI routes config lifecycle commands without exposing credential values", 
   const environment = { [TOKEN_ALIAS]: TOKEN }
   const output = outputStream()
   const configDependencies = dependencies({
-    explainConfig(path) {
-      events.push(`explain:${path}`)
-      return explainConnectorConfig(path)
+    explainConfig(path, options) {
+      events.push(`explain:${path}:${options?.includeMigrationAliases === true}`)
+      return explainConnectorConfig(path, options)
     },
     async initializeConfig(options) {
       events.push(`init:${options.file}:${options.name}`)
@@ -1696,12 +1702,41 @@ test("CLI routes config lifecycle commands without exposing credential values", 
   assert.deepEqual(events, [
     "validate:/configuration/discord-mcp.json",
     "show:/configuration/discord-mcp.json",
-    "explain:capabilities.deletions",
+    "explain:capabilities.deletions:false",
     "init:/configuration/new.json:new",
     "migrate:/configuration/migrated.json:migrated",
   ])
   assert.equal(output.value().includes(TOKEN), false)
   assert.match(output.value(), /secret values, and did not contact Discord/)
+})
+
+test("CLI hides legacy configuration aliases unless migration details are requested", async () => {
+  const operationalOutput = outputStream()
+  const migrationOutput = outputStream()
+
+  assert.equal(await runCli({
+    args: ["config", "explain", "capabilities.deletions", "--json"],
+    dependencies: dependencies(),
+    stdout: operationalOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [
+      "config",
+      "explain",
+      "capabilities.deletions",
+      "--migration",
+      "--json",
+    ],
+    dependencies: dependencies(),
+    stdout: migrationOutput.stream,
+  }), 0)
+
+  assert.match(operationalOutput.value(), /"migrationAliasesIncluded": false/)
+  assert.doesNotMatch(operationalOutput.value(), /DISCORD_MCP_ALLOW_DELETIONS/)
+  assert.doesNotMatch(operationalOutput.value(), /"environmentVariable"/)
+  assert.match(migrationOutput.value(), /"migrationAliasesIncluded": true/)
+  assert.match(migrationOutput.value(), /"migrationEnvironmentVariable": "DISCORD_MCP_ALLOW_DELETIONS"/)
+  assert.doesNotMatch(migrationOutput.value(), /"environmentVariable"/)
 })
 
 test("CLI profile lifecycle is credential-free, recoverable, and exactly confirmed", async () => {
@@ -1854,6 +1889,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\]/)
   assert.match(configHelpOutput.value(), /migrate FILE/)
+  assert.match(configHelpOutput.value(), /explain \[PATH\] \[--migration\] \[--json\]/)
+  assert.match(configHelpOutput.value(), /one strict non-secret configuration file/)
   assert.match(versionOutput.value(), /0\.1\.0/)
 })
 

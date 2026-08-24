@@ -27,6 +27,7 @@ Requirements:
 
 - Node.js 22 or newer
 - A Discord application with a bot user
+- One strict non-secret JSON policy file
 - The bot token available only through an environment variable
 - Only the Discord permissions needed for the selected read or reviewed-write scope
 
@@ -92,7 +93,7 @@ $env:DISCORD_BOT_TOKEN = "YOUR_DISCORD_BOT_TOKEN"
 
 The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery. It cannot enable writes, the Gateway, telemetry export, activity persistence, or Message Content access. Setup stores the credential variable name and verified public IDs, never the token value, and prints a portable stdio launch descriptor for a compatible MCP client.
 
-The versioned file is the canonical policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. Tokens and collector headers remain environment-only secret references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Schema-v2 managed profiles use the same document when private per-user storage is preferable.
+The versioned file is the canonical policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one bot-token secret. Tokens and optional authenticated-collector headers remain environment-only secret references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Schema-v2 managed profiles use the same document when private per-user storage is preferable.
 
 Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Policy environment variables are accepted only by `config migrate`; they cannot silently extend or override a selected document. Running `setup` without a preset verifies an existing schema-v2 policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
@@ -189,7 +190,7 @@ This separation keeps Discord transport behavior, permission evidence, local aut
 ## Documentation
 
 - [Complete operator and capability reference](docs/reference.md)
-- [Environment-policy migration guide](docs/environment-migration.md)
+- [Legacy environment-policy migration guide](docs/environment-migration.md)
 - [Security model and reporting](SECURITY.md)
 - [Release and independent verification runbook](docs/releasing.md)
 - [MCP Registry manifest](server.json)

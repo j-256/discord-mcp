@@ -1,8 +1,10 @@
-# Migrate environment policy to a configuration file
+# Migrate legacy environment policy to a configuration file
 
 [Project overview](../README.md) | [Complete reference](reference.md#configuration)
 
 Discord MCP operational commands require one schema-v2 configuration file or managed profile. Legacy policy environment variables remain accepted only as inputs to the migration command and lower-level compatibility APIs. The runtime environment should contain the secret variables referenced by the selected document, plus `DISCORD_MCP_CONFIG_FILE` only when it is used instead of `--config`.
+
+> Do not use this catalog to configure a new deployment. Use one strict JSON policy file plus the bot-token secret it references. Add collector-header secrets only when the document enables an authenticated telemetry exporter.
 
 The configuration document is deliberately non-secret. It owns verified public identity, exact Discord scope, tool selection, capabilities, limits, storage, Gateway behavior, runtime settings, and observability policy. Bot tokens and collector headers stay in the launcher's secret store and appear in the document only as environment-variable references.
 
@@ -35,11 +37,14 @@ discord-mcp config migrate ./discord-mcp.json --profile PROFILE_NAME
 
 Schema-v1 profiles remain inspectable so operators can recover their settings, but `serve`, `doctor`, `smoke`, `setup`, and `coordination` reject them until conversion. This prevents ambient variables from silently extending an incomplete legacy profile.
 
-Use `discord-mcp config explain [PATH]` for schema-backed descriptions and the published [JSON Schema](../discord-mcp.config.schema.json) for editor validation.
+Use `discord-mcp config explain [PATH]` for schema-backed operational descriptions and the published [JSON Schema](../discord-mcp.config.schema.json) for editor validation. Add `--migration` only when a legacy environment-variable name is needed during conversion.
 
 ## Legacy input catalog
 
-The table below documents migration inputs. Except for referenced secrets and the optional config-file selector, these variables are not an operational configuration interface.
+The catalog below documents migration inputs. Except for referenced secrets and the optional config-file selector, these variables are not an operational configuration interface.
+
+<details>
+<summary>Show migration-only environment variable catalog</summary>
 
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
@@ -215,5 +220,7 @@ The table below documents migration inputs. Except for referenced secrets and th
 | `DISCORD_MCP_ALLOW_PERMISSION_OVERWRITES` | For permission-overwrite changes | Must be exactly `true` to enable reviewed exact-target permission-overwrite updates or deletions |
 | `DISCORD_MCP_PERMISSION_OVERWRITE_CHANNEL_IDS` | For permission-overwrite changes | Non-empty exact direct guild-channel allowlist and a subset of the read channel allowlist when one exists |
 | `DISCORD_MCP_AUDIT_FILE` | No | Activity JSONL path; reviewed-write operation receipts and durable coordination claims use separate adjacent private directories; defaults under the user's local state directory |
+
+</details>
 
 An unset read allowlist in legacy input means all guild channels Discord allows the bot to view. The migration command preserves that meaning in the generated document, while the bot's Discord role remains authoritative.
