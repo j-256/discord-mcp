@@ -302,7 +302,7 @@ async function checkSourceIdentity(packageJson) {
   )
   invariant(
     !source.includes("ENVIRONMENT_NAMES"),
-    "source must not restore a legacy policy environment catalog",
+    "source must not add an alternate policy environment catalog",
   )
   assertEqual(
     policyEnvironmentNames,

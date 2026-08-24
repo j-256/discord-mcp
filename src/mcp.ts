@@ -359,6 +359,12 @@ import { registerDiscordGuidance } from "./mcp-guidance.js"
 import { registerDiscordNativeInteractionMcp } from "./mcp-native-interactions.js"
 import { registerDiscordObservabilityMcp } from "./mcp-observability.js"
 import { redactMcpValue } from "./mcp-output.js"
+import {
+  attachPlanReviewApp,
+  MCP_APP_EXTENSION_ID,
+  MCP_PLAN_REVIEW_APP_MIME_TYPE,
+  registerDiscordPlanReviewApp,
+} from "./mcp-plan-review-app.js"
 import { runReviewedToolExecution } from "./mcp-reviewed-execution.js"
 import {
   createDiscordToolDiscoveryCatalog,
@@ -14164,6 +14170,11 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         "tools/list": { cacheScope: "public", ttlMs: CATALOG_CACHE_TTL_MS },
       },
       capabilities: {
+        extensions: {
+          [MCP_APP_EXTENSION_ID]: {
+            mimeTypes: [MCP_PLAN_REVIEW_APP_MIME_TYPE],
+          },
+        },
         resources: gateway.enabled || nativeInteractions.enabled
           ? { subscribe: true }
           : {},
@@ -14175,6 +14186,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     },
   )
 
+  registerDiscordPlanReviewApp(server)
   const policy = service.describePolicy()
   registerDiscordGuidance(server, {
     ...(!options.catalogOnly ? { completionPolicy: policy } : {}),
@@ -14206,6 +14218,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     if (canonicalTools.has(name)) {
       throw new Error(`Duplicate canonical MCP tool ${name}`)
     }
+    attachPlanReviewApp(name, tool)
     canonicalTools.set(name, tool)
   }
 

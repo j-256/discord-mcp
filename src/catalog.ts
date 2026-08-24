@@ -48,6 +48,16 @@ import {
   type DiscordToolService,
 } from "./mcp.js"
 import {
+  MCP_APP_EXTENSION_ID,
+  MCP_PLAN_REVIEW_APP_HTML,
+  MCP_PLAN_REVIEW_APP_MIME_TYPE,
+  MCP_PLAN_REVIEW_APP_RESOURCE_META,
+  MCP_PLAN_REVIEW_APP_URI,
+  MCP_PLAN_REVIEW_TOOL_META,
+  MCP_PLAN_REVIEW_TOOL_NAMES,
+  isPlanReviewToolName,
+} from "./mcp-plan-review-app.js"
+import {
   selectedCanonicalMcpToolNames,
 } from "./mcp-tool-catalog.js"
 import { stableString } from "./normalize.js"
@@ -123,6 +133,19 @@ export interface DiscordCatalogCheckReport {
   executionGuard: typeof CATALOG_ONLY_ERROR_CODE
   gateway: "disabled"
   observabilityExport: "disabled"
+  planReviewApp: {
+    externalNetworkDomains: []
+    extensionId: typeof MCP_APP_EXTENSION_ID
+    htmlDigest: string
+    linkedToolCount: number
+    linkedToolNames: string[]
+    mimeType: typeof MCP_PLAN_REVIEW_APP_MIME_TYPE
+    permissions: []
+    resourceDigest: string
+    resourceUri: typeof MCP_PLAN_REVIEW_APP_URI
+    serverToolAuthority: false
+    toolVisibility: ["model"]
+  }
   promptCount: number
   promptNames: string[]
   resourceCount: number
@@ -146,6 +169,7 @@ export interface DiscordCatalogSnapshot {
   executionGuard: CallToolResult
   instructions: string
   prompts: ListPromptsResult["prompts"]
+  planReviewAppResource: ReadResourceResult
   report: DiscordCatalogCheckReport
   resourceTemplates: ListResourceTemplatesResult["resourceTemplates"]
   resources: ListResourcesResult["resources"]
@@ -243,6 +267,10 @@ function sha256Digest(value: unknown, label: string): string {
     .digest("hex")}`
 }
 
+function sha256TextDigest(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`
+}
+
 function sortedByIdentity<T>(
   values: readonly T[],
   identity: (value: T) => string,
@@ -294,6 +322,7 @@ function assertExactCatalog(
 }
 
 function assertToolContract(tool: {
+  _meta?: Record<string, unknown> | undefined
   annotations?: Record<string, unknown> | undefined
   description?: string | undefined
   inputSchema: Record<string, unknown>
@@ -311,6 +340,80 @@ function assertToolContract(tool: {
       `${tool.name} lacks boolean ${annotation}`,
     )
   }
+}
+
+function assertPlanReviewAppToolContract(
+  tools: ListToolsResult["tools"],
+): void {
+  const linkedToolNames: string[] = []
+  for (const tool of tools) {
+    const meta = objectValue(tool._meta)
+    const ui = objectValue(meta?.ui)
+    catalogInvariant(
+      meta?.["ui/resourceUri"] === undefined,
+      `${tool.name} uses deprecated flat MCP App metadata`,
+    )
+    if (isPlanReviewToolName(tool.name)) {
+      catalogInvariant(
+        stableString(ui) === stableString(MCP_PLAN_REVIEW_TOOL_META.ui),
+        `${tool.name} does not carry the exact display-only plan-review metadata`,
+      )
+      linkedToolNames.push(tool.name)
+    } else {
+      catalogInvariant(
+        ui === undefined,
+        `${tool.name} unexpectedly carries plan-review app metadata`,
+      )
+    }
+  }
+  assertExactCatalog(
+    linkedToolNames,
+    [...MCP_PLAN_REVIEW_TOOL_NAMES],
+    "plan-review app tool linkage",
+  )
+}
+
+function assertPlanReviewAppHtml(html: string): void {
+  catalogInvariant(html.startsWith("<!doctype html>"), "plan-review app is not a complete HTML document")
+  catalogInvariant(
+    html.includes("connect-src 'none'")
+    && html.includes("frame-src 'none'")
+    && html.includes("object-src 'none'")
+    && html.includes("base-uri 'none'"),
+    "plan-review app lacks its restrictive document CSP",
+  )
+  for (const forbidden of [
+    ".innerHTML",
+    "insertAdjacentHTML",
+    "document.write",
+    "eval(",
+    "Function(",
+    "fetch(",
+    "XMLHttpRequest",
+    "WebSocket",
+    "EventSource",
+    "sendBeacon",
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "navigator.clipboard",
+    "document.cookie",
+    "window.open",
+    "tools/call",
+    "resources/read",
+    "<a ",
+    "<form",
+  ]) {
+    catalogInvariant(!html.includes(forbidden), `plan-review app contains forbidden authority ${forbidden}`)
+  }
+  catalogInvariant(
+    html.includes('method: "ui/initialize"')
+    && html.includes('notify("ui/notifications/initialized"')
+    && html.includes('message.method === "ui/resource-teardown"')
+    && html.includes("event.source !== window.parent")
+    && html.includes('window.parent.postMessage(message, "*")'),
+    "plan-review app lifecycle or parent boundary is incomplete",
+  )
 }
 
 function assertCatalogOnlyResult(result: CallToolResult): void {
@@ -365,6 +468,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       "tool catalog",
     )
     for (const tool of toolsResult.tools) assertToolContract(tool)
+    assertPlanReviewAppToolContract(toolsResult.tools)
     assertExactCatalog(
       promptsResult.prompts.map((prompt) => prompt.name),
       EXPECTED_PROMPT_NAMES,
@@ -385,6 +489,13 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
     catalogInvariant(
       serverCapabilities.completions !== undefined,
       "completion capability is not advertised",
+    )
+    const extensions = objectValue(serverCapabilities.extensions)
+    catalogInvariant(
+      stableString(extensions?.[MCP_APP_EXTENSION_ID]) === stableString({
+        mimeTypes: [MCP_PLAN_REVIEW_APP_MIME_TYPE],
+      }),
+      "plan-review app extension capability is not advertised exactly",
     )
     const completionBindings = MCP_POLICY_COMPLETION_BINDINGS.map((candidate) => ({
       argument: candidate.argument,
@@ -420,6 +531,36 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
         && safetyContent.text.includes("review-first workflows"),
       "static safety resource is unavailable",
     )
+    const planReviewAppResource = await client.readResource({
+      uri: MCP_PLAN_REVIEW_APP_URI,
+    })
+    const planReviewAppContent = planReviewAppResource.contents[0]
+    catalogInvariant(
+      planReviewAppResource.contents.length === 1,
+      "plan-review app resource count changed",
+    )
+    catalogInvariant(
+      planReviewAppContent
+      && "text" in planReviewAppContent
+      && planReviewAppContent.uri === MCP_PLAN_REVIEW_APP_URI
+      && planReviewAppContent.mimeType === MCP_PLAN_REVIEW_APP_MIME_TYPE
+      && planReviewAppContent.text === MCP_PLAN_REVIEW_APP_HTML,
+      "plan-review app resource bytes or identity changed",
+    )
+    catalogInvariant(
+      stableString(planReviewAppContent._meta) === stableString(MCP_PLAN_REVIEW_APP_RESOURCE_META),
+      "plan-review app content security metadata changed",
+    )
+    const listedPlanReviewApp = resourcesResult.resources.find(
+      (resource) => resource.uri === MCP_PLAN_REVIEW_APP_URI,
+    )
+    catalogInvariant(
+      listedPlanReviewApp
+      && listedPlanReviewApp.mimeType === MCP_PLAN_REVIEW_APP_MIME_TYPE
+      && stableString(listedPlanReviewApp._meta) === stableString(MCP_PLAN_REVIEW_APP_RESOURCE_META),
+      "plan-review app discovery metadata changed",
+    )
+    assertPlanReviewAppHtml(MCP_PLAN_REVIEW_APP_HTML)
 
     catalogInvariant(EXPECTED_TOOL_NAMES.includes(CATALOG_PROBE_TOOL_NAME), "probe tool is not listed")
     const knownGuard = await client.callTool({
@@ -458,6 +599,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       prompts,
       resourceTemplates,
       resources,
+      planReviewAppResource,
       safetyResource: safety,
       serverCapabilities,
       tools,
@@ -475,6 +617,19 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       executionGuard: CATALOG_ONLY_ERROR_CODE,
       gateway: "disabled",
       observabilityExport: "disabled",
+      planReviewApp: {
+        externalNetworkDomains: [],
+        extensionId: MCP_APP_EXTENSION_ID,
+        htmlDigest: sha256TextDigest(MCP_PLAN_REVIEW_APP_HTML),
+        linkedToolCount: MCP_PLAN_REVIEW_TOOL_NAMES.length,
+        linkedToolNames: [...MCP_PLAN_REVIEW_TOOL_NAMES],
+        mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
+        permissions: [],
+        resourceDigest: sha256Digest(planReviewAppResource, "plan-review app resource"),
+        resourceUri: MCP_PLAN_REVIEW_APP_URI,
+        serverToolAuthority: false,
+        toolVisibility: ["model"],
+      },
       promptCount: promptsResult.prompts.length,
       promptNames,
       resourceCount: resourcesResult.resources.length,
@@ -497,6 +652,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       executionGuard: knownGuard,
       instructions,
       prompts,
+      planReviewAppResource,
       report,
       resourceTemplates,
       resources,

@@ -33,6 +33,16 @@ import {
   MCP_RESOURCE_TEMPLATE_URIS,
   selectedMcpPromptNames,
 } from "../src/mcp-guidance.js"
+import {
+  MCP_APP_EXTENSION_ID,
+  MCP_PLAN_REVIEW_APP_HTML,
+  MCP_PLAN_REVIEW_APP_MIME_TYPE,
+  MCP_PLAN_REVIEW_APP_RESOURCE_META,
+  MCP_PLAN_REVIEW_APP_URI,
+  MCP_PLAN_REVIEW_TOOL_META,
+  MCP_PLAN_REVIEW_TOOL_NAMES,
+  isPlanReviewToolName,
+} from "../src/mcp-plan-review-app.js"
 import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
 import { stableString } from "../src/normalize.js"
 import {
@@ -41,7 +51,6 @@ import {
 } from "../src/observability-catalog.js"
 
 const CHANNEL_ID = "200000000000000001"
-const LEGACY_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_ALLOW_DELETIONS"
 const EXPECTED_TOOL_NAMES = [
   ...selectedCanonicalMcpToolNames(new Set(MCP_TOOLSET_NAMES)),
   MCP_DISCOVERY_TOOL_NAME,
@@ -102,6 +111,10 @@ function evidenceDigest(value: unknown): string {
   return `sha256:${createHash("sha256").update(stableString(normalized)).digest("hex")}`
 }
 
+function textDigest(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`
+}
+
 function restoreEnvironment(
   before: ReadonlyMap<string, string | undefined>,
 ): void {
@@ -142,6 +155,18 @@ test("credential-free catalog exposes every exact production contract with compl
     assert.match(client.getInstructions() || "", /every tools\/call request returns the fixed CATALOG_ONLY result/)
     assert.match(client.getInstructions() || "", /operational serve command/)
     assert.deepEqual(client.getServerCapabilities()?.completions, {})
+    assert.deepEqual(
+      client.getServerCapabilities()?.extensions?.[MCP_APP_EXTENSION_ID],
+      { mimeTypes: [MCP_PLAN_REVIEW_APP_MIME_TYPE] },
+    )
+    for (const tool of tools.tools) {
+      if (isPlanReviewToolName(tool.name)) {
+        assert.deepEqual(tool._meta, MCP_PLAN_REVIEW_TOOL_META, tool.name)
+      } else {
+        assert.equal(tool._meta?.ui, undefined, tool.name)
+      }
+      assert.equal(tool._meta?.["ui/resourceUri"], undefined, tool.name)
+    }
   })
 })
 
@@ -173,6 +198,7 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
 test("catalog serves local guidance while live resources remain isolated", async () => {
   await withCatalogClient(async (client) => {
     const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+    const planReviewApp = await client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI })
     const policy = await client.readResource({ uri: MCP_RESOURCE_URIS.policy })
     const prompt = await client.getPrompt({
       arguments: { channelId: CHANNEL_ID },
@@ -197,6 +223,12 @@ test("catalog serves local guidance while live resources remain isolated", async
 
     assert.equal(safety.contents.length, 1)
     assert.match("text" in safety.contents[0]! ? safety.contents[0].text : "", /review-first workflows/)
+    assert.deepEqual(planReviewApp.contents, [{
+      _meta: MCP_PLAN_REVIEW_APP_RESOURCE_META,
+      mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
+      text: MCP_PLAN_REVIEW_APP_HTML,
+      uri: MCP_PLAN_REVIEW_APP_URI,
+    }])
     assert.equal(policy.contents.length, 1)
     assert.doesNotMatch(JSON.stringify(policy), /catalog-only-placeholder/)
     assert.ok(prompt.messages.length > 0)
@@ -236,6 +268,9 @@ test("catalog evidence digest binds the normalized advertised contract and safet
       client.listResourceTemplates(),
     ])
     const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+    const planReviewAppResource = await client.readResource({
+      uri: MCP_PLAN_REVIEW_APP_URI,
+    })
     const executionGuard = await client.callTool({
       arguments: {},
       name: "read_messages",
@@ -250,6 +285,7 @@ test("catalog evidence digest binds the normalized advertised contract and safet
         (template) => template.uriTemplate,
       ),
       resources: sortedByIdentity(resources.resources, (resource) => resource.uri),
+      planReviewAppResource,
       safetyResource: safety,
       serverCapabilities: client.getServerCapabilities(),
       tools: sortedByIdentity(tools.tools, (tool) => tool.name),
@@ -269,7 +305,6 @@ test("catalog self-check ignores hostile ambient credentials and unrelated setti
   const overrides = new Map<string, string>([
     [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE, ambientSecret],
     [CONFIG_FILE_ENVIRONMENT_VARIABLE, activityFile],
-    [LEGACY_POLICY_ENVIRONMENT_VARIABLE, "true"],
   ])
   const before = new Map(
     [...overrides].map(([name]) => [name, process.env[name]] as const),
@@ -294,6 +329,26 @@ test("catalog self-check ignores hostile ambient credentials and unrelated setti
     assert.equal(report.executionGuard, CATALOG_ONLY_ERROR_CODE)
     assert.equal(report.gateway, "disabled")
     assert.equal(report.observabilityExport, "disabled")
+    assert.deepEqual(report.planReviewApp, {
+      externalNetworkDomains: [],
+      extensionId: MCP_APP_EXTENSION_ID,
+      htmlDigest: textDigest(MCP_PLAN_REVIEW_APP_HTML),
+      linkedToolCount: MCP_PLAN_REVIEW_TOOL_NAMES.length,
+      linkedToolNames: [...MCP_PLAN_REVIEW_TOOL_NAMES],
+      mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
+      permissions: [],
+      resourceDigest: evidenceDigest({
+        contents: [{
+          _meta: MCP_PLAN_REVIEW_APP_RESOURCE_META,
+          mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
+          text: MCP_PLAN_REVIEW_APP_HTML,
+          uri: MCP_PLAN_REVIEW_APP_URI,
+        }],
+      }),
+      resourceUri: MCP_PLAN_REVIEW_APP_URI,
+      serverToolAuthority: false,
+      toolVisibility: ["model"],
+    })
     assert.equal(report.activityRecordsCreated, false)
     assert.equal(report.completionBindingCount, MCP_POLICY_COMPLETION_BINDINGS.length)
     assert.equal(report.completionCatalogValuesExposed, false)

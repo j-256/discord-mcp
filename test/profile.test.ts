@@ -43,7 +43,7 @@ const CHANNEL_ID = "200000000000000001"
 const OTHER_CHANNEL_ID = "200000000000000002"
 const TOKEN = "test-discord-token"
 const ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
-const LEGACY_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_ALLOW_DELETIONS"
+const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
 
 function profile(overrides: Partial<{
   applicationId: string
@@ -424,10 +424,10 @@ test("profile activation loads complete policy and rejects ambient policy", asyn
       directory,
       environment: {
         [ALIAS]: TOKEN,
-        [LEGACY_POLICY_ENVIRONMENT_VARIABLE]: "false",
+        [UNDECLARED_POLICY_ENVIRONMENT_VARIABLE]: "false",
       },
     }),
-    new RegExp(`conflicts.*${LEGACY_POLICY_ENVIRONMENT_VARIABLE}`),
+    new RegExp(`conflicts.*${UNDECLARED_POLICY_ENVIRONMENT_VARIABLE}`),
   )
   await assert.rejects(
     () => activateProfile(candidate.name, {

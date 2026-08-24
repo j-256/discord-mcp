@@ -194,6 +194,19 @@ function catalogReport(): DiscordCatalogCheckReport {
     executionGuard: "CATALOG_ONLY",
     gateway: "disabled",
     observabilityExport: "disabled",
+    planReviewApp: {
+      externalNetworkDomains: [],
+      extensionId: "io.modelcontextprotocol/ui",
+      htmlDigest: `sha256:${"c".repeat(64)}`,
+      linkedToolCount: 1,
+      linkedToolNames: ["plan_message_deletion"],
+      mimeType: "text/html;profile=mcp-app",
+      permissions: [],
+      resourceDigest: `sha256:${"d".repeat(64)}`,
+      resourceUri: "ui://discord-mcp/plan-review",
+      serverToolAuthority: false,
+      toolVisibility: ["model"],
+    },
     promptCount: 2,
     promptNames: ["review_change", "summarize_channel"],
     resourceCount: 2,
@@ -2124,7 +2137,6 @@ test("CLI explains only the typed configuration contract", async () => {
     stdout: output.stream,
   }), 0)
 
-  assert.doesNotMatch(output.value(), /DISCORD_MCP_ALLOW_DELETIONS/)
   assert.doesNotMatch(output.value(), /"environmentVariable"/)
   assert.doesNotMatch(output.value(), /migration/i)
 })

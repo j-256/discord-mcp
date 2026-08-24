@@ -54,7 +54,7 @@ const SOURCE_CHANNEL_ID = "400000000000000002"
 const ROLE_ID = "500000000000000001"
 const INTEGRATION_ID = "600000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
-const LEGACY_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_ALLOW_DELETIONS"
+const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
 
 function fixturePolicy(
   overrides: FixtureConfigOverrides = {},
@@ -767,7 +767,7 @@ test("credential-independent doctor preserves undeclared ambient policy rejectio
       toolSurface: "full",
     }),
     environment: {
-      [LEGACY_POLICY_ENVIRONMENT_VARIABLE]: "true",
+      [UNDECLARED_POLICY_ENVIRONMENT_VARIABLE]: "true",
       [TOKEN_ALIAS]: TOKEN,
     },
     nodeVersion: "22.14.0",
@@ -4921,7 +4921,7 @@ test("setup requires one schema-v2 target and rejects ambient policy or implicit
       configFile,
       environment: {
         [TOKEN_ALIAS]: TOKEN,
-        [LEGACY_POLICY_ENVIRONMENT_VARIABLE]: "true",
+        [UNDECLARED_POLICY_ENVIRONMENT_VARIABLE]: "true",
       },
       service: statusProvider(),
     }),
@@ -5042,6 +5042,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://interactions/status",
     "discord://soundboard/defaults",
     "discord://voice/regions",
+    "ui://discord-mcp/plan-review",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://channels/{channelId}",

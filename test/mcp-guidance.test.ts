@@ -2793,6 +2793,7 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uri: MCP_RESOURCE_URIS.nativeInteractionStatus,
       },
       { name: MCP_RESOURCE_NAMES.observability, uri: MCP_RESOURCE_URIS.observability },
+      { name: MCP_RESOURCE_NAMES.planReviewApp, uri: MCP_RESOURCE_URIS.planReviewApp },
       { name: MCP_RESOURCE_NAMES.policy, uri: MCP_RESOURCE_URIS.policy },
       { name: MCP_RESOURCE_NAMES.safety, uri: MCP_RESOURCE_URIS.safety },
       { name: MCP_RESOURCE_NAMES.voiceRegions, uri: MCP_RESOURCE_URIS.voiceRegions },

@@ -392,6 +392,14 @@ import {
   MCP_RESOURCE_TEMPLATE_URIS,
   MCP_RESOURCE_URIS,
 } from "../src/mcp-guidance.js"
+import {
+  MCP_APP_EXTENSION_ID,
+  MCP_PLAN_REVIEW_APP_HTML,
+  MCP_PLAN_REVIEW_APP_MIME_TYPE,
+  MCP_PLAN_REVIEW_APP_RESOURCE_META,
+  MCP_PLAN_REVIEW_APP_URI,
+  MCP_PLAN_REVIEW_TOOL_META,
+} from "../src/mcp-plan-review-app.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityDocumentConfig } from "../src/observability-config.js"
@@ -11424,6 +11432,11 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
     "delete_messages",
     MCP_DISCOVERY_TOOL_NAME,
   ])
+  assert.deepEqual(
+    listedTool(changedTools as Tool[], "plan_message_deletion")._meta,
+    MCP_PLAN_REVIEW_TOOL_META,
+  )
+  assert.equal(listedTool(changedTools as Tool[], "delete_messages")._meta?.ui, undefined)
 
   const refreshed = (await progressive.client.listTools()).tools
   assert.deepEqual(
@@ -27084,12 +27097,13 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   })
 
   await client.connect(transport)
-  const [tools, prompts, resources, templates, safety] = await Promise.all([
+  const [tools, prompts, resources, templates, safety, planReviewApp] = await Promise.all([
     client.listTools(),
     client.listPrompts(),
     client.listResources(),
     client.listResourceTemplates(),
     client.readResource({ uri: "discord://connector/safety" }),
+    client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI }),
   ])
   const [guildCompletion, channelCompletion] = await Promise.all([
     client.complete({
@@ -27121,6 +27135,26 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   }
   assert.equal(safety.cacheScope, "public")
   assert.equal(safety.ttlMs, STATIC_RESOURCE_CACHE_TTL_MS)
+  assert.equal(planReviewApp.cacheScope, "public")
+  assert.equal(planReviewApp.ttlMs, STATIC_RESOURCE_CACHE_TTL_MS)
+  assert.deepEqual(planReviewApp.contents, [{
+    _meta: MCP_PLAN_REVIEW_APP_RESOURCE_META,
+    mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
+    text: MCP_PLAN_REVIEW_APP_HTML,
+    uri: MCP_PLAN_REVIEW_APP_URI,
+  }])
+  assert.deepEqual(
+    resources.resources.find(({ uri }) => uri === MCP_PLAN_REVIEW_APP_URI)?._meta,
+    MCP_PLAN_REVIEW_APP_RESOURCE_META,
+  )
+  assert.deepEqual(
+    listedTool(tools.tools, "plan_message_deletion")._meta,
+    MCP_PLAN_REVIEW_TOOL_META,
+  )
+  assert.deepEqual(
+    client.getServerCapabilities()?.extensions?.[MCP_APP_EXTENSION_ID],
+    { mimeTypes: [MCP_PLAN_REVIEW_APP_MIME_TYPE] },
+  )
   assert.deepEqual(guildCompletion.completion.values, [GUILD_ID])
   assert.deepEqual(channelCompletion.completion.values, [CHANNEL_ID])
   assert.deepEqual(client.getServerCapabilities()?.completions, {})

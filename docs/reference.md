@@ -20,6 +20,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Credential-free catalog mode advertises the exact production tools, prompts, resources, and templates while a fixed guard rejects every tool call before argument validation or execution
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
 - Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
+- Every canonical `plan_*` tool remains model-visible and links to one optional display-only MCP App resource; the app exposes no app-callable tool, approval action, execution action, or alternate write path
 - Toolsets separate the member directory, guild ban audit, member nickname changes, member-role changes, member voice moderation, thread governance, guild audit logs, permission diagnostics, guild profiles, named guild settings, guild incident actions, channel metadata and voice-channel status changes, channel-order audit and changes, channel-clone audit and changes, forum-tag audit and changes, channel permission overwrites, message pins, announcement crossposts, message forwarding, announcement subscriptions, native polls, native Interaction ingress and command management, Guild Templates, guild integrations, application-owned emojis, guild expressions, soundboard sounds, AutoMod rules, scheduled events, Stage instances, guild onboarding, Welcome Screens, authenticated widget settings, credential-safe webhook administration, invite audit and revocation, attachments, forum posts, guild blueprints, guild scaffolds, channel creation, role creation, role configuration, role deletion, role ordering, message deletion, and moderation from ordinary reads and interactions, cannot expand Discord policy, and remove unavailable tools from both direct calls and discovery results
 - An exact guild allowlist forms the required outer read boundary, and an optional channel allowlist can narrow access inside it
 - Portable profiles store the same complete policy as standalone configuration files while referring to a caller-owned environment or file credential without storing its value
@@ -761,12 +762,23 @@ Voice-channel status follows the same progressive safety rule: discovering eithe
 | `execute_member_moderation` | Discord write | Confirm, revalidate, journal, and execute the reviewed exact-ID member action |
 | `list_activity` | Local read | Read content-free native-Interaction, managed-command, announcement-crosspost, announcement-subscription, application-emoji, attachment, AutoMod, channel-clone, channel-creation, channel-deletion, channel-metadata, voice-channel-status, channel-ordering, forum-tag, forum-post, thread-creation, thread-governance, Guild Template, guild-profile, guild-settings, guild-incident-action, guild-expression, integration-deletion, invite-deletion, onboarding-change, Welcome Screen, widget-settings, scheduled-event, soundboard, Stage-instance, scaffold-step, member-nickname, member-role, member-voice, role-creation, role-configuration, role-deletion, role-ordering, message-pin, poll-creation, poll-ending, reaction-moderation, webhook-creation, webhook-change, webhook-deletion, permission-overwrite, deletion, interaction, and member-moderation activity |
 
+## Interactive plan review
+
+The server implements the stable [MCP Apps extension](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx) as an optional progressive enhancement. It advertises `io.modelcontextprotocol/ui` with `text/html;profile=mcp-app`, links every configured canonical `plan_*` tool to `ui://discord-mcp/plan-review` through nested `_meta.ui.resourceUri`, and explicitly limits tool visibility to `model`. It does not emit the deprecated flat `ui/resourceUri` metadata.
+
+An MCP Apps host can load the one self-contained resource, complete the `ui/initialize` lifecycle, and deliver exact tool input plus the ordinary `CallToolResult`. The view highlights status, exact identifier fields, review digests, authority, freshness, permissions, blockers, warnings, risks, limitations, and other evidence. Search, keyboard-accessible tabs, disclosure groups, exact input, and full JSON keep unknown future plan fields inspectable rather than dropping them. A host without MCP Apps support receives the same complete text and structured plan result and can ignore the optional metadata.
+
+The view is deliberately display-only. It advertises no app tool capability, has no server-tool or resource-read call path, and cannot approve, execute, modify, retry, open a link, send a message, update model context, or persist state. Resource metadata requests no network domains, dedicated origin, camera, microphone, geolocation, or clipboard access. The document adds its own restrictive CSP, uses no external assets, and renders every caller or Discord-derived value with DOM text nodes rather than an HTML or CSS sink. Incoming lifecycle messages are accepted only from the parent frame. The app still does not replace any signed elicitation, host write approval, fresh-plan check, confirmation, reservation, pending record, Discord permission proof, or readback gate.
+
+Credential-free catalog inspection verifies the exact extension capability, resource declaration and response, canonical plan-tool linkage, model-only visibility, empty network and permission sets, absence of server-tool authority, and deterministic HTML bytes. The app resource response is part of the overall contract digest; separate HTML and resource digests make source and envelope changes independently visible. `catalog --html` includes this evidence and an escaped copy of the complete source for offline review.
+
 ## Resources
 
 MCP resource discovery lists only stable metadata. Listing resources or templates does not call the connector service or Discord. Fixed resources are:
 
 | Resource | Source | Purpose |
 | --- | --- | --- |
+| `ui://discord-mcp/plan-review` | Static | Render an optional display-only interactive review for canonical plan tools with no network, browser permission, persistence, approval, execution, or server-tool authority |
 | `discord://connector/safety` | Static | Explain trust boundaries and reviewed workflows without identity or Discord data |
 | `discord://connector/policy` | Local | Report effective scope and write policy without credentials or Discord access |
 | `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
@@ -826,7 +838,7 @@ Live templates are non-enumerable and require exact IDs:
 
 Every Discord-backed JSON resource carries an `untrusted-external-data` classification and an instruction to treat returned strings as data. The exact-message resource is deliberately compact: it includes message content, author identity, timestamps, jump URL, compact attachment metadata, and counts while omitting attachment URLs and raw embeds, components, reactions, and mention payloads. Existing service checks still verify the bot identity, exact returned IDs, guild and channel scope, and fixed Discord API origin before the resource is returned.
 
-Resource payloads and failures pass through the same recursive token-redaction boundary as tools. Live reads use private zero-lifetime cache hints. Only the identity-free static safety guide is eligible for shared caching.
+Resource payloads and failures pass through the same recursive token-redaction boundary as tools. Live reads use private zero-lifetime cache hints. Only the identity-free static safety guide and the deterministic data-free plan-review app are eligible for shared caching.
 
 ## Policy-aware exact-ID completion
 
