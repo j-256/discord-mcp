@@ -147,7 +147,7 @@ test("Discord client sends bot authentication only to its configured API origin"
   const application = await client.getCurrentApplication()
 
   assert.equal(application.id, "1")
-  assert.equal(requestUrl, `${API_BASE_URL}/oauth2/applications/@me`)
+  assert.equal(requestUrl, `${API_BASE_URL}/applications/@me`)
   assert.equal(authorization, `Bot ${TOKEN}`)
   assert.equal(redirect, "error")
 })

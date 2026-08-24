@@ -68,7 +68,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 19
+export const OPERATOR_REPORT_SCHEMA_VERSION = 20
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -78,7 +78,13 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   announcementSubscriptionChangePolicy: "announcement-subscription-change-policy",
   applicationEmojiAuditPolicy: "application-emoji-audit-policy",
   applicationEmojiChangePolicy: "application-emoji-change-policy",
+  applicationBotVisibility: "application-bot-visibility",
+  applicationDefaultPermissions: "application-default-permissions",
+  applicationEventWebhooks: "application-event-webhooks",
   applicationIdentity: "application-identity",
+  applicationInstall: "application-install",
+  applicationInteractionDelivery: "application-interaction-delivery",
+  applicationPresenceIntent: "application-presence-intent",
   attachmentPolicy: "attachment-policy",
   automodAuditPolicy: "automod-audit-policy",
   automodChangePolicy: "automod-change-policy",
@@ -285,6 +291,7 @@ export interface SmokeOptions {
 }
 
 const DOCTOR_REFERENCES = Object.freeze({
+  applicationPosture: "docs/reference.md#application-security-posture",
   botSetup: "docs/reference.md#discord-bot-setup",
   configuration: "docs/reference.md#configuration",
   operatorCli: "docs/reference.md#operator-cli",
@@ -305,6 +312,15 @@ const DOCTOR_SCOPE_CHECK_IDS = new Set<string>([
 const DOCTOR_INTENT_CHECK_IDS = new Set<string>([
   DOCTOR_CHECK_IDS.guildMembersIntent,
   DOCTOR_CHECK_IDS.messageContentIntent,
+])
+
+const DOCTOR_APPLICATION_POSTURE_CHECK_IDS = new Set<string>([
+  DOCTOR_CHECK_IDS.applicationBotVisibility,
+  DOCTOR_CHECK_IDS.applicationDefaultPermissions,
+  DOCTOR_CHECK_IDS.applicationEventWebhooks,
+  DOCTOR_CHECK_IDS.applicationInstall,
+  DOCTOR_CHECK_IDS.applicationInteractionDelivery,
+  DOCTOR_CHECK_IDS.applicationPresenceIntent,
 ])
 
 function doctorGuidance(
@@ -344,6 +360,12 @@ function doctorGuidance(
     return {
       action: "Enable only the required privileged intent in the Discord Developer Portal, or disable the connector feature that needs it, then rerun doctor --online.",
       reference: DOCTOR_REFERENCES.botSetup,
+    }
+  }
+  if (DOCTOR_APPLICATION_POSTURE_CHECK_IDS.has(id)) {
+    return {
+      action: "Review the verified current application settings in the Discord Developer Portal, correct only the reported boundary, then rerun doctor --online.",
+      reference: DOCTOR_REFERENCES.applicationPosture,
     }
   }
   if (id === DOCTOR_CHECK_IDS.guildAccess) {
@@ -878,6 +900,19 @@ function policyWarnings(config: ConnectorConfig): string[] {
     warnings.push("OTLP export uses the default loopback collector because no endpoint is explicitly configured")
   }
   return warnings
+}
+
+const SETUP_EXISTING_INTENT_FINDINGS = new Set([
+  "recommended-message-content-intent-disabled",
+  "required-guild-members-intent-disabled",
+  "required-message-content-intent-disabled",
+  "unknown-required-intent-state",
+])
+
+function applicationPostureWarnings(status: ConnectorStatus): string[] {
+  return status.applicationPosture.findings
+    .filter(({ code }) => !SETUP_EXISTING_INTENT_FINDINGS.has(code))
+    .map(({ action, summary }) => `${summary}; ${action}`)
 }
 
 function redactedError(error: unknown, environment: NodeJS.ProcessEnv): string {
@@ -2592,6 +2627,124 @@ export async function diagnoseConnector(
             ? `Verified application ${status.application.id}, bot ${status.bot.id}, and ${status.guildPage.inScope} in-scope guilds on the first page`
             : `Verified application ${status.application.id} and bot ${status.bot.id}, but no accessible guilds are in local scope`,
         ))
+        const posture = status.applicationPosture
+        const guildInstallSupported = posture.installation.guild.supported
+        checks.push(posture.access.botRequiresCodeGrant || guildInstallSupported === false
+          ? check(
+            DOCTOR_CHECK_IDS.applicationInstall,
+            "fail",
+            posture.access.botRequiresCodeGrant
+              ? "The Discord application requires a full OAuth2 code grant, so callback-free bot installation is blocked"
+              : "The Discord application does not advertise Guild Install support",
+          )
+          : guildInstallSupported === null
+            ? check(
+              DOCTOR_CHECK_IDS.applicationInstall,
+              "warn",
+              "Discord did not report supported installation contexts, so callback-free guild installation compatibility is unknown",
+            )
+            : check(
+              DOCTOR_CHECK_IDS.applicationInstall,
+              "pass",
+              "Discord application supports callback-free guild installation",
+            ))
+        checks.push(posture.access.botPublic
+          ? check(
+            DOCTOR_CHECK_IDS.applicationBotVisibility,
+            "warn",
+            "Users other than the application owner can add the bot to guilds",
+          )
+          : check(
+            DOCTOR_CHECK_IDS.applicationBotVisibility,
+            "pass",
+            "Only the application owner can add the bot to guilds",
+          ))
+        const installDefaults = [
+          posture.installation.guild.defaultAuthorization,
+          posture.installation.legacyDefaults,
+          posture.installation.user.defaultAuthorization,
+        ].filter((value) => value !== null)
+        const administratorDefault = installDefaults.some((defaults) => (
+          defaults.administrator
+        ))
+        const unknownDefaultAuthority = installDefaults.some((defaults) => (
+          defaults.unknownPermissionBitCount > 0 || defaults.unknownScopeCount > 0
+        ))
+        checks.push(administratorDefault
+          ? check(
+            DOCTOR_CHECK_IDS.applicationDefaultPermissions,
+            "warn",
+            "A Discord default install configuration requests Administrator",
+          )
+          : unknownDefaultAuthority
+            ? check(
+              DOCTOR_CHECK_IDS.applicationDefaultPermissions,
+              "warn",
+              "A Discord default install configuration contains unknown scopes or permission bits",
+            )
+            : check(
+              DOCTOR_CHECK_IDS.applicationDefaultPermissions,
+              "pass",
+              "Discord default install configuration contains no Administrator or unknown authority",
+            ))
+        checks.push(!config.allowNativeInteractions
+          ? check(
+            DOCTOR_CHECK_IDS.applicationInteractionDelivery,
+            "pass",
+            "Native Interaction ingress is disabled, so application Interaction delivery does not constrain the connector",
+          )
+          : posture.interactions.endpointConfigured
+            ? check(
+              DOCTOR_CHECK_IDS.applicationInteractionDelivery,
+              "fail",
+              "A configured Interactions endpoint routes delivery away from the connector's Gateway ingress",
+            )
+            : check(
+              DOCTOR_CHECK_IDS.applicationInteractionDelivery,
+              "pass",
+              "Application Interaction delivery is compatible with the connector's Gateway ingress",
+            ))
+        checks.push(posture.privilegedIntents.presence === "enabled"
+          ? check(
+            DOCTOR_CHECK_IDS.applicationPresenceIntent,
+            "warn",
+            "Discord application advertises Presence intent, which this connector does not use",
+          )
+          : posture.privilegedIntents.presence === "unknown"
+            ? check(
+              DOCTOR_CHECK_IDS.applicationPresenceIntent,
+              "warn",
+              "Discord application did not expose enough flags to diagnose unused Presence intent",
+            )
+            : check(
+              DOCTOR_CHECK_IDS.applicationPresenceIntent,
+              "pass",
+              "Discord application does not advertise unused Presence intent",
+            ))
+        checks.push(posture.eventWebhooks.status === "enabled"
+          ? check(
+            DOCTOR_CHECK_IDS.applicationEventWebhooks,
+            "warn",
+            "Application event webhooks are enabled for an external receiver outside this connector",
+          )
+          : posture.eventWebhooks.status === "unknown"
+            || posture.eventWebhooks.status === "disabled-by-discord"
+            || (
+              posture.eventWebhooks.status === "not-reported"
+              && posture.eventWebhooks.endpointConfigured
+            )
+            ? check(
+              DOCTOR_CHECK_IDS.applicationEventWebhooks,
+              "warn",
+              "Discord application event-webhook evidence requires Developer Portal review",
+            )
+            : check(
+              DOCTOR_CHECK_IDS.applicationEventWebhooks,
+              "pass",
+              posture.eventWebhooks.status === "not-reported"
+                ? "Discord did not report event-webhook status and no event-webhook endpoint is configured"
+                : "Discord application event webhooks are disabled",
+            ))
         const announcementCrosspostsConfigured = config.allowAnnouncementCrossposts
           && config.announcementCrosspostChannelIds.size > 0
         const componentMessagesConfigured = config.allowInteractions
@@ -2604,7 +2757,7 @@ export async function diagnoseConnector(
           ...(componentMessagesConfigured ? ["static component messages"] : []),
           ...(messageForwardingConfigured ? ["message forwarding"] : []),
         ]
-        checks.push(status.application.messageContentIntent === "enabled"
+        checks.push(posture.privilegedIntents.messageContent === "enabled"
           ? check(
             DOCTOR_CHECK_IDS.messageContentIntent,
             "pass",
@@ -2615,7 +2768,7 @@ export async function diagnoseConnector(
             contentDependentWrites.length > 0 ? "fail" : "warn",
             contentDependentWrites.length > 0
               ? `Discord application lacks confirmed Message Content intent, so configured ${contentDependentWrites.join(" and ")} are blocked`
-              : status.application.messageContentIntent === "disabled"
+              : posture.privilegedIntents.messageContent === "disabled"
                 ? "Discord application does not advertise Message Content intent; native message search may be unavailable"
                 : "Discord application did not expose enough flags to diagnose Message Content intent",
           ))
@@ -2625,7 +2778,7 @@ export async function diagnoseConnector(
             "pass",
             "Member directory is disabled, so Guild Members privileged intent is not required for it",
           ))
-        } else if (status.application.guildMembersIntent === "enabled") {
+        } else if (posture.privilegedIntents.guildMembers === "enabled") {
           checks.push(check(
             DOCTOR_CHECK_IDS.guildMembersIntent,
             "pass",
@@ -2634,8 +2787,8 @@ export async function diagnoseConnector(
         } else {
           checks.push(check(
             DOCTOR_CHECK_IDS.guildMembersIntent,
-            status.application.guildMembersIntent === "disabled" ? "fail" : "warn",
-            status.application.guildMembersIntent === "disabled"
+            posture.privilegedIntents.guildMembers === "disabled" ? "fail" : "warn",
+            posture.privilegedIntents.guildMembers === "disabled"
               ? "Discord application does not advertise Guild Members intent; configured member listing will fail"
               : "Discord application did not expose enough flags to diagnose Guild Members intent",
           ))
@@ -2988,7 +3141,8 @@ export async function prepareSetup(
     toolSurface: config.mcpToolSurface,
     warnings: [
       ...policyWarnings(config),
-      ...(status.application.messageContentIntent === "enabled"
+      ...applicationPostureWarnings(status),
+      ...(status.applicationPosture.privilegedIntents.messageContent === "enabled"
         ? []
         : [
             ...(contentDependentWrites.length > 0
@@ -3004,7 +3158,7 @@ export async function prepareSetup(
           ]),
       ...(config.allowMemberDirectory
         && config.memberDirectoryGuildIds.size > 0
-        && status.application.guildMembersIntent !== "enabled"
+        && status.applicationPosture.privilegedIntents.guildMembers !== "enabled"
         ? ["Discord application does not advertise confirmed Guild Members intent, so configured member listing may be unavailable"]
         : []),
     ],

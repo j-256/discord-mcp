@@ -1,12 +1,35 @@
 export interface DiscordApplication {
   bot?: DiscordUser
+  bot_public?: boolean
+  bot_require_code_grant?: boolean
+  custom_install_url?: string | null
   description: string
+  event_webhooks_status?: number
+  event_webhooks_types?: string[]
+  event_webhooks_url?: string | null
   flags?: number
   flags_new?: string
   id: string
+  install_params?: DiscordApplicationInstallParams
+  integration_types_config?: Record<
+    string,
+    DiscordApplicationIntegrationTypeConfiguration
+  >
   interactions_endpoint_url?: string | null
   name: string
+  redirect_uris?: string[]
+  role_connections_verification_url?: string | null
+  rpc_origins?: string[]
   verify_key?: string
+}
+
+export interface DiscordApplicationInstallParams {
+  permissions: string
+  scopes: string[]
+}
+
+export interface DiscordApplicationIntegrationTypeConfiguration {
+  oauth2_install_params?: DiscordApplicationInstallParams
 }
 
 export interface DiscordApplicationCommandOption {

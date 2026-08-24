@@ -3,6 +3,7 @@ import type { McpToolsetName } from "./constants.js"
 export const MCP_RESOURCE_NAMES = Object.freeze({
   activity: "connector_activity",
   applicationEmojis: "application_emojis",
+  applicationPosture: "application_posture",
   defaultSoundboard: "default_soundboard_sounds",
   guilds: "scoped_guilds",
   gatewayEvents: "gateway_events",
@@ -18,6 +19,7 @@ export const MCP_RESOURCE_NAMES = Object.freeze({
 export const MCP_RESOURCE_URIS = Object.freeze({
   activity: "discord://connector/activity",
   applicationEmojis: "discord://application/emojis",
+  applicationPosture: "discord://application/posture",
   defaultSoundboard: "discord://soundboard/defaults",
   guilds: "discord://guilds",
   gatewayEvents: "discord://gateway/events",

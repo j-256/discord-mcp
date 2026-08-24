@@ -770,10 +770,16 @@ export const NATIVE_INTERACTION_LIMITS = Object.freeze({
 export const NATIVE_INTERACTION_COMMAND_NAME_PATTERN = /^[a-z0-9_-]{1,32}$/
 
 export const DISCORD_APPLICATION_FLAGS = Object.freeze({
+  applicationAutoModerationRuleCreateBadge: 1n << 6n,
+  applicationCommandBadge: 1n << 23n,
+  embedded: 1n << 17n,
   gatewayGuildMembers: 1n << 14n,
   gatewayGuildMembersLimited: 1n << 15n,
   gatewayMessageContent: 1n << 18n,
   gatewayMessageContentLimited: 1n << 19n,
+  gatewayPresence: 1n << 12n,
+  gatewayPresenceLimited: 1n << 13n,
+  verificationPendingGuildLimit: 1n << 16n,
 })
 
 export const DISCORD_CHANNEL_TYPES = Object.freeze({

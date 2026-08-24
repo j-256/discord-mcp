@@ -6307,6 +6307,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  getApplicationPosture: ConnectorService["getApplicationPosture"]
   auditChannelDeletion: ConnectorService["auditChannelDeletion"]
   auditRoleDeletion: ConnectorService["auditRoleDeletion"]
   auditChannelOrder: ConnectorService["auditChannelOrder"]
@@ -13080,6 +13081,29 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }
     canonicalTools.set(name, tool)
   }
+
+  trackCanonicalTool("audit_application_posture", server.registerTool(
+    "audit_application_posture",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Audit the verified current Discord application's installation, privileged-intent, Interaction delivery, event-webhook, and connector-compatibility posture without returning profiles, text, URLs, raw flags, permission bitfields, or unknown fields.",
+      inputSchema: emptyInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Audit Discord application posture",
+    },
+    safeToolHandler("audit_application_posture", async (
+      _input: z.infer<typeof emptyInputSchema>,
+      context,
+    ) => {
+      const result = await service.getApplicationPosture({
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord application posture found ${result.findingCounts.blockers} blockers and ${result.findingCounts.warnings} warnings`,
+      )
+    }, secrets, observability),
+  ))
 
   trackCanonicalTool("get_connector_status", server.registerTool(
     "get_connector_status",

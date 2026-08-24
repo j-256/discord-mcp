@@ -190,6 +190,8 @@ export function registerDiscordResources(
           "",
           "The optional Gateway feed requires pinned identity and exact local scope, requests no privileged intents, stores no Discord content, and reports cursor discontinuities instead of claiming false continuity.",
           "",
+          "Current application posture uses the already-required identity response to derive installation support, default authorization, privileged intents, Interaction delivery, event-webhook state, connector compatibility, and fixed actionable findings. Application and bot profile text, owner and team profiles, URLs, raw flags, permission bitfields, webhook event names, and unknown fields are omitted; unknown authority is count-only, the resource is private and uncached, and nothing is persisted.",
+          "",
           "Channel-completeness consumers retain only ID, type, position, parent ID, and the explicit obfuscation bit in an exact-guild Gateway layout. They bracket one bounded HTTP channel read with identical complete layout snapshots, accept only the complete layout ID set or its exact non-obfuscated subset, discard HTTP metadata for obfuscated channels, and return only counts rather than hidden metadata. Ordinary channel listing remains explicitly visibility-bounded.",
           "",
           "Operational status is process-local by default. Optional OTLP export requires a separate feature gate and carries only fixed operation categories, aggregates, durations, and exporter health without Discord identifiers, content, routes, arguments, results, or error details.",
@@ -388,6 +390,27 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.listVoiceRegions({ signal: context.mcpReq.signal }),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.applicationPosture,
+    MCP_RESOURCE_URIS.applicationPosture,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Verified current Discord application installation, privileged-intent, Interaction delivery, event-webhook, and connector-compatibility posture. Profiles, text, URLs, raw flags, permission bitfields, and unknown fields are omitted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord application posture",
+    },
+    (uri, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getApplicationPosture({
+        signal: context.mcpReq.signal,
+      }),
     ),
   )
 

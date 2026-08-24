@@ -165,9 +165,14 @@ function application(id = APPLICATION_ID): DiscordApplication {
       id: BOT_ID,
       username: "connector-bot",
     },
+    bot_public: false,
+    bot_require_code_grant: false,
     description: "",
     flags: Number(1n << 18n),
     id,
+    integration_types_config: {
+      "0": {},
+    },
     name: "Connector",
   }
 }
@@ -5853,11 +5858,15 @@ test("service verifies identity once and reports scope without message reads", a
   const { calls, service } = serviceFixture()
 
   const status = await service.getStatus()
+  const posture = await service.getApplicationPosture()
   const guilds = await service.listGuilds({ limit: 10 })
 
   assert.equal(status.application.id, APPLICATION_ID)
   assert.equal(status.application.guildMembersIntent, "disabled")
   assert.equal(status.application.messageContentIntent, "enabled")
+  assert.deepEqual(status.applicationPosture, posture)
+  assert.deepEqual(posture.findingCounts, { blockers: 0, warnings: 0 })
+  assert.equal(posture.installation.guild.supported, true)
   assert.equal(status.bot.id, BOT_ID)
   assert.equal(status.guildPage.accessible, 1)
   assert.deepEqual(status.writeCoordination, {
@@ -5922,6 +5931,48 @@ test("service diagnoses Guild Members intent from normal and limited application
       .application.guildMembersIntent,
     "unknown",
   )
+})
+
+test("service assesses current application posture against effective policy", async () => {
+  const configured = application()
+  configured.bot_public = true
+  configured.flags = 0
+  configured.flags_new = "0"
+  configured.interactions_endpoint_url = "https://interactions.invalid/private"
+  const { calls, service } = serviceFixture({
+    application: configured,
+    environment: {
+      DISCORD_MCP_ALLOW_INTERACTIONS: "true",
+      DISCORD_MCP_ALLOW_MEMBER_DIRECTORY: "true",
+      DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+      DISCORD_MCP_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_MEMBER_DIRECTORY_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+      DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: BOT_ID,
+    },
+  })
+
+  const posture = await service.getApplicationPosture()
+
+  assert.deepEqual(posture.connectorFit, {
+    callbackFreeGuildInstall: "compatible",
+    guildMembersIntent: "blocked",
+    messageContentIntent: "blocked",
+    nativeInteractionIngress: "blocked",
+    presenceIntent: "not-required",
+  })
+  assert.deepEqual(posture.findings.map(({ code }) => code), [
+    "interaction-delivery-conflict",
+    "required-guild-members-intent-disabled",
+    "required-message-content-intent-disabled",
+    "bot-public",
+  ])
+  assert.deepEqual(posture.findingCounts, { blockers: 3, warnings: 1 })
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.guilds, 0)
+  assert.doesNotMatch(JSON.stringify(posture), /https:\/\//u)
 })
 
 test("service exposes an opt-in minimized member directory through exact REST calls", async () => {

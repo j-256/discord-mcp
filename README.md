@@ -108,7 +108,7 @@ npx --yes @j-256/discord-mcp@0.1.0 setup \
   --channel-id YOUR_CHANNEL_ID
 ```
 
-The online doctor verifies identity, intent flags, and the bounded guild-membership page. The smoke command verifies the real MCP path without listing channels, reading messages, opening the Gateway, exporting telemetry, or writing to Discord.
+The online doctor verifies identity, the bounded guild-membership page, and a privacy-safe application security posture covering installation settings, privileged intents, Interaction delivery, event webhooks, and least-privilege fit. The smoke command verifies the real MCP path without listing channels, reading messages, opening the Gateway, exporting telemetry, or writing to Discord.
 
 ### Build from source
 
@@ -131,7 +131,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 | Guild structure | Additive channels and roles, reviewed exact channel and standard-role retirement, resumable scaffolds, atomic channel cloning, relative channel and role ordering, boost-aware voice and Stage channel metadata, permission overwrites, forum tags, role configuration, guild settings, and guild profile text |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows with hierarchy and permission proof |
 | Community configuration | Native command management, Guild Templates, integrations, invites, webhooks, onboarding, Welcome Screens, authenticated widget settings, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
-| Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic presets, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
+| Operations | Full or progressive tool discovery, resources, prompts, strict non-secret policy files and managed profiles, deterministic presets, privacy-safe application posture audits, content-free activity, durable cross-process write coordination, optional privacy-safe Gateway events, native Interaction ingress, and local or OpenTelemetry diagnostics |
 
 Capabilities are exposed only when their toolset and policy gates are selected. A toolset narrows the callable surface but never grants Discord or local write authority. Browse the exact [tool reference](docs/reference.md#tools), [resources](docs/reference.md#resources), and [prompts](docs/reference.md#prompts).
 

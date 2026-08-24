@@ -5,9 +5,14 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
+  DISCORD_APPLICATION_FLAGS,
   ENVIRONMENT_NAMES,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
+import {
+  projectApplicationPosture,
+  type ApplicationPostureResult,
+} from "../src/application-posture.js"
 import { loadConnectorConfig } from "../src/config.js"
 import {
   configDocumentPolicyFromEnvironment,
@@ -36,6 +41,7 @@ import {
 import { selectedMcpToolsets } from "../src/mcp-tool-catalog.js"
 import { getSetupPreset } from "../src/setup-presets.js"
 import type { ConnectorService } from "../src/service.js"
+import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
@@ -99,7 +105,29 @@ function status(
   inScope = 1,
   messageContentIntent: "disabled" | "enabled" | "unknown" = "enabled",
   guildMembersIntent: "disabled" | "enabled" | "unknown" = "enabled",
+  posture?: ApplicationPostureResult,
 ): Awaited<ReturnType<ConnectorService["getStatus"]>> {
+  const projectedPosture = projectApplicationPosture({
+    bot_public: false,
+    bot_require_code_grant: false,
+    description: "",
+    flags: 0,
+    id: APPLICATION_ID,
+    integration_types_config: { "0": {} },
+    name: "Connector",
+  }, BOT_ID, {
+    guildMembersIntentRequired: false,
+    messageContentIntent: "not-required",
+    nativeInteractionIngressRequired: false,
+  })
+  const applicationPosture = posture ?? {
+    ...projectedPosture,
+    privilegedIntents: {
+      guildMembers: guildMembersIntent,
+      messageContent: messageContentIntent,
+      presence: "disabled" as const,
+    },
+  }
   return {
     application: {
       guildMembersIntent,
@@ -107,6 +135,7 @@ function status(
       messageContentIntent,
       name: "Connector",
     },
+    applicationPosture,
     auditFile: "/test/activity.jsonl",
     bot: {
       id: BOT_ID,
@@ -311,6 +340,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    getApplicationPosture: unexpected,
     auditChannelDeletion: unexpected,
     auditRoleDeletion: unexpected,
     auditChannelOrder: unexpected,
@@ -640,7 +670,7 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
     toolSurface?.summary || "",
     new RegExp(`2 of ${MCP_TOOLSET_NAMES.length}`),
   )
-  assert.match(toolSurface?.summary || "", /4 canonical tools/)
+  assert.match(toolSurface?.summary || "", /5 canonical tools/)
   assert.equal(setup.toolSurface, "progressive")
   assert.deepEqual(setup.toolsets, ["connector", "messages"])
   assert.match(setup.warnings.join("\n"), /interactions toolset/)
@@ -3246,6 +3276,79 @@ test("doctor verifies identity online and redacts online failures", async () => 
   assert.match(JSON.stringify(failed), /\[redacted\]/)
 })
 
+test("doctor and setup turn current application posture into actionable findings", async () => {
+  const defaultPermissions = DISCORD_PERMISSIONS.ADMINISTRATOR | (1n << 90n)
+  const posture = projectApplicationPosture({
+    bot_public: true,
+    bot_require_code_grant: true,
+    custom_install_url: "https://install.invalid/private",
+    description: "private application description",
+    event_webhooks_status: 2,
+    event_webhooks_url: "https://events.invalid/private",
+    flags_new: DISCORD_APPLICATION_FLAGS.gatewayPresenceLimited.toString(),
+    id: APPLICATION_ID,
+    integration_types_config: {
+      "0": {
+        oauth2_install_params: {
+          permissions: defaultPermissions.toString(),
+          scopes: ["bot", "future.scope"],
+        },
+      },
+    },
+    interactions_endpoint_url: "https://interactions.invalid/private",
+    name: "private application name",
+  }, BOT_ID, {
+    guildMembersIntentRequired: false,
+    messageContentIntent: "not-required",
+    nativeInteractionIngressRequired: true,
+  })
+  const configuredEnvironment = environment({
+    DISCORD_MCP_ALLOW_NATIVE_INTERACTIONS: "true",
+    DISCORD_MCP_NATIVE_INTERACTION_CHANNEL_IDS: CHANNEL_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_GUILD_IDS: GUILD_ID,
+    DISCORD_MCP_NATIVE_INTERACTION_USER_IDS: BOT_ID,
+    DISCORD_MCP_TOOLSETS: "connector,native-interactions",
+  })
+  const provider = {
+    async getStatus() {
+      return status(1, "disabled", "disabled", posture)
+    },
+  }
+
+  const report = await diagnoseConnector({
+    environment: configuredEnvironment,
+    nodeVersion: "22.14.0",
+    online: true,
+    service: provider,
+  })
+  const setup = await prepareSetup({
+    environment: configuredEnvironment,
+    service: provider,
+  })
+
+  const expected = [
+    [DOCTOR_CHECK_IDS.applicationInstall, "fail"],
+    [DOCTOR_CHECK_IDS.applicationBotVisibility, "warn"],
+    [DOCTOR_CHECK_IDS.applicationDefaultPermissions, "warn"],
+    [DOCTOR_CHECK_IDS.applicationInteractionDelivery, "fail"],
+    [DOCTOR_CHECK_IDS.applicationPresenceIntent, "warn"],
+    [DOCTOR_CHECK_IDS.applicationEventWebhooks, "warn"],
+  ] as const
+  for (const [id, expectedStatus] of expected) {
+    const entry = report.checks.find((check) => check.id === id)
+    assert.equal(entry?.status, expectedStatus, id)
+    assert.equal(entry?.reference, "docs/reference.md#application-security-posture")
+    assert.match(entry?.action || "", /Developer Portal/)
+  }
+  assert.equal(report.status, "error")
+  assert.match(setup.warnings.join("\n"), /full OAuth2 code grant/)
+  assert.match(setup.warnings.join("\n"), /requests Administrator/)
+  assert.match(setup.warnings.join("\n"), /other than the application owner/)
+  assert.match(setup.warnings.join("\n"), /event webhooks are enabled/)
+  assert.doesNotMatch(JSON.stringify({ report, setup }), /https:\/\//u)
+  assert.doesNotMatch(JSON.stringify({ report, setup }), /private application/u)
+})
+
 test("doctor and setup report Message Content intent needed by native search", async () => {
   const report = await diagnoseConnector({
     environment: environment(),
@@ -4146,6 +4249,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   ])
   assert.deepEqual(report.resourceUris, [
     "discord://application/emojis",
+    "discord://application/posture",
     "discord://connector/activity",
     "discord://connector/observability",
     "discord://connector/policy",

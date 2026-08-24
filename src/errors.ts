@@ -329,6 +329,10 @@ export class VoiceRegionEvidenceError extends Error {
   override name = "VoiceRegionEvidenceError"
 }
 
+export class ApplicationPostureEvidenceError extends Error {
+  override name = "ApplicationPostureEvidenceError"
+}
+
 export class ChannelDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

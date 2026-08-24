@@ -7990,7 +7990,7 @@ export class DiscordClient {
   }
 
   getCurrentApplication(options: RequestOptions = {}): Promise<DiscordApplication> {
-    return this.#request("get_current_application", "/oauth2/applications/@me", options)
+    return this.#request("get_current_application", "/applications/@me", options)
   }
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {

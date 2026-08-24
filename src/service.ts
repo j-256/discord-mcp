@@ -15,6 +15,13 @@ import {
   ApplicationEmojiService,
   normalizeApplicationEmojiChangeRequest,
 } from "./application-emoji-service.js"
+import {
+  projectApplicationPosture,
+  projectApplicationPrivilegedIntents,
+  type ApplicationMessageContentRequirement,
+  type ApplicationPostureRequirements,
+  type ApplicationPostureResult,
+} from "./application-posture.js"
 import type {
   AnnouncementCrosspostPlan,
   AnnouncementCrosspostRequest,
@@ -155,7 +162,6 @@ import { ChannelPermissionOverwriteService } from "./channel-permission-overwrit
 import type { ConnectorConfig } from "./config.js"
 import {
   CONNECTOR_LIMITS,
-  DISCORD_APPLICATION_FLAGS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   SCHEMA_VERSION,
@@ -931,42 +937,8 @@ interface VerifiedIdentity {
   bot: DiscordUser
 }
 
-type PrivilegedIntentStatus = "disabled" | "enabled" | "unknown"
-
-function applicationPrivilegedIntent(
-  application: DiscordApplication,
-  intentFlags: bigint,
-): PrivilegedIntentStatus {
-  let flags: bigint
-  try {
-    if (application.flags_new !== undefined) flags = BigInt(application.flags_new)
-    else if (application.flags !== undefined) flags = BigInt(application.flags)
-    else return "unknown"
-  } catch {
-    return "unknown"
-  }
-  if (flags < 0n) return "unknown"
-  return (flags & intentFlags) !== 0n ? "enabled" : "disabled"
-}
-
-function applicationGuildMembersIntent(
-  application: DiscordApplication,
-): PrivilegedIntentStatus {
-  return applicationPrivilegedIntent(
-    application,
-    DISCORD_APPLICATION_FLAGS.gatewayGuildMembers
-      | DISCORD_APPLICATION_FLAGS.gatewayGuildMembersLimited,
-  )
-}
-
-function applicationMessageContentIntent(
-  application: DiscordApplication,
-): PrivilegedIntentStatus {
-  return applicationPrivilegedIntent(
-    application,
-    DISCORD_APPLICATION_FLAGS.gatewayMessageContent
-      | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited,
-  )
+function applicationMessageContentIntent(application: DiscordApplication) {
+  return projectApplicationPrivilegedIntents(application).messageContent
 }
 
 function assertConnectorLimit(
@@ -1525,6 +1497,40 @@ export class ConnectorService {
     return this.#identityPromise
   }
 
+  #applicationPostureRequirements(): ApplicationPostureRequirements {
+    const contentDependentWrites = (
+      this.#config.allowAnnouncementCrossposts
+      && this.#config.announcementCrosspostChannelIds.size > 0
+    ) || (
+      this.#config.allowInteractions
+      && this.#config.interactionChannelIds.size > 0
+    ) || (
+      this.#config.allowMessageForwarding
+      && this.#config.messageForwardSourceChannelIds.size > 0
+      && this.#config.messageForwardTargetChannelIds.size > 0
+    )
+    const messageContentIntent: ApplicationMessageContentRequirement =
+      contentDependentWrites
+        ? "required"
+        : this.#config.mcpToolsets.has("messages")
+          ? "recommended"
+          : "not-required"
+    return {
+      guildMembersIntentRequired: this.#config.allowMemberDirectory
+        && this.#config.memberDirectoryGuildIds.size > 0,
+      messageContentIntent,
+      nativeInteractionIngressRequired: this.#config.allowNativeInteractions,
+    }
+  }
+
+  #applicationPosture(identity: VerifiedIdentity): ApplicationPostureResult {
+    return projectApplicationPosture(
+      identity.application,
+      identity.bot.id,
+      this.#applicationPostureRequirements(),
+    )
+  }
+
   #coordinateWrite<T>(
     kind: OperationKind,
     operationKey: string,
@@ -1546,6 +1552,7 @@ export class ConnectorService {
 
   async getStatus(options: RequestOptions = {}) {
     const identity = await this.#verifyIdentity(options)
+    const applicationPosture = this.#applicationPosture(identity)
     const guilds = await this.#client.listCurrentUserGuilds({
       limit: DISCORD_LIMITS.currentUserGuilds,
       ...options,
@@ -1553,11 +1560,12 @@ export class ConnectorService {
     const scopedGuilds = this.#policy.filterGuilds(guilds)
     return {
       application: {
-        guildMembersIntent: applicationGuildMembersIntent(identity.application),
+        guildMembersIntent: applicationPosture.privilegedIntents.guildMembers,
         id: identity.application.id,
-        messageContentIntent: applicationMessageContentIntent(identity.application),
+        messageContentIntent: applicationPosture.privilegedIntents.messageContent,
         name: identity.application.name,
       },
+      applicationPosture,
       auditFile: this.#config.auditFile,
       bot: {
         id: identity.bot.id,
@@ -1582,6 +1590,12 @@ export class ConnectorService {
         sharedStateRootRequired: true,
       },
     }
+  }
+
+  async getApplicationPosture(
+    options: RequestOptions = {},
+  ): Promise<ApplicationPostureResult> {
+    return this.#applicationPosture(await this.#verifyIdentity(options))
   }
 
   async listGuilds(options: GuildPageOptions = {}) {

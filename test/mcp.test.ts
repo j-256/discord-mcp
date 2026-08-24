@@ -48,6 +48,7 @@ import type {
   ApplicationEmojiPrivacyProjection,
   ProjectedApplicationEmoji,
 } from "../src/application-emoji-service.js"
+import { projectApplicationPosture } from "../src/application-posture.js"
 import type {
   AttachmentMessagePlan,
   AttachmentMessageRequest,
@@ -5929,6 +5930,25 @@ function fixturePolicy(): PolicyDescription {
   }
 }
 
+function fixtureApplicationPosture(
+  applicationId = "500000000000000001",
+  botId = "600000000000000001",
+) {
+  return projectApplicationPosture({
+    bot_public: false,
+    bot_require_code_grant: false,
+    description: "",
+    flags: Number((1n << 14n) | (1n << 18n)),
+    id: applicationId,
+    integration_types_config: { "0": {} },
+    name: "Connector",
+  }, botId, {
+    guildMembersIntentRequired: false,
+    messageContentIntent: "not-required",
+    nativeInteractionIngressRequired: false,
+  })
+}
+
 function serviceFixture(overrides: {
   administrationError?: Error
   activityError?: Error
@@ -8578,7 +8598,11 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async getApplicationPosture() {
+      return fixtureApplicationPosture()
+    },
     async getStatus() {
+      const applicationPosture = fixtureApplicationPosture()
       return {
         application: {
           guildMembersIntent: "enabled" as const,
@@ -8586,6 +8610,7 @@ function serviceFixture(overrides: {
           messageContentIntent: "enabled" as const,
           name: "Connector",
         },
+        applicationPosture,
         auditFile: "/memory/activity.jsonl",
         bot: { id: "600000000000000001", username: "bot" },
         guildPage: { accessible: 1, inScope: 1 },
@@ -9411,6 +9436,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.deepEqual(
     result.tools.map((tool) => tool.name),
     [
+      "audit_application_posture",
       "get_connector_status",
       "get_observability_status",
       "get_gateway_status",
@@ -11174,6 +11200,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
+      "audit_application_posture",
       "get_connector_status",
       "read_messages",
       "search_messages",
@@ -11725,6 +11752,10 @@ test("progressive audit-log discovery reveals only the requested exact read", as
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
+  const posture = structuredContent(await client.callTool({
+    arguments: {},
+    name: "audit_application_posture",
+  }))
   const status = structuredContent(await client.callTool({
     arguments: {},
     name: "get_connector_status",
@@ -11740,6 +11771,13 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     resumableWorkflows: ["guild-scaffold"],
     sharedStateRootRequired: true,
   })
+  assert.deepEqual(status.applicationPosture, posture)
+  assert.deepEqual(posture.findingCounts, { blockers: 0, warnings: 0 })
+  assert.equal(
+    (posture.interactions as Record<string, unknown>).delivery,
+    "gateway",
+  )
+  assert.doesNotMatch(JSON.stringify(posture), /https:\/\//u)
 
   const resource = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
   const content = resource.contents[0]

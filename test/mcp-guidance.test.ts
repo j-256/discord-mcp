@@ -11,6 +11,7 @@ import {
   ONBOARDING_LIMITS,
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
+import { projectApplicationPosture } from "../src/application-posture.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_NAMES,
@@ -162,6 +163,7 @@ interface GuidanceCalls {
   activity: number
   announcementSubscriptions: number
   applicationEmojis: number
+  applicationPosture: number
   automod: number
   bans: number
   channelAccess: number
@@ -217,6 +219,7 @@ function guidanceService(options: {
     activity: 0,
     announcementSubscriptions: 0,
     applicationEmojis: 0,
+    applicationPosture: 0,
     automod: 0,
     bans: 0,
     channelAccess: 0,
@@ -2204,6 +2207,23 @@ function guidanceService(options: {
       }
     },
     getStatus: unexpected,
+    async getApplicationPosture() {
+      calls.applicationPosture += 1
+      return projectApplicationPosture({
+        bot_public: false,
+        bot_require_code_grant: false,
+        description: "private application description",
+        flags: 0,
+        id: APPLICATION_ID,
+        integration_types_config: { "0": {} },
+        interactions_endpoint_url: null,
+        name: "private application name",
+      }, BOT_ID, {
+        guildMembersIntentRequired: false,
+        messageContentIntent: "not-required",
+        nativeInteractionIngressRequired: false,
+      })
+    },
     async listActivity(limit) {
       calls.activity += 1
       assert.equal(limit, 25)
@@ -2515,6 +2535,7 @@ function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
     + calls.announcementSubscriptions
     + calls.applicationEmojis
+    + calls.applicationPosture
     + calls.automod
     + calls.bans
     + calls.channelAccess
@@ -2597,6 +2618,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_NAMES.applicationEmojis,
         uri: MCP_RESOURCE_URIS.applicationEmojis,
+      },
+      {
+        name: MCP_RESOURCE_NAMES.applicationPosture,
+        uri: MCP_RESOURCE_URIS.applicationPosture,
       },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
@@ -2852,6 +2877,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /Application emoji inventory is bound to the verified pinned current application/)
   assert.match(safety.text, /explicit global-impact acknowledgement/)
+  assert.match(safety.text, /Current application posture uses the already-required identity response/)
+  assert.match(safety.text, /owner and team profiles, URLs, raw flags, permission bitfields/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /New rules are always disabled/)
   assert.match(safety.text, /Scheduled-event inventory requires a separate exact guild allowlist/)
@@ -2890,6 +2917,20 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(activity.text, /\[redacted\]/)
   assert.equal(calls.activity, 1)
 
+  const posture = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.applicationPosture,
+  )
+  const postureData = posture.value.data as Record<string, unknown>
+  assert.equal(postureData.applicationId, APPLICATION_ID)
+  assert.deepEqual(postureData.findingCounts, { blockers: 0, warnings: 0 })
+  assert.equal(
+    (posture.value.trust as Record<string, unknown>).classification,
+    "untrusted-external-data",
+  )
+  assert.doesNotMatch(posture.text, /private application/u)
+  assert.equal(calls.applicationPosture, 1)
+
   const observability = await readJsonResource(
     client,
     MCP_RESOURCE_URIS.observability,
@@ -2905,7 +2946,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   })
   assert.equal(JSON.stringify(observabilityData).includes(TOKEN), false)
   assert.equal(JSON.stringify(observabilityData).includes("OTEL_EXPORTER"), false)
-  assert.equal(totalCalls(calls), 1)
+  assert.equal(totalCalls(calls), 2)
 })
 
 test("MCP live resources forward exact IDs and minimize untrusted message content", async (context) => {
