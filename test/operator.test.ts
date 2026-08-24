@@ -287,6 +287,9 @@ function status(
       interactionMinWriteIntervalMs: 500,
       interactionsEnabled: false,
       inviteAuditEnabled: false,
+      inviteCapabilityRootCount: 0,
+      inviteCreationChannelIds: [],
+      inviteCreationEnabled: false,
       inviteDeletionsEnabled: false,
       inviteGuildIds: [],
       memberDirectoryEnabled: false,
@@ -417,6 +420,7 @@ function toolService(): DiscordToolService {
     executeGuildIntegrationDeletion: unexpected,
     executeForumTagChange: unexpected,
     executeSoundboardChange: unexpected,
+    executeInviteCreation: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
     executeWelcomeScreenChange: unexpected,
@@ -476,6 +480,7 @@ function toolService(): DiscordToolService {
     previewComponentLayout() {
       throw new Error("Unexpected smoke service call")
     },
+    planInviteCreation: unexpected,
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
     planWelcomeScreenChange: unexpected,
@@ -2003,14 +2008,21 @@ test("doctor and setup explain privacy-safe integration audit and deletion", asy
   assertDefaultSecretForwarding(setup)
 })
 
-test("doctor and setup explain capability-safe invite audit and revocation", async () => {
+test("doctor and setup explain capability-safe invite creation, audit, and revocation", async (context) => {
+  const capabilityRoot = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-invite-capabilities-")))
+  context.after(() => rm(capabilityRoot, { recursive: true, force: true }))
   const enabledPolicy = fixturePolicy({
     capabilities: {
       inviteAudit: true,
+      inviteCreation: true,
       inviteDeletions: true,
     },
     scopes: {
+      inviteCreationChannelIds: [CHANNEL_ID],
       inviteGuildIds: [GUILD_ID],
+    },
+    storage: {
+      inviteCapabilityRoots: [capabilityRoot],
     },
   })
   const enabled = await diagnoseConnector({
@@ -2047,12 +2059,21 @@ test("doctor and setup explain capability-safe invite audit and revocation", asy
   const deletion = enabled.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.inviteDeletionPolicy,
   )
+  const creation = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.inviteCreationPolicy,
+  )
   assert.equal(audit?.status, "pass")
   assert.match(audit?.summary || "", /opaque references/)
   assert.match(audit?.summary || "", /MANAGE_GUILD/)
   assert.equal(deletion?.status, "pass")
   assert.match(deletion?.summary || "", /one-shot execution/)
   assert.match(deletion?.summary || "", /full-inventory absence readback/)
+  assert.equal(creation?.status, "pass")
+  assert.match(creation?.summary || "", /1 exact channels and 1 private-file roots/)
+  assert.match(creation?.summary || "", /VIEW_CHANNEL and CREATE_INSTANT_INVITE/)
+  assert.match(creation?.summary || "", /finite unique invites/)
+  assert.match(creation?.summary || "", /exclusive 0600 delivery/)
+  assert.match(creation?.summary || "", /no bearer capability in MCP results or lifecycle records/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.inviteAuditPolicy,
@@ -5000,6 +5021,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_scaffold",
     "review_guild_settings_change",
     "review_guild_template_change",
+    "review_invite_creation",
     "review_invite_deletion",
     "review_member_moderation",
     "review_member_nickname_change",

@@ -61,6 +61,7 @@ type McpToolWorkflow =
   | "guild-settings-change"
   | "guild-template-change"
   | "integration-deletion"
+  | "invite-creation"
   | "invite-deletion"
   | "onboarding-change"
   | "poll-creation"
@@ -268,6 +269,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["bot", "cleanup", "delete", "execute", "guild", "integration", "webhook"],
     toolset: "integrations",
     workflow: "integration-deletion",
+  },
+  execute_invite_creation: {
+    keywords: ["capability", "create", "execute", "finite", "invite", "private"],
+    toolset: "invites",
+    workflow: "invite-creation",
   },
   execute_invite_deletion: {
     keywords: ["delete", "execute", "invite", "revoke"],
@@ -800,6 +806,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["delete", "invite", "plan", "review", "revoke"],
     toolset: "invites",
     workflow: "invite-deletion",
+  },
+  plan_invite_creation: {
+    keywords: ["capability", "create", "finite", "invite", "plan", "private", "review"],
+    toolset: "invites",
+    workflow: "invite-creation",
   },
   plan_onboarding_change: {
     keywords: ["configure", "join", "onboarding", "plan", "prompt", "review", "role"],

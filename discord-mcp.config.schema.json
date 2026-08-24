@@ -159,6 +159,10 @@
           "type": "boolean",
           "description": "Enable invite audit policy"
         },
+        "inviteCreation": {
+          "type": "boolean",
+          "description": "Enable reviewed finite invite creation with private-file capability delivery"
+        },
         "inviteDeletions": {
           "type": "boolean",
           "description": "Enable invite deletions policy"
@@ -972,6 +976,16 @@
           },
           "description": "Exact Discord ID allowlist for interaction channel ids"
         },
+        "inviteCreationChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
+        },
         "inviteGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1345,6 +1359,16 @@
             "maxLength": 4096
           },
           "description": "Owned local roots shared by guild-expression creation and reviewed role-icon images"
+        },
+        "inviteCapabilityRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "description": "Canonical process-owned roots for exclusive private invite capability files"
         },
         "scheduledEventRoots": {
           "maxItems": 32,

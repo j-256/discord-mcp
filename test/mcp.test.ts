@@ -152,6 +152,9 @@ import type { DiscordGuildIntegrationSummary } from "../src/discord-client.js"
 import {
   INVITE_OMITTED_FIELDS,
   type InviteAccessEvidence,
+  type InviteCreationPlan,
+  type InviteCreationRequest,
+  type InviteCreationResult,
   type InviteDeletionPlan,
   type InviteDeletionRequest,
   type InvitePrivacyProjection,
@@ -313,6 +316,8 @@ import {
   IntegrationDeletionOperationConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
+  InviteCreationExecutionError,
+  InviteCreationOperationConflictError,
   InviteDeletionExecutionError,
   InviteDeletionOperationConflictError,
   MessagePinExecutionError,
@@ -539,6 +544,8 @@ const INTEGRATION_ID = "375000000000000001"
 const INTEGRATION_APPLICATION_ID = "375000000000000002"
 const INTEGRATION_BOT_ID = "375000000000000003"
 const INVITE_OPERATION_KEY = "invite-delete-attempt-0001"
+const INVITE_CREATION_OPERATION_KEY = "invite-create-attempt-0001"
+const INVITE_CAPABILITY_OUTPUT_FILE = "/private/invite-created.json"
 const INVITE_REF = `iref_hmac_sha256_${"6".repeat(64)}`
 const PRIVATE_INVITE_CODE = "private-invite-capability"
 const GUILD_TEMPLATE_OPERATION_KEY = "guild-template-attempt-0001"
@@ -3182,6 +3189,75 @@ function inviteDeletionPlan(
       roles: 1,
     },
     warnings: ["One-shot capability revocation"],
+  }
+}
+
+function inviteCreationPlan(
+  request: InviteCreationRequest,
+  digest = DIGEST,
+): InviteCreationPlan {
+  return {
+    access: {
+      appliedRoleIds: [GUILD_ID],
+      botAdministrator: false,
+      botIsGuildOwner: false,
+      complete: true,
+      createInstantInvite: true,
+      effectivePermissionNames: ["CREATE_INSTANT_INVITE", "VIEW_CHANNEL"],
+      effectivePermissions: "1025",
+      requiredPermissions: ["CREATE_INSTANT_INVITE", "VIEW_CHANNEL"],
+      unknownPermissionBits: "0",
+      viewChannel: true,
+    },
+    action: "create",
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-24T00:00:00.000Z",
+    delivery: {
+      format: "discord-invite-capability.v1",
+      outputFile: request.outputFile,
+      review: {
+        canonicalPath: request.outputFile,
+        directChildOfConfiguredRoot: true,
+        exclusiveCreate: true,
+        fileMode: "0600",
+        rootCanonical: true,
+        rootOwnerMatchesProcess: true,
+        rootPrivate: true,
+        targetAbsent: true,
+      },
+    },
+    digest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    intent: {
+      maxAgeSeconds: request.maxAgeSeconds,
+      maxUses: request.maxUses,
+      temporaryMembership: request.temporaryMembership,
+      unique: true,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: {
+      capabilityDelivery: "private-file-only",
+      mcpResult: "credential-free",
+      persistence: "content-free-lifecycle-only",
+      rawDiscordPayloads: "omitted",
+    },
+    schemaVersion: 1,
+    status: "planned",
+    target: {
+      id: request.channelId,
+      name: "Private invite channel",
+      permissionOverwriteCount: 0,
+      type: 0,
+    },
+    visibleInventory: {
+      channelLimit: 500,
+      channels: 1,
+      roleLimit: 250,
+      roles: 1,
+    },
+    warnings: ["The invite code and URL are private-file-only"],
   }
 }
 
@@ -6658,6 +6734,9 @@ function fixturePolicy(): PolicyDescription {
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     inviteAuditEnabled: false,
+    inviteCapabilityRootCount: 0,
+    inviteCreationChannelIds: [],
+    inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
     memberDirectoryEnabled: true,
@@ -6825,6 +6904,9 @@ function serviceFixture(overrides: {
   integrationDeletionPlanDigest?: string
   inviteDeletionError?: Error
   inviteDeletionPlanDigest?: string
+  inviteCreationError?: Error
+  inviteCreationPlanDigest?: string
+  inviteCreationResult?: InviteCreationResult & Record<string, unknown>
   messageContent?: string
   messageForwardError?: Error
   messageForwardPlanDigest?: string
@@ -7009,6 +7091,8 @@ function serviceFixture(overrides: {
     inviteDeletionGet: 0,
     inviteDeletionList: 0,
     inviteDeletionPlan: 0,
+    inviteCreationExecute: 0,
+    inviteCreationPlan: 0,
     explain: 0,
     getRole: 0,
     memberGet: 0,
@@ -7933,6 +8017,23 @@ function serviceFixture(overrides: {
         verifiedAbsent: true,
       }
     },
+    async executeInviteCreation(request, planDigest) {
+      if (overrides.inviteCreationError) throw overrides.inviteCreationError
+      calls.inviteCreationExecute += 1
+      return overrides.inviteCreationResult ?? {
+        activityId: "activity-invite-creation",
+        capabilityFileWritten: true as const,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        inviteRef: INVITE_REF,
+        operationKeyHash: OPERATION_KEY_HASH,
+        outputFile: request.outputFile,
+        planDigest,
+        schemaVersion: 1,
+        status: "completed" as const,
+        verified: true as const,
+      }
+    },
     async getGuildInvite(guildId, inviteRef) {
       calls.inviteDeletionGet += 1
       return {
@@ -8005,6 +8106,13 @@ function serviceFixture(overrides: {
       return inviteDeletionPlan(
         request,
         overrides.inviteDeletionPlanDigest || DIGEST,
+      )
+    },
+    async planInviteCreation(request) {
+      calls.inviteCreationPlan += 1
+      return inviteCreationPlan(
+        request,
+        overrides.inviteCreationPlanDigest || DIGEST,
       )
     },
     async executeAutoModerationChange(request, planDigest) {
@@ -10591,6 +10699,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_webhook_deletion",
       "plan_guild_integration_deletion",
       "execute_guild_integration_deletion",
+      "plan_invite_creation",
+      "execute_invite_creation",
       "plan_invite_deletion",
       "execute_invite_deletion",
       "plan_onboarding_change",
@@ -10706,6 +10816,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const integrationDeletion = result.tools.find((tool) => (
     tool.name === "execute_guild_integration_deletion"
   ))
+  const inviteCreation = result.tools.find((tool) => tool.name === "execute_invite_creation")
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
   const onboarding = result.tools.find((tool) => tool.name === "execute_onboarding_change")
   const widgetSettings = result.tools.find((tool) => (
@@ -10857,6 +10968,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   })
   assert.deepEqual(webhookCreation?.annotations, {
     destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(inviteCreation?.annotations, {
+    destructiveHint: false,
     idempotentHint: false,
     openWorldHint: true,
     readOnlyHint: false,
@@ -12127,6 +12244,30 @@ test("progressive discovery enables the complete reviewed webhook-change workflo
   )
 })
 
+test("progressive discovery enables the complete reviewed invite-creation workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_invite_creation" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_invite_creation",
+    "plan_invite_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_invite_creation",
+      "execute_invite_creation",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed invite-deletion workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
@@ -12617,6 +12758,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     integrationDeletionExecute: 0,
     integrationDeletionList: 0,
     integrationDeletionPlan: 0,
+    inviteCreationExecute: 0,
+    inviteCreationPlan: 0,
     inviteDeletionExecute: 0,
     inviteDeletionGet: 0,
     inviteDeletionList: 0,
@@ -16807,6 +16950,311 @@ test("MCP integration deletion stops on refusal, plan drift, uncertainty, and re
     JSON.stringify(conflictResult),
     new RegExp(INTEGRATION_OPERATION_KEY),
   )
+})
+
+test("MCP invite creation plans require finite acknowledged private delivery", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const request = {
+    acknowledgeBearerCapability: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey: INVITE_CREATION_OPERATION_KEY,
+    outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+    temporaryMembership: false,
+  }
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_invite_creation",
+  })
+  const unacknowledged = await client.callTool({
+    arguments: { ...request, acknowledgeBearerCapability: false },
+    name: "plan_invite_creation",
+  })
+  const unlimited = await client.callTool({
+    arguments: { ...request, maxUses: 0 },
+    name: "plan_invite_creation",
+  })
+  const relative = await client.callTool({
+    arguments: { ...request, outputFile: "invite.json" },
+    name: "plan_invite_creation",
+  })
+  const noncanonical = await client.callTool({
+    arguments: {
+      ...request,
+      outputFile: "/private/nested/../invite-created.json",
+    },
+    name: "plan_invite_creation",
+  })
+  const controlCharacter = await client.callTool({
+    arguments: { ...request, outputFile: "/private/invite\n-created.json" },
+    name: "plan_invite_creation",
+  })
+  const capabilityInput = await client.callTool({
+    arguments: { ...request, code: PRIVATE_INVITE_CODE },
+    name: "plan_invite_creation",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal((content.intent as Record<string, unknown>).unique, true)
+  assert.equal(
+    ((content.delivery as Record<string, unknown>).review as Record<string, unknown>).fileMode,
+    "0600",
+  )
+  assert.equal(unacknowledged.isError, true)
+  assert.equal(unlimited.isError, true)
+  assert.equal(relative.isError, true)
+  assert.equal(noncanonical.isError, true)
+  assert.equal(controlCharacter.isError, true)
+  assert.equal(capabilityInput.isError, true)
+  assert.equal(calls.inviteCreationPlan, 1)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(PRIVATE_INVITE_CODE))
+})
+
+test("MCP invite creation binds signed approval to exact private capability delivery", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeBearerCapability: true,
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      maxAgeSeconds: 3_600,
+      maxUses: 1,
+      operationKey: INVITE_CREATION_OPERATION_KEY,
+      outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+      planDigest: DIGEST,
+      temporaryMembership: false,
+    },
+    name: "execute_invite_creation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.inviteCreationPlan, 1)
+  assert.equal(calls.inviteCreationExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    INVITE_CAPABILITY_OUTPUT_FILE,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value.replace(/[/.]/gu, "\\$&")))
+  }
+  assert.match(confirmationMessage, /Maximum age seconds: 3600/)
+  assert.match(confirmationMessage, /Maximum uses: 1/)
+  assert.match(confirmationMessage, /Bot VIEW_CHANNEL: true/)
+  assert.match(confirmationMessage, /Bot CREATE_INSTANT_INVITE: true/)
+  assert.match(confirmationMessage, /Private file mode: 0600/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.doesNotMatch(confirmationMessage, new RegExp(INVITE_CREATION_OPERATION_KEY))
+  assert.doesNotMatch(confirmationMessage, new RegExp(PRIVATE_INVITE_CODE))
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(PRIVATE_INVITE_CODE))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(PRIVATE_INVITE_CODE))
+})
+
+test("MCP invite creation signed state rejects every changed intent field", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    acknowledgeBearerCapability: true as const,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey: INVITE_CREATION_OPERATION_KEY,
+    outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+    planDigest: DIGEST,
+    temporaryMembership: false,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_invite_creation",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, channelId: PARENT_ID },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, maxAgeSeconds: 7_200 },
+    { ...request, maxUses: 2 },
+    { ...request, operationKey: "invite-create-attempt-0002" },
+    { ...request, outputFile: "/private/invite-created-2.json" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, temporaryMembership: true },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_invite_creation: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_invite_creation",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.inviteCreationExecute, 0)
+})
+
+test("MCP invite creation stops on drift and exposes uncertain or one-shot conflicts safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    acknowledgeBearerCapability: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey: INVITE_CREATION_OPERATION_KEY,
+    outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+    planDigest: DIGEST,
+    temporaryMembership: false,
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_invite_creation",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.inviteCreationExecute, 0)
+
+  const changed = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: { inviteCreationPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_invite_creation",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changed.calls.inviteCreationExecute, 0)
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      inviteCreationError: new InviteCreationExecutionError(
+        "Discord invite creation outcome is uncertain",
+        {
+          capabilityFileWritten: true,
+          inviteRef: INVITE_REF,
+          status: "uncertain",
+        },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_invite_creation",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const leakingError = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      inviteCreationError: new InviteCreationExecutionError(
+        `Leaked ${PRIVATE_INVITE_CODE}`,
+        { code: PRIVATE_INVITE_CODE, status: "uncertain" },
+      ),
+    },
+  })
+  const leakingErrorResult = await leakingError.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_invite_creation",
+  })
+  assert.equal(structuredContent(leakingErrorResult).status, "outcome-uncertain")
+  assert.deepEqual(
+    (structuredContent(leakingErrorResult).error as Record<string, unknown>).result,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(JSON.stringify(leakingErrorResult), new RegExp(PRIVATE_INVITE_CODE))
+
+  const leakingSuccess = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      inviteCreationResult: {
+        activityId: "activity-invite-creation",
+        capabilityFileWritten: true,
+        channelId: CHANNEL_ID,
+        code: PRIVATE_INVITE_CODE,
+        guildId: GUILD_ID,
+        inviteRef: INVITE_REF,
+        operationKeyHash: OPERATION_KEY_HASH,
+        outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+        planDigest: DIGEST,
+        schemaVersion: 1,
+        status: "completed",
+        verified: true,
+      },
+    },
+  })
+  const leakingSuccessResult = await leakingSuccess.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_invite_creation",
+  })
+  assert.equal(leakingSuccessResult.isError, true)
+  assert.doesNotMatch(JSON.stringify(leakingSuccessResult), new RegExp(PRIVATE_INVITE_CODE))
+
+  const receipt = {
+    activityId: "activity-invite-creation",
+    error: null,
+    guildId: GUILD_ID,
+    inviteRef: INVITE_REF,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-24T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      inviteCreationError: new InviteCreationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_invite_creation",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify([uncertainResult, conflictResult]), new RegExp(PRIVATE_INVITE_CODE))
+  assert.doesNotMatch(JSON.stringify([uncertainResult, conflictResult]), new RegExp(INVITE_CREATION_OPERATION_KEY))
 })
 
 test("MCP invite reads expose only opaque capability-safe evidence", async (context) => {

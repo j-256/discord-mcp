@@ -317,6 +317,9 @@ import {
   ReactionService,
 } from "./reaction-service.js"
 import type {
+  InviteCreationPlan,
+  InviteCreationRequest,
+  InviteCreationResult,
   InviteDeletionPlan,
   InviteDeletionRequest,
   InviteDeletionResult,
@@ -329,6 +332,7 @@ import {
   assertInviteGetInput,
   assertInviteListInput,
   InviteService,
+  normalizeInviteCreationRequest,
   normalizeInviteDeletionRequest,
 } from "./invite-service.js"
 import type {
@@ -657,6 +661,7 @@ export interface DiscordServiceClient {
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildAutoModerationRule: DiscordClient["createGuildAutoModerationRule"]
   createGuildChannel: DiscordClient["createGuildChannel"]
+  createChannelInvite: DiscordClient["createChannelInvite"]
   createGuildApplicationCommand: DiscordClient["createGuildApplicationCommand"]
   deleteGuildApplicationCommand: DiscordClient["deleteGuildApplicationCommand"]
   deleteApplicationEmoji: DiscordClient["deleteApplicationEmoji"]
@@ -718,6 +723,7 @@ export interface DiscordServiceClient {
   getGuildOnboarding: DiscordClient["getGuildOnboarding"]
   getGuildWelcomeScreen: DiscordClient["getGuildWelcomeScreen"]
   getGuildWidgetSettings: DiscordClient["getGuildWidgetSettings"]
+  getInvite: DiscordClient["getInvite"]
   getGuildEmoji: DiscordClient["getGuildEmoji"]
   getGuildRole: DiscordClient["getGuildRole"]
   getGuildRoleMemberCounts: DiscordClient["getGuildRoleMemberCounts"]
@@ -915,7 +921,10 @@ export interface ConnectorServiceOptions {
     IntegrationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
-  inviteOptions?: Pick<InviteServiceOptions, "clock" | "planKey" | "randomId">
+  inviteOptions?: Pick<
+    InviteServiceOptions,
+    "clock" | "planKey" | "privateFileSystem" | "randomId"
+  >
   onboardingOptions?: Pick<OnboardingServiceOptions, "clock" | "planKey" | "randomId">
   messagePinOptions?: Pick<
     MessagePinServiceOptions,
@@ -1325,6 +1334,7 @@ export class ConnectorService {
     })
     this.#inviteService = new InviteService({
       activityStore: this.#activityStore,
+      capabilityRoots: options.config.inviteCapabilityRoots,
       client: this.#client,
       operationStore,
       policy: this.#policy,
@@ -2934,6 +2944,21 @@ export class ConnectorService {
     normalizeInviteDeletionRequest(request)
     const identity = await this.#verifyIdentity(options)
     return this.#inviteService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planInviteCreation(
+    request: InviteCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<InviteCreationPlan> {
+    normalizeInviteCreationRequest(request)
+    this.#policy.assertGuildInviteCreatable(request.guildId, request.channelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#inviteService.planCreation(
       identity.application.id,
       identity.bot.id,
       request,
@@ -4814,6 +4839,35 @@ export class ConnectorService {
       planDigest,
       [writeGuildCollectionTarget("invites", request.guildId)],
       () => this.#inviteService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeInviteCreation(
+    request: InviteCreationRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<InviteCreationResult> {
+    normalizeInviteCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord invite-creation plan digest is invalid")
+    }
+    this.#policy.assertGuildInviteCreatable(request.guildId, request.channelId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "invite-creation",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeGuildCollectionTarget("invites", request.guildId),
+      ],
+      () => this.#inviteService.executeCreation(
         identity.application.id,
         identity.bot.id,
         request,

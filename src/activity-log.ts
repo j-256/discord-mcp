@@ -772,6 +772,28 @@ export interface InviteDeletionActivity {
   verification: "drift" | "match" | null
 }
 
+export type InviteCreationActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface InviteCreationActivity {
+  capabilityFileWritten: boolean
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  inviteRef: string | null
+  kind: "invite-creation"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: InviteCreationActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type OnboardingActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1226,6 +1248,7 @@ export type ActivityEntry =
   | GuildTemplateActivity
   | InteractionActivity
   | IntegrationDeletionActivity
+  | InviteCreationActivity
   | InviteDeletionActivity
   | MemberModerationActivity
   | MemberNicknameActivity
@@ -3650,6 +3673,93 @@ function parseInviteDeletionActivity(
   }
 }
 
+function parseInviteCreationActivity(
+  value: unknown,
+): InviteCreationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).sort().join("\0") !== [
+      "capabilityFileWritten",
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "inviteRef",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+    ].sort().join("\0")
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "invite-creation"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || !(record.inviteRef === null || (
+      typeof record.inviteRef === "string"
+      && INVITE_REFERENCE_PATTERN.test(record.inviteRef)
+    ))
+    || typeof record.capabilityFileWritten !== "boolean"
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.capabilityFileWritten
+      || record.inviteRef !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      !record.capabilityFileWritten
+      || record.inviteRef === null
+      || record.verification !== "match"
+    ))
+    || (record.status === "failed" && (
+      record.capabilityFileWritten
+      || record.inviteRef !== null
+      || record.error === null
+      || record.verification !== null
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    capabilityFileWritten: record.capabilityFileWritten,
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    inviteRef: record.inviteRef as string | null,
+    kind: "invite-creation",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as InviteCreationActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseOnboardingActivity(
   value: unknown,
 ): OnboardingActivity | undefined {
@@ -4869,6 +4979,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseWebhookDeletionActivity(value)
     || parseIntegrationDeletionActivity(value)
     || parseReactionModerationActivity(value)
+    || parseInviteCreationActivity(value)
     || parseInviteDeletionActivity(value)
     || parseOnboardingActivity(value)
     || parseMemberNicknameActivity(value)

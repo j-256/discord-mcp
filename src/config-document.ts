@@ -163,6 +163,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "integrationDeletions",
   "interactions",
   "inviteAudit",
+  "inviteCreation",
   "inviteDeletions",
   "memberDirectory",
   "nicknameChanges",
@@ -239,6 +240,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "integrationGuildIds",
   "integrationIds",
   "interactionChannelIds",
+  "inviteCreationChannelIds",
   "inviteGuildIds",
   "mentionUserIds",
   "memberDirectoryGuildIds",
@@ -287,6 +289,7 @@ export const CONFIG_STORAGE_NAMES = Object.freeze([
   "attachmentRoots",
   "auditFile",
   "guildExpressionRoots",
+  "inviteCapabilityRoots",
   "scheduledEventRoots",
   "soundboardRoots",
 ] as const)
@@ -305,6 +308,7 @@ export interface ConnectorConfigDocumentStorage {
   attachmentRoots?: readonly string[]
   auditFile?: string
   guildExpressionRoots?: readonly string[]
+  inviteCapabilityRoots?: readonly string[]
   scheduledEventRoots?: readonly string[]
   soundboardRoots?: readonly string[]
 }
@@ -327,7 +331,12 @@ const absolutePathSchema = z.string()
   .min(1)
   .max(CONFIG_STRING_CHARACTERS)
   .refine(
-    (value) => !value.includes("\0") && isAbsolute(value) && resolve(value) === value,
+    (value) => (
+      value.trim() === value
+      && !/[\u0000-\u001F\u007F]/u.test(value)
+      && isAbsolute(value)
+      && resolve(value) === value
+    ),
     "must be an absolute canonical path",
   )
 
@@ -375,23 +384,38 @@ const headerReferenceSchema = z.strictObject({
 
 const CHANNEL_METADATA_CAPABILITY_DESCRIPTION = "Enable reviewed channel metadata and exact ordinary voice-channel status policy"
 const CHANNEL_METADATA_SCOPE_DESCRIPTION = "Exact Discord ID allowlist for reviewed channel metadata and ordinary voice-channel status"
+const INVITE_CREATION_CAPABILITY_DESCRIPTION = "Enable reviewed finite invite creation with private-file capability delivery"
+const INVITE_CREATION_SCOPE_DESCRIPTION = "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
+const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for exclusive private invite capability files"
 
 function capabilityDescription(documentKey: string): string {
-  return documentKey === "channelMetadataChanges"
-    ? CHANNEL_METADATA_CAPABILITY_DESCRIPTION
-    : `Enable ${humanizeConfigKey(documentKey)} policy`
+  if (documentKey === "channelMetadataChanges") {
+    return CHANNEL_METADATA_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "inviteCreation") {
+    return INVITE_CREATION_CAPABILITY_DESCRIPTION
+  }
+  return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
 function scopeDescription(documentKey: string): string {
-  return documentKey === "channelMetadataIds"
-    ? CHANNEL_METADATA_SCOPE_DESCRIPTION
-    : `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
+  if (documentKey === "channelMetadataIds") {
+    return CHANNEL_METADATA_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "inviteCreationChannelIds") {
+    return INVITE_CREATION_SCOPE_DESCRIPTION
+  }
+  return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }
 
 function storageDescription(documentKey: string): string {
-  return documentKey === "guildExpressionRoots"
-    ? "Owned local roots shared by guild-expression creation and reviewed role-icon images"
-    : `Owned local roots for ${humanizeConfigKey(documentKey)}`
+  if (documentKey === "guildExpressionRoots") {
+    return "Owned local roots shared by guild-expression creation and reviewed role-icon images"
+  }
+  if (documentKey === "inviteCapabilityRoots") {
+    return INVITE_CAPABILITY_ROOT_DESCRIPTION
+  }
+  return `Owned local roots for ${humanizeConfigKey(documentKey)}`
 }
 
 const capabilityShape = Object.fromEntries(

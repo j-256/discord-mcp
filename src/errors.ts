@@ -70,6 +70,38 @@ export class InviteDeletionExecutionError extends Error {
   }
 }
 
+export class InviteCreationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord invite-creation evidence does not match the reviewed plan")
+    this.name = "InviteCreationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class InviteCreationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord invite creation operation key has already been reserved")
+    this.name = "InviteCreationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class InviteCreationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "InviteCreationExecutionError"
+    this.result = result
+  }
+}
+
 export class PolicyError extends Error {
   override name = "PolicyError"
 }

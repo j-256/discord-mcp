@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import {
+  chmod,
   mkdir,
   mkdtemp,
   realpath,
@@ -278,6 +279,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     inviteAuditEnabled: false,
+    inviteCapabilityRootCount: 0,
+    inviteCreationChannelIds: [],
+    inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
     onboardingAuditEnabled: false,
@@ -946,6 +950,9 @@ test("configuration and policy require an exact administration guild and protect
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     inviteAuditEnabled: false,
+    inviteCapabilityRootCount: 0,
+    inviteCreationChannelIds: [],
+    inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
     onboardingAuditEnabled: false,
@@ -1239,6 +1246,85 @@ test("configuration and policy isolate capability-safe invite audit and revocati
     }, { homeDirectory: "/test/home" }),
     /expected boolean/,
   )
+})
+
+test("configuration and policy isolate finite private-file invite creation", async (context) => {
+  const capabilityRoot = await realpath(
+    await mkdtemp(join(tmpdir(), "discord-mcp-invite-policy-")),
+  )
+  context.after(() => rm(capabilityRoot, { recursive: true, force: true }))
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      inviteCreation: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      inviteCreationChannelIds: [CHANNEL_ID],
+    },
+    storage: {
+      inviteCapabilityRoots: [capabilityRoot],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowInviteCreation, true)
+  assert.deepEqual([...config.inviteCreationChannelIds], [CHANNEL_ID])
+  assert.deepEqual(config.inviteCapabilityRoots, [capabilityRoot])
+  assert.equal(policy.describe().inviteCreationEnabled, true)
+  assert.deepEqual(policy.describe().inviteCreationChannelIds, [CHANNEL_ID])
+  assert.equal(policy.describe().inviteCapabilityRootCount, 1)
+  assert.doesNotThrow(() => policy.assertGuildInviteCreatable(GUILD_ID, CHANNEL_ID))
+  assert.throws(
+    () => policy.assertGuildInviteCreatable(GUILD_ID, OTHER_CHANNEL_ID),
+    /outside the invite-creation scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildInviteCreatable(GUILD_ID, CHANNEL_ID),
+    /invite creation is disabled/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { inviteCreation: true },
+      storage: { inviteCapabilityRoots: [capabilityRoot] },
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.scopes\.inviteCreationChannelIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { inviteCreation: true },
+      scopes: { inviteCreationChannelIds: [CHANNEL_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.storage\.inviteCapabilityRoots/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { channelIds: [CHANNEL_ID] },
+      scopes: { inviteCreationChannelIds: [OTHER_CHANNEL_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.inviteCreationChannelIds must be a subset/,
+  )
+  await chmod(capabilityRoot, 0o777)
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { inviteCreation: true },
+      scopes: { inviteCreationChannelIds: [CHANNEL_ID] },
+      storage: { inviteCapabilityRoots: [capabilityRoot] },
+    }, { homeDirectory: "/test/home" }),
+    /not group or world writable/,
+  )
+  await chmod(capabilityRoot, 0o700)
 })
 
 test("configuration and policy isolate reviewed guild onboarding", () => {
@@ -4168,6 +4254,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     interactionMinWriteIntervalMs: 500,
     interactionsEnabled: false,
     inviteAuditEnabled: false,
+    inviteCapabilityRootCount: 0,
+    inviteCreationChannelIds: [],
+    inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
     onboardingAuditEnabled: false,

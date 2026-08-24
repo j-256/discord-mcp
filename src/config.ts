@@ -83,6 +83,7 @@ export interface ConnectorConfig {
   allowIntegrationDeletions: boolean
   allowInteractions: boolean
   allowInviteAudit: boolean
+  allowInviteCreation: boolean
   allowInviteDeletions: boolean
   allowMemberDirectory: boolean
   allowNicknameChanges: boolean
@@ -162,6 +163,8 @@ export interface ConnectorConfig {
   interactionChannelIds: ReadonlySet<string>
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
+  inviteCapabilityRoots: readonly string[]
+  inviteCreationChannelIds: ReadonlySet<string>
   inviteGuildIds: ReadonlySet<string>
   mentionUserIds: ReadonlySet<string>
   memberDirectoryGuildIds: ReadonlySet<string>
@@ -289,6 +292,7 @@ function configLimit(
 function parseOwnedRoots(
   value: readonly string[] | undefined,
   name: string,
+  requirePrivate = false,
 ): readonly string[] {
   if (!value || value.length === 0) return []
   if (typeof process.getuid !== "function") {
@@ -298,10 +302,11 @@ function parseOwnedRoots(
   }
   const processUserId = process.getuid()
   const roots = value.map((entry) => {
-    const candidate = entry.trim()
+    const candidate = entry
     if (
-      !isAbsolute(candidate)
-      || candidate.includes("\0")
+      candidate.trim() !== candidate
+      || !isAbsolute(candidate)
+      || /[\u0000-\u001F\u007F]/u.test(candidate)
       || resolve(candidate) !== candidate
     ) {
       throw new ConfigurationError(`${name} entries must be absolute directory paths`)
@@ -322,9 +327,12 @@ function parseOwnedRoots(
       || root !== candidate
       || root === parse(root).root
       || metadata.uid !== processUserId
+      || (requirePrivate && (metadata.mode & 0o022) !== 0)
     ) {
       throw new ConfigurationError(
-        `${name} entries must be owned, canonical directories below the filesystem root`,
+        requirePrivate
+          ? `${name} entries must be owned, canonical directories below the filesystem root and not group or world writable`
+          : `${name} entries must be owned, canonical directories below the filesystem root`,
       )
     }
     return root
@@ -428,6 +436,7 @@ export function loadConnectorConfigDocument(
   const automodAlertChannelIds = configScope(document, "automodAlertChannelIds")
   const deleteChannelIds = configScope(document, "deleteChannelIds")
   const interactionChannelIds = configScope(document, "interactionChannelIds")
+  const inviteCreationChannelIds = configScope(document, "inviteCreationChannelIds")
   const pinChannelIds = configScope(document, "pinChannelIds")
   const permissionOverwriteChannelIds = configScope(document, "permissionOverwriteChannelIds")
   const pollChannelIds = configScope(document, "pollChannelIds")
@@ -566,6 +575,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("forumPostChannelIds"), forumPostChannelIds],
     [configPolicyPath("forumTagChannelIds"), forumTagChannelIds],
     [configPolicyPath("interactionChannelIds"), interactionChannelIds],
+    [configPolicyPath("inviteCreationChannelIds"), inviteCreationChannelIds],
     [configPolicyPath("messageForwardSourceChannelIds"), messageForwardSourceChannelIds],
     [configPolicyPath("messageForwardTargetChannelIds"), messageForwardTargetChannelIds],
     [configPolicyPath("memberVoiceChannelIds"), memberVoiceChannelIds],
@@ -750,10 +760,24 @@ export function loadConnectorConfigDocument(
     )
   }
   const allowInviteAudit = configCapability(document, "inviteAudit")
+  const allowInviteCreation = configCapability(document, "inviteCreation")
   const allowInviteDeletions = configCapability(document, "inviteDeletions")
   if (allowInviteDeletions && !allowInviteAudit) {
     throw new ConfigurationError(
       `${configPolicyPath("allowInviteDeletions")} requires ${configPolicyPath("allowInviteAudit")}`,
+    )
+  }
+  if (allowInviteCreation && inviteCreationChannelIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowInviteCreation")} requires ${configPolicyPath("inviteCreationChannelIds")}`,
+    )
+  }
+  if (
+    allowInviteCreation
+    && (document.storage.inviteCapabilityRoots?.length ?? 0) === 0
+  ) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowInviteCreation")} requires $.storage.inviteCapabilityRoots`,
     )
   }
   const allowOnboardingAudit = configCapability(document, "onboardingAudit")
@@ -966,6 +990,7 @@ export function loadConnectorConfigDocument(
     allowForumTagChanges,
     allowInteractions: configCapability(document, "interactions"),
     allowInviteAudit,
+    allowInviteCreation,
     allowInviteDeletions,
     allowMemberDirectory: configCapability(document, "memberDirectory"),
     allowNicknameChanges,
@@ -1071,6 +1096,12 @@ export function loadConnectorConfigDocument(
       0,
       CONNECTOR_LIMITS.interactionMinWriteIntervalMs,
     ),
+    inviteCapabilityRoots: parseOwnedRoots(
+      document.storage.inviteCapabilityRoots,
+      "$.storage.inviteCapabilityRoots",
+      true,
+    ),
+    inviteCreationChannelIds,
     inviteGuildIds,
     mentionUserIds,
     memberDirectoryGuildIds,

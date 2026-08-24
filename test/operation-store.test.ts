@@ -345,6 +345,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const guildSettings = { ...receipt(), kind: "guild-settings-change" as const }
   const guildIncident = { ...receipt(), kind: "guild-incident-action-change" as const }
   const integration = { ...receipt(), kind: "integration-deletion" as const }
+  const inviteCreation = { ...receipt(), kind: "invite-creation" as const }
   const invite = { ...receipt(), kind: "invite-deletion" as const }
   const guildTemplate = { ...receipt(), kind: "guild-template-change" as const }
   const onboarding = { ...receipt(), kind: "onboarding-change" as const }
@@ -376,6 +377,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(guildSettings)).created, true)
   assert.equal((await store.reserve(guildIncident)).created, true)
   assert.equal((await store.reserve(integration)).created, true)
+  assert.equal((await store.reserve(inviteCreation)).created, true)
   assert.equal((await store.reserve(invite)).created, true)
   assert.equal((await store.reserve(guildTemplate)).created, true)
   assert.equal((await store.reserve(onboarding)).created, true)
@@ -447,6 +449,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("integration-deletion", integration.operationKeyHash),
     integration,
+  )
+  assert.deepEqual(
+    await store.get("invite-creation", inviteCreation.operationKeyHash),
+    inviteCreation,
   )
   assert.deepEqual(
     await store.get("invite-deletion", invite.operationKeyHash),
@@ -524,6 +530,18 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("invite-deletion", invite.operationKeyHash),
     completedInvite,
+  )
+  const completedInviteCreation = {
+    ...inviteCreation,
+    resourceId: INVITE_REF,
+    status: "completed" as const,
+    timestamp: "2026-08-20T00:00:01.000Z",
+    verification: "match" as const,
+  }
+  await store.finish(completedInviteCreation)
+  assert.deepEqual(
+    await store.get("invite-creation", inviteCreation.operationKeyHash),
+    completedInviteCreation,
   )
   const completedGuildTemplate = {
     ...guildTemplate,

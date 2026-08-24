@@ -79,7 +79,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 23
+export const OPERATOR_REPORT_SCHEMA_VERSION = 24
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -134,6 +134,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   integrationAuditPolicy: "integration-audit-policy",
   integrationDeletionPolicy: "integration-deletion-policy",
   inviteAuditPolicy: "invite-audit-policy",
+  inviteCreationPolicy: "invite-creation-policy",
   inviteDeletionPolicy: "invite-deletion-policy",
   memberDirectoryPolicy: "member-directory-policy",
   memberNicknamePolicy: "member-nickname-policy",
@@ -610,6 +611,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowInviteAudit && config.inviteGuildIds.size === 0) {
     warnings.push("The invite-audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
   }
+  if (config.allowInviteCreation && config.inviteCreationChannelIds.size === 0) {
+    warnings.push("The invite-creation toggle is enabled but creation remains blocked because an exact channel allowlist is required")
+  }
+  if (config.allowInviteCreation && config.inviteCapabilityRoots.length === 0) {
+    warnings.push("The invite-creation toggle is enabled but capability delivery remains blocked because a canonical private-file root is required")
+  }
   if (config.allowInviteDeletions && config.inviteGuildIds.size === 0) {
     warnings.push("The invite-deletion toggle is enabled but deletion remains blocked because an exact guild allowlist is required")
   }
@@ -821,9 +828,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Native Interaction command management and ingress",
     ],
     [
-      config.allowInviteAudit || config.allowInviteDeletions,
+      config.allowInviteAudit || config.allowInviteCreation || config.allowInviteDeletions,
       "invites",
-      "Invite audit and reviewed revocation",
+      "Invite creation, audit, and reviewed revocation",
     ],
     [
       config.allowOnboardingAudit || config.allowOnboardingChanges,
@@ -2093,6 +2100,28 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.inviteDeletionPolicy,
         "pass",
         `Reviewed invite revocation is constrained to ${config.inviteGuildIds.size} exact guilds with one-shot execution and full-inventory absence readback`,
+      ))
+    }
+    if (!config.allowInviteCreation) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteCreationPolicy,
+        "pass",
+        "Capability-safe invite creation is disabled",
+      ))
+    } else if (
+      config.inviteCreationChannelIds.size === 0
+      || config.inviteCapabilityRoots.length === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteCreationPolicy,
+        "warn",
+        "Invite-creation toggle is enabled, but exact channel scope and a canonical private-file root are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.inviteCreationPolicy,
+        "pass",
+        `Invite creation is constrained to ${config.inviteCreationChannelIds.size} exact channels and ${config.inviteCapabilityRoots.length} private-file roots with complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, finite unique invites, exclusive 0600 delivery, and no bearer capability in MCP results or lifecycle records`,
       ))
     }
     if (!config.allowOnboardingAudit) {

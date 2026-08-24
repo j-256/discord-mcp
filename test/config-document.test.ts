@@ -155,6 +155,14 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     { ...valid, limits: { ...valid.limits, attachmentMaxBytes: "1024" } },
     {
       ...valid,
+      storage: { ...valid.storage, inviteCapabilityRoots: ["/private/invite\ncapabilities"] },
+    },
+    {
+      ...valid,
+      storage: { ...valid.storage, inviteCapabilityRoots: ["/private/invite-capabilities "] },
+    },
+    {
+      ...valid,
       observability: {
         ...valid.observability,
         clientKey: "/private/collector.key",
@@ -463,5 +471,21 @@ test("configuration metadata covers every runtime field and emits a strict schem
   assert.match(
     String(scopes.channelMetadataIds?.description),
     /channel metadata and ordinary voice-channel status/,
+  )
+  assert.match(
+    String(capabilities.inviteCreation?.description),
+    /finite invite creation with private-file capability delivery/,
+  )
+  assert.match(
+    String(scopes.inviteCreationChannelIds?.description),
+    /direct guild-channel ID allowlist/,
+  )
+  const storage = (properties.storage as Record<string, unknown>).properties as Record<
+    string,
+    Record<string, unknown>
+  >
+  assert.match(
+    String(storage.inviteCapabilityRoots?.description),
+    /exclusive private invite capability files/,
   )
 })

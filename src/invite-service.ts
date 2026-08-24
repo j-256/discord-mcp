@@ -6,10 +6,13 @@ import {
 
 import type {
   ActivityStore,
+  InviteCreationActivity,
+  InviteCreationActivityStatus,
   InviteDeletionActivity,
   InviteDeletionActivityStatus,
 } from "./activity-log.js"
 import {
+  DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_INVITE_URL_PATTERN,
   DISCORD_SNOWFLAKE_MAX,
@@ -21,12 +24,17 @@ import {
 } from "./constants.js"
 import {
   encodeDiscordAuditReason,
+  type CreateChannelInviteInput,
   type DiscordClient,
   type DiscordDeletedInviteSummary,
+  type DiscordInviteIdentitySummary,
   type DiscordInviteSummary,
 } from "./discord-client.js"
 import {
   DiscordApiError,
+  InviteCreationExecutionError,
+  InviteCreationOperationConflictError,
+  InviteCreationPlanChangedError,
   InviteDeletionExecutionError,
   InviteDeletionOperationConflictError,
   InviteDeletionPlanChangedError,
@@ -39,15 +47,28 @@ import {
   operationKeyHash,
 } from "./operation-store.js"
 import {
+  ALL_KNOWN_PERMISSION_BITS,
+  DISCORD_PERMISSION_NAMES,
   discordPermissionNames,
+  evaluateBotChannelPermissions,
   evaluateGuildMemberPermissions,
   hasGuildPermission,
   parseDiscordPermissionBits,
   unknownDiscordPermissionBits,
   type DiscordPermissionName,
+  type BotChannelPermissionResult,
   type GuildMemberPermissionResult,
 } from "./permissions.js"
 import type { ScopePolicy } from "./policy.js"
+import {
+  type PrivateCapabilityFileReservation,
+  type PrivateCapabilityFileSystem,
+  type PrivateCapabilityTargetReview,
+  DEFAULT_PRIVATE_CAPABILITY_FILE_SYSTEM,
+  PrivateCapabilityFileError,
+  reservePrivateCapabilityFile,
+  reviewPrivateCapabilityTarget,
+} from "./private-capability-file.js"
 import {
   createReviewedPlanKey,
   REVIEWED_PLAN_DIGEST_PATTERN,
@@ -58,6 +79,7 @@ import type {
   DiscordChannel,
   DiscordGuild,
   DiscordGuildMember,
+  DiscordPermissionOverwrite,
   DiscordRole,
   RequestOptions,
 } from "./types.js"
@@ -66,6 +88,21 @@ const INVITE_GUEST_FLAG = 1
 const INVITE_REFERENCE_PREFIX = "iref_hmac_sha256_"
 const INVITE_CURSOR_PREFIX = "icur_hmac_sha256_"
 const STATE_UNAVAILABLE = "invite-state-unavailable"
+const CREATION_STATE_UNAVAILABLE = "invite-creation-state-unavailable"
+const DISCORD_INVITE_BASE_URL = "https://discord.gg"
+const INVITE_CAPABILITY_FILE_SCHEMA_VERSION = 1
+const INVITE_CREATION_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
+])
+const INVITE_CREATION_REQUIRED_PERMISSIONS = Object.freeze([
+  "CREATE_INSTANT_INVITE",
+  "VIEW_CHANNEL",
+] as const satisfies readonly DiscordPermissionName[])
 const HIGH_RISK_ROLE_PERMISSIONS: ReadonlySet<DiscordPermissionName> = new Set([
   "ADMINISTRATOR",
   "CREATE_INSTANT_INVITE",
@@ -230,26 +267,114 @@ export interface InviteDeletionResult {
   verifiedAbsent: boolean
 }
 
+export interface InviteCreationRequest {
+  acknowledgeBearerCapability: true
+  auditReason: string
+  channelId: string
+  guildId: string
+  maxAgeSeconds: number
+  maxUses: number
+  operationKey: string
+  outputFile: string
+  temporaryMembership: boolean
+}
+
+export interface NormalizedInviteCreationRequest extends InviteCreationRequest {
+  operationKeyHash: string
+}
+
+export interface InviteCreationAccessEvidence {
+  appliedRoleIds: string[]
+  botAdministrator: boolean
+  botIsGuildOwner: boolean
+  complete: true
+  createInstantInvite: true
+  effectivePermissionNames: DiscordPermissionName[]
+  effectivePermissions: string
+  requiredPermissions: typeof INVITE_CREATION_REQUIRED_PERMISSIONS
+  unknownPermissionBits: string
+  viewChannel: true
+}
+
+export interface InviteCreationPlan {
+  access: InviteCreationAccessEvidence
+  action: "create"
+  applicationId: string
+  auditReason: string
+  botId: string
+  createdAt: string
+  delivery: {
+    format: "discord-invite-capability.v1"
+    outputFile: string
+    review: PrivateCapabilityTargetReview
+  }
+  digest: string
+  guild: {
+    id: string
+    name: string
+  }
+  intent: CreateChannelInviteInput & { unique: true }
+  operationKeyHash: string
+  privacy: {
+    capabilityDelivery: "private-file-only"
+    mcpResult: "credential-free"
+    persistence: "content-free-lifecycle-only"
+    rawDiscordPayloads: "omitted"
+  }
+  schemaVersion: number
+  status: "planned"
+  target: InviteChannelProjection & {
+    permissionOverwriteCount: number
+  }
+  visibleInventory: {
+    channelLimit: number
+    channels: number
+    roleLimit: number
+    roles: number
+  }
+  warnings: string[]
+}
+
+export interface InviteCreationResult {
+  activityId: string
+  capabilityFileWritten: true
+  channelId: string
+  guildId: string
+  inviteRef: string
+  operationKeyHash: string
+  outputFile: string
+  planDigest: string
+  schemaVersion: number
+  status: "completed"
+  verified: true
+}
+
 export interface InviteServiceClient extends Pick<
   DiscordClient,
+  | "createChannelInvite"
   | "deleteInvite"
   | "getGuild"
   | "getGuildChannels"
   | "getGuildMember"
   | "getGuildRoles"
+  | "getInvite"
   | "listGuildInvites"
 > {}
 
 export interface InviteServiceOptions {
   activityStore: ActivityStore
+  capabilityRoots?: readonly string[]
   client: InviteServiceClient
   clock?: () => Date
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: Pick<
     ScopePolicy,
-    "assertGuildInviteAuditable" | "assertGuildInviteDeletable"
+    | "assertGuildInviteAuditable"
+    | "assertGuildInviteCreatable"
+    | "assertGuildInviteDeletable"
   >
+  privateFileSystem?: PrivateCapabilityFileSystem
   randomId?: () => string
 }
 
@@ -270,6 +395,23 @@ interface InviteState {
   projected: ProjectedInvite[]
   rawByReference: ReadonlyMap<string, DiscordInviteSummary>
   roles: ValidatedRole[]
+}
+
+interface InviteCreationState {
+  access: InviteCreationAccessEvidence
+  channel: DiscordChannel & {
+    guild_id: string
+    name: string
+    permission_overwrites: DiscordPermissionOverwrite[]
+  }
+  channels: InviteChannelProjection[]
+  guild: DiscordGuild & { owner_id: string }
+  roles: ValidatedRole[]
+}
+
+interface PrivateInviteCreationPlan {
+  plan: InviteCreationPlan
+  request: NormalizedInviteCreationRequest
 }
 
 interface PrivateInviteDeletionPlan {
@@ -360,6 +502,76 @@ export function normalizeInviteDeletionRequest(
     guildId: request.guildId,
     inviteRef: request.inviteRef,
     operationKey: request.operationKey,
+    operationKeyHash: operationKeyHash(request.operationKey),
+  }
+}
+
+const INVITE_CREATION_REQUEST_KEYS: ReadonlySet<string> = new Set([
+  "acknowledgeBearerCapability",
+  "auditReason",
+  "channelId",
+  "guildId",
+  "maxAgeSeconds",
+  "maxUses",
+  "operationKey",
+  "outputFile",
+  "temporaryMembership",
+])
+
+export function normalizeInviteCreationRequest(
+  request: InviteCreationRequest,
+): NormalizedInviteCreationRequest {
+  if (
+    !request
+    || typeof request !== "object"
+    || Array.isArray(request)
+    || Object.keys(request).some((key) => !INVITE_CREATION_REQUEST_KEYS.has(key))
+    || Object.keys(request).length !== INVITE_CREATION_REQUEST_KEYS.size
+  ) {
+    throw new RangeError("Discord invite creation request must be one exact object")
+  }
+  assertPositiveSnowflake(request.guildId, "Discord invite-creation guild ID")
+  assertPositiveSnowflake(request.channelId, "Discord invite-creation channel ID")
+  if (request.acknowledgeBearerCapability !== true) {
+    throw new RangeError(
+      "Discord invite creation requires explicit bearer-capability acknowledgement",
+    )
+  }
+  if (typeof request.auditReason !== "string") {
+    throw new RangeError("Discord invite-creation audit reason must be a string")
+  }
+  encodeDiscordAuditReason(request.auditReason)
+  if (DISCORD_INVITE_URL_PATTERN.test(request.auditReason)) {
+    throw new RangeError("Discord invite-creation audit reason must not contain an invite URL")
+  }
+  if (
+    !Number.isInteger(request.maxAgeSeconds)
+    || request.maxAgeSeconds < INVITE_LIMITS.minAgeSeconds
+    || request.maxAgeSeconds > INVITE_LIMITS.maxAgeSeconds
+  ) {
+    throw new RangeError(
+      `Discord invite lifetime must be an integer between ${INVITE_LIMITS.minAgeSeconds} and ${INVITE_LIMITS.maxAgeSeconds} seconds`,
+    )
+  }
+  if (
+    !Number.isInteger(request.maxUses)
+    || request.maxUses < 1
+    || request.maxUses > INVITE_LIMITS.maxUses
+  ) {
+    throw new RangeError(
+      `Discord invite use limit must be an integer between 1 and ${INVITE_LIMITS.maxUses}`,
+    )
+  }
+  if (typeof request.temporaryMembership !== "boolean") {
+    throw new RangeError(
+      "Discord invite creation requires explicit temporary-membership intent",
+    )
+  }
+  if (typeof request.outputFile !== "string") {
+    throw new RangeError("Discord invite capability output file must be a string")
+  }
+  return {
+    ...request,
     operationKeyHash: operationKeyHash(request.operationKey),
   }
 }
@@ -507,6 +719,85 @@ function exactChannels(
   return channels.sort((left, right) => left.id.localeCompare(right.id))
 }
 
+const INVITE_OVERWRITE_KEYS: ReadonlySet<string> = new Set([
+  "allow",
+  "deny",
+  "id",
+  "type",
+])
+
+function exactInviteCreationChannel(
+  value: readonly DiscordChannel[],
+  guildId: string,
+  channelId: string,
+  roles: readonly ValidatedRole[],
+): InviteCreationState["channel"] {
+  const channel = value.find((entry) => entry.id === channelId)
+  if (
+    !channel
+    || channel.guild_id !== guildId
+    || !INVITE_CREATION_CHANNEL_TYPES.has(channel.type)
+    || !validText(channel.name, DISCORD_LIMITS.channelNameCharacters)
+    || !Array.isArray(channel.permission_overwrites)
+    || channel.permission_overwrites.length > DISCORD_LIMITS.channelPermissionOverwrites
+  ) {
+    throw evidenceError(
+      "Discord invite creation requires one supported direct guild channel with complete overwrite evidence",
+    )
+  }
+  const rolesById = new Set(roles.map((role) => role.id))
+  const seen = new Set<string>()
+  const permissionOverwrites = channel.permission_overwrites.map((overwrite) => {
+    if (
+      !overwrite
+      || typeof overwrite !== "object"
+      || Array.isArray(overwrite)
+      || Object.keys(overwrite).some((key) => !INVITE_OVERWRITE_KEYS.has(key))
+      || Object.keys(overwrite).length !== INVITE_OVERWRITE_KEYS.size
+      || !positiveSnowflake(overwrite.id)
+      || (overwrite.type !== 0 && overwrite.type !== 1)
+      || typeof overwrite.allow !== "string"
+      || typeof overwrite.deny !== "string"
+      || (overwrite.type === 0 && !rolesById.has(overwrite.id))
+    ) {
+      throw evidenceError("Discord returned invalid invite-creation overwrite evidence")
+    }
+    let allow: bigint
+    let deny: bigint
+    try {
+      allow = parseDiscordPermissionBits(overwrite.allow, "invite-creation overwrite allow")
+      deny = parseDiscordPermissionBits(overwrite.deny, "invite-creation overwrite deny")
+    } catch (error) {
+      throw new InviteEvidenceError(
+        "Discord returned invalid invite-creation overwrite permissions",
+        { cause: error },
+      )
+    }
+    if ((allow & deny) !== 0n) {
+      throw evidenceError("Discord returned contradictory invite-creation overwrites")
+    }
+    const key = `${overwrite.type}:${overwrite.id}`
+    if (seen.has(key)) {
+      throw evidenceError("Discord returned duplicate invite-creation overwrites")
+    }
+    seen.add(key)
+    return {
+      allow: allow.toString(),
+      deny: deny.toString(),
+      id: overwrite.id,
+      type: overwrite.type,
+    }
+  }).sort((left, right) => (
+    left.type - right.type || left.id.localeCompare(right.id)
+  ))
+  return {
+    ...channel,
+    guild_id: guildId,
+    name: channel.name,
+    permission_overwrites: permissionOverwrites,
+  }
+}
+
 function completePermissions(
   member: DiscordGuildMember,
   guildId: string,
@@ -524,6 +815,60 @@ function completePermissions(
     throw evidenceError("Discord returned incomplete invite permission evidence")
   }
   return result
+}
+
+function inviteCreationAccessEvidence(
+  botId: string,
+  guild: DiscordGuild & { owner_id: string },
+  member: DiscordGuildMember,
+  roles: readonly ValidatedRole[],
+  channel: InviteCreationState["channel"],
+): InviteCreationAccessEvidence {
+  let permissions: BotChannelPermissionResult
+  try {
+    permissions = evaluateBotChannelPermissions({
+      botId,
+      channel,
+      guildId: guild.id,
+      member,
+      permissionChannel: channel,
+      roles,
+    })
+  } catch (error) {
+    throw new InviteEvidenceError(
+      "Discord returned invalid invite-creation permission evidence",
+      { cause: error },
+    )
+  }
+  if (permissions.confidence !== "complete") {
+    throw evidenceError("Discord returned incomplete invite-creation permission evidence")
+  }
+  const botIsGuildOwner = guild.owner_id === botId
+  const effectivePermissions = botIsGuildOwner
+    ? (ALL_KNOWN_PERMISSION_BITS | BigInt(permissions.effectivePermissions)).toString()
+    : permissions.effectivePermissions
+  const effectivePermissionNames = botIsGuildOwner
+    ? [...DISCORD_PERMISSION_NAMES]
+    : [...permissions.effectivePermissionNames]
+  for (const permission of INVITE_CREATION_REQUIRED_PERMISSIONS) {
+    if (!effectivePermissionNames.includes(permission)) {
+      throw evidenceError(
+        `Discord connector bot lacks channel-level ${permission} for invite creation`,
+      )
+    }
+  }
+  return {
+    appliedRoleIds: [...permissions.appliedRoleIds].sort(),
+    botAdministrator: permissions.administrator,
+    botIsGuildOwner,
+    complete: true,
+    createInstantInvite: true,
+    effectivePermissionNames,
+    effectivePermissions,
+    requiredPermissions: INVITE_CREATION_REQUIRED_PERMISSIONS,
+    unknownPermissionBits: permissions.unknownPermissionBits,
+    viewChannel: true,
+  }
 }
 
 function accessEvidence(
@@ -562,7 +907,11 @@ function hmacHex(key: Uint8Array, domain: string, payload: string): string {
     .digest("hex")
 }
 
-function inviteReference(key: Uint8Array, guildId: string, code: string): string {
+function createInviteReference(
+  key: Uint8Array,
+  guildId: string,
+  code: string,
+): string {
   return `${INVITE_REFERENCE_PREFIX}${hmacHex(
     key,
     "discord-mcp-invite-reference.v1",
@@ -686,7 +1035,7 @@ function projectedInvite(
       raw: invite.flags,
       unknownBits,
     },
-    inviteRef: inviteReference(planKey, guildId, invite.code),
+    inviteRef: createInviteReference(planKey, guildId, invite.code),
     inviterUserId: invite.inviterUserId,
     maxAgeSeconds: invite.maxAge,
     maxUses: invite.maxUses,
@@ -837,6 +1186,122 @@ function operationReceipt(options: {
   }
 }
 
+function inviteCreationActivityEntry(options: {
+  activityId: string
+  capabilityFileWritten?: boolean
+  error?: string | null
+  inviteRef?: string | null
+  plan: InviteCreationPlan
+  request: NormalizedInviteCreationRequest
+  status: InviteCreationActivityStatus
+  timestamp: string
+  verification?: "match" | null
+}): InviteCreationActivity {
+  return {
+    capabilityFileWritten: options.capabilityFileWritten ?? false,
+    channelId: options.request.channelId,
+    error: options.error ?? null,
+    guildId: options.request.guildId,
+    id: options.activityId,
+    inviteRef: options.inviteRef ?? null,
+    kind: "invite-creation",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    schemaVersion: SCHEMA_VERSION,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
+function inviteCreationOperationReceipt(options: {
+  activityId: string
+  error?: string | null
+  inviteRef?: string | null
+  plan: InviteCreationPlan
+  request: NormalizedInviteCreationRequest
+  status: OperationReceipt["status"]
+  timestamp: string
+  verification?: "match" | null
+}): OperationReceipt {
+  return {
+    activityId: options.activityId,
+    error: options.error ?? null,
+    guildId: options.request.guildId,
+    kind: "invite-creation",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    resourceId: options.inviteRef ?? null,
+    schemaVersion: 1,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
+function assertCreatedInvite(
+  invite: DiscordInviteSummary,
+  botId: string,
+  request: NormalizedInviteCreationRequest,
+): void {
+  if (
+    invite.type !== 0
+    || invite.guildId !== request.guildId
+    || invite.channelId !== request.channelId
+    || invite.inviterUserId !== botId
+    || invite.maxAge !== request.maxAgeSeconds
+    || invite.maxUses !== request.maxUses
+    || invite.temporary !== request.temporaryMembership
+    || invite.uses !== 0
+    || invite.flags !== 0
+    || invite.roleIds.length !== 0
+    || invite.targetApplicationId !== null
+    || invite.targetType !== null
+    || invite.targetUserId !== null
+    || invite.unknownFieldCount !== undefined
+    || !canonicalInviteTimestamp(invite.createdAt)
+    || !canonicalInviteTimestamp(invite.expiresAt)
+    || Date.parse(invite.expiresAt) - Date.parse(invite.createdAt)
+      !== request.maxAgeSeconds * 1_000
+  ) {
+    throw evidenceError("Discord returned mismatched invite-creation evidence")
+  }
+}
+
+function assertInviteVerification(
+  observed: DiscordInviteIdentitySummary,
+  invite: DiscordInviteSummary,
+  request: NormalizedInviteCreationRequest,
+): void {
+  if (
+    observed.type !== 0
+    || observed.guildId !== request.guildId
+    || observed.channelId !== request.channelId
+    || observed.code !== invite.code
+  ) {
+    throw evidenceError("Discord returned mismatched exact invite verification evidence")
+  }
+}
+
+function inviteCapabilityContent(
+  invite: DiscordInviteSummary,
+  request: NormalizedInviteCreationRequest,
+): string {
+  return `${JSON.stringify({
+    channelId: request.channelId,
+    code: invite.code,
+    createdAt: invite.createdAt,
+    expiresAt: invite.expiresAt,
+    guildId: request.guildId,
+    kind: "discord-invite-capability",
+    maxAgeSeconds: request.maxAgeSeconds,
+    maxUses: request.maxUses,
+    schemaVersion: INVITE_CAPABILITY_FILE_SCHEMA_VERSION,
+    temporaryMembership: request.temporaryMembership,
+    url: `${DISCORD_INVITE_BASE_URL}/${encodeURIComponent(invite.code)}`,
+  }, null, 2)}\n`
+}
+
 function uncertainExecution(error: unknown): boolean {
   if (
     !(error instanceof InviteDeletionExecutionError)
@@ -845,6 +1310,20 @@ function uncertainExecution(error: unknown): boolean {
     || !("status" in error.result)
   ) return false
   return error.result.status === "uncertain"
+}
+
+function uncertainInviteCreationExecution(error: unknown): boolean {
+  if (
+    !(error instanceof InviteCreationExecutionError)
+    || !error.result
+    || typeof error.result !== "object"
+    || !("status" in error.result)
+  ) return false
+  const status = error.result.status
+  return typeof status === "string" && (
+    status === "uncertain"
+    || status.startsWith("completed-")
+  )
 }
 
 async function withTargetLock<T>(
@@ -875,24 +1354,522 @@ async function withTargetLock<T>(
   }
 }
 
+async function withInviteCreationTargetLock<T>(
+  locks: Map<string, Promise<InviteTargetOutcome>>,
+  key: string,
+  operation: () => Promise<T>,
+  priorUncertainError: () => InviteCreationExecutionError,
+): Promise<T> {
+  const prior = locks.get(key) ?? Promise.resolve("settled" as const)
+  let release: (outcome: InviteTargetOutcome) => void = () => undefined
+  const tail = new Promise<InviteTargetOutcome>((resolve) => {
+    release = resolve
+  })
+  locks.set(key, tail)
+  let outcome: InviteTargetOutcome = "settled"
+  try {
+    if (await prior === "uncertain") {
+      outcome = "uncertain"
+      throw priorUncertainError()
+    }
+    return await operation()
+  } catch (error) {
+    if (uncertainInviteCreationExecution(error)) outcome = "uncertain"
+    throw error
+  } finally {
+    release(outcome)
+    if (outcome === "settled" && locks.get(key) === tail) locks.delete(key)
+  }
+}
+
 export class InviteService {
   readonly #activityStore: ActivityStore
+  readonly #capabilityRoots: readonly string[]
   readonly #client: InviteServiceClient
   readonly #clock: () => Date
   readonly #operationStore: OperationStore
   readonly #planKey: Uint8Array
   readonly #policy: InviteServiceOptions["policy"]
+  readonly #privateFileSystem: PrivateCapabilityFileSystem
   readonly #randomId: () => string
+  readonly #creationTargetLocks = new Map<string, Promise<InviteTargetOutcome>>()
   readonly #targetLocks = new Map<string, Promise<InviteTargetOutcome>>()
 
   constructor(options: InviteServiceOptions) {
     this.#activityStore = options.activityStore
+    this.#capabilityRoots = options.capabilityRoots ?? []
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
+    this.#privateFileSystem = options.privateFileSystem
+      ?? DEFAULT_PRIVATE_CAPABILITY_FILE_SYSTEM
     this.#randomId = options.randomId || randomUUID
+  }
+
+  async #creationState(
+    botId: string,
+    request: NormalizedInviteCreationRequest,
+    options: RequestOptions,
+  ): Promise<InviteCreationState> {
+    assertPositiveSnowflake(botId, "Discord connector bot ID")
+    this.#policy.assertGuildInviteCreatable(request.guildId, request.channelId)
+    const receipt = await this.#operationStore.get(
+      "invite-creation",
+      request.operationKeyHash,
+    )
+    if (receipt) {
+      throw new InviteCreationOperationConflictError(receiptView(receipt))
+    }
+    const [rawGuild, rawBotMember, rawRoles, rawChannels] = await Promise.all([
+      this.#client.getGuild(request.guildId, options),
+      this.#client.getGuildMember(request.guildId, botId, options),
+      this.#client.getGuildRoles(request.guildId, options),
+      this.#client.getGuildChannels(request.guildId, options),
+    ])
+    const guild = exactGuild(rawGuild, request.guildId)
+    const botMember = exactBotMember(rawBotMember, request.guildId, botId)
+    const roles = exactRoles(rawRoles, request.guildId)
+    const channels = exactChannels(rawChannels, request.guildId)
+    const channel = exactInviteCreationChannel(
+      rawChannels,
+      request.guildId,
+      request.channelId,
+      roles,
+    )
+    const access = inviteCreationAccessEvidence(
+      botId,
+      guild,
+      botMember,
+      roles,
+      channel,
+    )
+    return { access, channel, channels, guild, roles }
+  }
+
+  async #buildCreationPlan(
+    applicationId: string,
+    botId: string,
+    request: NormalizedInviteCreationRequest,
+    options: RequestOptions,
+  ): Promise<PrivateInviteCreationPlan> {
+    assertPositiveSnowflake(applicationId, "Discord connector application ID")
+    assertPositiveSnowflake(botId, "Discord connector bot ID")
+    const [state, targetReview] = await Promise.all([
+      this.#creationState(botId, request, options),
+      reviewPrivateCapabilityTarget(
+        request.outputFile,
+        this.#capabilityRoots,
+        this.#privateFileSystem,
+      ),
+    ])
+    const delivery: InviteCreationPlan["delivery"] = {
+      format: "discord-invite-capability.v1",
+      outputFile: request.outputFile,
+      review: targetReview,
+    }
+    const intent: InviteCreationPlan["intent"] = {
+      maxAgeSeconds: request.maxAgeSeconds,
+      maxUses: request.maxUses,
+      temporaryMembership: request.temporaryMembership,
+      unique: true,
+    }
+    const privacy: InviteCreationPlan["privacy"] = {
+      capabilityDelivery: "private-file-only",
+      mcpResult: "credential-free",
+      persistence: "content-free-lifecycle-only",
+      rawDiscordPayloads: "omitted",
+    }
+    const target: InviteCreationPlan["target"] = {
+      id: state.channel.id,
+      name: state.channel.name,
+      permissionOverwriteCount: state.channel.permission_overwrites.length,
+      type: state.channel.type,
+    }
+    const visibleInventory = {
+      channelLimit: DISCORD_LIMITS.guildChannels,
+      channels: state.channels.length,
+      roleLimit: DISCORD_LIMITS.guildRoles,
+      roles: state.roles.length,
+    }
+    const warnings = [
+      ...(state.access.botAdministrator
+        ? ["Discord connector bot has ADMINISTRATOR; replace it with channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE"]
+        : []),
+      ...(state.access.botIsGuildOwner
+        ? ["Discord connector bot owns the guild and therefore bypasses narrower channel permission controls"]
+        : []),
+      "The created invite is a bearer capability; anyone who obtains the private file can use it within the reviewed limits",
+      "The connector exclusively creates one private file and never returns the invite code or URL through MCP",
+      "The output target must remain absent, canonical, process-owned, and inside the configured private root until execution",
+      "Invite creation performs one non-retried Discord mutation and cannot be rolled back automatically",
+      "A file-write or verification failure after Discord accepts the request leaves an uncertain outcome that must be inspected manually",
+      "The one-shot operation key cannot be reused after reservation, including after an uncertain outcome",
+      "Same-channel serialization is process-local; do not run overlapping invite creation in multiple connector processes",
+      "Temporary-membership behavior remains subject to Discord's member and role lifecycle",
+    ]
+    const digest = reviewedPlanDigest(this.#planKey, {
+      access: state.access,
+      applicationId,
+      botId,
+      delivery,
+      domain: "discord-mcp-invite-creation-plan.v1",
+      guild: {
+        id: state.guild.id,
+        name: state.guild.name,
+        ownerId: state.guild.owner_id,
+      },
+      intent,
+      operationKeyHash: request.operationKeyHash,
+      privacy,
+      request: {
+        acknowledgeBearerCapability: request.acknowledgeBearerCapability,
+        auditReason: request.auditReason,
+        channelId: request.channelId,
+        guildId: request.guildId,
+        outputFile: request.outputFile,
+      },
+      target,
+      visibleInventory,
+      warnings,
+    })
+    return {
+      plan: {
+        access: state.access,
+        action: "create",
+        applicationId,
+        auditReason: request.auditReason,
+        botId,
+        createdAt: this.#clock().toISOString(),
+        delivery,
+        digest,
+        guild: { id: state.guild.id, name: state.guild.name },
+        intent,
+        operationKeyHash: request.operationKeyHash,
+        privacy,
+        schemaVersion: SCHEMA_VERSION,
+        status: "planned",
+        target,
+        visibleInventory,
+        warnings,
+      },
+      request,
+    }
+  }
+
+  async planCreation(
+    applicationId: string,
+    botId: string,
+    request: InviteCreationRequest,
+    options: RequestOptions = {},
+  ): Promise<InviteCreationPlan> {
+    return (await this.#buildCreationPlan(
+      applicationId,
+      botId,
+      normalizeInviteCreationRequest(request),
+      options,
+    )).plan
+  }
+
+  executeCreation(
+    applicationId: string,
+    botId: string,
+    request: InviteCreationRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<InviteCreationResult> {
+    const normalized = normalizeInviteCreationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord invite-creation plan digest is invalid")
+    }
+    const lockKey = `${normalized.guildId}:${normalized.channelId}`
+    return withInviteCreationTargetLock(
+      this.#creationTargetLocks,
+      lockKey,
+      () => this.#executeCreationNormalized(
+        applicationId,
+        botId,
+        normalized,
+        expectedDigest,
+        options,
+      ),
+      () => new InviteCreationExecutionError(
+        "Discord invite creation was blocked because a prior same-channel operation ended with an uncertain outcome",
+        {
+          capabilityFileWritten: false,
+          channelId: normalized.channelId,
+          guildId: normalized.guildId,
+          inviteRef: null,
+          operationKeyHash: normalized.operationKeyHash,
+          outputFile: normalized.outputFile,
+          planDigest: expectedDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+        },
+      ),
+    )
+  }
+
+  async #executeCreationNormalized(
+    applicationId: string,
+    botId: string,
+    request: NormalizedInviteCreationRequest,
+    expectedDigest: string,
+    options: RequestOptions,
+  ): Promise<InviteCreationResult> {
+    let privatePlan: PrivateInviteCreationPlan
+    try {
+      privatePlan = await this.#buildCreationPlan(
+        applicationId,
+        botId,
+        request,
+        options,
+      )
+    } catch (error) {
+      if (
+        error instanceof InviteEvidenceError
+        || error instanceof PrivateCapabilityFileError
+        || error instanceof DiscordApiError && error.status === 404
+      ) {
+        throw new InviteCreationPlanChangedError(
+          expectedDigest,
+          CREATION_STATE_UNAVAILABLE,
+        )
+      }
+      throw error
+    }
+    const { plan } = privatePlan
+    if (plan.digest !== expectedDigest) {
+      throw new InviteCreationPlanChangedError(expectedDigest, plan.digest)
+    }
+    const baseResult = {
+      capabilityFileWritten: false,
+      channelId: request.channelId,
+      guildId: request.guildId,
+      inviteRef: null as string | null,
+      operationKeyHash: request.operationKeyHash,
+      outputFile: request.outputFile,
+      planDigest: plan.digest,
+      schemaVersion: SCHEMA_VERSION,
+    }
+    const activityId = this.#randomId()
+    const reservation = await this.#operationStore.reserve(
+      inviteCreationOperationReceipt({
+        activityId,
+        plan,
+        request,
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      }),
+    )
+    if (!reservation.created) {
+      throw new InviteCreationOperationConflictError(receiptView(reservation.receipt))
+    }
+    try {
+      await this.#activityStore.append(inviteCreationActivityEntry({
+        activityId,
+        plan,
+        request,
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      }))
+    } catch (error) {
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(inviteCreationOperationReceipt({
+          activityId,
+          error: safeErrorCode(error),
+          plan,
+          request,
+          status: "failed",
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      throw new InviteCreationExecutionError(
+        "Discord invite creation was blocked because pending activity could not be recorded",
+        {
+          ...baseResult,
+          activityId,
+          error: safeErrorCode(error),
+          operationRecordError,
+          status: "blocked-audit-failed",
+        },
+      )
+    }
+
+    let capabilityFile: PrivateCapabilityFileReservation | undefined
+    let capabilityFileWritten = false
+    let inviteRef: string | null = null
+    let mutationDispatched = false
+    try {
+      capabilityFile = await reservePrivateCapabilityFile(
+        request.outputFile,
+        this.#capabilityRoots,
+        this.#privateFileSystem,
+      )
+      mutationDispatched = true
+      const invite = await this.#client.createChannelInvite(
+        request.channelId,
+        {
+          maxAgeSeconds: request.maxAgeSeconds,
+          maxUses: request.maxUses,
+          temporaryMembership: request.temporaryMembership,
+        },
+        request.auditReason,
+        options,
+      )
+      assertCreatedInvite(invite, botId, request)
+      inviteRef = createInviteReference(this.#planKey, request.guildId, invite.code)
+      await capabilityFile.write(inviteCapabilityContent(invite, request))
+      capabilityFileWritten = true
+      const observed = await this.#client.getInvite(invite.code, options)
+      assertInviteVerification(observed, invite, request)
+    } catch (error) {
+      const definiteFailure = !mutationDispatched || (
+        inviteRef === null
+        && error instanceof DiscordApiError
+        && error.status >= 400
+        && error.status < 500
+        && error.status !== 429
+      )
+      const status = definiteFailure ? "failed" : "uncertain"
+      const errorCode = safeErrorCode(error)
+      const capabilityFileDiscarded = capabilityFileWritten
+        ? false
+        : await capabilityFile?.discard().catch(() => false) ?? true
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(inviteCreationOperationReceipt({
+          activityId,
+          error: errorCode,
+          inviteRef: status === "uncertain" ? inviteRef : null,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(inviteCreationActivityEntry({
+          activityId,
+          capabilityFileWritten,
+          error: errorCode,
+          inviteRef: status === "uncertain" ? inviteRef : null,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new InviteCreationExecutionError(
+        "Discord invite creation did not complete with a verified successful outcome",
+        {
+          ...baseResult,
+          activityId,
+          activityRecordError,
+          capabilityFileDiscarded,
+          capabilityFileWritten,
+          error: errorCode,
+          inviteRef,
+          operationRecordError,
+          retryAfterMs: error instanceof DiscordApiError
+            ? error.retryAfterMs ?? null
+            : null,
+          status,
+        },
+      )
+    }
+
+    if (!capabilityFileWritten || inviteRef === null) {
+      throw new InviteCreationExecutionError(
+        "Discord invite creation reached an invalid local terminal state",
+        {
+          ...baseResult,
+          activityId,
+          status: "uncertain",
+        },
+      )
+    }
+    const result: InviteCreationResult = {
+      activityId,
+      capabilityFileWritten: true,
+      channelId: request.channelId,
+      guildId: request.guildId,
+      inviteRef,
+      operationKeyHash: request.operationKeyHash,
+      outputFile: request.outputFile,
+      planDigest: plan.digest,
+      schemaVersion: SCHEMA_VERSION,
+      status: "completed",
+      verified: true,
+    }
+    try {
+      await this.#operationStore.finish(inviteCreationOperationReceipt({
+        activityId,
+        inviteRef,
+        plan,
+        request,
+        status: "completed",
+        timestamp: this.#clock().toISOString(),
+        verification: "match",
+      }))
+    } catch (error) {
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(inviteCreationActivityEntry({
+          activityId,
+          capabilityFileWritten: true,
+          error: safeErrorCode(error),
+          inviteRef,
+          plan,
+          request,
+          status: "completed",
+          timestamp: this.#clock().toISOString(),
+          verification: "match",
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new InviteCreationExecutionError(
+        "Discord invite creation completed but the operation receipt failed",
+        {
+          ...result,
+          activityRecordError,
+          operationRecordError: safeErrorCode(error),
+          status: "completed-operation-record-failed",
+        },
+      )
+    }
+    try {
+      await this.#activityStore.append(inviteCreationActivityEntry({
+        activityId,
+        capabilityFileWritten: true,
+        inviteRef,
+        plan,
+        request,
+        status: "completed",
+        timestamp: this.#clock().toISOString(),
+        verification: "match",
+      }))
+    } catch (error) {
+      throw new InviteCreationExecutionError(
+        "Discord invite creation completed but the final activity record failed",
+        {
+          ...result,
+          activityRecordError: safeErrorCode(error),
+          status: "completed-audit-failed",
+        },
+      )
+    }
+    return result
   }
 
   async #state(
@@ -1418,7 +2395,7 @@ export class InviteService {
       deleted.type !== 0
       || deleted.guildId !== guildId
       || deleted.channelId !== target.channel.id
-      || inviteReference(this.#planKey, guildId, deleted.code) !== target.inviteRef
+      || createInviteReference(this.#planKey, guildId, deleted.code) !== target.inviteRef
     ) {
       throw evidenceError("Discord returned mismatched invite deletion evidence")
     }

@@ -680,6 +680,7 @@ function guidanceService(options: {
     executeGuildTemplateChange: unexpected,
     executeGuildIntegrationDeletion: unexpected,
     executeSoundboardChange: unexpected,
+    executeInviteCreation: unexpected,
     executeInviteDeletion: unexpected,
     executeOnboardingChange: unexpected,
     executeWelcomeScreenChange: unexpected,
@@ -1663,6 +1664,7 @@ function guidanceService(options: {
         status: "ok" as const,
       }
     },
+    planInviteCreation: unexpected,
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
@@ -2021,6 +2023,9 @@ function guidanceService(options: {
         interactionMinWriteIntervalMs: 500,
         interactionsEnabled: false,
         inviteAuditEnabled: false,
+        inviteCapabilityRootCount: 0,
+        inviteCreationChannelIds: [],
+        inviteCreationEnabled: false,
         inviteDeletionsEnabled: false,
         inviteGuildIds: [],
         memberDirectoryEnabled: true,
@@ -4324,6 +4329,37 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(integrationDeletion, /webhook and bot consequences/)
   assert.match(webhookDeletion, /credential and private-field omissions/)
 
+  const inviteCreation = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgeBearerCapability: "true",
+      auditReason: "Reviewed invite creation",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      maxAgeSeconds: "3600",
+      maxUses: "1",
+      operationKey: OPERATION_KEY,
+      outputFile: "/private/invite.json",
+      temporaryMembership: "false",
+    },
+    name: MCP_PROMPT_NAMES.reviewInviteCreation,
+  }))
+  assert.deepEqual(JSON.parse(inviteCreation.split("\n")[1] || ""), {
+    acknowledgeBearerCapability: true,
+    auditReason: "Reviewed invite creation",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey: OPERATION_KEY,
+    outputFile: "/private/invite.json",
+    temporaryMembership: false,
+  })
+  assert.match(inviteCreation, /Call only plan_invite_creation/)
+  assert.match(inviteCreation, /Do not call execute_invite_creation/)
+  assert.match(inviteCreation, /VIEW_CHANNEL and CREATE_INSTANT_INVITE/)
+  assert.match(inviteCreation, /private file/)
+  assert.doesNotMatch(inviteCreation, new RegExp(PRIVATE_INVITE_CODE))
+
   const inviteDeletion = promptText(await client.getPrompt({
     arguments: {
       auditReason: "Reviewed invite revocation",
@@ -5287,6 +5323,20 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        acknowledgeBearerCapability: "true",
+        auditReason: "Reviewed invite creation",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        maxAgeSeconds: "3600",
+        maxUses: "1",
+        operationKey: OPERATION_KEY,
+        outputFile: "/private/nested/../invite.json",
+        temporaryMembership: "false",
+      },
+      name: MCP_PROMPT_NAMES.reviewInviteCreation,
+    },
     {
       arguments: {
         requestJson: JSON.stringify({

@@ -35,6 +35,7 @@ import {
   type GuildTemplateActivity,
   type IntegrationDeletionActivity,
   type InteractionActivity,
+  type InviteCreationActivity,
   type InviteDeletionActivity,
   type MemberModerationActivity,
   type MemberNicknameActivity,
@@ -953,6 +954,31 @@ function inviteDeletion(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function inviteCreation(
+  id: string,
+  status: InviteCreationActivity["status"],
+): InviteCreationActivity {
+  return {
+    capabilityFileWritten: status === "completed",
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    inviteRef: status === "completed"
+      ? `iref_hmac_sha256_${"5".repeat(64)}`
+      : null,
+    kind: "invite-creation",
+    operationKeyHash: `sha256:${"6".repeat(64)}`,
+    planDigest: `hmac-sha256:${"7".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -2932,6 +2958,62 @@ test("JSONL activity log keeps integration deletion evidence identity-safe", asy
       "schemaVersion",
       "status",
       "targetApplicationId",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps invite creation evidence capability- and path-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-invite-code",
+    "https://discord.gg/private-invite-code",
+    "/private/capabilities/invite.json",
+    "private-operation-key",
+  ]
+
+  await store.append(inviteCreation("1", "pending"))
+  await store.append(inviteCreation("2", "completed"))
+  await assert.rejects(
+    () => store.append({
+      ...inviteCreation("3", "completed"),
+      auditReason: privateValues[0],
+      code: privateValues[1],
+      url: privateValues[2],
+      outputFile: privateValues[3],
+      operationKey: privateValues[4],
+    } as InviteCreationActivity),
+    /invalid content-free shape/,
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 0)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "capabilityFileWritten",
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "inviteRef",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
       "timestamp",
       "verification",
     ],

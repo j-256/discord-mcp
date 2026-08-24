@@ -47,6 +47,7 @@ export const OPERATION_KINDS = [
   "guild-settings-change",
   "guild-template-change",
   "integration-deletion",
+  "invite-creation",
   "invite-deletion",
   "member-nickname-change",
   "member-role-change",
@@ -234,7 +235,7 @@ function parseReceipt(value: unknown): OperationReceipt {
     || !(record.resourceId === null || (
       typeof record.resourceId === "string"
       && (
-        record.kind === "invite-deletion"
+        record.kind === "invite-creation" || record.kind === "invite-deletion"
           ? INVITE_REFERENCE_PATTERN.test(record.resourceId)
           : record.kind === "guild-template-change"
             ? GUILD_TEMPLATE_REFERENCE_PATTERN.test(record.resourceId)

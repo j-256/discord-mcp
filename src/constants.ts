@@ -335,6 +335,8 @@ export const REACTION_LIMITS = Object.freeze({
 })
 
 export const INVITE_LIMITS = Object.freeze({
+  capabilityFileBytes: 4_096,
+  capabilityPathCharacters: 4_096,
   codeCharacters: 256,
   cursorCharacters: 512,
   inventory: 1_000,
@@ -342,6 +344,7 @@ export const INVITE_LIMITS = Object.freeze({
   listPageDefault: 25,
   maxAgeSeconds: 604_800,
   maxUses: 100,
+  minAgeSeconds: 60,
   roleIds: 250,
 })
 

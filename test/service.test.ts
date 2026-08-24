@@ -444,6 +444,9 @@ function serviceFixture(overrides: {
       calls.createComponentMessage += 1
       throw new Error("Unexpected component-message creation")
     },
+    async createChannelInvite() {
+      throw new Error("Unexpected invite creation")
+    },
     async createGuildChannel() {
       calls.createChannel += 1
       return channel()
@@ -599,6 +602,9 @@ function serviceFixture(overrides: {
         owner_id: "700000000000000001",
         premium_tier: 0,
       }
+    },
+    async getInvite() {
+      throw new Error("Unexpected exact invite lookup")
     },
     async getGuildIncidentActions() {
       throw new Error("Unexpected guild incident-action lookup")
@@ -1539,6 +1545,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         interactions: true,
         integrationAudit: true,
         integrationDeletions: true,
+        inviteCreation: true,
         roleDeletionAudit: true,
         roleDeletions: true,
         roleOrderingAudit: true,
@@ -1567,6 +1574,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         integrationGuildIds: [GUILD_ID],
         integrationIds: [INTEGRATION_ID],
         interactionChannelIds: [CHANNEL_ID],
+        inviteCreationChannelIds: [CHANNEL_ID],
         roleDeletionIds: [CREATED_ROLE_ID],
         roleOrderingGuildIds: [GUILD_ID],
         announcementSubscriptionTargetChannelIds: [CHANNEL_ID],
@@ -1574,6 +1582,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         messageForwardTargetChannelIds: [OTHER_CHANNEL_ID],
         deleteChannelIds: [CHANNEL_ID],
         webhookChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        inviteCapabilityRoots: [process.cwd()],
       },
     },
     gateway,
@@ -1729,6 +1740,17 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     guildId: GUILD_ID,
     inviteRef: `iref_hmac_sha256_${"b".repeat(64)}`,
     operationKey,
+  }, digest))
+  await captured(() => service.executeInviteCreation({
+    acknowledgeBearerCapability: true,
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey,
+    outputFile: join(process.cwd(), "coordination-invite-capability.json"),
+    temporaryMembership: false,
   }, digest))
   await captured(() => service.executeMemberNicknameChange({
     auditReason: "reviewed",
@@ -1945,7 +1967,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 42)
+  assert.equal(byKind.size, 43)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -2032,6 +2054,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
+      "invite-creation": [
+        { id: CHANNEL_ID, kind: "channel" },
+        { collection: "invites", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
       "member-nickname-change": [{ id: MEMBER_USER_ID, kind: "member" }],
       "member-role-change": [
         { id: MEMBER_USER_ID, kind: "member" },
@@ -2160,7 +2186,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 42)
+  assert.equal(writeCoordinator.intents.length, 43)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

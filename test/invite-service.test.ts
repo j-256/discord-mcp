@@ -232,8 +232,15 @@ function fixture(options: {
       policyCalls += 1
       basePolicy.assertGuildInviteDeletable(guildId)
     },
+    assertGuildInviteCreatable(guildId, channelId) {
+      policyCalls += 1
+      basePolicy.assertGuildInviteCreatable(guildId, channelId)
+    },
   }
   const client: InviteServiceOptions["client"] = {
+    async createChannelInvite() {
+      throw new Error("Unexpected invite creation")
+    },
     async deleteInvite(code, reason) {
       events.push(`write:delete:${reason}`)
       state.mutationStarted?.()
@@ -265,6 +272,9 @@ function fixture(options: {
     async getGuildRoles() {
       events.push("read:roles")
       return state.roles
+    },
+    async getInvite() {
+      throw new Error("Unexpected exact invite lookup")
     },
     async listGuildInvites() {
       events.push(mutationCompleted ? "read:readback" : "read:invites")

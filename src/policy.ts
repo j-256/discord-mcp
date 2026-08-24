@@ -85,6 +85,9 @@ export interface PolicyDescription {
   interactionMinWriteIntervalMs: number
   interactionsEnabled: boolean
   inviteAuditEnabled: boolean
+  inviteCapabilityRootCount: number
+  inviteCreationChannelIds: string[]
+  inviteCreationEnabled: boolean
   inviteDeletionsEnabled: boolean
   inviteGuildIds: string[]
   memberDirectoryEnabled: boolean
@@ -212,6 +215,7 @@ export class ScopePolicy {
   readonly #allowDeletions: boolean
   readonly #allowInteractions: boolean
   readonly #allowInviteAudit: boolean
+  readonly #allowInviteCreation: boolean
   readonly #allowInviteDeletions: boolean
   readonly #allowMemberDirectory: boolean
   readonly #allowNicknameChanges: boolean
@@ -296,6 +300,8 @@ export class ScopePolicy {
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
+  readonly #inviteCapabilityRoots: readonly string[]
+  readonly #inviteCreationChannelIds: ReadonlySet<string>
   readonly #inviteGuildIds: ReadonlySet<string>
   readonly #gatewayEventBufferSize: number
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
@@ -393,6 +399,7 @@ export class ScopePolicy {
     | "allowForumTagAudit"
     | "allowForumTagChanges"
     | "allowInviteAudit"
+    | "allowInviteCreation"
     | "allowInviteDeletions"
     | "allowMemberDirectory"
     | "allowNicknameChanges"
@@ -473,6 +480,8 @@ export class ScopePolicy {
     | "guildTemplateGuildIds"
     | "integrationGuildIds"
     | "integrationIds"
+    | "inviteCapabilityRoots"
+    | "inviteCreationChannelIds"
     | "inviteGuildIds"
     | "memberDirectoryGuildIds"
     | "nicknameGuildIds"
@@ -540,6 +549,7 @@ export class ScopePolicy {
     this.#allowDeletions = config.allowDeletions
     this.#allowInteractions = config.allowInteractions
     this.#allowInviteAudit = config.allowInviteAudit ?? false
+    this.#allowInviteCreation = config.allowInviteCreation ?? false
     this.#allowInviteDeletions = config.allowInviteDeletions ?? false
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
     this.#allowNicknameChanges = config.allowNicknameChanges ?? false
@@ -627,6 +637,8 @@ export class ScopePolicy {
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
+    this.#inviteCapabilityRoots = config.inviteCapabilityRoots ?? []
+    this.#inviteCreationChannelIds = config.inviteCreationChannelIds ?? new Set()
     this.#inviteGuildIds = config.inviteGuildIds ?? new Set()
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
@@ -813,6 +825,11 @@ export class ScopePolicy {
       interactionMinWriteIntervalMs: this.#interactionMinWriteIntervalMs,
       interactionsEnabled: this.#allowInteractions && this.#interactionChannelIds.size > 0,
       inviteAuditEnabled: this.#allowInviteAudit && this.#inviteGuildIds.size > 0,
+      inviteCapabilityRootCount: this.#inviteCapabilityRoots.length,
+      inviteCreationChannelIds: [...this.#inviteCreationChannelIds].sort(),
+      inviteCreationEnabled: this.#allowInviteCreation
+        && this.#inviteCreationChannelIds.size > 0
+        && this.#inviteCapabilityRoots.length > 0,
       inviteDeletionsEnabled: this.#allowInviteAudit
         && this.#allowInviteDeletions
         && this.#inviteGuildIds.size > 0,
@@ -1102,6 +1119,27 @@ export class ScopePolicy {
     this.assertGuildInviteAuditable(guildId)
     if (!this.#allowInviteDeletions) {
       throw new PolicyError("Discord invite deletion is disabled by connector configuration")
+    }
+  }
+
+  assertGuildInviteCreatable(guildId: string, channelId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowInviteCreation) {
+      throw new PolicyError("Discord invite creation is disabled by connector configuration")
+    }
+    if (this.#inviteCreationChannelIds.size === 0) {
+      throw new PolicyError("Discord invite creation requires an exact channel allowlist")
+    }
+    if (
+      !this.#inviteCreationChannelIds.has(channelId)
+      || !this.channelIdReadable(channelId)
+    ) {
+      throw new PolicyError(
+        `Discord channel ${channelId} is outside the invite-creation scope`,
+      )
+    }
+    if (this.#inviteCapabilityRoots.length === 0) {
+      throw new PolicyError("Discord invite creation requires a private capability root")
     }
   }
 

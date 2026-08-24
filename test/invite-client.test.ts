@@ -116,6 +116,98 @@ test("Discord client deletes an invite once with a secret-safe diagnostic route"
   }])
 })
 
+test("Discord client creates one unique finite invite without automatic retry", async () => {
+  const requests: Array<{
+    authorization: string | null
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: JSON.parse(String(init?.body)) as unknown,
+        method: init?.method,
+        reason: new Headers(init?.headers).get("x-audit-log-reason"),
+        url: String(input),
+      })
+      return jsonResponse({
+        channel: { id: "200" },
+        code: PRIVATE_CODE,
+        created_at: "2026-08-21T12:00:00.000Z",
+        expires_at: "2026-08-21T13:00:00.000Z",
+        flags: 0,
+        guild: { id: "100" },
+        inviter: { id: "300" },
+        max_age: 3_600,
+        max_uses: 2,
+        roles: [],
+        temporary: true,
+        type: 0,
+        uses: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  const created = await client.createChannelInvite(
+    "200",
+    { maxAgeSeconds: 3_600, maxUses: 2, temporaryMembership: true },
+    "Reviewed temporary access",
+  )
+
+  assert.equal(created.code, PRIVATE_CODE)
+  assert.equal(created.unknownFieldCount, undefined)
+  assert.deepEqual(requests, [{
+    authorization: `Bot ${TOKEN}`,
+    body: {
+      max_age: 3_600,
+      max_uses: 2,
+      temporary: true,
+      unique: true,
+    },
+    method: "POST",
+    reason: "Reviewed%20temporary%20access",
+    url: `${API_BASE_URL}/channels/200/invites`,
+  }])
+})
+
+test("Discord client verifies an exact invite without sending bot authentication", async () => {
+  const requests: Array<{ authorization: string | null; url: string }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("authorization"),
+        url: String(input),
+      })
+      return jsonResponse({
+        channel: { id: "200" },
+        code: PRIVATE_CODE,
+        guild: { id: "100" },
+        type: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  const observed = await client.getInvite(PRIVATE_CODE)
+
+  assert.deepEqual(observed, {
+    channelId: "200",
+    code: PRIVATE_CODE,
+    guildId: "100",
+    type: 0,
+  })
+  assert.deepEqual(requests, [{
+    authorization: null,
+    url: `${API_BASE_URL}/invites/private%2FA%3Fcode`,
+  }])
+})
+
 test("Discord client never exposes an invite code through invite failures", async () => {
   const listClient = new DiscordClient({
     apiBaseUrl: API_BASE_URL,
@@ -174,6 +266,16 @@ test("Discord client never exposes an invite code through invite failures", asyn
       return true
     },
   )
+  await assert.rejects(
+    () => networkClient.getInvite(PRIVATE_CODE),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+      assert.doesNotMatch(error.message, /private%2FA%3Fcode/)
+      assert.equal((error as Error & { cause?: unknown }).cause, undefined)
+      return true
+    },
+  )
 
   let requests = 0
   const apiClient = new DiscordClient({
@@ -194,6 +296,31 @@ test("Discord client never exposes an invite code through invite failures", asyn
     },
   )
   assert.equal(requests, 1)
+
+  let creationRequests = 0
+  const creationClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      creationRequests += 1
+      return jsonResponse({ message: `rejected ${PRIVATE_CODE}`, retry_after: 0 }, 429)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => creationClient.createChannelInvite(
+      "200",
+      { maxAgeSeconds: 60, maxUses: 1, temporaryMembership: false },
+      "Reviewed access",
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.equal(error.route, "/channels/{channel.id}/invites")
+      assert.doesNotMatch(error.message, /private/)
+      assert.equal((error as Error & { cause?: unknown }).cause, undefined)
+      return true
+    },
+  )
+  assert.equal(creationRequests, 1)
 })
 
 test("Discord client rejects malformed invite evidence and inputs", async () => {
@@ -211,6 +338,23 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
   await assert.rejects(() => client.listGuildInvites("bad"), /invite-audit guild ID/)
   await assert.rejects(() => client.deleteInvite("", "Reviewed cleanup"), /code is invalid/)
   await assert.rejects(() => client.deleteInvite("..", "Reviewed cleanup"), /code is invalid/)
+  await assert.rejects(() => client.getInvite(".."), /code is invalid/)
+  await assert.rejects(
+    () => client.createChannelInvite(
+      "200",
+      { maxAgeSeconds: 0, maxUses: 1, temporaryMembership: false },
+      "Reviewed access",
+    ),
+    /finite age/,
+  )
+  await assert.rejects(
+    () => client.createChannelInvite(
+      "200",
+      { maxAgeSeconds: 60, maxUses: 0, temporaryMembership: false },
+      "Reviewed access",
+    ),
+    /finite age/,
+  )
   assert.equal(requests, 1)
 
   for (const overrides of [

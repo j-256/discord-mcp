@@ -409,11 +409,19 @@ export interface DiscordGuildApplicationCommandPermissions {
   unknownFieldCount: number
 }
 
-export interface DiscordDeletedInviteSummary {
+export interface DiscordInviteIdentitySummary {
   channelId: string | null
   code: string
   guildId: string | null
   type: number
+}
+
+export type DiscordDeletedInviteSummary = DiscordInviteIdentitySummary
+
+export interface CreateChannelInviteInput {
+  maxAgeSeconds: number
+  maxUses: number
+  temporaryMembership: boolean
 }
 
 export interface DiscordGuildTemplateSummary {
@@ -1394,6 +1402,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_guild_soundboard_sound",
   "create_guild_sticker",
   "create_guild_template",
+  "create_channel_invite",
   "create_stage_instance",
   "create_webhook",
   "delete_application_emoji",
@@ -1429,6 +1438,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_channel_metadata",
   "get_guild_onboarding",
   "get_guild_welcome_screen",
+  "get_invite",
   "list_guild_invites",
   "list_guild_integrations",
   "list_application_emojis",
@@ -1714,7 +1724,7 @@ function inviteCode(record: Record<string, unknown>): string {
   return record.code
 }
 
-function projectDeletedInvite(value: unknown): DiscordDeletedInviteSummary {
+function projectInviteIdentity(value: unknown): DiscordInviteIdentitySummary {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw inviteEvidenceError()
   }
@@ -1724,6 +1734,52 @@ function projectDeletedInvite(value: unknown): DiscordDeletedInviteSummary {
     code: inviteCode(record),
     guildId: projectedInviteId(record.guild),
     type: inviteInteger(record.type),
+  }
+}
+
+const CREATE_CHANNEL_INVITE_INPUT_KEYS: ReadonlySet<string> = new Set([
+  "maxAgeSeconds",
+  "maxUses",
+  "temporaryMembership",
+])
+
+function assertCreateChannelInviteInput(input: CreateChannelInviteInput): void {
+  if (
+    !input
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || !hasOnlyKeys(
+      input as unknown as Record<string, unknown>,
+      [...CREATE_CHANNEL_INVITE_INPUT_KEYS],
+    )
+    || !Number.isInteger(input.maxAgeSeconds)
+    || input.maxAgeSeconds < INVITE_LIMITS.minAgeSeconds
+    || input.maxAgeSeconds > INVITE_LIMITS.maxAgeSeconds
+    || !Number.isInteger(input.maxUses)
+    || input.maxUses < 1
+    || input.maxUses > INVITE_LIMITS.maxUses
+    || typeof input.temporaryMembership !== "boolean"
+  ) {
+    throw new RangeError(
+      "Discord invite creation requires finite age, finite uses, and explicit temporary membership",
+    )
+  }
+}
+
+function encodedInviteCode(code: string, description: string): string {
+  if (
+    typeof code !== "string"
+    || code.length < 1
+    || code.length > INVITE_LIMITS.codeCharacters
+    || URL_DOT_PATH_SEGMENTS.has(code)
+    || /[\u0000-\u001F\u007F]/u.test(code)
+  ) {
+    throw new RangeError(`${description} code is invalid`)
+  }
+  try {
+    return encodeURIComponent(code)
+  } catch {
+    throw new RangeError(`${description} code is invalid`)
   }
 }
 
@@ -10184,6 +10240,53 @@ export class DiscordClient {
     return response.map(projectInvite)
   }
 
+  async createChannelInvite(
+    channelId: string,
+    input: CreateChannelInviteInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordInviteSummary> {
+    assertPositiveSnowflake(channelId, "Discord invite-creation channel ID")
+    assertCreateChannelInviteInput(input)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "create_channel_invite",
+      `/channels/${channelId}/invites`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          max_age: input.maxAgeSeconds,
+          max_uses: input.maxUses,
+          temporary: input.temporaryMembership,
+          unique: true,
+        },
+        diagnosticRoute: "/channels/{channel.id}/invites",
+        suppressFailureCause: true,
+      },
+    )
+    return projectInvite(response)
+  }
+
+  async getInvite(
+    code: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordInviteIdentitySummary> {
+    const encodedCode = encodedInviteCode(code, "Discord exact invite lookup")
+    const response = await this.#request<unknown>(
+      "get_invite",
+      `/invites/${encodedCode}`,
+      {
+        ...options,
+        authentication: "none",
+        diagnosticRoute: "/invites/{invite.code}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectInviteIdentity(response)
+  }
+
   async listGuildTemplates(
     guildId: string,
     options: RequestOptions = {},
@@ -10300,21 +10403,7 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<DiscordDeletedInviteSummary> {
-    if (
-      typeof code !== "string"
-      || code.length < 1
-      || code.length > INVITE_LIMITS.codeCharacters
-      || URL_DOT_PATH_SEGMENTS.has(code)
-      || /[\u0000-\u001F\u007F]/u.test(code)
-    ) {
-      throw new RangeError("Discord invite deletion code is invalid")
-    }
-    let encodedCode: string
-    try {
-      encodedCode = encodeURIComponent(code)
-    } catch {
-      throw new RangeError("Discord invite deletion code is invalid")
-    }
+    const encodedCode = encodedInviteCode(code, "Discord invite deletion")
     encodeDiscordAuditReason(auditReason)
     const response = await this.#request<unknown>(
       "delete_invite",
@@ -10327,7 +10416,7 @@ export class DiscordClient {
         suppressFailureCause: true,
       },
     )
-    return projectDeletedInvite(response)
+    return projectInviteIdentity(response)
   }
 
   modifyGuildMemberTimeout(
