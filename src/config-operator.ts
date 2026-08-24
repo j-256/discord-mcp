@@ -16,40 +16,31 @@ import {
 import { loadConnectorConfig } from "./config.js"
 import {
   CONFIG_DOCUMENT_SCHEMA_ID,
-  CONFIG_DOCUMENT_SCHEMA_VERSION,
   activateConnectorConfigDocument,
   configDocumentConfigurationError,
-  configDocumentPolicyFromEnvironment,
   connectorConfigFields,
   connectorConfigJsonSchema,
   connectorConfigSecretEnvironmentNames,
+  connectorConfigSecretFilePaths,
   createConnectorConfigDocument,
   loadConnectorConfigDocumentFile,
-  normalizeConfigName,
   parseConnectorConfigDocument,
   type ConfigDocumentField,
+  type ConnectorCredentialReference,
   type ConnectorConfigDocument,
 } from "./config-document.js"
 import { ENVIRONMENT_NAMES } from "./constants.js"
 import { ConfigDocumentError, ConfigurationError } from "./errors.js"
-import { selectedMcpToolsets } from "./mcp-tool-catalog.js"
-import {
-  activateCredentialEnvironment,
-  activateProfile,
-  loadProfile,
-  normalizeCredentialEnvironmentName,
-  type ProfileLocationOptions,
-} from "./profile.js"
 import { getSetupPreset } from "./setup-presets.js"
 
-export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 2
+export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 3
 
 const FILE_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
 export interface ConnectorConfigSummary {
   capabilitiesEnabled: readonly string[]
   configSchemaVersion: number
-  credentialVariables: readonly string[]
+  credential: ConnectorCredentialReference
   gateway: {
     enabled: boolean
     eventBufferSize: number
@@ -65,6 +56,8 @@ export interface ConnectorConfigSummary {
     guildIds: readonly string[]
   }
   runtimeConfigured: readonly string[]
+  secretEnvironmentVariables: readonly string[]
+  secretFilePaths: readonly string[]
   scopesConfigured: readonly {
     count: number
     name: string
@@ -92,18 +85,12 @@ export interface ConfigShowReport extends ConfigValidationReport {
   document: ConnectorConfigDocument
 }
 
-export interface ConfigExplainEntry extends Omit<ConfigDocumentField, "environmentVariable"> {
-  migrationEnvironmentVariable?: string
+export interface ConfigExplainEntry extends ConfigDocumentField {
   schema: unknown
-}
-
-export interface ConfigExplainOptions {
-  includeMigrationAliases?: boolean
 }
 
 export interface ConfigExplainReport {
   fields: readonly ConfigExplainEntry[]
-  migrationAliasesIncluded: boolean
   query: string
   schemaId: string
   schemaVersion: number
@@ -111,10 +98,10 @@ export interface ConfigExplainReport {
 }
 
 export interface ConfigWriteReport extends ConfigShowReport {
-  action: "init" | "migrate"
+  action: "init"
   backupFile?: string
   created: boolean
-  source: "environment" | "new" | "profile"
+  source: "new"
 }
 
 export interface ConfigWriteOptions {
@@ -125,19 +112,12 @@ export interface ConfigInitOptions extends ConfigWriteOptions {
   applicationId: string
   botId: string
   channelIds?: readonly string[]
+  credentialFile?: string
   credentialVariable?: string
   file: string
   guildIds: readonly string[]
   name: string
   preset?: string
-}
-
-export interface ConfigMigrateOptions extends ConfigWriteOptions, ProfileLocationOptions {
-  credentialVariable?: string
-  environment?: NodeJS.ProcessEnv
-  file: string
-  name?: string
-  profileName?: string
 }
 
 export interface ConfigWriteOutcome {
@@ -163,6 +143,16 @@ export function resolveConnectorConfigFile(file: string): string {
   return resolve(normalized)
 }
 
+export function resolveConnectorSecretFile(file: string): string {
+  const normalized = file.trim()
+  if (!normalized || FILE_CONTROL_CHARACTER_PATTERN.test(normalized)) {
+    throw new ConfigDocumentError(
+      "Credential file path must not be empty or contain control characters",
+    )
+  }
+  return resolve(normalized)
+}
+
 function validationEnvironment(
   document: ConnectorConfigDocument,
 ): NodeJS.ProcessEnv {
@@ -175,13 +165,26 @@ function validationEnvironment(
   return environment
 }
 
+function validationDocument(
+  document: ConnectorConfigDocument,
+): ConnectorConfigDocument {
+  return {
+    ...document,
+    credential: {
+      provider: "environment",
+      variable: ENVIRONMENT_NAMES.token,
+    },
+  }
+}
+
 export function validateConnectorConfigDocumentPolicy(
   documentValue: ConnectorConfigDocument,
 ): ConnectorConfigDocument {
   const document = parseConnectorConfigDocument(documentValue)
+  const placeholderDocument = validationDocument(document)
   const environment = activateConnectorConfigDocument(
-    document,
-    validationEnvironment(document),
+    placeholderDocument,
+    validationEnvironment(placeholderDocument),
   )
   try {
     loadConnectorConfig(environment)
@@ -201,7 +204,7 @@ export function summarizeConnectorConfigDocument(
       .map(([name]) => name)
       .sort(),
     configSchemaVersion: document.schemaVersion,
-    credentialVariables: [...connectorConfigSecretEnvironmentNames(document)].sort(),
+    credential: { ...document.credential },
     gateway: { ...document.gateway },
     identity: { ...document.identity },
     limitsConfigured: Object.keys(document.limits).sort(),
@@ -211,6 +214,8 @@ export function summarizeConnectorConfigDocument(
       guildIds: [...document.readScope.guildIds],
     },
     runtimeConfigured: Object.keys(document.runtime).sort(),
+    secretEnvironmentVariables: [...connectorConfigSecretEnvironmentNames(document)].sort(),
+    secretFilePaths: [...connectorConfigSecretFilePaths(document)].sort(),
     scopesConfigured: Object.entries(document.scopes)
       .filter(([, ids]) => ids.length > 0)
       .map(([name, ids]) => ({ count: ids.length, name }))
@@ -283,22 +288,17 @@ function normalizedExplainQuery(value: string | undefined): string {
 
 export function explainConnectorConfig(
   path?: string,
-  options: ConfigExplainOptions = {},
 ): ConfigExplainReport {
   const query = normalizedExplainQuery(path)
   const schema = connectorConfigJsonSchema()
-  const includeMigrationAliases = options.includeMigrationAliases === true
   const fields = connectorConfigFields()
     .filter((field) => (
       query === "$"
       || field.path === query
       || field.path.startsWith(`${query}.`)
     ))
-    .map(({ environmentVariable, ...field }) => ({
+    .map((field) => ({
       ...field,
-      ...(includeMigrationAliases && environmentVariable
-        ? { migrationEnvironmentVariable: environmentVariable }
-        : {}),
       schema: schemaAtPath(schema, field.path),
     }))
   if (fields.length === 0) {
@@ -306,7 +306,6 @@ export function explainConnectorConfig(
   }
   return {
     fields,
-    migrationAliasesIncluded: includeMigrationAliases,
     query,
     schemaId: CONFIG_DOCUMENT_SCHEMA_ID,
     schemaVersion: CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
@@ -588,7 +587,10 @@ export async function initializeConnectorConfigFile(
     applicationId: options.applicationId,
     botId: options.botId,
     channelIds: options.channelIds ?? [],
-    ...(options.credentialVariable
+    ...(options.credentialFile !== undefined
+      ? { credentialFile: resolveConnectorSecretFile(options.credentialFile) }
+      : {}),
+    ...(options.credentialVariable !== undefined
       ? { credentialVariable: options.credentialVariable }
       : {}),
     gatewayEnabled: preset.gatewayEnabled,
@@ -603,110 +605,4 @@ export async function initializeConnectorConfigFile(
     { ...(options.overwrite === undefined ? {} : { overwrite: options.overwrite }) },
   )
   return writeReport("init", "new", outcome)
-}
-
-function documentFromRuntimeEnvironment(
-  name: string,
-  credentialVariable: string,
-  runtimeEnvironment: NodeJS.ProcessEnv,
-): ConnectorConfigDocument {
-  if (runtimeEnvironment[ENVIRONMENT_NAMES.configFile]?.trim()) {
-    throw new ConfigurationError(
-      "Migration source conflicts with the selected configuration file",
-    )
-  }
-  const normalizedCredential = normalizeCredentialEnvironmentName(credentialVariable)
-  const recognized = new Set<string>(Object.values(ENVIRONMENT_NAMES))
-  const unknown = Object.keys(runtimeEnvironment)
-    .filter((entry) => (
-      (entry.startsWith("DISCORD_MCP_") || entry.startsWith("OTEL_"))
-      && !recognized.has(entry)
-      && runtimeEnvironment[entry]?.trim()
-    ))
-    .sort()
-  if (unknown.length > 0) {
-    throw new ConfigurationError(
-      `Environment migration found unknown policy variables: ${unknown.join(", ")}`,
-    )
-  }
-  const config = loadConnectorConfig(runtimeEnvironment)
-  if (!config.expectedApplicationId || !config.expectedBotId) {
-    throw new ConfigurationError(
-      "Environment migration requires pinned Discord application and bot IDs",
-    )
-  }
-  if (config.allowedGuildIds.size === 0) {
-    throw new ConfigurationError(
-      "Environment migration requires a non-empty exact guild scope",
-    )
-  }
-  return createConnectorConfigDocument({
-    applicationId: config.expectedApplicationId,
-    botId: config.expectedBotId,
-    channelIds: [...config.allowedChannelIds],
-    ...configDocumentPolicyFromEnvironment(runtimeEnvironment),
-    credentialVariable: normalizedCredential,
-    gatewayEnabled: config.allowGateway,
-    gatewayEventBufferSize: config.gatewayEventBufferSize,
-    guildIds: [...config.allowedGuildIds],
-    name: normalizeConfigName(name),
-    toolsets: selectedMcpToolsets(config.mcpToolsets),
-    toolSurface: config.mcpToolSurface,
-  })
-}
-
-function documentFromEnvironment(
-  name: string,
-  credentialVariable: string,
-  environment: NodeJS.ProcessEnv,
-): ConnectorConfigDocument {
-  if (environment[ENVIRONMENT_NAMES.configFile]?.trim()) {
-    throw new ConfigurationError(
-      "Environment migration requires an environment-only configuration",
-    )
-  }
-  const normalizedCredential = normalizeCredentialEnvironmentName(credentialVariable)
-  return documentFromRuntimeEnvironment(
-    name,
-    normalizedCredential,
-    activateCredentialEnvironment(normalizedCredential, environment),
-  )
-}
-
-export async function migrateConnectorConfigFile(
-  options: ConfigMigrateOptions,
-): Promise<ConfigWriteReport> {
-  const environment = options.environment ?? process.env
-  let document: ConnectorConfigDocument
-  let source: ConfigWriteReport["source"]
-  if (options.profileName) {
-    const profile = await loadProfile(options.profileName, options)
-    if (profile.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
-      document = parseConnectorConfigDocument(profile)
-    } else {
-      const activated = await activateProfile(options.profileName, options)
-      document = documentFromRuntimeEnvironment(
-        profile.name,
-        profile.credential.variable,
-        activated.environment,
-      )
-    }
-    source = "profile"
-  } else {
-    if (!options.name) {
-      throw new ConfigurationError("Environment migration requires --name")
-    }
-    document = documentFromEnvironment(
-      options.name,
-      options.credentialVariable ?? ENVIRONMENT_NAMES.token,
-      environment,
-    )
-    source = "environment"
-  }
-  const outcome = await writeConnectorConfigDocumentFile(
-    options.file,
-    document,
-    { ...(options.overwrite === undefined ? {} : { overwrite: options.overwrite }) },
-  )
-  return writeReport("migrate", source, outcome)
 }

@@ -599,6 +599,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   observabilityServiceNameCharacters: 64,
   observabilityTimeoutMs: 60_000,
   configBytes: 131_072,
+  credentialFileBytes: 4_096,
   operationReceiptBytes: 16_384,
   scaffoldChannels: 20,
   scaffoldRoles: 10,

@@ -344,24 +344,48 @@
       "description": "Explicit capability gates; omitted gates remain disabled"
     },
     "credential": {
-      "type": "object",
-      "properties": {
-        "provider": {
-          "type": "string",
-          "const": "environment"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "environment"
+            },
+            "variable": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^DISCORD_(?:[A-Z0-9]+_)*TOKEN$"
+            }
+          },
+          "required": [
+            "provider",
+            "variable"
+          ],
+          "additionalProperties": false
         },
-        "variable": {
-          "type": "string",
-          "maxLength": 128,
-          "pattern": "^DISCORD_(?:[A-Z0-9]+_)*TOKEN$"
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "Absolute canonical path to a bounded externally managed Discord token file"
+            },
+            "provider": {
+              "type": "string",
+              "const": "file"
+            }
+          },
+          "required": [
+            "path",
+            "provider"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "provider",
-        "variable"
       ],
-      "additionalProperties": false,
-      "description": "Environment reference for the Discord bot token"
+      "description": "Environment or bounded file reference for the Discord bot token"
     },
     "gateway": {
       "type": "object",

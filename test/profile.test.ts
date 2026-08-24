@@ -22,7 +22,6 @@ import {
   createConnectorProfile,
   listProfiles,
   loadProfile,
-  normalizeCredentialEnvironmentName,
   normalizeProfileName,
   parseConnectorProfile,
   profilePath,
@@ -31,7 +30,6 @@ import {
   saveProfile,
   trashProfile,
   type ConnectorProfile,
-  type LegacyConnectorProfile,
 } from "../src/profile.js"
 
 const APPLICATION_ID = "300000000000000001"
@@ -71,31 +69,14 @@ function profile(overrides: Partial<{
   })
 }
 
-function legacyProfile(): LegacyConnectorProfile {
-  return {
-    credential: { provider: "environment", variable: ALIAS },
-    gateway: { enabled: false, eventBufferSize: 100 },
-    identity: { applicationId: APPLICATION_ID, botId: BOT_ID },
-    name: "legacy-support-bot",
-    readScope: { channelIds: [CHANNEL_ID], guildIds: [GUILD_ID] },
-    schemaVersion: 1,
-    tools: { surface: "progressive", toolsets: ["connector", "messages"] },
-  }
-}
-
 async function profileRoot(context: test.TestContext): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-profiles-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   return join(await realpath(root), "profiles")
 }
 
-test("profile and credential names are bounded portable identifiers", () => {
+test("profile names are bounded portable identifiers", () => {
   assert.equal(normalizeProfileName(" support.bot-1_2 "), "support.bot-1_2")
-  assert.equal(normalizeCredentialEnvironmentName(` ${ALIAS} `), ALIAS)
-  assert.equal(
-    normalizeCredentialEnvironmentName(ENVIRONMENT_NAMES.token),
-    ENVIRONMENT_NAMES.token,
-  )
 
   for (const name of [
     "",
@@ -110,19 +91,6 @@ test("profile and credential names are bounded portable identifiers", () => {
   ]) {
     assert.throws(() => normalizeProfileName(name), ProfileError)
   }
-  for (const variable of [
-    "",
-    "PATH",
-    "discord_support_token",
-    "DISCORD_SUPPORT_SECRET",
-    "DISCORD-SUPPORT-TOKEN",
-    `DISCORD_${"A".repeat(121)}_TOKEN`,
-  ]) {
-    assert.throws(
-      () => normalizeCredentialEnvironmentName(variable),
-      ProfileError,
-    )
-  }
 })
 
 test("profile parsing requires one exact canonical non-secret contract", () => {
@@ -130,6 +98,7 @@ test("profile parsing requires one exact canonical non-secret contract", () => {
   assert.deepEqual(parseConnectorProfile(valid, valid.name), valid)
 
   const invalid: unknown[] = [
+    { ...valid, schemaVersion: 1 },
     { ...valid, schemaVersion: 3 },
     { ...valid, name: null },
     { ...valid, token: TOKEN },
@@ -476,24 +445,41 @@ test("profile activation clones complete policy, consumes aliases, and rejects a
   )
 })
 
-test("legacy profiles remain readable and retain their environment compatibility window", async (context) => {
+test("profile activation resolves a file-backed credential without ambient secret state", async (context) => {
   const directory = await profileRoot(context)
-  const candidate = legacyProfile()
-  assert.deepEqual(parseConnectorProfile(candidate), candidate)
+  const credentialFile = resolve(directory, "..", "discord-token")
+  await writeFile(credentialFile, `${TOKEN}\n`, { mode: 0o600 })
+  const candidate = createConnectorProfile({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialFile,
+    guildIds: [GUILD_ID],
+    name: "file-backed",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
   await saveProfile(candidate, { directory })
+  const source = { PATH: "/usr/bin" }
 
   const activated = await activateProfile(candidate.name, {
     directory,
-    environment: {
-      [ALIAS]: TOKEN,
-      [ENVIRONMENT_NAMES.allowDeletions]: "true",
-      [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-    },
+    environment: source,
   })
-  assert.equal(activated.profile.schemaVersion, 1)
+  assert.deepEqual(source, { PATH: "/usr/bin" })
+  assert.deepEqual(activated.profile.credential, {
+    path: credentialFile,
+    provider: "file",
+  })
   assert.equal(activated.environment[ENVIRONMENT_NAMES.token], TOKEN)
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.allowDeletions], "true")
-  assert.equal(activated.environment[ENVIRONMENT_NAMES.deleteChannelIds], CHANNEL_ID)
+  assert.equal(activated.environment.PATH, "/usr/bin")
+  await assert.rejects(
+    () => activateProfile(candidate.name, {
+      directory,
+      environment: { [ENVIRONMENT_NAMES.token]: "ambient-token" },
+    }),
+    /conflicts with policy environment variables/,
+  )
 })
 
 test("profile removal is recoverable and restore chooses the newest generation", async (context) => {

@@ -84,7 +84,13 @@ async function checkNeutrality() {
   for (const path of paths) {
     invariant(!containsSpecificReference(path), `${path} has model- or harness-specific branding`)
     const absolutePath = join(REPOSITORY_ROOT, path)
-    const metadata = await lstat(absolutePath)
+    let metadata
+    try {
+      metadata = await lstat(absolutePath)
+    } catch (error) {
+      if (error?.code === "ENOENT") continue
+      throw error
+    }
     const bytes = metadata.isSymbolicLink()
       ? Buffer.from(await readlink(absolutePath))
       : await readFile(absolutePath)
@@ -101,13 +107,12 @@ const EXPECTED_PACKAGE_FILES = [
   "SECURITY.md",
   "dist",
   "discord-mcp.config.schema.json",
-  "docs/environment-migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "server.json",
 ]
 
-const EXPECTED_COMPATIBILITY_ENVIRONMENT_NAMES = [
+const EXPECTED_INTERNAL_ENVIRONMENT_NAMES = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_MCP_ADMIN_GUILD_IDS",
   "DISCORD_MCP_ALLOWED_CHANNEL_IDS",
@@ -465,15 +470,11 @@ async function checkSourceIdentity(packageJson) {
   const environmentNames = [...environmentBlock.matchAll(/:\s*"([A-Z0-9_]+)"/g)]
     .map((match) => match[1])
     .sort()
-  assertEqual(environmentNames, EXPECTED_COMPATIBILITY_ENVIRONMENT_NAMES, "source compatibility environment catalog changed without review")
+  assertEqual(environmentNames, EXPECTED_INTERNAL_ENVIRONMENT_NAMES, "source internal environment catalog changed without review")
 }
 
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
-  const migration = await readFile(
-    join(REPOSITORY_ROOT, "docs/environment-migration.md"),
-    "utf8",
-  )
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
@@ -508,16 +509,6 @@ async function checkDocumentation(packageJson) {
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
-  invariant(reference.includes("[legacy environment-policy migration guide](environment-migration.md)"), "complete reference migration link is invalid")
-  invariant(migration.startsWith("# Migrate legacy environment policy to a configuration file\n"), "environment migration heading is invalid")
-  const documentedCompatibilityEnvironmentNames = [
-    ...migration.matchAll(/^\| `([A-Z0-9_]+)`(?:, `([A-Z0-9_]+)`)?(?:, `([A-Z0-9_]+)`)? \|/gm),
-  ].flatMap((match) => match.slice(1).filter(Boolean)).sort()
-  assertEqual(
-    documentedCompatibilityEnvironmentNames,
-    EXPECTED_COMPATIBILITY_ENVIRONMENT_NAMES,
-    "environment migration catalog is incomplete",
-  )
   invariant(reference.length > readme.length, "complete reference must retain the detailed contract")
   for (const heading of REFERENCE_REQUIRED_HEADINGS) {
     invariant(reference.includes(heading), `complete reference is missing ${heading}`)

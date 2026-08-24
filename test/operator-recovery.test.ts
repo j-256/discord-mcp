@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  ConfigDocumentError,
   ConfigurationError,
   DiscordApiError,
-  ProfileCredentialError,
   ProfileError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
@@ -54,21 +54,20 @@ test("operator recovery classifies bounded Discord failures without routes", () 
   }
 })
 
-test("operator recovery distinguishes credential, profile, and usage correction", () => {
-  const missing = new ProfileCredentialError("missing", "credential is required")
-  const conflict = new ProfileCredentialError("conflict", "credentials conflict")
+test("operator recovery distinguishes configuration, profile, and usage correction", () => {
+  const credential = new ConfigDocumentError("credential is required")
   const profile = new ProfileError("Profile not found")
   const configuration = new ConfigurationError("Configuration is invalid")
   const usage = { helpTopic: "setup", usage: true }
   const genericUsage = { usage: true }
 
-  assert.match(classifyCliFailure(missing, COMMAND_CONTEXT).recovery.action, /Set the profile's/)
-  assert.match(classifyCliFailure(conflict, COMMAND_CONTEXT).recovery.action, /Remove the conflicting/)
+  assert.equal(classifyCliFailure(credential, COMMAND_CONTEXT).category, "configuration")
+  assert.match(classifyCliFailure(credential, COMMAND_CONTEXT).recovery.action, /doctor/)
   assert.equal(classifyCliFailure(profile, COMMAND_CONTEXT).category, "profile")
   assert.equal(classifyCliFailure(configuration, COMMAND_CONTEXT).category, "configuration")
   assert.match(classifyCliFailure(new Error("ignored"), usage).recovery.action, /help setup/)
   assert.match(classifyCliFailure(new Error("ignored"), genericUsage).recovery.action, /discord-mcp help/)
-  assert.equal(safeCliFailureMessage(missing, COMMAND_CONTEXT), "credential is required")
+  assert.equal(safeCliFailureMessage(credential, COMMAND_CONTEXT), "credential is required")
   assert.equal(safeCliFailureMessage(profile, COMMAND_CONTEXT), "Profile not found")
   assert.equal(safeCliFailureMessage(configuration, COMMAND_CONTEXT), "Configuration is invalid")
   assert.equal(safeCliFailureMessage(new Error("argument secret"), usage), "Invalid command usage")

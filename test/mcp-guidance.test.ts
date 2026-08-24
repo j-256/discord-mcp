@@ -2935,7 +2935,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /complete role-member counts|complete member-count readback/)
   assert.match(safety.text, /permission changes with unknown bits/)
   assert.match(safety.text, /Role deletion requires separate audit and change gates/)
-  assert.match(safety.text, /canonical configuration keys are capabilities\.roleDeletionAudit/)
+  assert.match(safety.text, /Only capabilities\.roleDeletionAudit, capabilities\.roleDeletions/)
   assert.match(safety.text, /every discovered dependency blocks/)
   assert.match(safety.text, /Historical message mentions, Guild Template snapshot internals/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)

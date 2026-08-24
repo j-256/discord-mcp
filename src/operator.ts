@@ -11,18 +11,21 @@ import {
 import type { ConnectorConfig } from "./config.js"
 import { loadConnectorConfig } from "./config.js"
 import {
-  CONFIG_DOCUMENT_SCHEMA_VERSION,
+  activateConnectorCredentialReference,
   activateConnectorConfigDocument,
   configDocumentPolicyFromEnvironment,
   connectorConfigSecretEnvironmentNames,
+  connectorConfigSecretFilePaths,
   createConnectorConfigDocument,
   loadConnectorConfigDocumentFile,
   normalizeConfigName,
   parseConnectorConfigDocument,
+  type ConnectorCredentialReference,
   type ConnectorConfigDocument,
 } from "./config-document.js"
 import {
   resolveConnectorConfigFile,
+  resolveConnectorSecretFile,
   writeConnectorConfigDocumentFile,
 } from "./config-operator.js"
 import {
@@ -37,7 +40,12 @@ import {
   type McpToolSurface,
 } from "./constants.js"
 import { DiscordGateway, type GatewayRuntime } from "./discord-gateway.js"
-import { ConfigurationError, errorMessage, redactText } from "./errors.js"
+import {
+  ConfigurationError,
+  DiscordApiError,
+  errorMessage,
+  redactText,
+} from "./errors.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 import { voiceChannelStatusChannelIds } from "./gateway-voice-channel-status.js"
 import {
@@ -54,9 +62,7 @@ import {
   selectedMcpToolsets,
 } from "./mcp-tool-catalog.js"
 import {
-  activateCredentialEnvironment,
   loadProfile,
-  normalizeCredentialEnvironmentName,
   normalizeProfileName,
   parseConnectorProfile,
   profilePath,
@@ -70,7 +76,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 21
+export const OPERATOR_REPORT_SCHEMA_VERSION = 22
 export const SUPPORTED_NODE_MAJOR = 22
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
@@ -213,7 +219,7 @@ export interface SetupReport {
   botId: string
   configBackupFile: string | null
   configFile: string | null
-  credentialVariable: string
+  credential: ConnectorCredentialReference
   guildsAccessibleOnFirstPage: number
   guildsInScopeOnFirstPage: number
   launch: StdioLaunchDescriptor
@@ -238,6 +244,10 @@ export interface StdioLaunchDescriptor {
     elicitation: "required-for-reviewed-writes"
     requiredServer: true
     toolApproval: "writes"
+  }
+  secrets: {
+    environmentVariables: string[]
+    files: string[]
   }
   serverName: string
   timeouts: {
@@ -277,6 +287,7 @@ export interface SetupOptions {
   args?: readonly string[]
   command?: string
   configFile?: string
+  credentialFile?: string
   credentialVariable?: string
   environment?: NodeJS.ProcessEnv
   overwriteConfig?: boolean
@@ -337,7 +348,7 @@ function doctorGuidance(
   }
   if (id === DOCTOR_CHECK_IDS.token) {
     return {
-      action: "Set the environment variable referenced by credential.variable in the current process, then rerun doctor with the same selected policy.",
+      action: "Make the environment variable or file referenced by credential available to the connector process, then rerun doctor with the same selected policy.",
       reference: DOCTOR_REFERENCES.botSetup,
     }
   }
@@ -925,9 +936,34 @@ function applicationPostureWarnings(status: ConnectorStatus): string[] {
     .map(({ action, summary }) => `${summary}; ${action}`)
 }
 
-function redactedError(error: unknown, environment: NodeJS.ProcessEnv): string {
-  const token = environment[ENVIRONMENT_NAMES.token]
+function redactedError(
+  error: unknown,
+  environment: NodeJS.ProcessEnv,
+  resolvedToken?: string,
+): string {
+  const token = resolvedToken ?? environment[ENVIRONMENT_NAMES.token]
   return redactText(errorMessage(error), [token, token?.trim()])
+}
+
+function redactedSetupVerificationError(
+  error: unknown,
+  environment: NodeJS.ProcessEnv,
+  resolvedToken: string,
+): Error {
+  const message = `Discord setup verification failed: ${redactedError(error, environment, resolvedToken)}`
+  if (error instanceof DiscordApiError) {
+    return new DiscordApiError({
+      ...(error.code === undefined ? {} : { code: error.code }),
+      message,
+      method: error.method,
+      ...(error.retryAfterMs === undefined
+        ? {}
+        : { retryAfterMs: error.retryAfterMs }),
+      route: error.route,
+      status: error.status,
+    })
+  }
+  return new ConfigurationError(message)
 }
 
 export async function diagnoseConnector(
@@ -2835,7 +2871,7 @@ export async function diagnoseConnector(
         checks.push(check(
           DOCTOR_CHECK_IDS.guildAccess,
           "fail",
-          redactedError(error, environment),
+          redactedError(error, environment, config.token),
         ))
       }
     }
@@ -2889,11 +2925,6 @@ export function createStdioLaunchDescriptor(options: {
       "Portable launch descriptors require a schema-v2 configuration or profile",
     )
   }
-  if (profile && profile.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
-    throw new ConfigurationError(
-      `Portable launch profile ${profile.name} uses legacy schema version ${profile.schemaVersion}`,
-    )
-  }
   if (
     profile
     && (
@@ -2938,12 +2969,13 @@ export function createStdioLaunchDescriptor(options: {
     if (config) args.push("--config", config.file)
   }
   const policy = config?.document || profile
-  if (!policy || policy.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
+  if (!policy) {
     throw new ConfigurationError(
       "Portable launch descriptors require a schema-v2 configuration or profile",
     )
   }
   const environmentVariables = [...connectorConfigSecretEnvironmentNames(policy)]
+  const secretFiles = [...connectorConfigSecretFilePaths(policy)]
   return {
     args,
     command,
@@ -2955,6 +2987,10 @@ export function createStdioLaunchDescriptor(options: {
       elicitation: "required-for-reviewed-writes",
       requiredServer: true,
       toolApproval: "writes",
+    },
+    secrets: {
+      environmentVariables,
+      files: secretFiles,
     },
     serverName,
     timeouts: {
@@ -2987,6 +3023,9 @@ export async function prepareSetup(
   }
   if (options.profileName === undefined && options.overwriteProfile) {
     throw new ConfigurationError("Profile replacement requires a profile name")
+  }
+  if (options.credentialFile !== undefined && options.credentialVariable !== undefined) {
+    throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
   }
   const configFile = options.configFile === undefined
     ? undefined
@@ -3028,33 +3067,40 @@ export async function prepareSetup(
   }
   if (!options.preset && !targetExists) {
     throw new ConfigurationError(
-      "Setup target was not found; create it with --preset, discord-mcp config init, or discord-mcp config migrate",
+      "Setup target was not found; create it with --preset or discord-mcp config init",
     )
   }
   if (
     !options.preset
     && (
-      options.credentialVariable !== undefined
+      options.credentialFile !== undefined
+      || options.credentialVariable !== undefined
       || options.overwriteConfig
       || options.overwriteProfile
     )
   ) {
     throw new ConfigurationError(
-      "--token-env and --force require --preset because an existing policy owns its credential references and content",
+      "--token-env, --token-file, and --force require --preset because an existing policy owns its credential reference and content",
     )
   }
 
   let appliedPreset: ReturnType<typeof applySetupPreset> | null = null
-  let credentialVariable: string
+  let credential: ConnectorCredentialReference
   let portableConfig: ConnectorConfigDocument | undefined
   let profile: ConnectorProfile | null = null
   let runtimeEnvironment: NodeJS.ProcessEnv
   if (options.preset) {
-    credentialVariable = normalizeCredentialEnvironmentName(
-      options.credentialVariable ?? ENVIRONMENT_NAMES.token,
-    )
-    const credentialEnvironment = activateCredentialEnvironment(
-      credentialVariable,
+    credential = options.credentialFile === undefined
+      ? {
+          provider: "environment",
+          variable: (options.credentialVariable ?? ENVIRONMENT_NAMES.token).trim(),
+        }
+      : {
+          path: resolveConnectorSecretFile(options.credentialFile),
+          provider: "file",
+        }
+    const credentialEnvironment = activateConnectorCredentialReference(
+      credential,
       environment,
     )
     appliedPreset = applySetupPreset({
@@ -3068,23 +3114,23 @@ export async function prepareSetup(
     runtimeEnvironment = appliedPreset.environment
   } else if (configFile) {
     portableConfig = loadConnectorConfigDocumentFile(configFile)
-    credentialVariable = portableConfig.credential.variable
+    credential = portableConfig.credential
     runtimeEnvironment = activateConnectorConfigDocument(portableConfig, environment)
   } else {
     const loadedProfile = await loadProfile(profileName || configName, profileLocation)
-    if (loadedProfile.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
-      throw new ConfigurationError(
-        `Profile ${loadedProfile.name} uses legacy schema version ${loadedProfile.schemaVersion}; convert it with discord-mcp config migrate FILE --profile ${loadedProfile.name}`,
-      )
-    }
     portableConfig = loadedProfile
     profile = loadedProfile
-    credentialVariable = loadedProfile.credential.variable
+    credential = loadedProfile.credential
     runtimeEnvironment = activateConnectorConfigDocument(loadedProfile, environment)
   }
   const config = loadConnectorConfig(runtimeEnvironment)
   const service = options.service || new ConnectorService({ config })
-  const status = await service.getStatus()
+  let status: ConnectorStatus
+  try {
+    status = await service.getStatus()
+  } catch (error) {
+    throw redactedSetupVerificationError(error, runtimeEnvironment, config.token)
+  }
   if (status.guildPage.inScope < 1) {
     throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
   }
@@ -3102,7 +3148,9 @@ export async function prepareSetup(
       botId: status.bot.id,
       channelIds: [...config.allowedChannelIds],
       ...configDocumentPolicyFromEnvironment(runtimeEnvironment),
-      credentialVariable,
+      ...(credential.provider === "environment"
+        ? { credentialVariable: credential.variable }
+        : { credentialFile: credential.path }),
       gatewayEnabled: config.allowGateway,
       gatewayEventBufferSize: config.gatewayEventBufferSize,
       guildIds: [...config.allowedGuildIds],
@@ -3166,7 +3214,7 @@ export async function prepareSetup(
     botId: status.bot.id,
     configBackupFile: configWrite?.backupFile ?? null,
     configFile: configFile ?? null,
-    credentialVariable,
+    credential,
     launch,
     preset: appliedPreset?.preset ?? null,
     profile,

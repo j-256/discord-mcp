@@ -47,7 +47,6 @@ const REQUIRED_FILES = [
   "dist/cli.js",
   "dist/index.d.ts",
   "dist/index.js",
-  "docs/environment-migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "package.json",
@@ -58,7 +57,6 @@ const STATIC_FILES = new Set([
   "README.md",
   "SECURITY.md",
   "discord-mcp.config.schema.json",
-  "docs/environment-migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "package.json",
@@ -533,7 +531,8 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   })
   const listedProfiles = JSON.parse(listResult.stdout)
   assert.deepEqual(listedProfiles.profiles.map(({ name }) => name), ["installed-profile"])
-  assert.equal(listedProfiles.profiles[0].credentialVariable, "DISCORD_INSTALLED_BOT_TOKEN")
+  assert.equal(listedProfiles.profiles[0].credentialProvider, "environment")
+  assert.equal(listedProfiles.profiles[0].credentialReference, "DISCORD_INSTALLED_BOT_TOKEN")
   const showResult = await run(bin, ["profile", "show", "installed-profile", "--json"], {
     capture: true,
     cwd: consumer,

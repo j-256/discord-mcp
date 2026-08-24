@@ -5,12 +5,15 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs"
+import type { BigIntStats } from "node:fs"
 import {
   isAbsolute,
   resolve,
 } from "node:path"
+import { TextDecoder } from "node:util"
 
 import { z } from "zod"
 
@@ -36,6 +39,7 @@ const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.
 const TOKEN_ENVIRONMENT_PATTERN = /^DISCORD_(?:[A-Z0-9]+_)*TOKEN$/
 const HEADER_ENVIRONMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,118}_HEADERS$/
 const CONFIG_JSON_MAX_DEPTH = 64
+const CREDENTIAL_FILE_OVERFLOW_PROBE_BYTES = 1
 const CONFIG_STRING_CHARACTERS = 4_096
 const CONFIG_SCOPE_ENTRIES = 1_000
 const CONFIG_ROOT_ENTRIES = 32
@@ -47,6 +51,15 @@ export interface EnvironmentSecretReference {
   provider: "environment"
   variable: string
 }
+
+export interface FileSecretReference {
+  path: string
+  provider: "file"
+}
+
+export type ConnectorCredentialReference =
+  | EnvironmentSecretReference
+  | FileSecretReference
 
 export interface ConnectorConfigDocumentObservabilitySignal {
   compression?: string
@@ -74,7 +87,7 @@ export interface ConnectorConfigDocumentObservability {
 export interface ConnectorConfigDocument {
   $schema?: typeof CONFIG_DOCUMENT_SCHEMA_ID
   capabilities: Readonly<Record<string, boolean>>
-  credential: EnvironmentSecretReference
+  credential: ConnectorCredentialReference
   gateway: {
     enabled: boolean
     eventBufferSize: number
@@ -112,7 +125,6 @@ export interface ConnectorConfigDocumentPolicy {
 export interface ConfigDocumentField {
   defaultValue: boolean | number | string | readonly string[] | undefined
   description: string
-  environmentVariable: string | undefined
   kind: "boolean" | "integer" | "number" | "path" | "paths" | "secret-reference" | "snowflake" | "snowflakes" | "string" | "strings"
   path: string
   required: boolean
@@ -280,7 +292,20 @@ const tokenReferenceSchema = z.strictObject({
   variable: z.string()
     .max(128)
     .regex(TOKEN_ENVIRONMENT_PATTERN, "must name an uppercase Discord token environment variable"),
-}).describe("Environment reference for the Discord bot token")
+})
+
+const credentialFileReferenceSchema = z.strictObject({
+  path: absolutePathSchema.refine(
+    (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+    "must not contain control characters",
+  ).describe("Absolute canonical path to a bounded externally managed Discord token file"),
+  provider: z.literal("file"),
+})
+
+const credentialReferenceSchema = z.discriminatedUnion("provider", [
+  tokenReferenceSchema,
+  credentialFileReferenceSchema,
+]).describe("Environment or bounded file reference for the Discord bot token")
 
 const headerReferenceSchema = z.strictObject({
   provider: z.literal("environment"),
@@ -387,7 +412,7 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
   capabilities: z.strictObject(capabilityShape)
     .describe("Explicit capability gates; omitted gates remain disabled")
     .default({}),
-  credential: tokenReferenceSchema,
+  credential: credentialReferenceSchema,
   gateway: z.strictObject({
     enabled: z.boolean().describe("Enable the optional privacy-safe Discord Gateway client"),
     eventBufferSize: z.number().int().min(1).max(CONNECTOR_LIMITS.gatewayEventBufferSize)
@@ -476,13 +501,24 @@ function issuePath(path: readonly PropertyKey[]): string {
   ), "$")
 }
 
-function schemaError(error: z.ZodError): ConfigDocumentError {
+function schemaError(
+  error: z.ZodError,
+  prefix: readonly PropertyKey[] = [],
+): ConfigDocumentError {
   const issue = error.issues[0]
   if (!issue) return new ConfigDocumentError("Configuration document is invalid")
   return new ConfigDocumentError(
-    `Configuration document ${issuePath(issue.path)} ${issue.message}`,
+    `Configuration document ${issuePath([...prefix, ...issue.path])} ${issue.message}`,
     { cause: error },
   )
+}
+
+function parseConnectorCredentialReference(
+  value: unknown,
+): ConnectorCredentialReference {
+  const result = credentialReferenceSchema.safeParse(value)
+  if (!result.success) throw schemaError(result.error, ["credential"])
+  return result.data
 }
 
 export function normalizeConfigName(value: string): string {
@@ -507,7 +543,7 @@ function assertSecretReferenceDoesNotConflict(
   }
 }
 
-function secretReferences(document: ConnectorConfigDocument): readonly {
+function environmentSecretReferences(document: ConnectorConfigDocument): readonly {
   path: string
   reference: EnvironmentSecretReference
   target: string
@@ -516,11 +552,12 @@ function secretReferences(document: ConnectorConfigDocument): readonly {
     path: string
     reference: EnvironmentSecretReference
     target: string
-  }[] = [{
+  }[] = []
+  if (document.credential.provider === "environment") result.push({
     path: "$.credential",
     reference: document.credential,
     target: ENVIRONMENT_NAMES.token,
-  }]
+  })
   const common = document.observability.headers
   const traces = document.observability.traces?.headers
   const metrics = document.observability.metrics?.headers
@@ -546,9 +583,18 @@ export function connectorConfigSecretEnvironmentNames(
   document: ConnectorConfigDocument,
 ): readonly string[] {
   return Object.freeze([
-    ...new Set(secretReferences(parseConnectorConfigDocument(document))
+    ...new Set(environmentSecretReferences(parseConnectorConfigDocument(document))
       .map((entry) => entry.reference.variable)),
   ])
+}
+
+export function connectorConfigSecretFilePaths(
+  document: ConnectorConfigDocument,
+): readonly string[] {
+  const parsed = parseConnectorConfigDocument(document)
+  return Object.freeze(parsed.credential.provider === "file"
+    ? [parsed.credential.path]
+    : [])
 }
 
 export function parseConnectorConfigDocument(
@@ -566,7 +612,7 @@ export function parseConnectorConfigDocument(
   if (expectedName !== undefined && document.name !== normalizeConfigName(expectedName)) {
     throw new ConfigDocumentError("Configuration name does not match its filename")
   }
-  for (const secret of secretReferences(document)) {
+  for (const secret of environmentSecretReferences(document)) {
     assertSecretReferenceDoesNotConflict(secret.reference, secret.target, secret.path)
   }
   return document
@@ -577,6 +623,7 @@ export function createConnectorConfigDocument(options: {
   botId: string
   capabilities?: Readonly<Record<string, boolean>>
   channelIds?: readonly string[]
+  credentialFile?: string
   credentialVariable?: string
   gatewayEnabled?: boolean
   gatewayEventBufferSize?: number
@@ -590,13 +637,23 @@ export function createConnectorConfigDocument(options: {
   toolsets: readonly McpToolsetName[]
   toolSurface: McpToolSurface
 }): ConnectorConfigDocument {
+  if (options.credentialFile !== undefined && options.credentialVariable !== undefined) {
+    throw new ConfigDocumentError(
+      "Configuration credential file and environment variable are mutually exclusive",
+    )
+  }
   return parseConnectorConfigDocument({
     $schema: CONFIG_DOCUMENT_SCHEMA_ID,
     capabilities: options.capabilities ?? {},
-    credential: {
-      provider: "environment",
-      variable: options.credentialVariable ?? ENVIRONMENT_NAMES.token,
-    },
+    credential: options.credentialFile === undefined
+      ? {
+          provider: "environment",
+          variable: options.credentialVariable ?? ENVIRONMENT_NAMES.token,
+        }
+      : {
+          path: options.credentialFile,
+          provider: "file",
+        },
     gateway: {
       enabled: options.gatewayEnabled ?? false,
       eventBufferSize: options.gatewayEventBufferSize ?? GATEWAY_DEFAULTS.eventBufferSize,
@@ -1016,6 +1073,191 @@ function nonEmptyEnvironmentValue(
   return value ? value : undefined
 }
 
+function sameStableCredentialMetadata(
+  left: BigIntStats,
+  right: BigIntStats,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.size === right.size
+    && left.ctimeNs === right.ctimeNs
+    && left.mtimeNs === right.mtimeNs
+}
+
+function assertCredentialFileMetadata(
+  metadata: BigIntStats,
+  options: {
+    platform: NodeJS.Platform
+    processUserId: number | undefined
+  },
+): void {
+  if (
+    !metadata.isFile()
+    || metadata.isSymbolicLink()
+    || metadata.nlink !== 1n
+    || metadata.size < 1n
+    || metadata.size > BigInt(CONNECTOR_LIMITS.credentialFileBytes)
+    || (
+      options.platform !== "win32"
+      && (
+        options.processUserId === undefined
+        || ![0n, BigInt(options.processUserId)].includes(metadata.uid)
+        || (metadata.mode & 0o022n) !== 0n
+      )
+    )
+  ) {
+    throw new ConfigDocumentError(
+      "Configuration credential file must be a bounded regular file owned by the process user or root with one hard link and no group or world write access",
+    )
+  }
+}
+
+function readBoundedCredentialBytes(
+  handle: number,
+  expectedBytes: number,
+): Buffer {
+  const buffer = Buffer.allocUnsafe(
+    expectedBytes + CREDENTIAL_FILE_OVERFLOW_PROBE_BYTES,
+  )
+  let offset = 0
+  while (offset < buffer.byteLength) {
+    const bytesRead = readSync(
+      handle,
+      buffer,
+      offset,
+      buffer.byteLength - offset,
+      offset,
+    )
+    if (bytesRead === 0) break
+    offset += bytesRead
+  }
+  return buffer.subarray(0, offset)
+}
+
+export function loadConnectorCredentialFile(
+  file: string,
+  options: {
+    platform?: NodeJS.Platform
+    processUserId?: number
+  } = {},
+): string {
+  const reference = parseConnectorCredentialReference({ path: file, provider: "file" })
+  if (reference.provider !== "file") {
+    throw new ConfigDocumentError("Configuration credential file reference is invalid")
+  }
+  const platform = options.platform ?? process.platform
+  const processUserId = options.processUserId
+    ?? (typeof process.getuid === "function" ? process.getuid() : undefined)
+  let handle: number | undefined
+  try {
+    const canonical = realpathSync.native(reference.path)
+    const beforePath = lstatSync(canonical, { bigint: true })
+    const noFollow = typeof fsConstants.O_NOFOLLOW === "number"
+      ? fsConstants.O_NOFOLLOW
+      : 0
+    handle = openSync(canonical, fsConstants.O_RDONLY | noFollow)
+    const beforeRead = fstatSync(handle, { bigint: true })
+    assertCredentialFileMetadata(beforePath, { platform, processUserId })
+    assertCredentialFileMetadata(beforeRead, { platform, processUserId })
+    if (
+      beforePath.dev !== beforeRead.dev
+      || beforePath.ino !== beforeRead.ino
+    ) {
+      throw new ConfigDocumentError(
+        "Configuration credential file changed while it was opened",
+      )
+    }
+    const bytes = readBoundedCredentialBytes(handle, Number(beforeRead.size))
+    const afterRead = fstatSync(handle, { bigint: true })
+    const afterPath = lstatSync(canonical, { bigint: true })
+    const finalCanonical = realpathSync.native(reference.path)
+    if (
+      bytes.byteLength !== Number(beforeRead.size)
+      || !sameStableCredentialMetadata(beforeRead, afterRead)
+      || !sameStableCredentialMetadata(afterRead, afterPath)
+      || finalCanonical !== canonical
+    ) {
+      throw new ConfigDocumentError(
+        "Configuration credential file changed while it was read",
+      )
+    }
+    let token: string
+    try {
+      token = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim()
+    } catch (error) {
+      throw new ConfigDocumentError(
+        "Configuration credential file must contain valid UTF-8",
+        { cause: error },
+      )
+    }
+    if (!token || /[\u0000-\u001f\u007f]/u.test(token)) {
+      throw new ConfigDocumentError(
+        "Configuration credential file must contain one non-empty token without control characters",
+      )
+    }
+    return token
+  } catch (error) {
+    if (error instanceof ConfigDocumentError) throw error
+    const message = isNodeError(error, "ENOENT")
+      ? "Configuration credential file was not found"
+      : "Unable to inspect or read configuration credential file"
+    throw new ConfigDocumentError(message, { cause: error })
+  } finally {
+    if (handle !== undefined) closeSync(handle)
+  }
+}
+
+function resolveConnectorCredential(
+  referenceValue: ConnectorCredentialReference,
+  source: NodeJS.ProcessEnv,
+): string {
+  const reference = parseConnectorCredentialReference(referenceValue)
+  if (reference.provider === "file") {
+    return loadConnectorCredentialFile(reference.path)
+  }
+  const value = nonEmptyEnvironmentValue(source, reference.variable)
+  if (!value) {
+    throw new ConfigDocumentError(
+      `Configuration document $.credential requires ${reference.variable}`,
+    )
+  }
+  return value
+}
+
+export function activateConnectorCredentialReference(
+  referenceValue: ConnectorCredentialReference,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const reference = parseConnectorCredentialReference(referenceValue)
+  const canonical = nonEmptyEnvironmentValue(source, ENVIRONMENT_NAMES.token)
+  if (reference.provider === "file" && canonical) {
+    throw new ConfigDocumentError(
+      `Configuration credential file conflicts with ${ENVIRONMENT_NAMES.token}`,
+    )
+  }
+  const credential = resolveConnectorCredential(reference, source)
+  if (
+    reference.provider === "environment"
+    && reference.variable !== ENVIRONMENT_NAMES.token
+    && canonical
+    && canonical !== credential
+  ) {
+    throw new ConfigDocumentError(
+      `Credential ${reference.variable} conflicts with ${ENVIRONMENT_NAMES.token}`,
+    )
+  }
+  const environment = { ...source }
+  if (reference.provider === "environment" && reference.variable !== ENVIRONMENT_NAMES.token) {
+    delete environment[reference.variable]
+  }
+  environment[ENVIRONMENT_NAMES.token] = credential
+  return environment
+}
+
 function setEnvironmentValue(
   environment: NodeJS.ProcessEnv,
   name: string,
@@ -1074,7 +1316,7 @@ export function activateConnectorConfigDocument(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const document = parseConnectorConfigDocument(documentValue)
-  const secrets = secretReferences(document)
+  const secrets = environmentSecretReferences(document)
   const recognized = new Set<string>(Object.values(ENVIRONMENT_NAMES))
   const permitted = new Set<string>([
     ENVIRONMENT_NAMES.configFile,
@@ -1098,6 +1340,12 @@ export function activateConnectorConfigDocument(
   }
 
   const resolvedSecrets = new Map<string, string>()
+  if (document.credential.provider === "file") {
+    resolvedSecrets.set(
+      ENVIRONMENT_NAMES.token,
+      resolveConnectorCredential(document.credential, source),
+    )
+  }
   for (const secret of secrets) {
     const value = nonEmptyEnvironmentValue(source, secret.reference.variable)
     if (!value) {
@@ -1243,7 +1491,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: undefined,
       description: "Editor schema identifier for this configuration format",
-      environmentVariable: undefined,
       kind: "string",
       path: "$.$schema",
       required: false,
@@ -1251,7 +1498,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: CONFIG_DOCUMENT_SCHEMA_VERSION,
       description: "Configuration format version",
-      environmentVariable: undefined,
       kind: "integer",
       path: "$.schemaVersion",
       required: true,
@@ -1259,41 +1505,37 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: undefined,
       description: "Bounded lowercase identifier for this policy",
-      environmentVariable: undefined,
       kind: "string",
       path: "$.name",
       required: true,
     },
     {
       defaultValue: undefined,
-      description: "Environment reference for the Discord bot token",
-      environmentVariable: ENVIRONMENT_NAMES.token,
+      description: "Environment or bounded file reference for the Discord bot token",
       kind: "secret-reference",
       path: "$.credential",
       required: true,
     },
     ...([
-      ["$.identity.applicationId", ENVIRONMENT_NAMES.applicationId],
-      ["$.identity.botId", ENVIRONMENT_NAMES.botId],
-    ] as const).map(([path, environmentVariable]) => ({
+      "$.identity.applicationId",
+      "$.identity.botId",
+    ] as const).map((path) => ({
       defaultValue: undefined,
       description: path.endsWith("applicationId")
         ? "Expected Discord application identity"
         : "Expected Discord bot user identity",
-      environmentVariable,
       kind: "snowflake" as const,
       path,
       required: true,
     })),
     ...([
-      ["$.readScope.guildIds", ENVIRONMENT_NAMES.allowedGuildIds, undefined],
-      ["$.readScope.channelIds", ENVIRONMENT_NAMES.allowedChannelIds, []],
-    ] as const).map(([path, environmentVariable, defaultValue]) => ({
+      ["$.readScope.guildIds", undefined],
+      ["$.readScope.channelIds", []],
+    ] as const).map(([path, defaultValue]) => ({
       defaultValue,
       description: path.endsWith("guildIds")
         ? "Exact guild allowlist forming the outer read boundary"
         : "Optional exact channel allowlist inside the guild boundary",
-      environmentVariable,
       kind: "snowflakes" as const,
       path,
       required: true,
@@ -1301,7 +1543,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: "progressive",
       description: "MCP tool discovery surface",
-      environmentVariable: ENVIRONMENT_NAMES.toolSurface,
       kind: "string",
       path: "$.tools.surface",
       required: true,
@@ -1309,7 +1550,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: undefined,
       description: "Canonical MCP toolset selection",
-      environmentVariable: ENVIRONMENT_NAMES.toolsets,
       kind: "strings",
       path: "$.tools.toolsets",
       required: true,
@@ -1317,7 +1557,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: false,
       description: "Enable the optional privacy-safe Discord Gateway client",
-      environmentVariable: ENVIRONMENT_NAMES.allowGateway,
       kind: "boolean",
       path: "$.gateway.enabled",
       required: true,
@@ -1325,7 +1564,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     {
       defaultValue: GATEWAY_DEFAULTS.eventBufferSize,
       description: "Maximum bounded Gateway event buffer size",
-      environmentVariable: ENVIRONMENT_NAMES.gatewayEventBufferSize,
       kind: "integer",
       path: "$.gateway.eventBufferSize",
       required: true,
@@ -1333,7 +1571,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     ...CONFIG_CAPABILITY_MAPPINGS.map((entry) => ({
       defaultValue: false,
       description: capabilityDescription(entry.documentKey),
-      environmentVariable: entry.environmentVariable,
       kind: "boolean" as const,
       path: `$.capabilities.${entry.documentKey}`,
       required: false,
@@ -1341,7 +1578,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     ...CONFIG_SCOPE_MAPPINGS.map((entry) => ({
       defaultValue: [],
       description: scopeDescription(entry.documentKey),
-      environmentVariable: entry.environmentVariable,
       kind: "snowflakes" as const,
       path: `$.scopes.${entry.documentKey}`,
       required: false,
@@ -1349,7 +1585,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     ...CONFIG_LIMIT_MAPPINGS.map((entry) => ({
       defaultValue: undefined,
       description: `Numeric policy limit for ${humanizeConfigKey(entry.documentKey)}`,
-      environmentVariable: entry.environmentVariable,
       kind: "integer" as const,
       path: `$.limits.${entry.documentKey}`,
       required: false,
@@ -1359,7 +1594,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       description: entry.environmentKey === "auditFile"
         ? "Absolute path for the content-free activity log"
         : storageDescription(entry.documentKey),
-      environmentVariable: entry.environmentVariable,
       kind: (entry.environmentKey === "auditFile" ? "path" : "paths") as "path" | "paths",
       path: `$.storage.${entry.documentKey}`,
       required: false,
@@ -1367,7 +1601,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     ...CONFIG_RUNTIME_MAPPINGS.map((entry) => ({
       defaultValue: undefined,
       description: `Runtime setting for ${humanizeConfigKey(entry.documentKey)}`,
-      environmentVariable: entry.environmentVariable,
       kind: "string" as const,
       path: `$.runtime.${entry.documentKey}`,
       required: false,
@@ -1375,7 +1608,6 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     ...[...OBSERVABILITY_ENVIRONMENT_PATHS].map(([environmentVariable, path]) => ({
       defaultValue: undefined,
       description: `Observability setting for ${humanizeConfigKey(path.split(".").at(-1) || path)}`,
-      environmentVariable,
       kind: environmentVariable.endsWith("_HEADERS")
         ? "secret-reference" as const
         : environmentVariable.endsWith("_TIMEOUT")

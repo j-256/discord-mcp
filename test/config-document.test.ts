@@ -23,14 +23,17 @@ import {
   activateConnectorConfigDocument,
   connectorConfigFields,
   connectorConfigJsonSchema,
+  connectorConfigSecretEnvironmentNames,
+  connectorConfigSecretFilePaths,
   createConnectorConfigDocument,
+  loadConnectorCredentialFile,
   loadConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
   parseConnectorConfigJson,
   type ConnectorConfigDocument,
 } from "../src/config-document.js"
 import { loadConnectorConfig } from "../src/config.js"
-import { ENVIRONMENT_NAMES } from "../src/constants.js"
+import { CONNECTOR_LIMITS, ENVIRONMENT_NAMES } from "../src/constants.js"
 import { ConfigDocumentError } from "../src/errors.js"
 
 const APPLICATION_ID = "300000000000000001"
@@ -109,7 +112,25 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     { ...valid, name: "Support" },
     { ...valid, token: TOKEN },
     { ...valid, credential: { provider: "environment", variable: "PATH" } },
+    { ...valid, credential: { provider: "environment", variable: "discord_bot_token" } },
+    {
+      ...valid,
+      credential: {
+        provider: "environment",
+        variable: `DISCORD_${"A".repeat(121)}_TOKEN`,
+      },
+    },
     { ...valid, credential: { provider: "environment", variable: ENVIRONMENT_NAMES.allowDeletions } },
+    { ...valid, credential: { path: "relative-token", provider: "file" } },
+    { ...valid, credential: { path: "/run/secrets/token\n", provider: "file" } },
+    {
+      ...valid,
+      credential: {
+        path: "/run/secrets/discord-token",
+        provider: "file",
+        variable: TOKEN_ALIAS,
+      },
+    },
     { ...valid, readScope: { ...valid.readScope, guildIds: [] } },
     { ...valid, readScope: { ...valid.readScope, channelIds: [CHANNEL_ID, CHANNEL_ID] } },
     { ...valid, tools: { ...valid.tools, toolsets: ["messages", "connector"] } },
@@ -218,6 +239,87 @@ test("configuration activation allows only referenced secrets and maps typed pol
   )
 })
 
+test("file-backed credentials activate without ambient secret delivery", async (context) => {
+  const root = await configRoot(context)
+  const tokenFile = join(root, "discord-token")
+  await writeFile(tokenFile, `  ${TOKEN}\n`, { mode: 0o600 })
+  const configured = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialFile: tokenFile,
+    guildIds: [GUILD_ID],
+    name: "support-bot",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+  const source = { PATH: "/usr/bin" }
+  const before = { ...source }
+
+  assert.deepEqual(connectorConfigSecretEnvironmentNames(configured), [])
+  assert.deepEqual(connectorConfigSecretFilePaths(configured), [tokenFile])
+  assert.equal(loadConnectorCredentialFile(tokenFile), TOKEN)
+  const activated = activateConnectorConfigDocument(configured, source)
+  assert.deepEqual(source, before)
+  assert.equal(activated[ENVIRONMENT_NAMES.token], TOKEN)
+  assert.equal(activated.PATH, "/usr/bin")
+  assert.throws(
+    () => activateConnectorConfigDocument(configured, {
+      [ENVIRONMENT_NAMES.token]: "ambient-token",
+    }),
+    new RegExp(`conflicts with policy environment variables: ${ENVIRONMENT_NAMES.token}`),
+  )
+})
+
+test("credential files allow projected-secret symlinks and reject unsafe storage", async (context) => {
+  const root = await configRoot(context)
+  const tokenFile = join(root, "discord-token")
+  const tokenLink = join(root, "projected-token")
+  await writeFile(tokenFile, `${TOKEN}\n`, { mode: 0o600 })
+  await symlink(tokenFile, tokenLink)
+  assert.equal(loadConnectorCredentialFile(tokenLink), TOKEN)
+
+  const hardlink = join(root, "hardlinked-token")
+  await link(tokenFile, hardlink)
+  assert.throws(
+    () => loadConnectorCredentialFile(tokenFile),
+    /owned by the process user or root/,
+  )
+  await rm(hardlink)
+
+  if (process.platform !== "win32") {
+    await chmod(tokenFile, 0o622)
+    assert.throws(
+      () => loadConnectorCredentialFile(tokenFile),
+      /owned by the process user or root/,
+    )
+    await chmod(tokenFile, 0o600)
+  }
+
+  const empty = join(root, "empty-token")
+  await writeFile(empty, "", { mode: 0o600 })
+  assert.throws(() => loadConnectorCredentialFile(empty), /bounded/)
+
+  const oversized = join(root, "oversized-token")
+  await writeFile(oversized, "x".repeat(CONNECTOR_LIMITS.credentialFileBytes + 1), {
+    mode: 0o600,
+  })
+  assert.throws(() => loadConnectorCredentialFile(oversized), /bounded/)
+
+  const multiline = join(root, "multiline-token")
+  await writeFile(multiline, `${TOKEN}\nsecond-line\n`, { mode: 0o600 })
+  assert.throws(() => loadConnectorCredentialFile(multiline), /control characters/)
+
+  const malformed = join(root, "malformed-token")
+  await writeFile(malformed, Uint8Array.from([0xc3, 0x28]), { mode: 0o600 })
+  assert.throws(() => loadConnectorCredentialFile(malformed), /valid UTF-8/)
+
+  assert.throws(
+    () => loadConnectorCredentialFile(join(root, "missing-token")),
+    /was not found/,
+  )
+})
+
 test("configuration file loading is canonical, bounded, and usable by the connector", async (context) => {
   const file = await writeConfig(context)
   assert.deepEqual(loadConnectorConfigDocumentFile(file), document())
@@ -321,6 +423,13 @@ test("configuration metadata covers every runtime field and emits a strict schem
   assert.equal(schemaVersion?.type, "number")
   assert.equal(schemaVersion?.description, "Configuration format version")
   const properties = schema.properties as Record<string, Record<string, unknown>>
+  const credential = properties.credential as {
+    oneOf?: Array<{ properties?: Record<string, Record<string, unknown>> }>
+  }
+  assert.deepEqual(
+    credential.oneOf?.map((entry) => entry.properties?.provider?.const),
+    ["environment", "file"],
+  )
   const capabilities = (properties.capabilities as Record<string, unknown>).properties as Record<
     string,
     Record<string, unknown>

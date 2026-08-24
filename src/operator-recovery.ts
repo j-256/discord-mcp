@@ -2,7 +2,6 @@ import {
   ConfigurationError,
   DiscordApiError,
   errorMessage,
-  ProfileCredentialError,
   ProfileError,
   RuntimeConfigurationRequiredError,
   WriteCoordinationConflictError,
@@ -88,17 +87,6 @@ export function classifyCliFailure(
       OPERATOR_RETRY.afterCorrection,
     )
   }
-  if (error instanceof ProfileCredentialError) {
-    const action = error.kind === "missing"
-      ? "Set the profile's configured credential variable in the current process, then rerun the command."
-      : "Remove the conflicting credential value, keep only the intended profile credential variable, and rerun doctor before retrying."
-    return guidance(
-      CLI_FAILURE_CATEGORIES.configuration,
-      action,
-      OPERATOR_REFERENCES.botSetup,
-      OPERATOR_RETRY.afterCorrection,
-    )
-  }
   if (error instanceof ProfileError) {
     return guidance(
       CLI_FAILURE_CATEGORIES.profile,
@@ -110,7 +98,7 @@ export function classifyCliFailure(
   if (error instanceof RuntimeConfigurationRequiredError) {
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
-      "Create a policy with discord-mcp config init, convert environment policy with discord-mcp config migrate, then select it with --config or --profile.",
+      "Create a policy with discord-mcp config init or setup --preset, then select it with --config or --profile.",
       OPERATOR_REFERENCES.configuration,
       OPERATOR_RETRY.afterCorrection,
     )

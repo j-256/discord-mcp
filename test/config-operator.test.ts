@@ -3,7 +3,6 @@ import {
   chmod,
   lstat,
   mkdtemp,
-  mkdir,
   readFile,
   realpath,
   rm,
@@ -16,7 +15,6 @@ import test from "node:test"
 import {
   explainConnectorConfig,
   initializeConnectorConfigFile,
-  migrateConnectorConfigFile,
   showConnectorConfigFile,
   validateConnectorConfigDocumentPolicy,
   validateConnectorConfigFile,
@@ -27,12 +25,7 @@ import {
   loadConnectorConfigDocumentFile,
   type ConnectorConfigDocument,
 } from "../src/config-document.js"
-import { ENVIRONMENT_NAMES } from "../src/constants.js"
 import { ConfigDocumentError } from "../src/errors.js"
-import {
-  saveProfile,
-  type LegacyConnectorProfile,
-} from "../src/profile.js"
 
 const APPLICATION_ID = "300000000000000001"
 const BOT_ID = "400000000000000001"
@@ -82,6 +75,20 @@ test("configuration policy validation is offline, secret-free, and cross-field c
     () => validateConnectorConfigDocumentPolicy(invalid),
     /poll creation.*\.capabilities\.pollAudit/i,
   )
+
+  const fileCredential = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    credentialFile: "/run/secrets/discord_bot_token",
+    guildIds: [GUILD_ID],
+    name: "file-credential",
+    toolsets: ["connector"],
+    toolSurface: "full",
+  })
+  assert.deepEqual(
+    validateConnectorConfigDocumentPolicy(fileCredential),
+    fileCredential,
+  )
 })
 
 test("configuration files create privately, validate canonically, and preserve backups", async (context) => {
@@ -97,7 +104,12 @@ test("configuration files create privately, validate canonically, and preserve b
   const validation = validateConnectorConfigFile(file)
   assert.equal(validation.validation.discordContacted, false)
   assert.equal(validation.validation.secretValuesRead, false)
-  assert.deepEqual(validation.summary.credentialVariables, [TOKEN_ALIAS])
+  assert.deepEqual(validation.summary.credential, {
+    provider: "environment",
+    variable: TOKEN_ALIAS,
+  })
+  assert.deepEqual(validation.summary.secretEnvironmentVariables, [TOKEN_ALIAS])
+  assert.deepEqual(validation.summary.secretFilePaths, [])
   assert.deepEqual(showConnectorConfigFile(file).document, original)
 
   await assert.rejects(
@@ -175,6 +187,31 @@ test("configuration init creates a read-only preset and enforces required channe
   assert.equal(observer.document.tools.surface, "full")
   assert.equal(JSON.stringify(observer).includes(TOKEN), false)
 
+  const fileCredential = await initializeConnectorConfigFile({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    credentialFile: join(root, "discord.token"),
+    file: join(root, "file-credential.json"),
+    guildIds: [GUILD_ID],
+    name: "file-credential",
+  })
+  assert.deepEqual(fileCredential.document.credential, {
+    path: join(root, "discord.token"),
+    provider: "file",
+  })
+
+  await assert.rejects(
+    () => initializeConnectorConfigFile({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      credentialFile: "",
+      file: join(root, "empty-credential-file.json"),
+      guildIds: [GUILD_ID],
+      name: "empty-credential-file",
+    }),
+    /must not be empty/,
+  )
+
   await assert.rejects(
     () => initializeConnectorConfigFile({
       applicationId: APPLICATION_ID,
@@ -188,104 +225,14 @@ test("configuration init creates a read-only preset and enforces required channe
   )
 })
 
-test("environment migration captures complete policy without serializing credentials", async (context) => {
-  const root = await operatorRoot(context)
-  const file = join(root, "migrated.json")
-  const report = await migrateConnectorConfigFile({
-    credentialVariable: TOKEN_ALIAS,
-    environment: {
-      [TOKEN_ALIAS]: TOKEN,
-      [ENVIRONMENT_NAMES.applicationId]: APPLICATION_ID,
-      [ENVIRONMENT_NAMES.botId]: BOT_ID,
-      [ENVIRONMENT_NAMES.allowedGuildIds]: GUILD_ID,
-      [ENVIRONMENT_NAMES.allowedChannelIds]: CHANNEL_ID,
-      [ENVIRONMENT_NAMES.allowDeletions]: "true",
-      [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-      [ENVIRONMENT_NAMES.toolSurface]: "progressive",
-      [ENVIRONMENT_NAMES.toolsets]: "connector,deletion",
-    },
-    file,
-    name: "migrated",
-  })
-  assert.equal(report.action, "migrate")
-  assert.equal(report.source, "environment")
-  assert.equal(report.document.capabilities.deletions, true)
-  assert.deepEqual(report.document.scopes.deleteChannelIds, [CHANNEL_ID])
-  assert.equal(report.document.credential.variable, TOKEN_ALIAS)
-  assert.equal((await readFile(file, "utf8")).includes(TOKEN), false)
-
-  await assert.rejects(
-    () => migrateConnectorConfigFile({
-      environment: {
-        [ENVIRONMENT_NAMES.token]: TOKEN,
-        [ENVIRONMENT_NAMES.applicationId]: APPLICATION_ID,
-        [ENVIRONMENT_NAMES.botId]: BOT_ID,
-        [ENVIRONMENT_NAMES.allowedGuildIds]: GUILD_ID,
-        DISCORD_MCP_ALLOW_DELETION: "true",
-      },
-      file: join(root, "typo.json"),
-      name: "typo",
-    }),
-    /unknown policy variables.*DISCORD_MCP_ALLOW_DELETION/,
-  )
-})
-
-test("legacy profile migration preserves its effective compatibility policy", async (context) => {
-  const root = await operatorRoot(context)
-  const profileDirectory = join(root, "profiles")
-  await mkdir(profileDirectory, { mode: 0o700 })
-  const legacy: LegacyConnectorProfile = {
-    credential: { provider: "environment", variable: TOKEN_ALIAS },
-    gateway: { enabled: false, eventBufferSize: 100 },
-    identity: { applicationId: APPLICATION_ID, botId: BOT_ID },
-    name: "legacy",
-    readScope: { channelIds: [CHANNEL_ID], guildIds: [GUILD_ID] },
-    schemaVersion: 1,
-    tools: { surface: "progressive", toolsets: ["connector", "deletion"] },
-  }
-  await saveProfile(legacy, { directory: profileDirectory })
-
-  const report = await migrateConnectorConfigFile({
-    environment: {
-      [TOKEN_ALIAS]: TOKEN,
-      [ENVIRONMENT_NAMES.allowDeletions]: "true",
-      [ENVIRONMENT_NAMES.deleteChannelIds]: CHANNEL_ID,
-    },
-    directory: profileDirectory,
-    file: join(root, "legacy.json"),
-    profileName: legacy.name,
-  })
-  assert.equal(report.source, "profile")
-  assert.equal(report.document.schemaVersion, 2)
-  assert.equal(report.document.capabilities.deletions, true)
-  assert.deepEqual(report.document.scopes.deleteChannelIds, [CHANNEL_ID])
-  assert.equal(report.document.credential.variable, TOKEN_ALIAS)
-})
-
 test("configuration explanation returns bounded schema-backed field metadata", () => {
   const report = explainConnectorConfig("capabilities.deletions")
   assert.equal(report.query, "$.capabilities.deletions")
-  assert.equal(report.migrationAliasesIncluded, false)
   assert.equal(report.fields.length, 1)
-  assert.equal(report.fields[0]?.migrationEnvironmentVariable, undefined)
   assert.equal(Object.hasOwn(report.fields[0] ?? {}, "environmentVariable"), false)
   assert.equal(
     (report.fields[0]?.schema as { type?: string }).type,
     "boolean",
-  )
-
-  const migrationReport = explainConnectorConfig(
-    "capabilities.deletions",
-    { includeMigrationAliases: true },
-  )
-  assert.equal(migrationReport.migrationAliasesIncluded, true)
-  assert.equal(
-    migrationReport.fields[0]?.migrationEnvironmentVariable,
-    ENVIRONMENT_NAMES.allowDeletions,
-  )
-  assert.equal(
-    Object.hasOwn(migrationReport.fields[0] ?? {}, "environmentVariable"),
-    false,
   )
   assert.throws(
     () => explainConnectorConfig("capabilities.notReal"),

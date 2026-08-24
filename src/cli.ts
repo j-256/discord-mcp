@@ -17,20 +17,14 @@ import {
   ENVIRONMENT_NAMES,
 } from "./constants.js"
 import { resolveConnectorConfigDocumentAuditFile } from "./config.js"
-import {
-  CONFIG_DOCUMENT_SCHEMA_VERSION,
-  type ConnectorConfigDocument,
-} from "./config-document.js"
+import type { ConnectorConfigDocument } from "./config-document.js"
 import {
   explainConnectorConfig,
   initializeConnectorConfigFile,
-  migrateConnectorConfigFile,
   showConnectorConfigFile,
   validateConnectorConfigFile,
-  type ConfigExplainOptions,
   type ConfigExplainReport,
   type ConfigInitOptions,
-  type ConfigMigrateOptions,
   type ConfigShowReport,
   type ConfigValidationReport,
   type ConfigWriteReport,
@@ -118,7 +112,6 @@ export type ParsedCliArguments =
     action: "explain"
     command: "config"
     json: boolean
-    migrationAliases: boolean
     path?: string
   }
   | {
@@ -127,6 +120,7 @@ export type ParsedCliArguments =
     botId: string
     channelIds: string[]
     command: "config"
+    credentialFile?: string
     credentialVariable?: string
     file: string
     guildIds: string[]
@@ -134,16 +128,6 @@ export type ParsedCliArguments =
     name: string
     overwrite: boolean
     preset?: string
-  }
-  | {
-    action: "migrate"
-    command: "config"
-    credentialVariable?: string
-    file: string
-    json: boolean
-    name?: string
-    overwrite: boolean
-    profileName?: string
   }
   | {
     action: "show" | "validate"
@@ -210,6 +194,7 @@ export type ParsedCliArguments =
   | {
     command: "setup"
     configFile?: string
+    credentialFile?: string
     credentialVariable?: string
     json: boolean
     launcherCommand: string | undefined
@@ -231,12 +216,11 @@ export interface CliDependencies {
   }): unknown
   checkCatalog(): Promise<DiscordCatalogCheckReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
-  explainConfig(path?: string, options?: ConfigExplainOptions): ConfigExplainReport
+  explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
   listCoordination(activityFile: string): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
-  migrateConfig(options: ConfigMigrateOptions): Promise<ConfigWriteReport>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
   resolveCoordination(
     activityFile: string,
@@ -291,7 +275,6 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   },
   listProfiles,
   loadProfile,
-  migrateConfig: migrateConnectorConfigFile,
   prepareSetup,
   resolveCoordination: async (auditFile, claimId, confirmation) => {
     return new FileWriteCoordinator(
@@ -331,6 +314,7 @@ function parseBooleanOptions(
 function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments, { command: "setup" }> {
   const channelIds: string[] = []
   let configFile: string | undefined
+  let credentialFile: string | undefined
   let credentialVariable: string | undefined
   const guildIds: string[] = []
   let json = false
@@ -366,6 +350,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       "--name",
       "--preset",
       "--profile",
+      "--token-file",
       "--token-env",
     ].includes(argument)) {
       throw new ConfigurationError(`Unknown option ${argument}`)
@@ -382,6 +367,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
     if (argument === "--name") serverName = value
     if (argument === "--preset") presetName = value
     if (argument === "--profile") profileName = value
+    if (argument === "--token-file") credentialFile = value
     if (argument === "--token-env") credentialVariable = value
   }
   if (configFile && profileName) {
@@ -390,8 +376,15 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
   if (!configFile && !profileName) {
     throw new ConfigurationError("Setup requires --config FILE or --profile NAME")
   }
-  if (!presetName && (credentialVariable !== undefined || overwrite)) {
-    throw new ConfigurationError("--token-env and --force require --preset")
+  if (credentialFile !== undefined && credentialVariable !== undefined) {
+    throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
+  }
+  if (!presetName && (
+    credentialFile !== undefined
+    || credentialVariable !== undefined
+    || overwrite
+  )) {
+    throw new ConfigurationError("--token-env, --token-file, and --force require --preset")
   }
   if (!presetName && (guildIds.length > 0 || channelIds.length > 0)) {
     throw new ConfigurationError("--guild-id and --channel-id require --preset")
@@ -411,6 +404,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
   return {
     command: "setup",
     ...(configFile ? { configFile } : {}),
+    ...(credentialFile ? { credentialFile } : {}),
     ...(credentialVariable ? { credentialVariable } : {}),
     json,
     launcherCommand,
@@ -433,22 +427,21 @@ function parseConfigCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "config" }> {
   const action = args[0]
-  if (!action || !["explain", "init", "migrate", "show", "validate"].includes(action)) {
+  if (!action || !["explain", "init", "show", "validate"].includes(action)) {
     throw new ConfigurationError(
-      "config requires explain, init, migrate, show, or validate",
+      "config requires explain, init, show, or validate",
     )
   }
   if (action === "explain") {
     const path = args[1]?.startsWith("--") ? undefined : args[1]
     const options = parseBooleanOptions(
       args.slice(path ? 2 : 1),
-      new Set(["--json", "--migration"]),
+      new Set(["--json"]),
     )
     return {
       action,
       command: "config",
       json: options.has("--json"),
-      migrationAliases: options.has("--migration"),
       ...(path ? { path } : {}),
     }
   }
@@ -470,32 +463,30 @@ function parseConfigCommand(
   let applicationId: string | undefined
   let botId: string | undefined
   const channelIds: string[] = []
+  let credentialFile: string | undefined
   let credentialVariable: string | undefined
   const guildIds: string[] = []
   let json = false
   let name: string | undefined
   let overwrite = false
   let preset: string | undefined
-  let profileName: string | undefined
   const seen = new Set<string>()
-  const allowed = action === "init"
-    ? new Set([
-      "--application-id",
-      "--bot-id",
-      "--channel-id",
-      "--guild-id",
-      "--name",
-      "--preset",
-      "--token-env",
-    ])
-    : new Set(["--name", "--profile", "--token-env"])
+  const allowed = new Set([
+    "--application-id",
+    "--bot-id",
+    "--channel-id",
+    "--guild-id",
+    "--name",
+    "--preset",
+    "--token-env",
+    "--token-file",
+  ])
   for (let index = 2; index < args.length; index += 1) {
     const argument = args[index]
     if (!argument?.startsWith("--")) {
       throw new ConfigurationError(`Unexpected config ${action} argument ${argument || ""}`)
     }
-    const repeatable = action === "init"
-      && (argument === "--channel-id" || argument === "--guild-id")
+    const repeatable = argument === "--channel-id" || argument === "--guild-id"
     if (!repeatable && seen.has(argument)) {
       throw new ConfigurationError(`Option ${argument} may be provided only once`)
     }
@@ -522,51 +513,32 @@ function parseConfigCommand(
     if (argument === "--guild-id") guildIds.push(value)
     if (argument === "--name") name = value
     if (argument === "--preset") preset = value
-    if (argument === "--profile") profileName = value
+    if (argument === "--token-file") credentialFile = value
     if (argument === "--token-env") credentialVariable = value
   }
 
-  if (action === "init") {
-    if (!applicationId || !botId || !name || guildIds.length === 0) {
-      throw new ConfigurationError(
-        "config init requires --name, --application-id, --bot-id, and at least one --guild-id",
-      )
-    }
-    return {
-      action,
-      applicationId,
-      botId,
-      channelIds,
-      command: "config",
-      ...(credentialVariable ? { credentialVariable } : {}),
-      file,
-      guildIds,
-      json,
-      name,
-      overwrite,
-      ...(preset ? { preset } : {}),
-    }
+  if (credentialFile !== undefined && credentialVariable !== undefined) {
+    throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
   }
-
-  if (profileName && (name || credentialVariable)) {
+  if (!applicationId || !botId || !name || guildIds.length === 0) {
     throw new ConfigurationError(
-      "config migrate --profile is mutually exclusive with --name and --token-env",
-    )
-  }
-  if (!profileName && !name) {
-    throw new ConfigurationError(
-      "config migrate requires --name for environment migration or --profile",
+      "config init requires --name, --application-id, --bot-id, and at least one --guild-id",
     )
   }
   return {
-    action: "migrate",
+    action: "init",
+    applicationId,
+    botId,
+    channelIds,
     command: "config",
+    ...(credentialFile ? { credentialFile } : {}),
     ...(credentialVariable ? { credentialVariable } : {}),
     file,
+    guildIds,
     json,
-    ...(name ? { name } : {}),
+    name,
     overwrite,
-    ...(profileName ? { profileName } : {}),
+    ...(preset ? { preset } : {}),
   }
 }
 
@@ -883,13 +855,12 @@ function helpText(topic: CliCommand | undefined): string {
       "Usage: discord-mcp config <action> [options]",
       "",
       "Actions:",
-      "  init FILE --name NAME --application-id ID --bot-id ID --guild-id ID... [--preset PRESET] [--channel-id ID...] [--token-env VARIABLE] [--force] [--json]",
-      "  migrate FILE (--name NAME [--token-env VARIABLE] | --profile NAME) [--force] [--json]  Convert legacy policy",
+      "  init FILE --name NAME --application-id ID --bot-id ID --guild-id ID... [--preset PRESET] [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force] [--json]",
       "  validate FILE [--json]",
       "  show FILE [--json]",
-      "  explain [PATH] [--migration] [--json]",
+      "  explain [PATH] [--json]",
       "",
-      "Normal operation uses one strict non-secret configuration file plus only the secrets it references. Add --migration to explain only while translating legacy environment policy. Validation does not read secret values or contact Discord. Replacement preserves a recoverable backup and cannot change the pinned Discord identity.",
+      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. Validation does not read secret values or contact Discord. Replacement preserves a recoverable backup and cannot change the pinned Discord identity.",
     ].join("\n")
   }
   if (topic === "doctor") {
@@ -907,7 +878,7 @@ function helpText(topic: CliCommand | undefined): string {
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor."
+    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
     return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
@@ -946,7 +917,7 @@ function helpText(topic: CliCommand | undefined): string {
     "",
     "Commands:",
     "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
-    "  config   Create, migrate, validate, and inspect one non-secret policy file",
+    "  config   Create, validate, and inspect one non-secret policy file",
     "  coordination  Inspect or resolve one policy's durable reviewed-write claims",
     "  serve    Run the stdio MCP server with a selected policy (default)",
     "  setup    Create or verify a policy and generate safe client configuration",
@@ -1093,7 +1064,9 @@ function renderSetup(report: SetupReport): string {
     lines.push(`Previous configuration backup: ${report.configBackupFile}`)
   }
   if (report.profile || report.configFile) {
-    lines.push(`Credential variable: ${report.credentialVariable}`)
+    lines.push(report.credential.provider === "environment"
+      ? `Credential environment variable: ${report.credential.variable}`
+      : `Credential file: ${report.credential.path}`)
   }
   for (const warning of report.warnings) lines.push(`WARNING: ${warning}`)
   lines.push(
@@ -1102,7 +1075,7 @@ function renderSetup(report: SetupReport): string {
     "",
     JSON.stringify(report.launch, null, 2),
     "",
-    `${report.credentialVariable} is named for secret forwarding and its value is not included`,
+    "The descriptor names exact secret inputs but includes no secret value",
     "Translate the requirements into the MCP host's required-server, write-approval, elicitation, and timeout settings.",
   )
   return lines.join("\n")
@@ -1190,7 +1163,8 @@ interface ProfileSummary {
   applicationId: string
   botId: string
   channelCount: number
-  credentialVariable: string
+  credentialProvider: "environment" | "file"
+  credentialReference: string
   gatewayEnabled: boolean
   guildCount: number
   name: string
@@ -1224,7 +1198,10 @@ function profileSummary(profile: ConnectorProfile): ProfileSummary {
     applicationId: profile.identity.applicationId,
     botId: profile.identity.botId,
     channelCount: profile.readScope.channelIds.length,
-    credentialVariable: profile.credential.variable,
+    credentialProvider: profile.credential.provider,
+    credentialReference: profile.credential.provider === "environment"
+      ? profile.credential.variable
+      : profile.credential.path,
     gatewayEnabled: profile.gateway.enabled,
     guildCount: profile.readScope.guildIds.length,
     name: profile.name,
@@ -1236,7 +1213,7 @@ function profileSummary(profile: ConnectorProfile): ProfileSummary {
 function renderProfileList(report: ProfileListReport): string {
   if (report.profiles.length === 0) return "No saved Discord MCP profiles"
   return report.profiles.map((profile) => (
-    `${profile.name}: application ${profile.applicationId}, bot ${profile.botId}, ${profile.guildCount} guilds, ${profile.channelCount} channels, ${profile.toolSurface} tools, Gateway ${profile.gatewayEnabled ? "enabled" : "disabled"}, credential ${profile.credentialVariable}`
+    `${profile.name}: application ${profile.applicationId}, bot ${profile.botId}, ${profile.guildCount} guilds, ${profile.channelCount} channels, ${profile.toolSurface} tools, Gateway ${profile.gatewayEnabled ? "enabled" : "disabled"}, credential ${profile.credentialProvider} ${profile.credentialReference}`
   )).join("\n")
 }
 
@@ -1253,7 +1230,7 @@ function renderProfileAction(report: ProfileActionReport): string {
     : `Profile ${report.name} restored from recoverable trash`
   return [
     lifecycle,
-    "The credential environment variable and Discord token were not modified or revoked.",
+    "The referenced external credential and Discord token were not modified or revoked.",
   ].join("\n")
 }
 
@@ -1275,9 +1252,11 @@ function renderConfigSummary(report: ConfigValidationReport): string {
     `Tool surface: ${summary.tools.surface}`,
     `Toolsets: ${summary.tools.toolsets.join(", ")}`,
     `Gateway: ${summary.gateway.enabled ? "enabled" : "disabled"}`,
+    `Credential: ${summary.credential.provider} ${summary.credential.provider === "environment" ? summary.credential.variable : summary.credential.path}`,
     `Enabled capabilities: ${summary.capabilitiesEnabled.join(", ") || "none"}`,
     `Configured feature scopes: ${configuredScopes}`,
-    `Referenced secret variables: ${summary.credentialVariables.join(", ")}`,
+    `Referenced secret environment variables: ${summary.secretEnvironmentVariables.join(", ") || "none"}`,
+    `Referenced secret files: ${summary.secretFilePaths.join(", ") || "none"}`,
   ].join("\n")
 }
 
@@ -1303,9 +1282,6 @@ function renderConfigExplain(report: ConfigExplainReport): string {
     `Schema: ${report.schemaId}`,
     "Operational policy source: one selected schema-v2 configuration document",
     "Secret values: external references only; never stored in the policy document",
-    report.migrationAliasesIncluded
-      ? "Migration aliases: included for one-time legacy conversion only; operational commands reject them"
-      : "Migration aliases: hidden; add --migration only while converting legacy environment policy",
     "",
     ...report.fields.flatMap((field, index) => [
       ...(index > 0 ? [""] : []),
@@ -1314,9 +1290,6 @@ function renderConfigExplain(report: ConfigExplainReport): string {
       `  Type: ${field.kind}`,
       `  Required: ${field.required ? "yes" : "no"}`,
       `  Default: ${field.defaultValue === undefined ? "none" : JSON.stringify(field.defaultValue)}`,
-      ...(field.migrationEnvironmentVariable
-        ? [`  Migration-only input: ${field.migrationEnvironmentVariable}`]
-        : []),
     ]),
   ].join("\n")
 }
@@ -1388,18 +1361,7 @@ function configSelectionEnvironment(
 }
 
 const CONFIG_SELECTION_REQUIRED_MESSAGE =
-  "Operational commands require --config FILE, --profile NAME, or DISCORD_MCP_CONFIG_FILE; create a policy with discord-mcp config init or convert environment policy with discord-mcp config migrate"
-
-function assertSchemaV2Profile(profile: ConnectorProfile): asserts profile is Extract<
-  ConnectorProfile,
-  { schemaVersion: typeof CONFIG_DOCUMENT_SCHEMA_VERSION }
-> {
-  if (profile.schemaVersion !== CONFIG_DOCUMENT_SCHEMA_VERSION) {
-    throw new ConfigurationError(
-      `Profile ${profile.name} uses legacy schema version ${profile.schemaVersion}; convert it with discord-mcp config migrate FILE --profile ${profile.name}`,
-    )
-  }
-}
+  "Operational commands require --config FILE, --profile NAME, or DISCORD_MCP_CONFIG_FILE; create a policy with discord-mcp config init or setup --preset"
 
 async function runtimeSelectionEnvironment(
   selection: { configFile?: string; profileName?: string },
@@ -1407,13 +1369,7 @@ async function runtimeSelectionEnvironment(
   dependencies: CliDependencies,
 ): Promise<NodeJS.ProcessEnv> {
   if (selection.profileName) {
-    const selectedProfile = await dependencies.loadProfile(
-      selection.profileName,
-      { environment },
-    )
-    assertSchemaV2Profile(selectedProfile)
     const activated = await dependencies.activateProfile(selection.profileName, { environment })
-    assertSchemaV2Profile(activated.profile)
     return activated.environment
   }
   const selected = configSelectionEnvironment(selection.configFile, environment)
@@ -1436,7 +1392,6 @@ async function coordinationActivityFile(
       )
     }
     const profile = await dependencies.loadProfile(selection.profileName, { environment })
-    assertSchemaV2Profile(profile)
     document = profile
   } else {
     const selected = configSelectionEnvironment(selection.configFile, environment)
@@ -1488,9 +1443,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
       }
       case "config": {
         if (parsed.action === "explain") {
-          const report = dependencies.explainConfig(parsed.path, {
-            includeMigrationAliases: parsed.migrationAliases,
-          })
+          const report = dependencies.explainConfig(parsed.path)
           safeWrite(
             stdout,
             parsed.json ? jsonReport(report) : renderConfigExplain(report),
@@ -1516,33 +1469,25 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           )
           return CLI_EXIT_CODES.success
         }
-        if (parsed.action !== "init" && parsed.action !== "migrate") {
+        if (parsed.action !== "init") {
           throw new ConfigurationError("Unsupported config action")
         }
-        const report = parsed.action === "init"
-          ? await dependencies.initializeConfig({
-            applicationId: parsed.applicationId,
-            botId: parsed.botId,
-            channelIds: parsed.channelIds,
-            ...(parsed.credentialVariable
-              ? { credentialVariable: parsed.credentialVariable }
-              : {}),
-            file: parsed.file,
-            guildIds: parsed.guildIds,
-            name: parsed.name,
-            overwrite: parsed.overwrite,
-            ...(parsed.preset ? { preset: parsed.preset } : {}),
-          })
-          : await dependencies.migrateConfig({
-            ...(parsed.credentialVariable
-              ? { credentialVariable: parsed.credentialVariable }
-              : {}),
-            environment,
-            file: parsed.file,
-            ...(parsed.name ? { name: parsed.name } : {}),
-            overwrite: parsed.overwrite,
-            ...(parsed.profileName ? { profileName: parsed.profileName } : {}),
-          })
+        const report = await dependencies.initializeConfig({
+          applicationId: parsed.applicationId,
+          botId: parsed.botId,
+          channelIds: parsed.channelIds,
+          ...(parsed.credentialFile
+            ? { credentialFile: parsed.credentialFile }
+            : {}),
+          ...(parsed.credentialVariable
+            ? { credentialVariable: parsed.credentialVariable }
+            : {}),
+          file: parsed.file,
+          guildIds: parsed.guildIds,
+          name: parsed.name,
+          overwrite: parsed.overwrite,
+          ...(parsed.preset ? { preset: parsed.preset } : {}),
+        })
         safeWrite(
           stdout,
           parsed.json ? jsonReport(report) : renderConfigWrite(report),
@@ -1700,6 +1645,9 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             : { overwriteProfile: parsed.overwrite }),
           ...(parsed.credentialVariable
             ? { credentialVariable: parsed.credentialVariable }
+            : {}),
+          ...(parsed.credentialFile
+            ? { credentialFile: parsed.credentialFile }
             : {}),
           environment,
           ...(parsed.preset ? { preset: parsed.preset } : {}),

@@ -20,17 +20,12 @@ import {
 
 import {
   CONNECTOR_LIMITS,
-  DISCORD_LIMITS,
-  DISCORD_SNOWFLAKE_PATTERN,
   ENVIRONMENT_NAMES,
-  MCP_TOOLSET_NAMES,
-  MCP_TOOL_SURFACES,
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
 import {
   activateConnectorConfigDocument,
-  CONFIG_DOCUMENT_SCHEMA_VERSION,
   createConnectorConfigDocument,
   parseConnectorConfigDocument,
   parseStrictConfigJson,
@@ -39,65 +34,14 @@ import {
 } from "./config-document.js"
 import {
   ConfigDocumentError,
-  ProfileCredentialError,
   ProfileError,
 } from "./errors.js"
 
-export const PROFILE_SCHEMA_VERSION = CONFIG_DOCUMENT_SCHEMA_VERSION
-export const LEGACY_PROFILE_SCHEMA_VERSION = 1
-
 const PROFILE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/
-const CREDENTIAL_ENVIRONMENT_PATTERN = /^DISCORD_(?:[A-Z0-9]+_)*TOKEN$/
 const TRASH_FILE_PATTERN = /^[0-9]{13}-[0-9a-f-]{36}\.json$/
 
-export const PROFILE_MANAGED_ENVIRONMENT_NAMES = Object.freeze([
-  ENVIRONMENT_NAMES.allowedChannelIds,
-  ENVIRONMENT_NAMES.allowedGuildIds,
-  ENVIRONMENT_NAMES.allowGateway,
-  ENVIRONMENT_NAMES.applicationId,
-  ENVIRONMENT_NAMES.botId,
-  ENVIRONMENT_NAMES.gatewayEventBufferSize,
-  ENVIRONMENT_NAMES.toolSurface,
-  ENVIRONMENT_NAMES.toolsets,
-] as const)
-
-const PROFILE_KEYS = Object.freeze([
-  "credential",
-  "gateway",
-  "identity",
-  "name",
-  "readScope",
-  "schemaVersion",
-  "tools",
-] as const)
-
-export interface LegacyConnectorProfile {
-  credential: {
-    provider: "environment"
-    variable: string
-  }
-  gateway: {
-    enabled: boolean
-    eventBufferSize: number
-  }
-  identity: {
-    applicationId: string
-    botId: string
-  }
-  name: string
-  readScope: {
-    channelIds: string[]
-    guildIds: string[]
-  }
-  schemaVersion: 1
-  tools: {
-    surface: McpToolSurface
-    toolsets: McpToolsetName[]
-  }
-}
-
-export type ConnectorProfile = LegacyConnectorProfile | ConnectorConfigDocument
+export type ConnectorProfile = ConnectorConfigDocument
 
 export interface ProfileLocationOptions {
   directory?: string
@@ -120,44 +64,6 @@ export interface TrashedProfile {
   trashId: string
 }
 
-function clonedCredentialEnvironment(
-  variable: string,
-  source: NodeJS.ProcessEnv,
-  missingMessage: string,
-  conflictMessage: string,
-): NodeJS.ProcessEnv {
-  const credentialVariable = normalizeCredentialEnvironmentName(variable)
-  const credential = source[credentialVariable]?.trim()
-  if (!credential) throw new ProfileCredentialError("missing", missingMessage)
-  const canonicalCredential = source[ENVIRONMENT_NAMES.token]?.trim()
-  if (
-    credentialVariable !== ENVIRONMENT_NAMES.token
-    && canonicalCredential
-    && canonicalCredential !== credential
-  ) {
-    throw new ProfileCredentialError("conflict", conflictMessage)
-  }
-  const environment = { ...source }
-  if (credentialVariable !== ENVIRONMENT_NAMES.token) {
-    delete environment[credentialVariable]
-  }
-  environment[ENVIRONMENT_NAMES.token] = credential
-  return environment
-}
-
-export function activateCredentialEnvironment(
-  variable: string,
-  source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-  const normalized = normalizeCredentialEnvironmentName(variable)
-  return clonedCredentialEnvironment(
-    normalized,
-    source,
-    `${normalized} is required`,
-    `Credential ${normalized} conflicts with ${ENVIRONMENT_NAMES.token}`,
-  )
-}
-
 function isNodeError(error: unknown, code: string): boolean {
   return error instanceof Error
     && "code" in error
@@ -166,21 +72,6 @@ function isNodeError(error: unknown, code: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
-}
-
-function assertExactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-  label: string,
-): void {
-  const actual = Object.keys(value).sort()
-  const normalizedExpected = [...expected].sort()
-  if (
-    actual.length !== normalizedExpected.length
-    || actual.some((key, index) => key !== normalizedExpected[index])
-  ) {
-    throw new ProfileError(`${label} has unknown or missing fields`)
-  }
 }
 
 export function normalizeProfileName(value: string): string {
@@ -197,185 +88,20 @@ export function normalizeProfileName(value: string): string {
   return normalized
 }
 
-export function normalizeCredentialEnvironmentName(value: string): string {
-  if (typeof value !== "string") {
-    throw new ProfileError("Profile credential environment variable must be a string")
-  }
-  const normalized = value.trim()
-  if (
-    normalized.length > 128
-    || !CREDENTIAL_ENVIRONMENT_PATTERN.test(normalized)
-  ) {
-    throw new ProfileError(
-      "Profile credential environment variable must be an uppercase DISCORD token name",
-    )
-  }
-  if (
-    normalized !== ENVIRONMENT_NAMES.token
-    && (Object.values(ENVIRONMENT_NAMES) as string[]).includes(normalized)
-  ) {
-    throw new ProfileError(
-      "Profile credential environment variable conflicts with connector configuration",
-    )
-  }
-  return normalized
-}
-
-function snowflake(value: unknown, label: string): string {
-  if (typeof value !== "string" || !DISCORD_SNOWFLAKE_PATTERN.test(value)) {
-    throw new ProfileError(`${label} must be a Discord snowflake`)
-  }
-  return value
-}
-
-function canonicalSnowflakes(
-  value: unknown,
-  label: string,
-  minimum: number,
-  maximum: number,
-): string[] {
-  if (
-    !Array.isArray(value)
-    || value.length < minimum
-    || value.length > maximum
-  ) {
-    throw new ProfileError(`${label} must contain ${minimum}-${maximum} Discord snowflakes`)
-  }
-  const result = value.map((entry) => snowflake(entry, label))
-  if (
-    new Set(result).size !== result.length
-    || result.some((entry, index) => index > 0 && entry < (result[index - 1] as string))
-  ) {
-    throw new ProfileError(`${label} must contain unique sorted Discord snowflakes`)
-  }
-  return result
-}
-
-function canonicalToolsets(value: unknown): McpToolsetName[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MCP_TOOLSET_NAMES.length) {
-    throw new ProfileError("Profile toolsets must contain configured canonical toolsets")
-  }
-  const selected = new Set<McpToolsetName>()
-  for (const entry of value) {
-    if (
-      typeof entry !== "string"
-      || !MCP_TOOLSET_NAMES.includes(entry as McpToolsetName)
-      || selected.has(entry as McpToolsetName)
-    ) {
-      throw new ProfileError("Profile toolsets must contain unique canonical toolsets")
-    }
-    selected.add(entry as McpToolsetName)
-  }
-  const canonical = MCP_TOOLSET_NAMES.filter((entry) => selected.has(entry))
-  if (canonical.some((entry, index) => entry !== value[index])) {
-    throw new ProfileError("Profile toolsets must use canonical order")
-  }
-  return canonical
-}
-
 export function parseConnectorProfile(
   value: unknown,
   expectedName?: string,
 ): ConnectorProfile {
   if (!isRecord(value)) throw new ProfileError("Profile must be a JSON object")
-  if (value.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
-    try {
-      return parseConnectorConfigDocument(value, expectedName)
-    } catch (error) {
-      if (error instanceof ConfigDocumentError) {
-        throw new ProfileError(error.message.replace("Configuration", "Profile"), {
-          cause: error,
-        })
-      }
-      throw error
+  try {
+    return parseConnectorConfigDocument(value, expectedName)
+  } catch (error) {
+    if (error instanceof ConfigDocumentError) {
+      throw new ProfileError(error.message.replace("Configuration", "Profile"), {
+        cause: error,
+      })
     }
-  }
-  assertExactKeys(value, PROFILE_KEYS, "Profile")
-  if (value.schemaVersion !== LEGACY_PROFILE_SCHEMA_VERSION) {
-    throw new ProfileError(`Unsupported profile schema version: ${String(value.schemaVersion)}`)
-  }
-  if (typeof value.name !== "string") {
-    throw new ProfileError("Profile name must be a string")
-  }
-  const name = normalizeProfileName(value.name)
-  if (expectedName !== undefined && name !== normalizeProfileName(expectedName)) {
-    throw new ProfileError("Profile name does not match its filename")
-  }
-
-  if (!isRecord(value.credential)) throw new ProfileError("Profile credential must be an object")
-  assertExactKeys(value.credential, ["provider", "variable"], "Profile credential")
-  if (value.credential.provider !== "environment") {
-    throw new ProfileError("Profile credential provider must be environment")
-  }
-  if (typeof value.credential.variable !== "string") {
-    throw new ProfileError("Profile credential environment variable must be a string")
-  }
-  const credentialVariable = normalizeCredentialEnvironmentName(value.credential.variable)
-
-  if (!isRecord(value.identity)) throw new ProfileError("Profile identity must be an object")
-  assertExactKeys(value.identity, ["applicationId", "botId"], "Profile identity")
-  const applicationId = snowflake(
-    value.identity.applicationId,
-    "Profile application ID",
-  )
-  const botId = snowflake(value.identity.botId, "Profile bot ID")
-
-  if (!isRecord(value.readScope)) throw new ProfileError("Profile read scope must be an object")
-  assertExactKeys(value.readScope, ["channelIds", "guildIds"], "Profile read scope")
-  const guildIds = canonicalSnowflakes(
-    value.readScope.guildIds,
-    "Profile guild scope",
-    1,
-    DISCORD_LIMITS.currentUserGuilds,
-  )
-  const channelIds = canonicalSnowflakes(
-    value.readScope.channelIds,
-    "Profile channel scope",
-    0,
-    DISCORD_LIMITS.searchChannelIds,
-  )
-
-  if (!isRecord(value.tools)) throw new ProfileError("Profile tools must be an object")
-  assertExactKeys(value.tools, ["surface", "toolsets"], "Profile tools")
-  if (
-    typeof value.tools.surface !== "string"
-    || !MCP_TOOL_SURFACES.includes(value.tools.surface as McpToolSurface)
-  ) {
-    throw new ProfileError("Profile tool surface is invalid")
-  }
-  const toolsets = canonicalToolsets(value.tools.toolsets)
-
-  if (!isRecord(value.gateway)) throw new ProfileError("Profile Gateway must be an object")
-  assertExactKeys(value.gateway, ["enabled", "eventBufferSize"], "Profile Gateway")
-  if (typeof value.gateway.enabled !== "boolean") {
-    throw new ProfileError("Profile Gateway enabled state must be boolean")
-  }
-  if (
-    typeof value.gateway.eventBufferSize !== "number"
-    || !Number.isSafeInteger(value.gateway.eventBufferSize)
-    || value.gateway.eventBufferSize < 1
-    || value.gateway.eventBufferSize > CONNECTOR_LIMITS.gatewayEventBufferSize
-  ) {
-    throw new ProfileError("Profile Gateway buffer size is invalid")
-  }
-
-  return {
-    credential: {
-      provider: "environment",
-      variable: credentialVariable,
-    },
-    gateway: {
-      enabled: value.gateway.enabled,
-      eventBufferSize: value.gateway.eventBufferSize,
-    },
-    identity: { applicationId, botId },
-    name,
-    readScope: { channelIds, guildIds },
-    schemaVersion: LEGACY_PROFILE_SCHEMA_VERSION,
-    tools: {
-      surface: value.tools.surface as McpToolSurface,
-      toolsets,
-    },
+    throw error
   }
 }
 
@@ -384,6 +110,7 @@ export function createConnectorProfile(options: {
   botId: string
   capabilities?: Readonly<Record<string, boolean>>
   channelIds?: readonly string[]
+  credentialFile?: string
   credentialVariable?: string
   gatewayEnabled?: boolean
   gatewayEventBufferSize?: number
@@ -870,35 +597,13 @@ export async function activateProfile(
 ): Promise<ActivatedProfile> {
   const profile = await loadProfile(name, options)
   const source = options.environment || process.env
-  if (profile.schemaVersion === CONFIG_DOCUMENT_SCHEMA_VERSION) {
-    if (source[ENVIRONMENT_NAMES.configFile]?.trim()) {
-      throw new ProfileError(
-        `Profile ${profile.name} conflicts with ${ENVIRONMENT_NAMES.configFile}`,
-      )
-    }
-    return {
-      environment: activateConnectorConfigDocument(profile, source),
-      profile,
-    }
+  if (source[ENVIRONMENT_NAMES.configFile]?.trim()) {
+    throw new ProfileError(
+      `Profile ${profile.name} conflicts with ${ENVIRONMENT_NAMES.configFile}`,
+    )
   }
-  const environment = clonedCredentialEnvironment(
-    profile.credential.variable,
-    source,
-    `Profile ${profile.name} requires ${profile.credential.variable}`,
-    `Profile ${profile.name} found conflicting Discord credentials`,
-  )
-  for (const variable of PROFILE_MANAGED_ENVIRONMENT_NAMES) {
-    delete environment[variable]
+  return {
+    environment: activateConnectorConfigDocument(profile, source),
+    profile,
   }
-  environment[ENVIRONMENT_NAMES.applicationId] = profile.identity.applicationId
-  environment[ENVIRONMENT_NAMES.botId] = profile.identity.botId
-  environment[ENVIRONMENT_NAMES.allowedGuildIds] = profile.readScope.guildIds.join(",")
-  environment[ENVIRONMENT_NAMES.allowedChannelIds] = profile.readScope.channelIds.join(",")
-  environment[ENVIRONMENT_NAMES.toolSurface] = profile.tools.surface
-  environment[ENVIRONMENT_NAMES.toolsets] = profile.tools.toolsets.join(",")
-  environment[ENVIRONMENT_NAMES.allowGateway] = String(profile.gateway.enabled)
-  environment[ENVIRONMENT_NAMES.gatewayEventBufferSize] = String(
-    profile.gateway.eventBufferSize,
-  )
-  return { environment, profile }
 }

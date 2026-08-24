@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises"
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -556,7 +556,7 @@ test("doctor reports unsupported runtime and missing configuration without throw
   assert.match(runtime?.action || "", /Install Node\.js 22 or newer/)
   assert.equal(runtime?.reference, "docs/reference.md#requirements")
   const token = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)
-  assert.match(token?.action || "", /credential\.variable/)
+  assert.match(token?.action || "", /environment variable or file referenced by credential/)
   assert.equal(token?.reference, "docs/reference.md#discord-bot-setup")
 })
 
@@ -594,6 +594,47 @@ test("doctor resolves the credential variable referenced by a selected configura
     report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.configuration)?.status,
     "pass",
   )
+})
+
+test("doctor resolves file-backed credentials and redacts downstream failures", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-file-secret-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const configFile = join(root, "discord-mcp.json")
+  const credentialFile = join(root, "discord-token")
+  await writeFile(credentialFile, `${TOKEN}\n`, { mode: 0o600 })
+  await writeConnectorConfigDocumentFile(
+    configFile,
+    createConnectorConfigDocument({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      credentialFile,
+      guildIds: [GUILD_ID],
+      name: "doctor-file-secret",
+      toolsets: ["connector"],
+      toolSurface: "full",
+    }),
+  )
+
+  const report = await diagnoseConnector({
+    environment: { [ENVIRONMENT_NAMES.configFile]: configFile },
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        throw new Error(`Credential ${TOKEN} rejected`)
+      },
+    },
+  })
+
+  assert.equal(
+    report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.token)?.status,
+    "pass",
+  )
+  const access = report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.guildAccess)
+  assert.equal(access?.status, "fail")
+  assert.match(access?.summary || "", /Credential \[redacted\] rejected/)
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
 })
 
 test("doctor distinguishes valid scoped configuration from safe warnings", async () => {
@@ -3599,6 +3640,10 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
       requiredServer: true,
       toolApproval: "writes",
     },
+    secrets: {
+      environmentVariables: [ENVIRONMENT_NAMES.token],
+      files: [],
+    },
     serverName: "team-discord",
     timeouts: {
       startupSeconds: 30,
@@ -3942,7 +3987,10 @@ test("setup creates and verifies a preset-backed profile without persisting or r
   assert.deepEqual(source, before)
   assert.equal(report.schemaVersion, OPERATOR_REPORT_SCHEMA_VERSION)
   assert.equal(report.profile?.name, "support-bot")
-  assert.equal(report.profile?.credential.variable, TOKEN_ALIAS)
+  assert.deepEqual(report.profile?.credential, {
+    provider: "environment",
+    variable: TOKEN_ALIAS,
+  })
   assert.equal(report.profile?.identity.applicationId, APPLICATION_ID)
   assert.equal(report.profile?.identity.botId, BOT_ID)
   assert.deepEqual(report.profile?.readScope, {
@@ -4052,7 +4100,10 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
   assert.deepEqual(source, before)
   assert.equal(report.configBackupFile, null)
   assert.equal(report.configFile, configFile)
-  assert.equal(report.credentialVariable, TOKEN_ALIAS)
+  assert.deepEqual(report.credential, {
+    provider: "environment",
+    variable: TOKEN_ALIAS,
+  })
   assert.equal(report.profile, null)
   assert.deepEqual(report.launch.args, [
     "/srv/discord-mcp/dist/cli.js",
@@ -4066,7 +4117,10 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
   })
   const initial = loadConnectorConfigDocumentFile(configFile)
   assert.equal(initial.name, "discord")
-  assert.equal(initial.credential.variable, TOKEN_ALIAS)
+  assert.deepEqual(initial.credential, {
+    provider: "environment",
+    variable: TOKEN_ALIAS,
+  })
   assert.equal(initial.gateway.enabled, false)
   assert.deepEqual(initial.tools.toolsets, getSetupPreset("server-observer").toolsets)
   assert.doesNotMatch(await readFile(configFile, "utf8"), new RegExp(TOKEN))
@@ -4136,6 +4190,72 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
       },
     }),
     /locked to its existing Discord identity/,
+  )
+})
+
+test("setup records and verifies a file-backed credential without forwarding an environment secret", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-file-secret-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const configFile = join(root, "discord.json")
+  const credentialFile = join(root, "discord-token")
+  await writeFile(credentialFile, `${TOKEN}\n`, { mode: 0o600 })
+
+  const report = await prepareSetup({
+    configFile,
+    credentialFile,
+    environment: { PATH: "/usr/bin" },
+    preset: {
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
+    service: statusProvider(),
+  })
+
+  assert.deepEqual(report.credential, {
+    path: credentialFile,
+    provider: "file",
+  })
+  assert.deepEqual(report.launch.environment, { forward: [], set: {} })
+  assert.deepEqual(report.launch.secrets, {
+    environmentVariables: [],
+    files: [credentialFile],
+  })
+  assert.deepEqual(loadConnectorConfigDocumentFile(configFile).credential, {
+    path: credentialFile,
+    provider: "file",
+  })
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(TOKEN))
+  assert.deepEqual(
+    (await prepareSetup({
+      configFile,
+      environment: { PATH: "/usr/bin" },
+      service: statusProvider(),
+    })).credential,
+    report.credential,
+  )
+
+  await assert.rejects(
+    () => prepareSetup({
+      configFile: join(root, "redaction.json"),
+      credentialFile,
+      environment: { PATH: "/usr/bin" },
+      preset: {
+        guildIds: [GUILD_ID],
+        name: "server-observer",
+      },
+      service: {
+        async getStatus() {
+          throw new Error(`Credential ${TOKEN} rejected`)
+        },
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /Credential \[redacted\] rejected/)
+      assert.doesNotMatch(error.message, new RegExp(TOKEN))
+      return true
+    },
   )
 })
 
