@@ -22,6 +22,7 @@ import {
   sha256,
   sha512Integrity,
 } from "./release-lib.mjs"
+import { containsSpecificReference } from "./neutrality.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
@@ -150,6 +151,20 @@ async function assertNoSecrets(packageDirectory, files) {
     for (const value of sensitiveValues) {
       invariant(!contents.includes(value), `npm archive embeds a sensitive environment value in ${relative}`)
     }
+  }
+}
+
+async function assertNeutralPackage(packageDirectory, files) {
+  for (const relative of files) {
+    invariant(
+      !containsSpecificReference(relative),
+      `npm archive path ${relative} has model- or harness-specific branding`,
+    )
+    const contents = await readFile(join(packageDirectory, relative))
+    invariant(
+      !containsSpecificReference(contents.toString("latin1")),
+      `npm archive file ${relative} has model- or harness-specific branding`,
+    )
   }
 }
 
@@ -610,6 +625,7 @@ try {
   const extractedPackage = join(extraction, "package")
   const extractedFiles = await listFiles(extractedPackage)
   assert.deepEqual(extractedFiles, first.files)
+  await assertNeutralPackage(extractedPackage, extractedFiles)
   await assertNoSecrets(extractedPackage, extractedFiles)
   const catalogEvidence = await verifyInstalledPackage(
     first.archive,

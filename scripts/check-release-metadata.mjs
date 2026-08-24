@@ -14,6 +14,7 @@ import {
   run,
   sha256,
 } from "./release-lib.mjs"
+import { containsSpecificReference } from "./neutrality.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const MCP_NAME = "io.github.j-256/discord-mcp"
@@ -54,21 +55,6 @@ const REFERENCE_REQUIRED_HEADINGS = Object.freeze([
 ])
 const STABLE_SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
-// Keep blocked names out of the repository bytes that this gate scans
-const SPECIFIC_REFERENCE_CODES = Object.freeze([
-  [99, 111, 100, 101, 120],
-  [111, 112, 101, 110, 97, 105],
-  [99, 104, 97, 116, 103, 112, 116],
-  [99, 108, 97, 117, 100, 101],
-  [97, 110, 116, 104, 114, 111, 112, 105, 99],
-  [103, 101, 109, 105, 110, 105],
-  [99, 111, 112, 105, 108, 111, 116],
-])
-const SPECIFIC_REFERENCES = SPECIFIC_REFERENCE_CODES.map((codes) => (
-  String.fromCharCode(...codes)
-))
-const VERSIONED_MODEL_PREFIX = String.fromCharCode(103, 112, 116)
-const VERSIONED_MODEL_PATTERN = new RegExp(`${VERSIONED_MODEL_PREFIX}[-_ ]?[0-9]`, "u")
 const EXPECTED_DEPENDENCIES = {
   "@modelcontextprotocol/client": "2.0.0",
   "@modelcontextprotocol/server": "2.0.0",
@@ -86,12 +72,6 @@ const EXPECTED_DEV_DEPENDENCIES = {
   "@types/node": "26.2.0",
   tsx: "4.23.12",
   typescript: "7.0.2",
-}
-
-function containsSpecificReference(value) {
-  const normalized = value.toLowerCase()
-  return SPECIFIC_REFERENCES.some((reference) => normalized.includes(reference))
-    || VERSIONED_MODEL_PATTERN.test(normalized)
 }
 
 async function checkNeutrality() {
