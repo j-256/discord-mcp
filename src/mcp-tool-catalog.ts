@@ -52,6 +52,7 @@ type McpToolWorkflow =
   | "channel-ordering"
   | "channel-permission-overwrite"
   | "component-message"
+  | "direct-message-change"
   | "forum-post"
   | "forum-tag-change"
   | "guild-blueprint"
@@ -162,6 +163,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["component", "create", "edit", "execute", "layout", "message", "v2"],
     toolset: "interactions",
     workflow: "component-message",
+  },
+  execute_direct_message_change: {
+    keywords: ["delete", "direct message", "dm", "edit", "execute", "private", "reply", "send"],
+    toolset: "direct-messages",
+    workflow: "direct-message-change",
   },
   execute_automod_change: {
     keywords: ["automod", "create", "delete", "disable", "enable", "execute", "moderation", "policy", "rule", "update"],
@@ -503,6 +509,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "bot", "identity", "scope", "status"],
     toolset: "connector",
   },
+  get_direct_message: {
+    keywords: ["direct message", "dm", "exact", "get", "private", "read"],
+    toolset: "direct-messages",
+    workflow: "direct-message-change",
+  },
   get_gateway_events: {
     keywords: ["cursor", "event", "realtime", "subscription"],
     toolset: "gateway",
@@ -643,6 +654,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audio", "default", "inventory", "list", "sound", "soundboard"],
     toolset: "soundboard",
   },
+  list_direct_messages: {
+    keywords: ["direct message", "dm", "history", "list", "private", "read"],
+    toolset: "direct-messages",
+    workflow: "direct-message-change",
+  },
   list_guild_soundboard_sounds: {
     keywords: ["audio", "guild", "inventory", "list", "sound", "soundboard"],
     toolset: "soundboard",
@@ -738,6 +754,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["component", "create", "edit", "layout", "message", "plan", "review", "v2"],
     toolset: "interactions",
     workflow: "component-message",
+  },
+  plan_direct_message_change: {
+    keywords: ["delete", "direct message", "dm", "edit", "plan", "private", "reply", "review", "send"],
+    toolset: "direct-messages",
+    workflow: "direct-message-change",
   },
   plan_channel_creation: {
     keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
@@ -973,6 +994,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["component", "drift", "message", "receipt", "recover", "verify", "v2"],
     toolset: "interactions",
     workflow: "component-message",
+  },
+  verify_direct_message_change: {
+    keywords: ["direct message", "dm", "drift", "private", "receipt", "recover", "verify"],
+    toolset: "direct-messages",
+    workflow: "direct-message-change",
   },
   verify_automod_change: {
     keywords: ["automod", "drift", "moderation", "receipt", "recover", "rule", "verify"],

@@ -28,6 +28,7 @@ import {
   type ChannelPermissionOverwriteActivity,
   type ComponentMessageActivity,
   type DeletionActivity,
+  type DirectMessageActivity,
   type ForumPostActivity,
   type ForumTagActivity,
   type GuildExpressionActivity,
@@ -143,6 +144,35 @@ function interaction(id: string, status: InteractionActivity["status"]): Interac
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
+  }
+}
+
+function directMessageActivity(
+  id: string,
+  stage: DirectMessageActivity["stage"],
+  status: DirectMessageActivity["status"],
+): DirectMessageActivity {
+  const dispatched = stage === "message-dispatched" || stage === "terminal"
+  const channelReady = stage !== "reserved"
+  return {
+    action: "send",
+    channelId: channelReady ? "200" : null,
+    error: status === "failed" || status === "uncertain"
+      ? "DiscordApiError.500.unknown"
+      : null,
+    id,
+    kind: "direct-message-change",
+    messageId: dispatched ? "300" : null,
+    operationKeyHash: `sha256:${"c".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
+    recipientId: "400",
+    replyToMessageId: null,
+    requestDigest: `hmac-sha256:${"e".repeat(64)}`,
+    schemaVersion: 1,
+    stage,
+    status,
+    timestamp: `2026-08-25T00:00:0${id.at(-1)}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -1526,6 +1556,69 @@ test("JSONL activity log tolerates malformed historical lines", async (context) 
   assert.equal(result.skippedLines, 2)
   assert.doesNotMatch(JSON.stringify(result), /private/)
   assert.equal(result.entries.at(-1)?.kind, "message-deletion")
+})
+
+test("JSONL activity log accepts only exact content-free private-message lifecycle evidence", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const pending = directMessageActivity("direct-message-1", "reserved", "pending")
+  const completed = directMessageActivity(
+    "direct-message-2",
+    "terminal",
+    "completed",
+  )
+
+  await store.append(pending)
+  await store.append(completed)
+  await assert.rejects(
+    store.append({
+      ...completed,
+      content: "private message content",
+    } as unknown as DirectMessageActivity),
+    /invalid content-free shape/,
+  )
+  await assert.rejects(
+    store.append({
+      ...completed,
+      schemaVersion: 2,
+    }),
+    /invalid content-free shape/,
+  )
+  await appendFile(file, `${JSON.stringify({
+    ...completed,
+    reviewReason: "private review reason",
+  })}\n`, "utf8")
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(
+    result.entries.map((entry) => entry.id),
+    ["direct-message-2", "direct-message-1"],
+  )
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "action",
+    "channelId",
+    "error",
+    "id",
+    "kind",
+    "messageId",
+    "operationKeyHash",
+    "planDigest",
+    "recipientId",
+    "replyToMessageId",
+    "requestDigest",
+    "schemaVersion",
+    "stage",
+    "status",
+    "timestamp",
+    "verification",
+  ])
+  assert.doesNotMatch(persisted, /private message content/)
+  assert.doesNotMatch(JSON.stringify(result), /private review reason/)
 })
 
 test("JSONL activity log keeps durable deletion evidence content-free and internally consistent", async (context) => {

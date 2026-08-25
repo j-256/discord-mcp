@@ -33,6 +33,7 @@ const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-builder",
   "channel-publisher",
+  "direct-messenger",
   "incident-response",
 ]
 const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
@@ -45,6 +46,11 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
     evidenceConnection: "guild-layout",
     eventFeedPolicy: "unchanged",
     intents: Object.freeze(["GUILDS"]),
+  }),
+  "direct-messenger": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
   }),
   "incident-response": Object.freeze({
     evidenceConnection: "none",
@@ -253,6 +259,7 @@ assert.equal(typeof connector.VoiceChannelStatusService, "function")
 assert.equal(typeof connector.GuildTemplateService, "function")
 assert.equal(typeof connector.GuildIncidentService, "function")
 assert.equal(typeof connector.InviteService, "function")
+assert.equal(typeof connector.DirectMessageService, "function")
 assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
 assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
@@ -260,9 +267,11 @@ assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
 assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
   "guild-builder",
   "channel-publisher",
+  "direct-messenger",
   "incident-response",
 ])
 assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
+assert.equal(connector.getConfigRecipe("direct-messenger").writeCapable, true)
 assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)
 assert.equal(typeof connector.planConfigRecipe, "function")
 assert.equal(typeof connector.applyConfigRecipe, "function")
@@ -513,7 +522,12 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   for (const recipe of recipeReport.recipes) {
     invariant(recipe.writeCapable === true, `installed configuration recipe ${recipe.name} is not write-capable`)
     invariant(recipe.requirements.botPermissions.includes("ADMINISTRATOR") === false, `installed configuration recipe ${recipe.name} requests Administrator`)
-    invariant(/^[1-9][0-9]*$/.test(recipe.requirements.botPermissionBitfield), `installed configuration recipe ${recipe.name} has an invalid bot permission bitfield`)
+    invariant(/^(0|[1-9][0-9]*)$/.test(recipe.requirements.botPermissionBitfield), `installed configuration recipe ${recipe.name} has an invalid bot permission bitfield`)
+    invariant(
+      (recipe.requirements.botPermissions.length === 0)
+        === (recipe.requirements.botPermissionBitfield === "0"),
+      `installed configuration recipe ${recipe.name} permission names and bitfield disagree`,
+    )
     assertSortedUniqueStrings(recipe.capabilities, `installed configuration recipe ${recipe.name} capability inventory`)
     assertSortedUniqueStrings(recipe.riskClasses, `installed configuration recipe ${recipe.name} risk inventory`)
     assertSortedUniqueStrings(recipe.toolNames, `installed configuration recipe ${recipe.name} tool inventory`)

@@ -293,6 +293,7 @@ export type ParsedCliArguments =
     guildIds: string[]
     json: boolean
     name: string
+    userIds: string[]
   }
   | {
     action: "apply"
@@ -304,6 +305,7 @@ export type ParsedCliArguments =
     json: boolean
     name: string
     planDigest: string
+    userIds: string[]
   }
   | { command: "serve"; configFile?: string; profileName?: string }
   | {
@@ -891,11 +893,13 @@ function parseRecipeCommand(
   const guildIds: string[] = []
   let json = false
   let planDigest: string | undefined
+  const userIds: string[] = []
   const seen = new Set<string>()
   const allowed = new Set([
     "--channel-id",
     "--guild-id",
     "--json",
+    "--user-id",
     ...(action === "apply" ? ["--confirm", "--plan-digest"] : []),
   ])
   for (let index = 3; index < args.length; index += 1) {
@@ -903,7 +907,9 @@ function parseRecipeCommand(
     if (!argument || !allowed.has(argument)) {
       throw new ConfigurationError(`Unknown option ${argument || ""}`)
     }
-    const repeatable = argument === "--channel-id" || argument === "--guild-id"
+    const repeatable = argument === "--channel-id"
+      || argument === "--guild-id"
+      || argument === "--user-id"
     if (!repeatable && seen.has(argument)) {
       throw new ConfigurationError(`Option ${argument} may be provided only once`)
     }
@@ -921,14 +927,21 @@ function parseRecipeCommand(
     if (argument === "--confirm") confirmation = value
     if (argument === "--guild-id") guildIds.push(value)
     if (argument === "--plan-digest") planDigest = value
+    if (argument === "--user-id") userIds.push(value)
   }
-  const request = normalizeConfigRecipeRequest({ channelIds, guildIds, name })
+  const request = normalizeConfigRecipeRequest({
+    channelIds,
+    guildIds,
+    name,
+    userIds,
+  })
   const selection = {
     channelIds: request.scope.kind === "channel" ? [...request.scope.ids] : [],
     file,
     guildIds: request.scope.kind === "guild" ? [...request.scope.ids] : [],
     json,
     name: request.name,
+    userIds: request.scope.kind === "user" ? [...request.scope.ids] : [],
   }
   if (action === "plan") {
     return { action, command: "recipe", ...selection }
@@ -1353,8 +1366,8 @@ function helpText(topic: CliCommand | undefined): string {
       "Actions:",
       "  list [--json]",
       "  show NAME [--json]",
-      "  plan NAME FILE (--guild-id ID... | --channel-id ID...) [--json]",
-      "  apply NAME FILE (--guild-id ID... | --channel-id ID...) --plan-digest DIGEST --confirm NAME [--json]",
+      "  plan NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) [--json]",
+      "  apply NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) --plan-digest DIGEST --confirm NAME [--json]",
       "",
       "Review and add one bounded write workflow to an existing strict policy. Planning and application do not resolve secrets or contact Discord. Application recomputes the exact plan, rejects concurrent source changes, and preserves a recoverable backup.",
     ].join("\n")
@@ -1741,9 +1754,9 @@ function renderRecipe(recipe: ConfigRecipeDescriptor): string {
     recipe.name,
     `  ${recipe.description}`,
     `  Scope input: ${recipe.requirements.scope.option} (${recipe.requirements.scope.minimum}-${recipe.requirements.scope.maximum})`,
-    `  Outer boundary: ${recipe.requirements.scope.outerBoundary}`,
+    `  Outer boundary: ${recipe.requirements.scope.outerBoundary ?? "independent exact-user scope"}`,
     `  Added scopes: ${recipe.requirements.scope.targets.join(", ")}`,
-    `  Bot permissions: ${recipe.requirements.botPermissions.join(", ")} (${recipe.requirements.botPermissionBitfield})`,
+    `  Bot permissions: ${recipe.requirements.botPermissions.length === 0 ? "none" : recipe.requirements.botPermissions.join(", ")} (${recipe.requirements.botPermissionBitfield})`,
     `  Privileged intents: ${privilegedIntents}`,
     `  Gateway evidence: ${gatewayEvidence}`,
     `  Toolsets: ${recipe.toolsets.join(", ")}`,
@@ -2504,6 +2517,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           file: parsed.file,
           guildIds: parsed.guildIds,
           name: parsed.name,
+          userIds: parsed.userIds,
         }
         const report = parsed.action === "plan"
           ? dependencies.planRecipe(selection)

@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server for reading and safely administering Discord guilds through a caller-owned bot. It combines broad, typed Discord coverage with exact scope, privacy-minimized results, reviewed writes, durable content-free evidence, and explicit uncertain-outcome handling.
+Discord MCP is a local stdio Model Context Protocol server for reading and safely administering Discord guilds and separately allowlisted one-to-one conversations through a caller-owned bot. It combines broad, typed Discord coverage with exact scope, privacy-minimized results, reviewed writes, durable content-free evidence, and explicit uncertain-outcome handling.
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
@@ -12,10 +12,10 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 
 | Concern | Enforced behavior |
 | --- | --- |
-| Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, risk-separated toolsets, and read-only setup presets |
-| Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, and no hidden direct-message access |
+| Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, a separate exact-user private-message scope, risk-separated toolsets, and read-only setup presets |
+| Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, and no private-channel discovery or scope inheritance |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
-| Outcome integrity | Pending content-free evidence before mutation, one non-retried write, exact readback, durable coordination, and quarantine after ambiguity |
+| Outcome integrity | Pending content-free evidence before mutation, non-retried writes, exact readback, durable coordination, and quarantine after ambiguity |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
 | Plan review | Every canonical plan tool retains a complete text and structured result and can add a display-only, authority-free interactive review in MCP Apps hosts |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
@@ -166,7 +166,7 @@ npx --yes @j-256/discord-mcp@0.1.0 setup \
 
 ### Expand the policy through review
 
-Keep first setup read-only, then inspect and plan an additive recipe when a write workflow is needed. `guild-builder` adds two-pass live capture plus caller-retained guild blueprints across structure, profile, settings, Welcome Screen, onboarding, and staged AutoMod policy for exact guilds. Capture returns only the strict representable subset, including complete exact-ID AutoMod rules, reports every known omission and exact-bound reference, and persists no snapshot or policy content. New AutoMod rules are created disabled; exact existing rules never use name-based adoption; each disable, configure, or enable stage needs a fresh review. The recipe grants AutoMod audit and change policy but does not overgrant `Moderate Members`, which is required only for timeout actions, or infer the separate exact alert-channel allowlist. Its settings and onboarding evidence uses a nonprivileged `GUILDS`-only layout-evidence connection when the resulting policy is served, while the configured event-feed policy remains unchanged. `incident-response` adds privacy-minimized incident-action audit plus reviewed time-bounded invite and direct-message lockdown changes for exact guilds, requires only `Manage Guild`, and adds no Gateway or privileged intent. `channel-publisher` adds bounded message and static Components V2 publication tools for exact channels without adding a Gateway evidence connection, and it reports the required Message Content intent.
+Keep first setup read-only, then inspect and plan an additive recipe when a write workflow is needed. `guild-builder` adds two-pass live capture plus caller-retained guild blueprints across structure, profile, settings, Welcome Screen, onboarding, and staged AutoMod policy for exact guilds. Capture returns only the strict representable subset, including complete exact-ID AutoMod rules, reports every known omission and exact-bound reference, and persists no snapshot or policy content. New AutoMod rules are created disabled; exact existing rules never use name-based adoption; each disable, configure, or enable stage needs a fresh review. The recipe grants AutoMod audit and change policy but does not overgrant `Moderate Members`, which is required only for timeout actions, or infer the separate exact alert-channel allowlist. Its settings and onboarding evidence uses a nonprivileged `GUILDS`-only layout-evidence connection when the resulting policy is served, while the configured event-feed policy remains unchanged. `incident-response` adds privacy-minimized incident-action audit plus reviewed time-bounded invite and direct-message lockdown changes for exact guilds, requires only `Manage Guild`, and adds no Gateway or privileged intent. `channel-publisher` adds bounded message and static Components V2 publication tools for exact channels without adding a Gateway evidence connection, and it reports the required Message Content intent. [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds only exact-user one-to-one private-message audit, delivery, editing, deletion, and the dedicated toolset. It grants no guild permission, privileged intent, Gateway feed, group DM, recipient discovery, or immediate write path.
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.0 recipe list
@@ -176,6 +176,12 @@ npx --yes @j-256/discord-mcp@0.1.0 recipe apply guild-builder ./discord-mcp.json
   --guild-id YOUR_GUILD_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm guild-builder
+npx --yes @j-256/discord-mcp@0.1.0 recipe plan direct-messenger ./discord-mcp.json \
+  --user-id EXPECTED_RECIPIENT_USER_ID
+npx --yes @j-256/discord-mcp@0.1.0 recipe apply direct-messenger ./discord-mcp.json \
+  --user-id EXPECTED_RECIPIENT_USER_ID \
+  --plan-digest SHA256_FROM_THE_PLAN \
+  --confirm direct-messenger
 ```
 
 Planning prints the complete proposed non-secret document, exact field changes, permissions, intents, risks, warnings, and a path-bound digest without resolving a secret or contacting Discord. Application recomputes that plan, requires the exact digest and recipe-name confirmation, rejects a concurrent source change, preserves a recoverable backup, and still grants no Discord authority by itself. Run the printed offline validation, online doctor, and smoke checks after applying. Recipes add policy only; they never remove an existing capability, scope, or toolset.
@@ -198,8 +204,8 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 
 | Area | Selected capabilities |
 | --- | --- |
-| Discovery and reads | Guilds, channels, global and guild voice regions, exact transient voice-channel status, roles, effective permissions, member-safe audits, message history, indexed search, threads, forums, polls, reactions, audit history, integrations, invites, templates, guild and application-owned emojis, stickers, soundboard, events, Stage instances, onboarding, Welcome Screens, profiles, settings, incident actions, and webhooks |
-| Messages and communities | Idempotent bot sends and edits, privately credentialed Incoming-webhook message lookup, plain-text delivery, exact editing and reviewed deletion, exact pins, reactions, announcement crossposts and subscriptions, immutable forwarding, attachments, reviewed and restart-verifiable static Components V2, forum posts, thread creation, native polls, and exact deletion |
+| Discovery and reads | Guilds, channels, exact allowlisted one-to-one private messages, global and guild voice regions, exact transient voice-channel status, roles, effective permissions, member-safe audits, message history, indexed search, threads, forums, polls, reactions, audit history, integrations, invites, templates, guild and application-owned emojis, stickers, soundboard, events, Stage instances, onboarding, Welcome Screens, profiles, settings, incident actions, and webhooks |
+| Messages and communities | Idempotent guild bot sends and edits, reviewed exact-recipient private-message send, reply, edit, deletion, and receipt verification, privately credentialed Incoming-webhook message lookup, plain-text delivery, exact editing and reviewed deletion, exact pins, reactions, announcement crossposts and subscriptions, immutable forwarding, attachments, reviewed and restart-verifiable static Components V2, forum posts, thread creation, native polls, and exact deletion |
 | Guild structure | Privacy-minimized two-pass capture into caller-retained declarative guild blueprints across additive structure, guild profile, named settings, complete Welcome Screens, complete onboarding, receipt-bound staged AutoMod policy, and ordered restart-verifiable static Components V2 publications; additive channels and roles; reviewed exact channel and standard-role retirement; resumable scaffolds; atomic channel cloning; relative channel and role ordering; boost-aware voice and Stage channel metadata; connection-sensitive voice-channel status changes; permission overwrites; forum tags; and exact role configuration with reviewed local or Unicode icons |
 | Members and moderation | Privacy-minimized member and ban reads, exact nickname, role, voice, thread-membership, kick, ban, unban, and timeout workflows; reviewed native bulk bans with complete target-set evidence, explicit partial outcomes, and per-target readback; and bounded non-exact guild pruning with protected-identity role shields, two independent count ceilings, and count-only outcome evidence |
 | Community configuration | Native command management, reviewed policy-justified privileged-intent enablement, Guild Templates, integrations, finite private-file bearer or exact-user invite creation, capability-safe invite audit and revocation, credential-safe webhook administration and private message lifecycle, onboarding, Welcome Screens, authenticated widget settings, time-bounded incident actions, application-owned emojis, guild expressions, soundboard, AutoMod, scheduled events, and Stage lifecycle |
@@ -213,7 +219,7 @@ Discord permissions are the outer boundary. Connector policy narrows that author
 
 - Production traffic uses fixed Discord REST and vetted Gateway origins; runtime configuration cannot redirect credentials
 - Exact guild, channel, role, member, and feature allowlists constrain each surface independently
-- Direct messages are rejected, mentions default to suppressed, and anti-spam limits precede message writes
+- Every guild tool rejects direct and group-direct channels. The dedicated private-message tools instead require an independent exact ordinary-user allowlist and caller-known one-to-one channel IDs, suppress all mentions, use fixed anti-spam limits, and provide no discovery, bulk targeting, or Gateway feed
 - Discord names, messages, embeds, components, filenames, URLs, and other remote text are treated as untrusted data rather than instructions
 - Discord content may be returned transiently when explicitly requested, but it is not cached, journaled, exported, or persisted by the connector
 - New invite codes and URLs are delivered only through a caller-selected exclusive private file; MCP results, lifecycle records, errors, logs, and telemetry remain bearer-capability-free

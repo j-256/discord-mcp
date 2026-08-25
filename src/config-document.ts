@@ -150,6 +150,10 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "channelOrderingAudit",
   "channelOrderingChanges",
   "deletions",
+  "directMessageAudit",
+  "directMessageDeletion",
+  "directMessageDelivery",
+  "directMessageEditing",
   "forumPosts",
   "forumTagAudit",
   "forumTagChanges",
@@ -241,6 +245,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "channelMetadataIds",
   "channelOrderingGuildIds",
   "deleteChannelIds",
+  "directMessageUserIds",
   "forumPostChannelIds",
   "forumTagChannelIds",
   "guildScaffoldGuildIds",
@@ -419,6 +424,11 @@ const WEBHOOK_MESSAGE_CHANGE_CAPABILITY_DESCRIPTION = "Enable exact credential-s
 const WEBHOOK_MESSAGE_DELETION_CAPABILITY_DESCRIPTION = "Enable reviewed exact Incoming-webhook message deletion with transient content-bound planning"
 const WEBHOOK_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION = "Enable bounded plain-text Incoming-webhook message delivery with mention containment and one-shot coordination"
 const WEBHOOK_MESSAGE_SCOPE_DESCRIPTION = "Exact direct text or announcement channel ID allowlist for privately credentialed Incoming-webhook message access"
+const DIRECT_MESSAGE_AUDIT_CAPABILITY_DESCRIPTION = "Enable exact-recipient one-to-one direct-message reads without content persistence"
+const DIRECT_MESSAGE_DELETION_CAPABILITY_DESCRIPTION = "Enable reviewed deletion of exact connector-authored direct messages"
+const DIRECT_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION = "Enable reviewed plain-text direct-message sends and replies"
+const DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION = "Enable reviewed edits of exact connector-authored direct messages"
+const DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION = "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "applicationIntentChanges") {
@@ -454,6 +464,18 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "webhookMessageDelivery") {
     return WEBHOOK_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "directMessageAudit") {
+    return DIRECT_MESSAGE_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "directMessageDeletion") {
+    return DIRECT_MESSAGE_DELETION_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "directMessageDelivery") {
+    return DIRECT_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "directMessageEditing") {
+    return DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION
+  }
   return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
@@ -475,6 +497,9 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "webhookMessageChannelIds") {
     return WEBHOOK_MESSAGE_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "directMessageUserIds") {
+    return DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION
   }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }
@@ -504,7 +529,12 @@ const capabilityShape = Object.fromEntries(
 const scopeShape = Object.fromEntries(
   CONFIG_SCOPE_NAMES.map((name) => [
     name,
-    snowflakeArraySchema(0, CONFIG_SCOPE_ENTRIES)
+    snowflakeArraySchema(
+      0,
+      name === "directMessageUserIds"
+        ? CONNECTOR_LIMITS.directMessageUserAllowlist
+        : CONFIG_SCOPE_ENTRIES,
+    )
       .describe(scopeDescription(name))
       .optional(),
   ]),

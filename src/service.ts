@@ -219,6 +219,20 @@ import {
   normalizeDeletionRequest,
 } from "./deletion-service.js"
 import type {
+  DirectMessageChangeRequest,
+  DirectMessageChangeResult,
+  DirectMessagePage,
+  DirectMessagePlan,
+  DirectMessageServiceClient,
+  DirectMessageServiceOptions,
+  DirectMessageVerificationResult,
+  DirectMessageView,
+} from "./direct-message-service.js"
+import {
+  directMessageVerificationKey,
+  DirectMessageService,
+} from "./direct-message-service.js"
+import type {
   DiscordClientOptions,
   GuildPageOptions,
   GuildMessageSearchOptions,
@@ -734,6 +748,8 @@ export interface DiscordServiceClient {
   createComponentMessage: DiscordClient["createComponentMessage"]
   createMessage: DiscordClient["createMessage"]
   createMessageForward: DiscordClient["createMessageForward"]
+  createDirectMessage?: DiscordClient["createDirectMessage"]
+  createDirectMessageChannel?: DiscordClient["createDirectMessageChannel"]
   createPoll: DiscordClient["createPoll"]
   createThreadFromMessage: DiscordClient["createThreadFromMessage"]
   createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
@@ -746,6 +762,7 @@ export interface DiscordServiceClient {
   deleteGuildRole: DiscordClient["deleteGuildRole"]
   deleteGuildAutoModerationRule: DiscordClient["deleteGuildAutoModerationRule"]
   deleteMessage: DiscordClient["deleteMessage"]
+  deleteDirectMessage?: DiscordClient["deleteDirectMessage"]
   deleteGuildEmoji: DiscordClient["deleteGuildEmoji"]
   deleteGuildScheduledEvent: DiscordClient["deleteGuildScheduledEvent"]
   deleteGuildSoundboardSound: DiscordClient["deleteGuildSoundboardSound"]
@@ -762,6 +779,7 @@ export interface DiscordServiceClient {
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editComponentMessage: DiscordClient["editComponentMessage"]
   editMessage: DiscordClient["editMessage"]
+  editDirectMessage?: DiscordClient["editDirectMessage"]
   executeWebhookMessage: DiscordClient["executeWebhookMessage"]
   getChannel: DiscordClient["getChannel"]
   getApplicationEmoji: DiscordClient["getApplicationEmoji"]
@@ -795,6 +813,9 @@ export interface DiscordServiceClient {
   getGuildSticker: DiscordClient["getGuildSticker"]
   getStageInstance: DiscordClient["getStageInstance"]
   getMessage: DiscordClient["getMessage"]
+  getDirectMessage?: DiscordClient["getDirectMessage"]
+  getDirectMessageChannel?: DiscordClient["getDirectMessageChannel"]
+  getDirectMessageUser?: DiscordClient["getDirectMessageUser"]
   getWebhookMessage: DiscordClient["getWebhookMessage"]
   getWebhookWithToken: DiscordClient["getWebhookWithToken"]
   getThreadMember: DiscordClient["getThreadMember"]
@@ -823,6 +844,7 @@ export interface DiscordServiceClient {
   listReactionUsers: DiscordClient["listReactionUsers"]
   listChannelWebhooks: DiscordClient["listChannelWebhooks"]
   listMessages: DiscordClient["listMessages"]
+  listDirectMessages?: DiscordClient["listDirectMessages"]
   listDefaultSoundboardSounds: DiscordClient["listDefaultSoundboardSounds"]
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
@@ -878,6 +900,11 @@ export interface ArchivedThreadListOptions extends RequestOptions {
   beforeTimestamp?: string
   limit?: number
   visibility?: ArchivedThreadVisibility
+}
+
+export interface DirectMessageListOptions extends RequestOptions {
+  beforeMessageId?: string
+  limit?: number
 }
 
 export interface ConnectorServiceOptions {
@@ -946,6 +973,10 @@ export interface ConnectorServiceOptions {
   clientOptions?: Omit<DiscordClientOptions, "token">
   config: ConnectorConfig
   deletionOptions?: Pick<DeletionServiceOptions, "clock" | "planKey" | "randomId">
+  directMessageOptions?: Pick<
+    DirectMessageServiceOptions,
+    "clock" | "limiter" | "planKey" | "randomId"
+  >
   forumPostOptions?: Pick<
     ForumPostServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1187,6 +1218,37 @@ function voiceChannelStatusSource(
   return new DisabledGatewayVoiceChannelStatusSource()
 }
 
+const DIRECT_MESSAGE_CLIENT_METHODS = [
+  "createDirectMessage",
+  "createDirectMessageChannel",
+  "deleteDirectMessage",
+  "editDirectMessage",
+  "getDirectMessage",
+  "getDirectMessageChannel",
+  "getDirectMessageUser",
+  "listDirectMessages",
+] as const
+
+function configuredDirectMessageServiceClient(
+  client: DiscordServiceClient,
+): DirectMessageServiceClient | undefined {
+  const candidate = client as DiscordServiceClient
+    & Partial<DirectMessageServiceClient>
+  if (DIRECT_MESSAGE_CLIENT_METHODS.every((name) => (
+    typeof candidate[name] === "function"
+  ))) {
+    return candidate as DirectMessageServiceClient
+  }
+  return undefined
+}
+
+function directMessagesConfigured(config: ConnectorConfig): boolean {
+  return config.allowDirectMessageAudit
+    || config.allowDirectMessageDeletion
+    || config.allowDirectMessageDelivery
+    || config.allowDirectMessageEditing
+}
+
 export function applicationPostureRequirementsForConfig(
   config: ConnectorConfig,
 ): ApplicationPostureRequirements {
@@ -1236,6 +1298,7 @@ export class ConnectorService {
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
   readonly #deletionService: DeletionService
+  readonly #directMessageService: DirectMessageService | undefined
   #identityPromise: Promise<VerifiedIdentity> | undefined
   readonly #interactionService: InteractionService
   readonly #inviteService: InviteService
@@ -1302,6 +1365,23 @@ export class ConnectorService {
       writeCoordinationDirectory(options.config.auditFile),
       operationStore,
     )
+    const directMessageClient = configuredDirectMessageServiceClient(this.#client)
+    if (!directMessageClient && directMessagesConfigured(options.config)) {
+      throw new ConfigurationError(
+        "Configured direct-message capabilities require complete direct-message client support",
+      )
+    }
+    this.#directMessageService = directMessageClient
+      ? new DirectMessageService({
+          activityStore: this.#activityStore,
+          client: directMessageClient,
+          operationStore,
+          policy: this.#policy,
+          ...options.directMessageOptions,
+          verificationKey: directMessageVerificationKey(options.config.token),
+          writeCoordinator: this.#writeCoordinator,
+        })
+      : undefined
     this.#webhookCredentialStore = options.config.webhookCredentialRoot
       ? new WebhookCredentialStore(options.config.webhookCredentialRoot)
       : undefined
@@ -1757,6 +1837,15 @@ export class ConnectorService {
       )
     }
     return this.#webhookMessageService
+  }
+
+  #directMessages(): DirectMessageService {
+    if (!this.#directMessageService) {
+      throw new ConfigurationError(
+        "Discord direct-message capabilities require complete client support",
+      )
+    }
+    return this.#directMessageService
   }
 
   async #verifyIdentity(options: RequestOptions = {}): Promise<VerifiedIdentity> {
@@ -2879,6 +2968,57 @@ export class ConnectorService {
     )
   }
 
+  async listDirectMessages(
+    recipientId: string,
+    channelId: string,
+    options: DirectMessageListOptions = {},
+  ): Promise<DirectMessagePage> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#directMessages().list(
+      identity.application.id,
+      identity.bot.id,
+      recipientId,
+      channelId,
+      {
+        ...(options.beforeMessageId === undefined
+          ? {}
+          : { beforeMessageId: options.beforeMessageId }),
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+        request: options.signal === undefined ? {} : { signal: options.signal },
+      },
+    )
+  }
+
+  async getDirectMessage(
+    recipientId: string,
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DirectMessageView> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#directMessages().get(
+      identity.application.id,
+      identity.bot.id,
+      recipientId,
+      channelId,
+      messageId,
+      options,
+    )
+  }
+
+  async verifyDirectMessageChange(
+    request: DirectMessageChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<DirectMessageVerificationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#directMessages().verify(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async listAutoModerationRules(
     guildId: string,
     options: RequestOptions = {},
@@ -3387,6 +3527,19 @@ export class ConnectorService {
   ): Promise<AutoModerationPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#automodService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planDirectMessageChange(
+    request: DirectMessageChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<DirectMessagePlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#directMessages().plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -5598,6 +5751,21 @@ export class ConnectorService {
         planDigest,
         options,
       ),
+    )
+  }
+
+  async executeDirectMessageChange(
+    request: DirectMessageChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<DirectMessageChangeResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#directMessages().execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
     )
   }
 

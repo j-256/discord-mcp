@@ -234,6 +234,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    directMessageAuditEnabled: false,
+    directMessageDeletionEnabled: false,
+    directMessageDeliveryEnabled: false,
+    directMessageEditingEnabled: false,
+    directMessageUserIds: [],
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,
@@ -422,6 +427,88 @@ test("configuration keeps Gateway disabled and requires pinned bounded scope whe
       /expected number to be|expected int|must be an integer between 1 and 1000/,
     )
   }
+})
+
+test("configuration and policy isolate exact-user private-message authority", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      directMessageAudit: true,
+      directMessageDeletion: true,
+      directMessageDelivery: true,
+      directMessageEditing: true,
+    },
+    readScope: {
+      guildIds: [OTHER_GUILD_ID],
+    },
+    scopes: {
+      directMessageUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowDirectMessageAudit, true)
+  assert.equal(config.allowDirectMessageDeletion, true)
+  assert.equal(config.allowDirectMessageDelivery, true)
+  assert.equal(config.allowDirectMessageEditing, true)
+  assert.deepEqual([...config.directMessageUserIds], [USER_ID])
+  assert.doesNotThrow(() => policy.assertDirectMessageAuditAllowed(USER_ID))
+  assert.doesNotThrow(() => policy.assertDirectMessageDeletionAllowed(USER_ID))
+  assert.doesNotThrow(() => policy.assertDirectMessageDeliveryAllowed(USER_ID))
+  assert.doesNotThrow(() => policy.assertDirectMessageEditingAllowed(USER_ID))
+  assert.throws(
+    () => policy.assertDirectMessageAuditAllowed("400000000000000002"),
+    /outside the direct-message scope/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { directMessageAudit: true },
+    scopes: { directMessageUserIds: [USER_ID] },
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertDirectMessageAuditAllowed(USER_ID))
+  assert.throws(
+    () => auditOnly.assertDirectMessageDeliveryAllowed(USER_ID),
+    /delivery is disabled/,
+  )
+  assert.throws(
+    () => auditOnly.assertDirectMessageEditingAllowed(USER_ID),
+    /editing is disabled/,
+  )
+  assert.throws(
+    () => auditOnly.assertDirectMessageDeletionAllowed(USER_ID),
+    /deletion is disabled/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { directMessageDelivery: true },
+    }, { homeDirectory: "/test/home" }),
+    /require an exact direct-message user allowlist/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        directMessages: true,
+      } as never,
+      directMessageUserIds: [USER_ID],
+    } as never, { homeDirectory: "/test/home" }),
+    /unknown|unrecognized|strict/i,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      scopes: {
+        directMessageUserIds: Array.from(
+          { length: CONNECTOR_LIMITS.directMessageUserAllowlist + 1 },
+          (_value, index) => String(500000000000000000n + BigInt(index)),
+        ),
+      },
+    }, { homeDirectory: "/test/home" }),
+    new RegExp(`<=${CONNECTOR_LIMITS.directMessageUserAllowlist} items|at most ${CONNECTOR_LIMITS.directMessageUserAllowlist} unique IDs`),
+  )
 })
 
 test("configuration and policy isolate native Interaction ingress and command changes", () => {
@@ -1075,6 +1162,11 @@ test("configuration and policy require an exact administration guild and protect
     channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    directMessageAuditEnabled: false,
+    directMessageDeletionEnabled: false,
+    directMessageDeliveryEnabled: false,
+    directMessageEditingEnabled: false,
+    directMessageUserIds: [],
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,
@@ -4601,6 +4693,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     channelOrderingGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
+    directMessageAuditEnabled: false,
+    directMessageDeletionEnabled: false,
+    directMessageDeliveryEnabled: false,
+    directMessageEditingEnabled: false,
+    directMessageUserIds: [],
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,

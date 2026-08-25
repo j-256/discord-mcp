@@ -27,6 +27,7 @@ import {
   OPERATION_KEY_HASH_PATTERN,
   OPERATION_KINDS,
   isApplicationOperationKind,
+  isDirectMessageOperationKind,
   type OperationKind,
   type OperationReceiptStatus,
   type OperationStore,
@@ -39,6 +40,7 @@ export const WRITE_COORDINATION_RESOURCE_KINDS = [
   "member",
   "message",
   "role",
+  "user",
   "webhook",
 ] as const
 
@@ -353,6 +355,20 @@ function normalizeTargets(
       )
     }
     byDescriptor.set(targetDescriptor(target), target)
+  }
+  if (kind === "direct-message-change") {
+    const targets = [...byDescriptor.values()]
+    if (
+      byDescriptor.size !== values.length
+      || targets.filter((target) => target.kind === "user").length !== 1
+      || targets.filter((target) => target.kind === "channel").length > 1
+      || targets.filter((target) => target.kind === "message").length > 1
+      || targets.some((target) => !["channel", "message", "user"].includes(target.kind))
+    ) {
+      throw new WriteCoordinationStateError(
+        "Discord direct-message coordination requires one exact user and optional exact channel and message targets",
+      )
+    }
   }
   if (kind === "bulk-guild-ban") {
     const targets = [...byDescriptor.values()]
@@ -1114,15 +1130,24 @@ export class FileWriteCoordinator implements WriteCoordinator {
         isApplicationOperationKind(record.kind)
         && !this.#operationStore.getApplication
       ) return "unreadable"
+      if (
+        isDirectMessageOperationKind(record.kind)
+        && !this.#operationStore.getDirectMessage
+      ) return "unreadable"
       const receipt = isApplicationOperationKind(record.kind)
         ? await this.#operationStore.getApplication!(
-          record.kind,
-          record.operationKeyHash,
-        )
-        : await this.#operationStore.get(
-          record.kind,
-          record.operationKeyHash,
-        )
+            record.kind,
+            record.operationKeyHash,
+          )
+        : isDirectMessageOperationKind(record.kind)
+          ? await this.#operationStore.getDirectMessage!(
+              record.kind,
+              record.operationKeyHash,
+            )
+          : await this.#operationStore.get(
+              record.kind,
+              record.operationKeyHash,
+            )
       if (!receipt) return "missing"
       if (receipt.planDigest !== record.planDigest) return "different-plan"
       return receipt.status

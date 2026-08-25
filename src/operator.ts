@@ -82,7 +82,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 28
+export const OPERATOR_REPORT_SCHEMA_VERSION = 29
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -122,6 +122,10 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   channelScope: "channel-scope",
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
+  directMessageAuditPolicy: "direct-message-audit-policy",
+  directMessageDeletionPolicy: "direct-message-deletion-policy",
+  directMessageDeliveryPolicy: "direct-message-delivery-policy",
+  directMessageEditingPolicy: "direct-message-editing-policy",
   forumPostPolicy: "forum-post-policy",
   forumTagAuditPolicy: "forum-tag-audit-policy",
   forumTagChangePolicy: "forum-tag-change-policy",
@@ -840,6 +844,14 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowChannelCreation, "channel-creation", "Channel creation"],
     [config.allowChannelMetadataChanges, "channel-metadata", "Channel metadata changes"],
     [config.allowDeletions, "deletion", "Message deletion"],
+    [
+      config.allowDirectMessageAudit
+        || config.allowDirectMessageDeletion
+        || config.allowDirectMessageDelivery
+        || config.allowDirectMessageEditing,
+      "direct-messages",
+      "Exact-user private messages",
+    ],
     [config.allowForumPosts, "forum-posts", "Forum-post creation"],
     [
       config.allowForumTagAudit || config.allowForumTagChanges,
@@ -1307,6 +1319,82 @@ export async function diagnoseConnector(
       "pass",
       `Complete redacted MCP read results are limited to ${config.mcpReadResponseMaxBytes} UTF-8 bytes; oversized reads fail whole without truncation and final mutation outcomes are preserved`,
     ))
+    if (!config.allowDirectMessageAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageAuditPolicy,
+        "pass",
+        "Exact-user private-message reads are disabled",
+      ))
+    } else if (config.directMessageUserIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageAuditPolicy,
+        "warn",
+        "Private-message audit is enabled, but the required exact user allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageAuditPolicy,
+        "pass",
+        `Private-message reads are constrained to ${config.directMessageUserIds.size} exact users and caller-known one-to-one channel IDs with profile-minimized transient results and no DM discovery or persistence`,
+      ))
+    }
+    if (!config.allowDirectMessageDelivery) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageDeliveryPolicy,
+        "pass",
+        "Reviewed private-message sends and replies are disabled",
+      ))
+    } else if (config.directMessageUserIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageDeliveryPolicy,
+        "warn",
+        "Private-message delivery is enabled, but the required exact user allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageDeliveryPolicy,
+        "pass",
+        `Private-message sends and replies are constrained to ${config.directMessageUserIds.size} exact users with contact acknowledgement, content-bound review, forced empty mentions, fixed anti-spam limits, request-bound schema-v2 receipts, no automatic mutation retry, and exact readback`,
+      ))
+    }
+    if (!config.allowDirectMessageEditing) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageEditingPolicy,
+        "pass",
+        "Reviewed private-message editing is disabled",
+      ))
+    } else if (config.directMessageUserIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageEditingPolicy,
+        "warn",
+        "Private-message editing is enabled, but the required exact user allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageEditingPolicy,
+        "pass",
+        `Private-message editing is constrained to exact plain-text connector-authored messages involving ${config.directMessageUserIds.size} configured users with signed approval and exact readback`,
+      ))
+    }
+    if (!config.allowDirectMessageDeletion) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageDeletionPolicy,
+        "pass",
+        "Reviewed private-message deletion is disabled",
+      ))
+    } else if (config.directMessageUserIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageDeletionPolicy,
+        "warn",
+        "Private-message deletion is enabled, but the required exact user allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageDeletionPolicy,
+        "pass",
+        `Private-message deletion is constrained to exact plain-text connector-authored messages involving ${config.directMessageUserIds.size} configured users with irreversible acknowledgement, signed approval, one non-retried deletion, and exact absence readback`,
+      ))
+    }
     if (!config.allowAttachments) {
       checks.push(check(
         DOCTOR_CHECK_IDS.attachmentPolicy,

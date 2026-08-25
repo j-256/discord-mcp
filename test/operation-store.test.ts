@@ -21,6 +21,7 @@ import {
   type ApplicationOperationReceipt,
   type AutoModerationOperationReceipt,
   type ComponentMessageOperationReceipt,
+  type DirectMessageOperationReceipt,
   type OperationReceipt,
   type StandardOperationReceipt,
 } from "../src/operation-store.js"
@@ -30,6 +31,8 @@ const CHANNEL_ID = "200000000000000001"
 const PLAN_DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const REQUEST_DIGEST = `hmac-sha256:${"b".repeat(64)}`
 const OPERATION_KEY = "channel-create-operation-0001"
+const DIRECT_MESSAGE_OPERATION_KEY = "direct-message-operation-0001"
+const DIRECT_MESSAGE_RECIPIENT_ID = "400000000000000001"
 const INVITE_REF = `iref_hmac_sha256_${"b".repeat(64)}`
 const GUILD_TEMPLATE_REF = `tref_hmac_sha256_${"c".repeat(64)}`
 
@@ -74,6 +77,42 @@ function automodReceipt(
     kind: "automod-change",
     requestDigest: REQUEST_DIGEST,
     schemaVersion: 2,
+  }
+}
+
+function directMessageReceipt(
+  stage: DirectMessageOperationReceipt["stage"] = "reserved",
+  status: DirectMessageOperationReceipt["status"] = stage === "terminal"
+    ? "completed"
+    : "pending",
+): DirectMessageOperationReceipt {
+  const dispatched = stage === "message-dispatched" || stage === "terminal"
+  const channelReady = stage !== "reserved"
+  return {
+    action: "send",
+    activityId: "activity-direct-message-0001",
+    channelId: channelReady ? CHANNEL_ID : null,
+    error: status === "failed" || status === "uncertain"
+      ? "DiscordApiError.500.unknown"
+      : null,
+    kind: "direct-message-change",
+    messageId: dispatched ? "300000000000000001" : null,
+    operationKeyHash: operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    recipientId: DIRECT_MESSAGE_RECIPIENT_ID,
+    replyToMessageId: null,
+    requestDigest: REQUEST_DIGEST,
+    schemaVersion: 2,
+    stage,
+    status,
+    timestamp: stage === "reserved"
+      ? "2026-08-25T00:00:00.000Z"
+      : stage === "channel-ready"
+        ? "2026-08-25T00:00:01.000Z"
+        : stage === "message-dispatched"
+          ? "2026-08-25T00:00:02.000Z"
+          : "2026-08-25T00:00:03.000Z",
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -245,6 +284,124 @@ test("component-message receipts strictly bind a content-free keyed request dige
       requestDigest: REQUEST_DIGEST,
     } as unknown as OperationReceipt),
     /invalid shape/,
+  )
+})
+
+test("direct-message receipts advance through immutable content-free checkpoints", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-direct-message-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const reserved = directMessageReceipt()
+
+  assert.deepEqual(await store.reserveDirectMessage(reserved), {
+    created: true,
+    receipt: reserved,
+  })
+  assert.deepEqual(
+    await store.getDirectMessage("direct-message-change", reserved.operationKeyHash),
+    reserved,
+  )
+  await store.checkpointDirectMessage(directMessageReceipt("channel-ready"))
+  assert.deepEqual(
+    await store.getDirectMessage("direct-message-change", reserved.operationKeyHash),
+    directMessageReceipt("channel-ready"),
+  )
+  await store.checkpointDirectMessage(directMessageReceipt("message-dispatched"))
+  await store.finishDirectMessage(directMessageReceipt("terminal"))
+  await store.finishDirectMessage(directMessageReceipt("terminal"))
+  assert.deepEqual(
+    await store.getDirectMessage("direct-message-change", reserved.operationKeyHash),
+    directMessageReceipt("terminal"),
+  )
+
+  const operationDirectory = join(directory, (await readdir(directory))[0] as string)
+  const receiptFiles = [
+    join(operationDirectory, "pending.json"),
+    join(operationDirectory, "channel-ready", "receipt.json"),
+    join(operationDirectory, "message-dispatched", "receipt.json"),
+    join(operationDirectory, "terminal", "receipt.json"),
+  ]
+  const durableText = (await Promise.all(
+    receiptFiles.map((file) => readFile(file, "utf8")),
+  )).join("\n")
+  assert.match(durableText, new RegExp(REQUEST_DIGEST))
+  assert.doesNotMatch(durableText, new RegExp(DIRECT_MESSAGE_OPERATION_KEY))
+  assert.doesNotMatch(
+    durableText,
+    /private message content|review reason|username|avatar|attachment URL/,
+  )
+  for (const file of receiptFiles) {
+    assert.equal((await lstat(file)).mode & 0o777, 0o600)
+  }
+})
+
+test("direct-message receipts reject legacy shapes and unsafe stage transitions", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-direct-message-invalid-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const malformedStore = new FileOperationStore(join(root, "malformed"))
+  const reserved = directMessageReceipt()
+
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      schemaVersion: 1,
+    } as unknown as DirectMessageOperationReceipt),
+    /invalid shape/,
+  )
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      content: "private message content",
+    } as unknown as DirectMessageOperationReceipt),
+    /invalid shape/,
+  )
+  const { requestDigest: _requestDigest, ...missingDigest } = reserved
+  await assert.rejects(
+    malformedStore.reserveDirectMessage(
+      missingDigest as unknown as DirectMessageOperationReceipt,
+    ),
+    /invalid shape/,
+  )
+
+  const skipStore = new FileOperationStore(join(root, "skip"))
+  await skipStore.reserveDirectMessage(reserved)
+  await assert.rejects(
+    skipStore.checkpointDirectMessage(
+      directMessageReceipt("message-dispatched"),
+    ),
+    /stage did not advance safely/,
+  )
+  await assert.rejects(
+    skipStore.finishDirectMessage(directMessageReceipt("terminal")),
+    /stage did not advance safely/,
+  )
+
+  const identityStore = new FileOperationStore(join(root, "identity"))
+  await identityStore.reserveDirectMessage(reserved)
+  await assert.rejects(
+    identityStore.checkpointDirectMessage({
+      ...directMessageReceipt("channel-ready"),
+      recipientId: "400000000000000002",
+    }),
+    /changed reserved identity/,
+  )
+  await identityStore.checkpointDirectMessage(
+    directMessageReceipt("channel-ready"),
+  )
+  await assert.rejects(
+    identityStore.checkpointDirectMessage({
+      ...directMessageReceipt("message-dispatched"),
+      channelId: "200000000000000002",
+    }),
+    /changed reserved identity/,
+  )
+  await assert.rejects(
+    identityStore.checkpointDirectMessage({
+      ...directMessageReceipt("channel-ready"),
+      timestamp: "2026-08-25T00:00:09.000Z",
+    }),
+    /already has different evidence/,
   )
 })
 

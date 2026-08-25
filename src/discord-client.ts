@@ -36,6 +36,7 @@ import {
   ApplicationEmojiEvidenceError,
   AutoModerationEvidenceError,
   ChannelMetadataEvidenceError,
+  DirectMessageEvidenceError,
   DiscordApiError,
   errorMessage,
   ForumTagEvidenceError,
@@ -1086,6 +1087,26 @@ export interface CreateMessageInput {
     guildId: string
     messageId: string
   }
+}
+
+export interface CreateDirectMessageInput {
+  content: string
+  nonce: string
+  replyToMessageId?: string
+}
+
+export interface DiscordDirectMessageUserEvidence {
+  bot: boolean
+  id: string
+  system: boolean
+  unknownFieldCount: number
+}
+
+export interface DiscordDirectMessageChannelEvidence {
+  id: string
+  recipient: DiscordDirectMessageUserEvidence
+  type: typeof DISCORD_CHANNEL_TYPES.dm
+  unknownFieldCount: number
 }
 
 export interface CreateMessageForwardInput {
@@ -6037,6 +6058,107 @@ function assertMessageContent(content: string): void {
   }
 }
 
+const DIRECT_MESSAGE_USER_FIELDS = new Set([
+  "avatar",
+  "avatar_decoration_data",
+  "banner",
+  "banner_color",
+  "bot",
+  "clan",
+  "collectibles",
+  "discriminator",
+  "display_name_styles",
+  "email",
+  "flags",
+  "global_name",
+  "id",
+  "locale",
+  "mfa_enabled",
+  "premium_type",
+  "primary_guild",
+  "public_flags",
+  "system",
+  "username",
+  "verified",
+])
+
+const DIRECT_MESSAGE_CHANNEL_FIELDS = new Set([
+  "flags",
+  "icon",
+  "id",
+  "last_message_id",
+  "last_pin_timestamp",
+  "name",
+  "owner_id",
+  "recipients",
+  "type",
+])
+
+function projectDirectMessageUser(
+  value: unknown,
+  expectedId: string,
+): DiscordDirectMessageUserEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned invalid direct-message user evidence",
+    )
+  }
+  const record = value as Record<string, unknown>
+  if (
+    record.id !== expectedId
+    || typeof record.username !== "string"
+    || (record.bot !== undefined && typeof record.bot !== "boolean")
+    || (record.system !== undefined && typeof record.system !== "boolean")
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned direct-message user evidence for a different or invalid identity",
+    )
+  }
+  return {
+    bot: record.bot === true,
+    id: expectedId,
+    system: record.system === true,
+    unknownFieldCount: Object.keys(record)
+      .filter((key) => !DIRECT_MESSAGE_USER_FIELDS.has(key)).length,
+  }
+}
+
+function projectDirectMessageChannel(
+  value: unknown,
+  expectedChannelId: string | undefined,
+  expectedRecipientId: string,
+): DiscordDirectMessageChannelEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned invalid direct-message channel evidence",
+    )
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== "string"
+    || (expectedChannelId !== undefined && record.id !== expectedChannelId)
+    || record.type !== DISCORD_CHANNEL_TYPES.dm
+    || record.guild_id !== undefined
+    || !Array.isArray(record.recipients)
+    || record.recipients.length !== 1
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned a channel outside the exact one-to-one direct-message boundary",
+    )
+  }
+  assertPositiveSnowflake(record.id, "Discord direct-message channel ID")
+  return {
+    id: record.id,
+    recipient: projectDirectMessageUser(
+      record.recipients[0],
+      expectedRecipientId,
+    ),
+    type: DISCORD_CHANNEL_TYPES.dm,
+    unknownFieldCount: Object.keys(record)
+      .filter((key) => !DIRECT_MESSAGE_CHANNEL_FIELDS.has(key)).length,
+  }
+}
+
 function assertPollText(value: string, maximum: number, name: string): void {
   if (
     typeof value !== "string"
@@ -8622,6 +8744,41 @@ export class DiscordClient {
     return this.#request("get_user", `/users/${userId}`, options)
   }
 
+  async getDirectMessageUser(
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordDirectMessageUserEvidence> {
+    assertPositiveSnowflake(userId, "Discord direct-message user ID")
+    const response = await this.#request<unknown>(
+      "get_direct_message_user",
+      `/users/${userId}`,
+      {
+        ...options,
+        diagnosticRoute: "/users/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectDirectMessageUser(response, userId)
+  }
+
+  async createDirectMessageChannel(
+    recipientId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordDirectMessageChannelEvidence> {
+    assertPositiveSnowflake(recipientId, "Discord direct-message recipient ID")
+    const response = await this.#request<unknown>(
+      "create_direct_message_channel",
+      "/users/@me/channels",
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: { recipient_id: recipientId },
+        suppressFailureCause: true,
+      },
+    )
+    return projectDirectMessageChannel(response, undefined, recipientId)
+  }
+
   listCurrentUserGuilds(options: GuildPageOptions = {}): Promise<DiscordGuild[]> {
     assertBoundedLimit(
       options.limit,
@@ -11047,6 +11204,25 @@ export class DiscordClient {
     return this.#request("get_channel", `/channels/${channelId}`, options)
   }
 
+  async getDirectMessageChannel(
+    channelId: string,
+    recipientId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordDirectMessageChannelEvidence> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertPositiveSnowflake(recipientId, "Discord direct-message recipient ID")
+    const response = await this.#request<unknown>(
+      "get_direct_message_channel",
+      `/channels/${channelId}`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectDirectMessageChannel(response, channelId, recipientId)
+  }
+
   async getThreadState(
     threadId: string,
     options: RequestOptions = {},
@@ -11667,12 +11843,60 @@ export class DiscordClient {
     return this.#request("list_messages", route, options)
   }
 
+  listDirectMessages(
+    channelId: string,
+    options: MessagePageOptions = {},
+  ): Promise<DiscordMessage[]> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertBoundedLimit(
+      options.limit,
+      DISCORD_LIMITS.channelMessages,
+      "Discord direct-message page limit",
+    )
+    assertSearchSnowflake(options.before, "Discord direct-message page cursor")
+    if (options.after !== undefined || options.around !== undefined) {
+      throw new RangeError(
+        "Discord direct-message history supports only an exact before cursor",
+      )
+    }
+    return this.#request(
+      "list_direct_messages",
+      `/channels/${channelId}/messages${queryString({
+        before: options.before,
+        limit: options.limit,
+      })}`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}/messages",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
   getMessage(
     channelId: string,
     messageId: string,
     options: RequestOptions = {},
   ): Promise<DiscordMessage> {
     return this.#request("get_message", `/channels/${channelId}/messages/${messageId}`, options)
+  }
+
+  getDirectMessage(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertPositiveSnowflake(messageId, "Discord direct-message message ID")
+    return this.#request(
+      "get_direct_message",
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}",
+        suppressFailureCause: true,
+      },
+    )
   }
 
   crosspostMessage(
@@ -11813,6 +12037,55 @@ export class DiscordClient {
         nonce: input.nonce,
       },
     })
+  }
+
+  createDirectMessage(
+    channelId: string,
+    input: CreateDirectMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertMessageContent(input.content)
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord direct-message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertSearchSnowflake(
+      input.replyToMessageId,
+      "Discord direct-message reply target ID",
+    )
+    return this.#request(
+      "create_direct_message",
+      `/channels/${channelId}/messages`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: {
+            parse: [],
+            replied_user: false,
+            roles: [],
+            users: [],
+          },
+          content: input.content,
+          enforce_nonce: true,
+          ...(input.replyToMessageId === undefined
+            ? {}
+            : {
+                message_reference: {
+                  channel_id: channelId,
+                  fail_if_not_exists: true,
+                  message_id: input.replyToMessageId,
+                  type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+                },
+              }),
+          nonce: input.nonce,
+        },
+        diagnosticRoute: "/channels/{channel.id}/messages",
+        suppressFailureCause: true,
+      },
+    )
   }
 
   createMessageForward(
@@ -12032,6 +12305,36 @@ export class DiscordClient {
         content: input.content,
       },
     })
+  }
+
+  editDirectMessage(
+    channelId: string,
+    messageId: string,
+    content: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertPositiveSnowflake(messageId, "Discord direct-message message ID")
+    assertMessageContent(content)
+    return this.#request(
+      "edit_direct_message",
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: {
+            parse: [],
+            replied_user: false,
+            roles: [],
+            users: [],
+          },
+          content,
+        },
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}",
+        suppressFailureCause: true,
+      },
+    )
   }
 
   editComponentMessage(
@@ -12436,6 +12739,26 @@ export class DiscordClient {
       ...options,
       auditReason,
     })
+  }
+
+  async deleteDirectMessage(
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertPositiveSnowflake(messageId, "Discord direct-message message ID")
+    await this.#request<void>(
+      "delete_direct_message",
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async bulkDeleteMessages(

@@ -120,6 +120,11 @@ import type {
   DeletionRequest,
 } from "../src/deletion-service.js"
 import type {
+  DirectMessageChangeRequest,
+  DirectMessagePlan,
+  DirectMessageView,
+} from "../src/direct-message-service.js"
+import type {
   ForumPostPlan,
   ForumPostRequest,
 } from "../src/forum-post-service.js"
@@ -323,6 +328,8 @@ import {
   ComponentMessageOperationConflictError,
   DeletionExecutionError,
   DeletionOperationConflictError,
+  DirectMessageExecutionError,
+  DirectMessageOperationConflictError,
   DiscordApiError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
@@ -496,6 +503,33 @@ const ROLE_ID = "350000000000000001"
 const AUDIT_ENTRY_ID = "360000000000000001"
 const USER_ID = "400000000000000001"
 const OTHER_USER_ID = "400000000000000002"
+const DIRECT_MESSAGE_OPERATION_KEY = "direct-message-operation-0001"
+const DIRECT_MESSAGE_CONTENT = "Private reviewed message"
+
+function directMessageSendToolInput(planDigest?: string) {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "send" as const,
+    content: DIRECT_MESSAGE_CONTENT,
+    operationKey: DIRECT_MESSAGE_OPERATION_KEY,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    recipientId: USER_ID,
+    reviewReason: "Expected recipient contact reviewed",
+  }
+}
+
+function directMessageEditToolInput(planDigest?: string) {
+  return {
+    action: "edit" as const,
+    channelId: CHANNEL_ID,
+    content: DIRECT_MESSAGE_CONTENT,
+    messageId: MESSAGE_ID,
+    operationKey: DIRECT_MESSAGE_OPERATION_KEY,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    recipientId: USER_ID,
+    reviewReason: "Exact private-message edit reviewed",
+  }
+}
 
 async function stdioConfigFile(
   context: TestContext,
@@ -7174,6 +7208,11 @@ function fixturePolicy(): PolicyDescription {
     channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    directMessageAuditEnabled: false,
+    directMessageDeletionEnabled: false,
+    directMessageDeliveryEnabled: false,
+    directMessageEditingEnabled: false,
+    directMessageUserIds: [],
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,
@@ -7391,6 +7430,9 @@ function serviceFixture(overrides: {
   componentMessageVerificationStatus?: "blocked" | "drifted" | "not-found" | "verified"
   componentMessageWriteRequired?: boolean
   deletionError?: Error
+  directMessageError?: Error
+  directMessagePlanDigest?: string
+  directMessageWriteRequired?: boolean
   forumPostError?: Error
   forumPostPlanDigest?: string
   forumTagEffect?: "change" | "none"
@@ -7587,6 +7629,11 @@ function serviceFixture(overrides: {
     componentMessagePreview: 0,
     componentMessageVerify: 0,
     delete: 0,
+    directMessageExecute: 0,
+    directMessageGet: 0,
+    directMessageList: 0,
+    directMessagePlan: 0,
+    directMessageVerify: 0,
     edit: 0,
     forumPostExecute: 0,
     forumPostPlan: 0,
@@ -7699,6 +7746,125 @@ function serviceFixture(overrides: {
     webhookMessageGet: 0,
     webhookMessageSend: 0,
   }
+  const directMessageView = (
+    request: DirectMessageChangeRequest,
+  ): DirectMessageView | null => {
+    if (request.action === "send") return null
+    const connectorAuthored = request.action !== "reply"
+    const content = request.action === "edit"
+      && overrides.directMessageWriteRequired === false
+      ? request.content
+      : request.action === "delete"
+        ? "Private message to delete"
+        : "Previous private message"
+    const messageId = request.action === "reply"
+      ? request.replyToMessageId
+      : request.messageId
+    return {
+      attachmentCount: 0,
+      author: connectorAuthored ? "connector" : "recipient",
+      authorId: connectorAuthored ? BOT_ID : request.recipientId,
+      channelId: request.channelId,
+      componentCount: 0,
+      content,
+      editedTimestamp: null,
+      embedCount: 0,
+      id: messageId,
+      mentionEveryone: false,
+      mentionedRoleCount: 0,
+      mentionedUserCount: 0,
+      reactionCount: 0,
+      replyToMessageId: null,
+      stickerCount: 0,
+      timestamp: "2026-08-25T00:00:00.000Z",
+      type: "default",
+    }
+  }
+  const directMessagePlan = (
+    request: DirectMessageChangeRequest,
+  ): DirectMessagePlan => {
+    const writeRequired = overrides.directMessageWriteRequired ?? true
+    const current = directMessageView(request)
+    return {
+      action: request.action,
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      channel: request.action === "send"
+        ? null
+        : {
+            exactOneToOne: true,
+            id: request.channelId,
+            unknownFieldCount: 0,
+          },
+      createdAt: "2026-08-25T00:00:01.000Z",
+      current,
+      desired: {
+        content: request.action === "delete" ? null : request.content,
+        replyToMessageId: request.action === "reply"
+          ? request.replyToMessageId
+          : current?.replyToMessageId ?? null,
+      },
+      digest: overrides.directMessagePlanDigest ?? DIGEST,
+      effect: writeRequired ? "change" : "none",
+      mentionPolicy: {
+        parse: [],
+        repliedUser: false,
+        roles: [],
+        users: [],
+      },
+      operationKeyHash: operationKeyHash(request.operationKey),
+      privacy: {
+        omittedFields: [
+          "attachment-urls",
+          "avatars",
+          "profile-names",
+          "raw-discord-objects",
+          "raw-operation-key",
+        ],
+        persistence: "content-free-records-only",
+      },
+      rateLimit: {
+        globalWritesPerMinute: 5,
+        minimumRecipientIntervalMs: 5_000,
+      },
+      recipient: {
+        bot: false,
+        eligible: true,
+        id: request.recipientId,
+        system: false,
+        unknownFieldCount: 0,
+      },
+      reviewReason: request.reviewReason,
+      risks: ["Private conversation scope"],
+      schemaVersion: 1,
+      status: writeRequired ? "planned" : "already-current",
+      warnings: ["No automatic mutation retry"],
+      writeRequired,
+    }
+  }
+  const directMessageReadView = (
+    recipientId: string,
+    channelId: string,
+    messageId: string,
+  ): DirectMessageView => ({
+    attachmentCount: 0,
+    author: "recipient",
+    authorId: recipientId,
+    channelId,
+    componentCount: 0,
+    content: DIRECT_MESSAGE_CONTENT,
+    editedTimestamp: null,
+    embedCount: 0,
+    id: messageId,
+    mentionEveryone: false,
+    mentionedRoleCount: 0,
+    mentionedUserCount: 0,
+    reactionCount: 0,
+    replyToMessageId: null,
+    stickerCount: 0,
+    timestamp: "2026-08-25T00:00:00.000Z",
+    type: "default",
+  })
   const reactionModerationPlan = (
     request: Parameters<DiscordToolService["planReactionModeration"]>[0],
     digest: string,
@@ -7793,6 +7959,68 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async executeDirectMessageChange(request, planDigest) {
+      if (overrides.directMessageError) throw overrides.directMessageError
+      calls.directMessageExecute += 1
+      const plan = directMessagePlan(request)
+      const channelId = request.action === "send" ? CHANNEL_ID : request.channelId
+      const messageId = request.action === "reply" || request.action === "send"
+        ? MESSAGE_ID
+        : request.messageId
+      return {
+        action: request.action,
+        activityId: plan.writeRequired ? "activity-direct-message" : null,
+        channelId,
+        messageId,
+        operationKeyHash: plan.operationKeyHash,
+        planDigest,
+        recipientId: request.recipientId,
+        recovered: false,
+        schemaVersion: 1,
+        status: plan.writeRequired ? "completed" : "already-current",
+      }
+    },
+    async getDirectMessage(recipientId, channelId, messageId) {
+      calls.directMessageGet += 1
+      return directMessageReadView(recipientId, channelId, messageId)
+    },
+    async listDirectMessages(recipientId, channelId) {
+      calls.directMessageList += 1
+      return {
+        channelId,
+        messages: [directMessageReadView(recipientId, channelId, MESSAGE_ID)],
+        nextBeforeMessageId: null,
+        recipientId,
+        schemaVersion: 1,
+      }
+    },
+    async planDirectMessageChange(request) {
+      calls.directMessagePlan += 1
+      return directMessagePlan(request)
+    },
+    async verifyDirectMessageChange(request) {
+      calls.directMessageVerify += 1
+      const plan = directMessagePlan(request)
+      return {
+        action: request.action,
+        activityId: "activity-direct-message",
+        channelId: request.action === "send" ? CHANNEL_ID : request.channelId,
+        messageId: request.action === "reply" || request.action === "send"
+          ? MESSAGE_ID
+          : request.messageId,
+        operationKeyHash: plan.operationKeyHash,
+        planDigest: plan.digest,
+        readbackMatched: true,
+        reason: "verified",
+        receiptStage: "terminal",
+        receiptStatus: "completed",
+        recipientId: request.recipientId,
+        requestMatched: true,
+        schemaVersion: 1,
+        status: "verified",
+        timestamp: "2026-08-25T00:00:02.000Z",
+      }
+    },
     async captureGuildBlueprint(request) {
       guildBlueprintCaptureCalls.capture += 1
       return overrides.guildBlueprintCaptureResult || guildBlueprintCaptureResult(request)
@@ -11415,6 +11643,11 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "read_messages",
       "search_messages",
       "get_message",
+      "list_direct_messages",
+      "get_direct_message",
+      "plan_direct_message_change",
+      "verify_direct_message_change",
+      "execute_direct_message_change",
       "list_message_reactions",
       "list_reaction_users",
       "get_poll",
@@ -11592,6 +11825,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildTemplateChange = result.tools.find((tool) => (
     tool.name === "execute_guild_template_change"
   ))
+  const directMessageChange = result.tools.find((tool) => (
+    tool.name === "execute_direct_message_change"
+  ))
   const forumTagChange = result.tools.find((tool) => (
     tool.name === "execute_forum_tag_change"
   ))
@@ -11767,6 +12003,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(directMessageChange?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
   assert.deepEqual(webhookCreation?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
@@ -11885,6 +12127,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_scheduled_event_users",
     "get_channel",
     "get_voice_channel_status",
+    "list_direct_messages",
+    "get_direct_message",
+    "plan_direct_message_change",
+    "verify_direct_message_change",
     "audit_forum_tags",
     "audit_channel_order",
     "plan_channel_clone",
@@ -12751,6 +12997,36 @@ test("progressive discovery enables the complete reviewed component-message work
       "plan_component_message",
       "verify_component_message",
       "execute_component_message",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete exact-recipient private-message lifecycle", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "list_direct_messages" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_direct_message_change",
+    "get_direct_message",
+    "list_direct_messages",
+    "plan_direct_message_change",
+    "verify_direct_message_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "list_direct_messages",
+      "get_direct_message",
+      "plan_direct_message_change",
+      "verify_direct_message_change",
+      "execute_direct_message_change",
       "discover_discord_tools",
     ],
   )
@@ -13710,6 +13986,11 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     componentMessagePreview: 0,
     componentMessageVerify: 0,
     delete: 0,
+    directMessageExecute: 0,
+    directMessageGet: 0,
+    directMessageList: 0,
+    directMessagePlan: 0,
+    directMessageVerify: 0,
     edit: 0,
     explain: 1,
     forumPostExecute: 0,
@@ -14654,6 +14935,297 @@ test("MCP interaction errors distinguish uncertain external outcomes", async (co
 
   assert.equal(result.isError, true)
   assert.equal(structuredContent(result).status, "outcome-uncertain")
+})
+
+test("MCP private-message tools expose exact reads, plans, and receipt verification", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const listed = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      limit: 10,
+      recipientId: USER_ID,
+    },
+    name: "list_direct_messages",
+  })
+  const fetched = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      recipientId: USER_ID,
+    },
+    name: "get_direct_message",
+  })
+  const planned = await client.callTool({
+    arguments: directMessageSendToolInput(),
+    name: "plan_direct_message_change",
+  })
+  const verified = await client.callTool({
+    arguments: directMessageSendToolInput(),
+    name: "verify_direct_message_change",
+  })
+  const invalidAcknowledgement = await client.callTool({
+    arguments: {
+      ...directMessageSendToolInput(),
+      acknowledgeExpectedRecipientContact: false,
+    },
+    name: "plan_direct_message_change",
+  })
+  const unknownField = await client.callTool({
+    arguments: {
+      ...directMessageSendToolInput(),
+      discoverPrivateChannel: true,
+    },
+    name: "plan_direct_message_change",
+  })
+
+  assert.equal(structuredContent(listed).status, "ok")
+  assert.equal(
+    ((structuredContent(listed).messages as Record<string, unknown>[])[0] as Record<string, unknown>).content,
+    DIRECT_MESSAGE_CONTENT,
+  )
+  assert.equal(structuredContent(fetched).status, "ok")
+  assert.equal(
+    ((structuredContent(fetched).message as Record<string, unknown>).author),
+    "recipient",
+  )
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(structuredContent(planned).digest, DIGEST)
+  assert.equal(structuredContent(verified).status, "verified")
+  assert.equal(structuredContent(verified).requestMatched, true)
+  assert.equal(invalidAcknowledgement.isError, true)
+  assert.equal(unknownField.isError, true)
+  assert.deepEqual({
+    get: calls.directMessageGet,
+    list: calls.directMessageList,
+    plan: calls.directMessagePlan,
+    verify: calls.directMessageVerify,
+  }, {
+    get: 1,
+    list: 1,
+    plan: 1,
+    verify: 1,
+  })
+})
+
+test("MCP private-message execution displays and approves the exact reviewed plan", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: directMessageSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.directMessagePlan, 1)
+  assert.equal(calls.directMessageExecute, 1)
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, new RegExp(DIRECT_MESSAGE_CONTENT))
+  assert.match(confirmationMessage, /Expected recipient contact reviewed/)
+  assert.match(confirmationMessage, /"repliedUser":false/)
+  assert.match(confirmationMessage, /"minimumRecipientIntervalMs":5000/)
+  assert.match(confirmationMessage, new RegExp(operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY)))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(confirmationMessage, new RegExp(DIRECT_MESSAGE_OPERATION_KEY))
+})
+
+test("MCP private-message signed state rejects changed private intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = directMessageSendToolInput(DIGEST)
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_direct_message_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, content: "Changed private message" },
+    { ...request, reviewReason: "Different private contact review" },
+    { ...request, recipientId: OTHER_USER_ID },
+    { ...request, operationKey: "direct-message-operation-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_direct_message_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_direct_message_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.directMessageExecute, 0)
+})
+
+test("MCP private-message execution stops on decline or a changed plan", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: directMessageSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.directMessageExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { directMessagePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: directMessageSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.directMessageExecute, 0)
+})
+
+test("MCP private-message no-op edit skips confirmation without skipping execution checks", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { directMessageWriteRequired: false },
+  })
+
+  const result = await client.callTool({
+    arguments: directMessageEditToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+
+  assert.equal(structuredContent(result).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(calls.directMessagePlan, 1)
+  assert.equal(calls.directMessageExecute, 1)
+})
+
+test("MCP private-message errors expose only strict content-free lifecycle evidence", async (context) => {
+  const approveDirectMessage = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const receipt = {
+    action: "send",
+    activityId: "activity-direct-message",
+    channelId: CHANNEL_ID,
+    error: null,
+    messageId: MESSAGE_ID,
+    operationKeyHash: operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY),
+    planDigest: DIGEST,
+    recipientId: USER_ID,
+    replyToMessageId: null,
+    stage: "terminal",
+    status: "completed",
+    timestamp: "2026-08-25T00:00:02.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approveDirectMessage,
+    serviceOverrides: {
+      directMessageError: new DirectMessageOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: directMessageSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+
+  const uncertainEvidence = {
+    action: "send",
+    activityId: "activity-direct-message",
+    activityRecordError: null,
+    channelId: CHANNEL_ID,
+    dispatchStarted: true,
+    error: "DiscordApiError.500.unknown",
+    messageId: MESSAGE_ID,
+    operationKeyHash: operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY),
+    operationRecordError: null,
+    planDigest: DIGEST,
+    recipientId: USER_ID,
+    schemaVersion: 1,
+    status: "uncertain",
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approveDirectMessage,
+    serviceOverrides: {
+      directMessageError: new DirectMessageExecutionError(
+        "Discord private-message outcome is uncertain",
+        uncertainEvidence,
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: directMessageSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.deepEqual(
+    (structuredContent(uncertainResult).error as Record<string, unknown>).result,
+    uncertainEvidence,
+  )
+
+  const privateMarker = "private-content-must-not-escape"
+  const malformed = await connectedFixture(context, {
+    elicitationHandler: approveDirectMessage,
+    serviceOverrides: {
+      directMessageError: new DirectMessageExecutionError(
+        "Discord private-message failure",
+        {
+          ...uncertainEvidence,
+          privateContent: privateMarker,
+        },
+      ),
+    },
+  })
+  const malformedResult = await malformed.client.callTool({
+    arguments: directMessageSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+  assert.deepEqual(
+    (structuredContent(malformedResult).error as Record<string, unknown>).result,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(JSON.stringify(malformedResult), new RegExp(privateMarker))
+  for (const result of [conflictResult, uncertainResult, malformedResult]) {
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(DIRECT_MESSAGE_OPERATION_KEY))
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(DIRECT_MESSAGE_CONTENT))
+  }
 })
 
 test("MCP deletion plans require bounded exact reviewed intent", async (context) => {

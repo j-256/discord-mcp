@@ -124,6 +124,7 @@ export interface DiscordChannel {
   permission_overwrites?: DiscordPermissionOverwrite[]
   position?: number
   rate_limit_per_user?: number | null
+  recipients?: DiscordUser[]
   rtc_region?: string | null
   thread_metadata?: {
     archive_timestamp?: string
@@ -411,6 +412,7 @@ export interface DiscordUser {
   discriminator?: string
   global_name?: string | null
   id: string
+  system?: boolean
   username: string
 }
 

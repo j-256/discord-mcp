@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   DISCORD_APPLICATION_FLAGS,
+  DISCORD_CHANNEL_TYPES,
   DISCORD_MESSAGE_FLAGS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
 } from "../src/constants.js"
@@ -15,6 +16,7 @@ import {
 import {
   ApplicationEmojiEvidenceError,
   ChannelMetadataEvidenceError,
+  DirectMessageEvidenceError,
   DiscordApiError,
   MemberVoiceEvidenceError,
   OnboardingEvidenceError,
@@ -82,6 +84,29 @@ import type {
 
 const TOKEN = "test-discord-token-value"
 const API_BASE_URL = "https://discord.test/api/v10"
+const DIRECT_MESSAGE_CHANNEL_ID = "200"
+const DIRECT_MESSAGE_ID = "300"
+const DIRECT_MESSAGE_REPLY_ID = "301"
+const DIRECT_MESSAGE_USER_ID = "400"
+
+function directMessageUserPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    future_user_field: "omitted",
+    id: DIRECT_MESSAGE_USER_ID,
+    username: "private-recipient",
+    ...overrides,
+  }
+}
+
+function directMessageChannelPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    future_channel_field: "omitted",
+    id: DIRECT_MESSAGE_CHANNEL_ID,
+    recipients: [directMessageUserPayload()],
+    type: DISCORD_CHANNEL_TYPES.dm,
+    ...overrides,
+  }
+}
 
 interface RecordedObservation {
   completions: OperationCompletion[]
@@ -235,6 +260,256 @@ test("Discord client encodes bounded message pagination without undefined cursor
   await client.listMessages("200", { before: "300", limit: 25 })
 
   assert.equal(requestUrl, `${API_BASE_URL}/channels/200/messages?before=300&limit=25`)
+})
+
+test("Discord client projects exact private users and one-to-one channels without profiles", async () => {
+  const requests: Array<{
+    body: string | null
+    method: string | undefined
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const url = String(input)
+      requests.push({
+        body: init?.body === undefined ? null : String(init.body),
+        method: init?.method,
+        url,
+      })
+      if (url.endsWith(`/users/${DIRECT_MESSAGE_USER_ID}`)) {
+        return jsonResponse(directMessageUserPayload())
+      }
+      return jsonResponse(directMessageChannelPayload())
+    },
+    token: TOKEN,
+  })
+
+  const user = await client.getDirectMessageUser(DIRECT_MESSAGE_USER_ID)
+  const channel = await client.getDirectMessageChannel(
+    DIRECT_MESSAGE_CHANNEL_ID,
+    DIRECT_MESSAGE_USER_ID,
+  )
+  const created = await client.createDirectMessageChannel(DIRECT_MESSAGE_USER_ID)
+
+  assert.deepEqual(user, {
+    bot: false,
+    id: DIRECT_MESSAGE_USER_ID,
+    system: false,
+    unknownFieldCount: 1,
+  })
+  assert.deepEqual(channel, {
+    id: DIRECT_MESSAGE_CHANNEL_ID,
+    recipient: user,
+    type: DISCORD_CHANNEL_TYPES.dm,
+    unknownFieldCount: 1,
+  })
+  assert.deepEqual(created, channel)
+  assert.deepEqual(requests, [{
+    body: null,
+    method: "GET",
+    url: `${API_BASE_URL}/users/${DIRECT_MESSAGE_USER_ID}`,
+  }, {
+    body: null,
+    method: "GET",
+    url: `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}`,
+  }, {
+    body: JSON.stringify({ recipient_id: DIRECT_MESSAGE_USER_ID }),
+    method: "POST",
+    url: `${API_BASE_URL}/users/@me/channels`,
+  }])
+  assert.doesNotMatch(JSON.stringify({ channel, created, user }), /private-recipient/)
+})
+
+test("Discord client rejects malformed, guild, and group private-channel evidence", async () => {
+  for (const response of [
+    directMessageChannelPayload({ guild_id: "100" }),
+    directMessageChannelPayload({
+      recipients: [
+        directMessageUserPayload(),
+        directMessageUserPayload({ id: "401" }),
+      ],
+    }),
+    directMessageChannelPayload({ type: DISCORD_CHANNEL_TYPES.groupDm }),
+    directMessageChannelPayload({ id: "201" }),
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(response),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => client.getDirectMessageChannel(
+        DIRECT_MESSAGE_CHANNEL_ID,
+        DIRECT_MESSAGE_USER_ID,
+      ),
+      DirectMessageEvidenceError,
+    )
+  }
+
+  const invalidUser = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      id: DIRECT_MESSAGE_USER_ID,
+    }),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => invalidUser.getDirectMessageUser(DIRECT_MESSAGE_USER_ID),
+    DirectMessageEvidenceError,
+  )
+})
+
+test("Discord client uses only exact bounded private-message read routes", async () => {
+  const urls: string[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      urls.push(String(input))
+      return String(input).includes(`/${DIRECT_MESSAGE_ID}`)
+        ? jsonResponse({ id: DIRECT_MESSAGE_ID })
+        : jsonResponse([])
+    },
+    token: TOKEN,
+  })
+
+  await client.listDirectMessages(DIRECT_MESSAGE_CHANNEL_ID, {
+    before: DIRECT_MESSAGE_ID,
+    limit: 25,
+  })
+  await client.getDirectMessage(
+    DIRECT_MESSAGE_CHANNEL_ID,
+    DIRECT_MESSAGE_ID,
+  )
+
+  assert.deepEqual(urls, [
+    `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages?before=${DIRECT_MESSAGE_ID}&limit=25`,
+    `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages/${DIRECT_MESSAGE_ID}`,
+  ])
+  assert.throws(
+    () => client.listDirectMessages(DIRECT_MESSAGE_CHANNEL_ID, {
+      after: DIRECT_MESSAGE_ID,
+      limit: 25,
+    }),
+    /supports only an exact before cursor/,
+  )
+  assert.throws(
+    () => client.listDirectMessages(DIRECT_MESSAGE_CHANNEL_ID, {
+      around: DIRECT_MESSAGE_ID,
+      limit: 25,
+    }),
+    /supports only an exact before cursor/,
+  )
+})
+
+test("Discord client suppresses private-message mentions and never retries mutations", async () => {
+  const requests: Array<{
+    auditReason: string | null
+    body: string | null
+    method: string | undefined
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        auditReason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        body: init?.body === undefined ? null : String(init.body),
+        method: init?.method,
+        url: String(input),
+      })
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse({ id: DIRECT_MESSAGE_ID })
+    },
+    token: TOKEN,
+  })
+
+  await client.createDirectMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+    content: `Hello <@${DIRECT_MESSAGE_USER_ID}>`,
+    nonce: "direct-message-nonce",
+    replyToMessageId: DIRECT_MESSAGE_REPLY_ID,
+  })
+  await client.editDirectMessage(
+    DIRECT_MESSAGE_CHANNEL_ID,
+    DIRECT_MESSAGE_ID,
+    "Edited @everyone",
+  )
+  await client.deleteDirectMessage(
+    DIRECT_MESSAGE_CHANNEL_ID,
+    DIRECT_MESSAGE_ID,
+  )
+
+  assert.deepEqual(requests, [{
+    auditReason: null,
+    body: JSON.stringify({
+      allowed_mentions: {
+        parse: [],
+        replied_user: false,
+        roles: [],
+        users: [],
+      },
+      content: `Hello <@${DIRECT_MESSAGE_USER_ID}>`,
+      enforce_nonce: true,
+      message_reference: {
+        channel_id: DIRECT_MESSAGE_CHANNEL_ID,
+        fail_if_not_exists: true,
+        message_id: DIRECT_MESSAGE_REPLY_ID,
+        type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+      },
+      nonce: "direct-message-nonce",
+    }),
+    method: "POST",
+    url: `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages`,
+  }, {
+    auditReason: null,
+    body: JSON.stringify({
+      allowed_mentions: {
+        parse: [],
+        replied_user: false,
+        roles: [],
+        users: [],
+      },
+      content: "Edited @everyone",
+    }),
+    method: "PATCH",
+    url: `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages/${DIRECT_MESSAGE_ID}`,
+  }, {
+    auditReason: null,
+    body: null,
+    method: "DELETE",
+    url: `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages/${DIRECT_MESSAGE_ID}`,
+  }])
+
+  let attempts = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      attempts += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  for (const mutation of [
+    () => rateLimited.createDirectMessageChannel(DIRECT_MESSAGE_USER_ID),
+    () => rateLimited.createDirectMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+      content: "One shot",
+      nonce: "direct-message-nonce",
+    }),
+    () => rateLimited.editDirectMessage(
+      DIRECT_MESSAGE_CHANNEL_ID,
+      DIRECT_MESSAGE_ID,
+      "One shot edit",
+    ),
+    () => rateLimited.deleteDirectMessage(
+      DIRECT_MESSAGE_CHANNEL_ID,
+      DIRECT_MESSAGE_ID,
+    ),
+  ]) {
+    await assert.rejects(mutation, DiscordApiError)
+  }
+  assert.equal(attempts, 4)
 })
 
 test("Discord client uses the current paginated message pin route", async () => {

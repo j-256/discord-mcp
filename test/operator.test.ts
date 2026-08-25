@@ -54,6 +54,7 @@ const CHANNEL_ID = "400000000000000001"
 const SOURCE_CHANNEL_ID = "400000000000000002"
 const ROLE_ID = "500000000000000001"
 const INTEGRATION_ID = "600000000000000001"
+const USER_ID = "700000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
 
@@ -242,6 +243,11 @@ function status(
       channelOrderingGuildIds: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
+      directMessageAuditEnabled: false,
+      directMessageDeletionEnabled: false,
+      directMessageDeliveryEnabled: false,
+      directMessageEditingEnabled: false,
+      directMessageUserIds: [],
       forumPostChannelIds: [],
       forumPostsEnabled: false,
       forumTagAuditEnabled: false,
@@ -411,6 +417,11 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     captureGuildBlueprint: unexpected,
+    executeDirectMessageChange: unexpected,
+    getDirectMessage: unexpected,
+    listDirectMessages: unexpected,
+    planDirectMessageChange: unexpected,
+    verifyDirectMessageChange: unexpected,
     getApplicationPosture: unexpected,
     auditChannelDeletion: unexpected,
     auditRoleDeletion: unexpected,
@@ -1068,6 +1079,60 @@ test("doctor and setup explain effective interaction policy without Discord writ
     "fail",
   )
   assert.match(missingIntentSetup.warnings.join("\n"), /component messages are blocked/)
+})
+
+test("doctor and setup explain exact-user private-message boundaries without contact", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      directMessageAudit: true,
+      directMessageDeletion: true,
+      directMessageDelivery: true,
+      directMessageEditing: true,
+    },
+    scopes: {
+      directMessageUserIds: [USER_ID],
+    },
+  })
+  const report = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    configOverrides: enabledPolicy,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: { toolsets: ["connector"] },
+    },
+    service: statusProvider(),
+  })
+
+  const audit = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageAuditPolicy,
+  )
+  const delivery = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageDeliveryPolicy,
+  )
+  const editing = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageEditingPolicy,
+  )
+  const deletion = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageDeletionPolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /caller-known one-to-one channel IDs/)
+  assert.match(audit?.summary || "", /no DM discovery or persistence/)
+  assert.equal(delivery?.status, "pass")
+  assert.match(delivery?.summary || "", /forced empty mentions/)
+  assert.match(delivery?.summary || "", /request-bound schema-v2 receipts/)
+  assert.equal(editing?.status, "pass")
+  assert.match(editing?.summary || "", /plain-text connector-authored messages/)
+  assert.equal(deletion?.status, "pass")
+  assert.match(deletion?.summary || "", /irreversible acknowledgement/)
+  assert.equal(setup.warnings.some((warning) => warning.includes("direct-messages toolset")), false)
+  assert.match(omitted.warnings.join("\n"), /direct-messages toolset/)
 })
 
 test("doctor and setup explain reviewed attachment scope without reading files or writing to Discord", async (context) => {
@@ -5263,6 +5328,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_channel_metadata_change",
     "review_channel_order",
     "review_channel_permission_overwrite",
+    "review_direct_message_change",
     "review_forum_post",
     "review_forum_tag_change",
     "review_guild_blueprint",
@@ -5376,6 +5442,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_order",
     "execute_channel_permission_overwrite",
     "execute_component_message",
+    "execute_direct_message_change",
     "execute_forum_tag_change",
     "execute_guild_blueprint",
     "execute_guild_expression_change",

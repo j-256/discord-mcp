@@ -15,6 +15,7 @@ import {
   CONNECTOR_LIMITS,
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
   IDEMPOTENCY_KEY_PATTERN,
@@ -40,6 +41,7 @@ export const OPERATION_KINDS = [
   "channel-ordering",
   "channel-permission-overwrite",
   "component-message",
+  "direct-message-change",
   "forum-post",
   "forum-tag-change",
   "guild-expression-change",
@@ -88,7 +90,11 @@ export type OperationKind = typeof OPERATION_KINDS[number]
 export type ApplicationOperationKind =
   | "application-emoji-change"
   | "application-intent-enablement"
-export type GuildOperationKind = Exclude<OperationKind, ApplicationOperationKind>
+export type DirectMessageOperationKind = "direct-message-change"
+export type GuildOperationKind = Exclude<
+  OperationKind,
+  ApplicationOperationKind | DirectMessageOperationKind
+>
 export type StandardGuildOperationKind = Exclude<
   GuildOperationKind,
   "automod-change" | "component-message"
@@ -144,6 +150,39 @@ export interface ApplicationOperationReceipt {
   verification: OperationVerification
 }
 
+export const DIRECT_MESSAGE_ACTIONS = [
+  "delete",
+  "edit",
+  "reply",
+  "send",
+] as const
+
+export type DirectMessageAction = typeof DIRECT_MESSAGE_ACTIONS[number]
+export type DirectMessageReceiptStage =
+  | "channel-ready"
+  | "message-dispatched"
+  | "reserved"
+  | "terminal"
+
+export interface DirectMessageOperationReceipt {
+  action: DirectMessageAction
+  activityId: string
+  channelId: string | null
+  error: string | null
+  kind: DirectMessageOperationKind
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string
+  recipientId: string
+  replyToMessageId: string | null
+  requestDigest: string
+  schemaVersion: 2
+  stage: DirectMessageReceiptStage
+  status: OperationReceiptStatus
+  timestamp: string
+  verification: OperationVerification
+}
+
 export interface OperationReservation {
   created: boolean
   receipt: OperationReceipt
@@ -152,20 +191,34 @@ export interface OperationReservation {
 export interface OperationStore {
   finish(receipt: OperationReceipt): Promise<void>
   finishApplication?(receipt: ApplicationOperationReceipt): Promise<void>
+  checkpointDirectMessage?(receipt: DirectMessageOperationReceipt): Promise<void>
+  finishDirectMessage?(receipt: DirectMessageOperationReceipt): Promise<void>
   get(kind: GuildOperationKind, operationKeyHash: string): Promise<OperationReceipt | undefined>
   getApplication?(
     kind: ApplicationOperationKind,
     operationKeyHash: string,
   ): Promise<ApplicationOperationReceipt | undefined>
+  getDirectMessage?(
+    kind: DirectMessageOperationKind,
+    operationKeyHash: string,
+  ): Promise<DirectMessageOperationReceipt | undefined>
   reserve(receipt: OperationReceipt): Promise<OperationReservation>
   reserveApplication?(
     receipt: ApplicationOperationReceipt,
   ): Promise<ApplicationOperationReservation>
+  reserveDirectMessage?(
+    receipt: DirectMessageOperationReceipt,
+  ): Promise<DirectMessageOperationReservation>
 }
 
 export interface ApplicationOperationReservation {
   created: boolean
   receipt: ApplicationOperationReceipt
+}
+
+export interface DirectMessageOperationReservation {
+  created: boolean
+  receipt: DirectMessageOperationReceipt
 }
 
 export interface ApplicationOperationStore extends OperationStore {
@@ -179,6 +232,18 @@ export interface ApplicationOperationStore extends OperationStore {
   ): Promise<ApplicationOperationReservation>
 }
 
+export interface DirectMessageOperationStore extends OperationStore {
+  checkpointDirectMessage(receipt: DirectMessageOperationReceipt): Promise<void>
+  finishDirectMessage(receipt: DirectMessageOperationReceipt): Promise<void>
+  getDirectMessage(
+    kind: DirectMessageOperationKind,
+    operationKeyHash: string,
+  ): Promise<DirectMessageOperationReceipt | undefined>
+  reserveDirectMessage(
+    receipt: DirectMessageOperationReceipt,
+  ): Promise<DirectMessageOperationReservation>
+}
+
 const APPLICATION_OPERATION_KINDS: readonly ApplicationOperationKind[] = [
   "application-emoji-change",
   "application-intent-enablement",
@@ -190,8 +255,16 @@ export function isApplicationOperationKind(
   return (APPLICATION_OPERATION_KINDS as readonly OperationKind[]).includes(kind)
 }
 
+export function isDirectMessageOperationKind(
+  kind: OperationKind,
+): kind is DirectMessageOperationKind {
+  return kind === "direct-message-change"
+}
+
 const GUILD_OPERATION_KINDS = OPERATION_KINDS.filter(
-  (kind): kind is GuildOperationKind => !isApplicationOperationKind(kind),
+  (kind): kind is GuildOperationKind => (
+    !isApplicationOperationKind(kind) && !isDirectMessageOperationKind(kind)
+  ),
 )
 
 const OPERATION_RECEIPT_SCHEMA_VERSION = 1
@@ -223,6 +296,25 @@ const APPLICATION_RECEIPT_KEYS = [
   "planDigest",
   "resourceId",
   "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+] as const
+
+const DIRECT_MESSAGE_RECEIPT_KEYS = [
+  "action",
+  "activityId",
+  "channelId",
+  "error",
+  "kind",
+  "messageId",
+  "operationKeyHash",
+  "planDigest",
+  "recipientId",
+  "replyToMessageId",
+  "requestDigest",
+  "schemaVersion",
+  "stage",
   "status",
   "timestamp",
   "verification",
@@ -454,6 +546,157 @@ function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
   }
 }
 
+function validSnowflake(value: unknown): value is string {
+  return typeof value === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(value)
+    && BigInt(value) > 0n
+    && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+}
+
+function nullableSnowflake(value: unknown): value is string | null {
+  return value === null || validSnowflake(value)
+}
+
+function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt is not an object",
+    )
+  }
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).sort().join("\0")
+      !== [...DIRECT_MESSAGE_RECEIPT_KEYS].sort().join("\0")
+    || record.schemaVersion !== REQUEST_BOUND_RECEIPT_SCHEMA_VERSION
+    || record.kind !== "direct-message-change"
+    || !(DIRECT_MESSAGE_ACTIONS as readonly unknown[]).includes(record.action)
+    || !["channel-ready", "message-dispatched", "reserved", "terminal"]
+      .includes(String(record.stage))
+    || !["completed", "failed", "pending", "uncertain"]
+      .includes(String(record.status))
+    || typeof record.activityId !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.activityId)
+    || !validSnowflake(record.recipientId)
+    || !nullableSnowflake(record.channelId)
+    || !nullableSnowflake(record.messageId)
+    || !nullableSnowflake(record.replyToMessageId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || typeof record.requestDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.requestDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || !validTimestamp(record.timestamp)
+  ) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt has an invalid shape",
+    )
+  }
+  const action = record.action as DirectMessageAction
+  const stage = record.stage as DirectMessageReceiptStage
+  const status = record.status as OperationReceiptStatus
+  const channelId = record.channelId as string | null
+  const messageId = record.messageId as string | null
+  const replyToMessageId = record.replyToMessageId as string | null
+  if (
+    (action === "reply" && replyToMessageId === null)
+    || (["delete", "send"].includes(action) && replyToMessageId !== null)
+  ) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt has invalid reply identity",
+    )
+  }
+  if (action !== "send" && channelId === null) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt lacks its exact channel identity",
+    )
+  }
+  if (["delete", "edit"].includes(action) && messageId === null) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt lacks its exact message identity",
+    )
+  }
+  if ((stage === "terminal") !== (status !== "pending")) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt stage and status disagree",
+    )
+  }
+  if (status === "pending" && (
+    record.error !== null
+    || record.verification !== null
+  )) {
+    throw new OperationStoreError(
+      "Pending Discord direct-message receipt contains terminal state",
+    )
+  }
+  if (stage === "reserved" && (
+    (action === "send" && (channelId !== null || messageId !== null))
+    || (action === "reply" && messageId !== null)
+  )) {
+    throw new OperationStoreError(
+      "Reserved Discord direct-message receipt contains dispatched identity",
+    )
+  }
+  if (stage === "channel-ready" && (
+    action !== "send"
+    || channelId === null
+    || messageId !== null
+  )) {
+    throw new OperationStoreError(
+      "Discord direct-message channel checkpoint has invalid identity",
+    )
+  }
+  if (stage === "message-dispatched" && (
+    channelId === null
+    || messageId === null
+  )) {
+    throw new OperationStoreError(
+      "Discord direct-message dispatch checkpoint lacks exact identity",
+    )
+  }
+  if (status === "completed" && (
+    record.error !== null
+    || record.verification !== "match"
+    || channelId === null
+    || messageId === null
+  )) {
+    throw new OperationStoreError(
+      "Completed Discord direct-message receipt lacks verified state",
+    )
+  }
+  if (["failed", "uncertain"].includes(status) && (
+    record.error === null
+    || record.verification !== null
+  )) {
+    throw new OperationStoreError(
+      "Incomplete Discord direct-message receipt lacks a safe outcome category",
+    )
+  }
+  return {
+    action,
+    activityId: record.activityId,
+    channelId,
+    error: record.error as string | null,
+    kind: "direct-message-change",
+    messageId,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    recipientId: record.recipientId,
+    replyToMessageId,
+    requestDigest: record.requestDigest,
+    schemaVersion: REQUEST_BOUND_RECEIPT_SCHEMA_VERSION,
+    stage,
+    status,
+    timestamp: record.timestamp,
+    verification: record.verification as OperationVerification,
+  }
+}
+
 function assertIdentity(
   pending: OperationReceipt,
   terminal: OperationReceipt,
@@ -528,6 +771,85 @@ function sameApplicationTerminal(
     && left.planDigest === right.planDigest
     && left.resourceId === right.resourceId
     && left.status === right.status
+    && left.verification === right.verification
+}
+
+const DIRECT_MESSAGE_STAGE_ORDER: Readonly<Record<
+  DirectMessageReceiptStage,
+  number
+>> = Object.freeze({
+  "channel-ready": 1,
+  "message-dispatched": 2,
+  reserved: 0,
+  terminal: 3,
+})
+
+function assertDirectMessageIdentity(
+  reserved: DirectMessageOperationReceipt,
+  next: DirectMessageOperationReceipt,
+): void {
+  if (
+    reserved.action !== next.action
+    || reserved.activityId !== next.activityId
+    || reserved.kind !== next.kind
+    || reserved.operationKeyHash !== next.operationKeyHash
+    || reserved.planDigest !== next.planDigest
+    || reserved.recipientId !== next.recipientId
+    || reserved.replyToMessageId !== next.replyToMessageId
+    || reserved.requestDigest !== next.requestDigest
+    || reserved.schemaVersion !== next.schemaVersion
+    || (reserved.channelId !== null && reserved.channelId !== next.channelId)
+    || (reserved.messageId !== null && reserved.messageId !== next.messageId)
+  ) {
+    throw new OperationStoreError(
+      "Discord direct-message receipt changed reserved identity",
+    )
+  }
+}
+
+function assertDirectMessageAdvance(
+  current: DirectMessageOperationReceipt,
+  next: DirectMessageOperationReceipt,
+): void {
+  assertDirectMessageIdentity(current, next)
+  if (
+    DIRECT_MESSAGE_STAGE_ORDER[next.stage]
+      <= DIRECT_MESSAGE_STAGE_ORDER[current.stage]
+    || (
+      current.action === "send"
+      && next.stage === "message-dispatched"
+      && current.stage !== "channel-ready"
+    )
+    || (
+      next.status === "completed"
+      && current.stage !== "message-dispatched"
+    )
+  ) {
+    throw new OperationStoreError(
+      "Discord direct-message receipt stage did not advance safely",
+    )
+  }
+}
+
+function sameDirectMessageReceipt(
+  left: DirectMessageOperationReceipt,
+  right: DirectMessageOperationReceipt,
+): boolean {
+  return left.action === right.action
+    && left.activityId === right.activityId
+    && left.channelId === right.channelId
+    && left.error === right.error
+    && left.kind === right.kind
+    && left.messageId === right.messageId
+    && left.operationKeyHash === right.operationKeyHash
+    && left.planDigest === right.planDigest
+    && left.recipientId === right.recipientId
+    && left.replyToMessageId === right.replyToMessageId
+    && left.requestDigest === right.requestDigest
+    && left.schemaVersion === right.schemaVersion
+    && left.stage === right.stage
+    && left.status === right.status
+    && left.timestamp === right.timestamp
     && left.verification === right.verification
 }
 
@@ -664,7 +986,10 @@ async function syncDirectory(directory: string): Promise<void> {
 
 async function writeExclusive(
   file: string,
-  receipt: OperationReceipt | ApplicationOperationReceipt,
+  receipt:
+    | ApplicationOperationReceipt
+    | DirectMessageOperationReceipt
+    | OperationReceipt,
 ): Promise<boolean> {
   let handle
   try {
@@ -695,7 +1020,10 @@ async function publishReceiptDirectory(
   parent: string,
   target: string,
   receiptFile: string,
-  receipt: OperationReceipt | ApplicationOperationReceipt,
+  receipt:
+    | ApplicationOperationReceipt
+    | DirectMessageOperationReceipt
+    | OperationReceipt,
 ): Promise<boolean> {
   let staging: string
   try {
@@ -759,7 +1087,9 @@ async function readTerminalReceipt<T = OperationReceipt>(
   return receipt
 }
 
-export class FileOperationStore implements ApplicationOperationStore {
+export class FileOperationStore implements
+  ApplicationOperationStore,
+  DirectMessageOperationStore {
   readonly #directory: string
 
   constructor(directory: string) {
@@ -862,6 +1192,183 @@ export class FileOperationStore implements ApplicationOperationStore {
     assertIdentity(pending, existing)
     if (!sameTerminal(existing, normalized)) {
       throw new OperationStoreError("Discord operation already has a different terminal receipt")
+    }
+  }
+
+  async getDirectMessage(
+    kind: DirectMessageOperationKind,
+    hash: string,
+  ): Promise<DirectMessageOperationReceipt | undefined> {
+    if (!await this.#assertDirectory(false)) return undefined
+    const paths = this.#paths(kind, hash)
+    if (!await assertPrivateDirectory(paths.operation, true)) return undefined
+    const [reserved, channelReady, messageDispatched, terminal] = await Promise.all([
+      readReceiptFile(paths.pending, parseDirectMessageReceipt),
+      readTerminalReceipt(
+        join(paths.operation, "channel-ready"),
+        "receipt.json",
+        parseDirectMessageReceipt,
+      ),
+      readTerminalReceipt(
+        join(paths.operation, "message-dispatched"),
+        "receipt.json",
+        parseDirectMessageReceipt,
+      ),
+      readTerminalReceipt(
+        paths.terminalDirectory,
+        "receipt.json",
+        parseDirectMessageReceipt,
+      ),
+    ])
+    if (!reserved || reserved.stage !== "reserved" || reserved.status !== "pending") {
+      throw new OperationStoreError(
+        "Discord direct-message operation has no valid reservation",
+      )
+    }
+    let current = reserved
+    if (channelReady) {
+      assertDirectMessageAdvance(current, channelReady)
+      current = channelReady
+    }
+    if (messageDispatched) {
+      assertDirectMessageAdvance(current, messageDispatched)
+      current = messageDispatched
+    }
+    if (!terminal) return current
+    assertDirectMessageAdvance(current, terminal)
+    return terminal
+  }
+
+  async reserveDirectMessage(
+    receipt: DirectMessageOperationReceipt,
+  ): Promise<DirectMessageOperationReservation> {
+    const normalized = parseDirectMessageReceipt(receipt)
+    if (normalized.status !== "pending" || normalized.stage !== "reserved") {
+      throw new OperationStoreError(
+        "Discord direct-message reservation must be pending and reserved",
+      )
+    }
+    await this.#assertDirectory(true)
+    const paths = this.#paths(normalized.kind, normalized.operationKeyHash)
+    const created = await publishReceiptDirectory(
+      this.#directory,
+      paths.operation,
+      "pending.json",
+      normalized,
+    )
+    if (created) return { created: true, receipt: normalized }
+    const existing = await this.getDirectMessage(
+      normalized.kind,
+      normalized.operationKeyHash,
+    )
+    if (!existing) {
+      throw new OperationStoreError(
+        "Discord direct-message reservation disappeared",
+      )
+    }
+    return { created: false, receipt: existing }
+  }
+
+  async checkpointDirectMessage(
+    receipt: DirectMessageOperationReceipt,
+  ): Promise<void> {
+    const normalized = parseDirectMessageReceipt(receipt)
+    if (
+      normalized.status !== "pending"
+      || !["channel-ready", "message-dispatched"].includes(normalized.stage)
+    ) {
+      throw new OperationStoreError(
+        "Discord direct-message checkpoint must be a supported pending stage",
+      )
+    }
+    await this.#assertDirectory(true)
+    const paths = this.#paths(normalized.kind, normalized.operationKeyHash)
+    const current = await this.getDirectMessage(
+      normalized.kind,
+      normalized.operationKeyHash,
+    )
+    if (!current) {
+      throw new OperationStoreError(
+        "Discord direct-message checkpoint has no reservation",
+      )
+    }
+    if (current.stage === "terminal") {
+      throw new OperationStoreError(
+        "Discord direct-message operation is already terminal",
+      )
+    }
+    if (current.stage === normalized.stage) {
+      if (!sameDirectMessageReceipt(current, normalized)) {
+        throw new OperationStoreError(
+          "Discord direct-message checkpoint already has different evidence",
+        )
+      }
+      return
+    }
+    assertDirectMessageAdvance(current, normalized)
+    const target = join(paths.operation, normalized.stage)
+    if (await publishReceiptDirectory(
+      paths.operation,
+      target,
+      "receipt.json",
+      normalized,
+    )) return
+    const existing = await readTerminalReceipt(
+      target,
+      "receipt.json",
+      parseDirectMessageReceipt,
+    )
+    if (!existing || !sameDirectMessageReceipt(existing, normalized)) {
+      throw new OperationStoreError(
+        "Discord direct-message checkpoint already has different evidence",
+      )
+    }
+  }
+
+  async finishDirectMessage(
+    receipt: DirectMessageOperationReceipt,
+  ): Promise<void> {
+    const normalized = parseDirectMessageReceipt(receipt)
+    if (normalized.status === "pending" || normalized.stage !== "terminal") {
+      throw new OperationStoreError(
+        "Discord direct-message terminal receipt is not terminal",
+      )
+    }
+    await this.#assertDirectory(true)
+    const paths = this.#paths(normalized.kind, normalized.operationKeyHash)
+    const current = await this.getDirectMessage(
+      normalized.kind,
+      normalized.operationKeyHash,
+    )
+    if (!current) {
+      throw new OperationStoreError(
+        "Discord direct-message operation has no reservation",
+      )
+    }
+    if (current.stage === "terminal") {
+      if (!sameDirectMessageReceipt(current, normalized)) {
+        throw new OperationStoreError(
+          "Discord direct-message operation already has a different terminal receipt",
+        )
+      }
+      return
+    }
+    assertDirectMessageAdvance(current, normalized)
+    if (await publishReceiptDirectory(
+      paths.operation,
+      paths.terminalDirectory,
+      "receipt.json",
+      normalized,
+    )) return
+    const existing = await readTerminalReceipt(
+      paths.terminalDirectory,
+      "receipt.json",
+      parseDirectMessageReceipt,
+    )
+    if (!existing || !sameDirectMessageReceipt(existing, normalized)) {
+      throw new OperationStoreError(
+        "Discord direct-message operation already has a different terminal receipt",
+      )
     }
   }
 

@@ -55,6 +55,11 @@ export interface PolicyDescription {
   channelOrderingGuildIds: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
+  directMessageAuditEnabled: boolean
+  directMessageDeletionEnabled: boolean
+  directMessageDeliveryEnabled: boolean
+  directMessageEditingEnabled: boolean
+  directMessageUserIds: string[]
   forumPostChannelIds: string[]
   forumPostsEnabled: boolean
   forumTagAuditEnabled: boolean
@@ -237,6 +242,10 @@ export class ScopePolicy {
   readonly #allowChannelOrderingAudit: boolean
   readonly #allowChannelOrderingChanges: boolean
   readonly #allowDeletions: boolean
+  readonly #allowDirectMessageAudit: boolean
+  readonly #allowDirectMessageDeletion: boolean
+  readonly #allowDirectMessageDelivery: boolean
+  readonly #allowDirectMessageEditing: boolean
   readonly #allowInteractions: boolean
   readonly #allowInviteAudit: boolean
   readonly #allowInviteCreation: boolean
@@ -311,6 +320,7 @@ export class ScopePolicy {
   readonly #allowWidgetSettingsAudit: boolean
   readonly #allowWidgetSettingsChanges: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
+  readonly #directMessageUserIds: ReadonlySet<string>
   readonly #announcementCrosspostChannelIds: ReadonlySet<string>
   readonly #announcementSubscriptionSourceChannelIds: ReadonlySet<string>
   readonly #announcementSubscriptionTargetChannelIds: ReadonlySet<string>
@@ -408,6 +418,10 @@ export class ScopePolicy {
   > & Partial<Pick<
     ConnectorConfig,
     | "allowAnnouncementCrossposts"
+    | "allowDirectMessageAudit"
+    | "allowDirectMessageDeletion"
+    | "allowDirectMessageDelivery"
+    | "allowDirectMessageEditing"
     | "allowApplicationEmojiAudit"
     | "allowApplicationEmojiChanges"
     | "allowApplicationIntentChanges"
@@ -500,6 +514,7 @@ export class ScopePolicy {
     | "allowWidgetSettingsAudit"
     | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
+    | "directMessageUserIds"
     | "channelDeletionIds"
     | "channelCloneGuildIds"
     | "channelCloneSourceIds"
@@ -601,6 +616,10 @@ export class ScopePolicy {
     this.#allowChannelOrderingChanges = config.allowChannelOrderingChanges ?? false
     this.#allowChannelMetadataChanges = config.allowChannelMetadataChanges ?? false
     this.#allowDeletions = config.allowDeletions
+    this.#allowDirectMessageAudit = config.allowDirectMessageAudit ?? false
+    this.#allowDirectMessageDeletion = config.allowDirectMessageDeletion ?? false
+    this.#allowDirectMessageDelivery = config.allowDirectMessageDelivery ?? false
+    this.#allowDirectMessageEditing = config.allowDirectMessageEditing ?? false
     this.#allowInteractions = config.allowInteractions
     this.#allowInviteAudit = config.allowInviteAudit ?? false
     this.#allowInviteCreation = config.allowInviteCreation ?? false
@@ -676,6 +695,7 @@ export class ScopePolicy {
     this.#allowWidgetSettingsAudit = config.allowWidgetSettingsAudit ?? false
     this.#allowWidgetSettingsChanges = config.allowWidgetSettingsChanges ?? false
     this.#deleteChannelIds = config.deleteChannelIds
+    this.#directMessageUserIds = config.directMessageUserIds ?? new Set()
     this.#announcementCrosspostChannelIds = config.announcementCrosspostChannelIds ?? new Set()
     this.#announcementSubscriptionSourceChannelIds = config
       .announcementSubscriptionSourceChannelIds ?? new Set()
@@ -838,6 +858,15 @@ export class ScopePolicy {
       channelOrderingGuildIds: [...this.#channelOrderingGuildIds].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
+      directMessageAuditEnabled: this.#allowDirectMessageAudit
+        && this.#directMessageUserIds.size > 0,
+      directMessageDeletionEnabled: this.#allowDirectMessageDeletion
+        && this.#directMessageUserIds.size > 0,
+      directMessageDeliveryEnabled: this.#allowDirectMessageDelivery
+        && this.#directMessageUserIds.size > 0,
+      directMessageEditingEnabled: this.#allowDirectMessageEditing
+        && this.#directMessageUserIds.size > 0,
+      directMessageUserIds: [...this.#directMessageUserIds].sort(),
       gatewayEnabled: this.#allowGateway,
       gatewayEventBufferSize: this.#gatewayEventBufferSize,
       guildScaffoldGuildIds: [...this.#guildScaffoldGuildIds].sort(),
@@ -1110,6 +1139,55 @@ export class ScopePolicy {
       channel.id,
       channel.parent_id,
     ))
+  }
+
+  #assertDirectMessageUserAllowed(userId: string): void {
+    if (this.#directMessageUserIds.size === 0) {
+      throw new PolicyError(
+        "Discord direct messages require an explicit user allowlist",
+      )
+    }
+    if (!this.#directMessageUserIds.has(userId)) {
+      throw new PolicyError(
+        `Discord user ${userId} is outside the direct-message scope`,
+      )
+    }
+  }
+
+  assertDirectMessageAuditAllowed(userId: string): void {
+    if (!this.#allowDirectMessageAudit) {
+      throw new PolicyError(
+        "Discord direct-message reads are disabled by connector configuration",
+      )
+    }
+    this.#assertDirectMessageUserAllowed(userId)
+  }
+
+  assertDirectMessageDeletionAllowed(userId: string): void {
+    if (!this.#allowDirectMessageDeletion) {
+      throw new PolicyError(
+        "Discord direct-message deletion is disabled by connector configuration",
+      )
+    }
+    this.#assertDirectMessageUserAllowed(userId)
+  }
+
+  assertDirectMessageDeliveryAllowed(userId: string): void {
+    if (!this.#allowDirectMessageDelivery) {
+      throw new PolicyError(
+        "Discord direct-message delivery is disabled by connector configuration",
+      )
+    }
+    this.#assertDirectMessageUserAllowed(userId)
+  }
+
+  assertDirectMessageEditingAllowed(userId: string): void {
+    if (!this.#allowDirectMessageEditing) {
+      throw new PolicyError(
+        "Discord direct-message editing is disabled by connector configuration",
+      )
+    }
+    this.#assertDirectMessageUserAllowed(userId)
   }
 
   guildAllowed(guildId: string): boolean {

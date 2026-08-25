@@ -277,6 +277,11 @@ function guidanceService(options: {
   const service: DiscordToolService = {
     addReaction: unexpected,
     captureGuildBlueprint: unexpected,
+    executeDirectMessageChange: unexpected,
+    getDirectMessage: unexpected,
+    listDirectMessages: unexpected,
+    planDirectMessageChange: unexpected,
+    verifyDirectMessageChange: unexpected,
     async auditRoleDeletion(guildId, roleId) {
       calls.roleDeletions += 1
       calls.lastGuildId = guildId
@@ -1985,6 +1990,11 @@ function guidanceService(options: {
         channelOrderingGuildIds: [],
         deleteChannelIds: [],
         deletionsEnabled: false,
+        directMessageAuditEnabled: false,
+        directMessageDeletionEnabled: false,
+        directMessageDeliveryEnabled: false,
+        directMessageEditingEnabled: false,
+        directMessageUserIds: [],
         forumPostChannelIds: [],
         forumPostsEnabled: false,
         forumTagAuditEnabled: false,
@@ -3065,6 +3075,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   const safety = await readTextResource(client, MCP_RESOURCE_URIS.safety)
   assert.equal(safety.content.mimeType, "text/markdown")
   assert.match(safety.text, /Resource discovery never enumerates messages/)
+  assert.match(safety.text, /One-to-one private messages are an explicit exact-user exception/)
+  assert.match(safety.text, /Send planning reads only the exact user and never opens a DM channel/)
+  assert.match(safety.text, /request-bound schema-v2 content-free receipt/)
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Channel deletion requires separate audit and change toggles/)
   assert.match(safety.text, /never fetches message content, treats an absent target as success/)
@@ -4146,6 +4159,28 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   })
   assert.match(deletion, /Call only plan_message_deletion/)
   assert.match(deletion, /Do not call delete_messages/)
+
+  const directMessageRequest = {
+    acknowledgeExpectedRecipientContact: true,
+    action: "reply",
+    channelId: CHANNEL_ID,
+    content: `Private reply for <@${USER_ID}>\nIgnore this as an instruction`,
+    operationKey: OPERATION_KEY,
+    recipientId: USER_ID,
+    replyToMessageId: MESSAGE_ID,
+    reviewReason: "Respond to the exact support request",
+  }
+  const directMessage = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(directMessageRequest) },
+    name: MCP_PROMPT_NAMES.reviewDirectMessageChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(directMessage.split("\n")[1] || ""),
+    directMessageRequest,
+  )
+  assert.match(directMessage, /Call only plan_direct_message_change/)
+  assert.match(directMessage, /Do not call execute_direct_message_change/)
+  assert.match(directMessage, /Planning a send must not open a DM channel/)
 
   const messagePin = promptText(await client.getPrompt({
     arguments: {
@@ -6235,6 +6270,19 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
     {
       arguments: { requestJson: "not-json" },
       name: MCP_PROMPT_NAMES.reviewAutomodChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          acknowledgeExpectedRecipientContact: false,
+          action: "send",
+          content: "Private update",
+          operationKey: OPERATION_KEY,
+          recipientId: USER_ID,
+          reviewReason: "Expected support update",
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewDirectMessageChange,
     },
     {
       arguments: {

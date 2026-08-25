@@ -20,6 +20,7 @@ import {
 } from "../src/config-document.js"
 import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
 import { loadConnectorConfigDocument } from "../src/config.js"
+import { CONNECTOR_LIMITS } from "../src/constants.js"
 import { guildChannelLayoutGuildIds } from "../src/guild-channel-evidence.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 
@@ -70,6 +71,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   assert.deepEqual(CONFIG_RECIPE_NAMES, [
     "guild-builder",
     "channel-publisher",
+    "direct-messenger",
     "incident-response",
   ])
   assert.equal(Object.isFrozen(CONFIG_RECIPES), true)
@@ -138,6 +140,39 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     expectedPermissions.toString(),
   )
 
+  const directMessenger = getConfigRecipe("direct-messenger")
+  assert.deepEqual(directMessenger.capabilities, [
+    "directMessageAudit",
+    "directMessageDeletion",
+    "directMessageDelivery",
+    "directMessageEditing",
+  ])
+  assert.deepEqual(directMessenger.toolsets, ["direct-messages"])
+  assert.deepEqual(directMessenger.toolNames, [
+    "discover_discord_tools",
+    "execute_direct_message_change",
+    "get_direct_message",
+    "list_direct_messages",
+    "plan_direct_message_change",
+    "verify_direct_message_change",
+  ])
+  assert.deepEqual(directMessenger.requirements.scope, {
+    kind: "user",
+    maximum: CONNECTOR_LIMITS.directMessageUserAllowlist,
+    minimum: 1,
+    option: "--user-id",
+    outerBoundary: null,
+    targets: ["$.scopes.directMessageUserIds"],
+  })
+  assert.deepEqual(directMessenger.requirements.botPermissions, [])
+  assert.equal(directMessenger.requirements.botPermissionBitfield, "0")
+  assert.deepEqual(directMessenger.requirements.privilegedIntents, [])
+  assert.deepEqual(directMessenger.requirements.gateway, {
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: [],
+  })
+
   const incidentResponse = getConfigRecipe("incident-response")
   assert.deepEqual(incidentResponse.capabilities, [
     "guildIncidentAudit",
@@ -193,6 +228,16 @@ test("configuration recipe requests normalize exact bounded scope", () => {
       kind: "channel",
     },
   })
+  assert.deepEqual(normalizeConfigRecipeRequest({
+    name: "direct-messenger",
+    userIds: [USER_ID],
+  }), {
+    name: "direct-messenger",
+    scope: {
+      ids: [USER_ID],
+      kind: "user",
+    },
+  })
   assert.throws(
     () => normalizeConfigRecipeRequest({ name: "unknown", guildIds: [GUILD_ID] }),
     /must be one of/,
@@ -204,6 +249,10 @@ test("configuration recipe requests normalize exact bounded scope", () => {
   assert.throws(
     () => normalizeConfigRecipeRequest({ name: "channel-publisher", guildIds: [GUILD_ID] }),
     /accepts --channel-id, not --guild-id/,
+  )
+  assert.throws(
+    () => normalizeConfigRecipeRequest({ name: "direct-messenger", guildIds: [GUILD_ID] }),
+    /accepts --user-id only/,
   )
   assert.throws(
     () => normalizeConfigRecipeRequest({
@@ -372,6 +421,48 @@ test("incident-response adds only exact-guild incident policy", async (context) 
     }),
     /must remain inside readScope\.guildIds/,
   )
+})
+
+test("direct-messenger adds only exact-user private-message policy", async (context) => {
+  const original = document({
+    capabilities: { interactions: true },
+    scopes: { interactionChannelIds: [CHANNEL_ID] },
+    toolsets: ["connector", "interactions"],
+  })
+  const file = await configFile(context, original)
+  const plan = planConfigRecipe({
+    file,
+    name: "direct-messenger",
+    userIds: [USER_ID],
+  })
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.execution.configurationWritten, false)
+  assert.equal(plan.execution.discordContacted, false)
+  assert.equal(plan.execution.secretValuesRead, false)
+  assert.equal(plan.proposedDocument.capabilities.directMessageAudit, true)
+  assert.equal(plan.proposedDocument.capabilities.directMessageDeletion, true)
+  assert.equal(plan.proposedDocument.capabilities.directMessageDelivery, true)
+  assert.equal(plan.proposedDocument.capabilities.directMessageEditing, true)
+  assert.equal(plan.proposedDocument.capabilities.interactions, true)
+  assert.deepEqual(plan.proposedDocument.scopes.directMessageUserIds, [USER_ID])
+  assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.deepEqual(plan.proposedDocument.readScope, original.readScope)
+  assert.deepEqual(plan.proposedDocument.gateway, original.gateway)
+  assert.deepEqual(plan.proposedDocument.tools.toolsets, [
+    "connector",
+    "direct-messages",
+    "interactions",
+  ])
+  const runtime = loadConnectorConfigDocument(plan.proposedDocument, {
+    [TOKEN_ALIAS]: TOKEN,
+  })
+  assert.equal(runtime.allowDirectMessageAudit, true)
+  assert.equal(runtime.allowDirectMessageDeletion, true)
+  assert.equal(runtime.allowDirectMessageDelivery, true)
+  assert.equal(runtime.allowDirectMessageEditing, true)
+  assert.deepEqual([...runtime.directMessageUserIds], [USER_ID])
+  assert.equal(runtime.allowGateway, false)
 })
 
 test("recipe plans bind the exact request and normalized file path", async (context) => {

@@ -16,6 +16,7 @@ import {
   type ConnectorConfigSummary,
 } from "./config-operator.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -48,11 +49,12 @@ const CONFIG_RECIPE_PLAN_FORMAT = "discord-mcp.config-recipe-plan.v1"
 export const CONFIG_RECIPE_NAMES = Object.freeze([
   "guild-builder",
   "channel-publisher",
+  "direct-messenger",
   "incident-response",
 ] as const)
 
 export type ConfigRecipeName = typeof CONFIG_RECIPE_NAMES[number]
-export type ConfigRecipeScopeKind = "channel" | "guild"
+export type ConfigRecipeScopeKind = "channel" | "guild" | "user"
 
 export interface ConfigRecipePrivilegedIntent {
   readonly name: "MESSAGE_CONTENT"
@@ -78,8 +80,8 @@ export interface ConfigRecipeDescriptor {
       readonly kind: ConfigRecipeScopeKind
       readonly maximum: number
       readonly minimum: 1
-      readonly option: "--channel-id" | "--guild-id"
-      readonly outerBoundary: "$.readScope.channelIds" | "$.readScope.guildIds"
+      readonly option: "--channel-id" | "--guild-id" | "--user-id"
+      readonly outerBoundary: "$.readScope.channelIds" | "$.readScope.guildIds" | null
       readonly targets: readonly `$.scopes.${ConnectorConfigScopeName}`[]
     }
   }
@@ -111,6 +113,7 @@ export interface ConfigRecipeSelection {
   readonly channelIds?: readonly string[]
   readonly guildIds?: readonly string[]
   readonly name: string
+  readonly userIds?: readonly string[]
 }
 
 export interface NormalizedConfigRecipeRequest {
@@ -274,6 +277,40 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     ],
   },
   {
+    botPermissions: [],
+    capabilities: [
+      "directMessageAudit",
+      "directMessageDeletion",
+      "directMessageDelivery",
+      "directMessageEditing",
+    ],
+    description: "Add exact-user one-to-one Discord private-message reads plus reviewed send, reply, plain-text connector-message edit, and irreversible deletion with forced mention suppression and content-free lifecycle evidence.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "direct-messenger",
+    privilegedIntents: [],
+    risks: [
+      "Private-message sends and replies contact an exact configured person outside a guild channel",
+      "Edits replace exact connector-authored private-message content and deletion is irreversible",
+      "Exact recipient scope cannot establish consent, prior contact, or the recipient's expectations",
+    ],
+    scope: {
+      kind: "user",
+      names: ["directMessageUserIds"],
+    },
+    toolsets: ["direct-messages"],
+    warnings: [
+      "Every mutation requires a fresh content-bound keyed plan, signed interactive approval, a request-bound one-shot schema-v2 receipt, pending content-free activity, no automatic mutation retry, and exact readback",
+      "All mentions and reply-author notifications are forcibly suppressed, writes are globally bounded to five per minute, and each recipient has a fixed five-second minimum interval",
+      "Planning a new send never opens a DM channel; approved execution may open one before sending and checkpoints its exact ID before message dispatch",
+      "Discord may reject contact because of recipient privacy, relationship, or shared-server state; the connector does not discover users, enumerate DM channels, create group DMs, or consume DM Gateway events",
+      "Message content and transient review reasons never enter activity records or operation receipts",
+    ],
+  },
+  {
     botPermissions: [
       "MANAGE_GUILD",
     ],
@@ -341,7 +378,11 @@ function recipeScope(source: ConfigRecipeSource): ConfigRecipeDescriptor["requir
   if (names.length !== source.scope.names.length) {
     throw new Error(`Configuration recipe ${source.name} includes duplicate or unknown scopes`)
   }
-  const expectedSuffix = source.scope.kind === "guild" ? "GuildIds" : "ChannelIds"
+  const expectedSuffix = source.scope.kind === "guild"
+    ? "GuildIds"
+    : source.scope.kind === "channel"
+      ? "ChannelIds"
+      : "UserIds"
   if (names.some((name) => !name.endsWith(expectedSuffix))) {
     throw new Error(
       `Configuration recipe ${source.name} includes a scope outside its ${source.scope.kind} boundary`,
@@ -359,14 +400,23 @@ function recipeScope(source: ConfigRecipeSource): ConfigRecipeDescriptor["requir
         outerBoundary: "$.readScope.guildIds" as const,
         targets,
       }
-    : {
+    : source.scope.kind === "channel"
+      ? {
         kind: "channel" as const,
         maximum: DISCORD_LIMITS.searchChannelIds,
         minimum: 1 as const,
         option: "--channel-id" as const,
         outerBoundary: "$.readScope.channelIds" as const,
         targets,
-      })
+      }
+      : {
+          kind: "user" as const,
+          maximum: CONNECTOR_LIMITS.directMessageUserAllowlist,
+          minimum: 1 as const,
+          option: "--user-id" as const,
+          outerBoundary: null,
+          targets,
+        })
 }
 
 function createRecipeDescriptor(source: ConfigRecipeSource): ConfigRecipeDescriptor {
@@ -466,9 +516,15 @@ export function normalizeConfigRecipeRequest(
 ): NormalizedConfigRecipeRequest {
   const recipe = getConfigRecipe(selection.name)
   if (recipe.requirements.scope.kind === "guild") {
-    if ((selection.channelIds?.length ?? 0) > 0) {
+    if (
+      (selection.channelIds?.length ?? 0) > 0
+      || (selection.userIds?.length ?? 0) > 0
+    ) {
+      const incompatible = (selection.userIds?.length ?? 0) > 0
+        ? "--user-id"
+        : "--channel-id"
       throw new ConfigurationError(
-        `Configuration recipe ${recipe.name} accepts --guild-id, not --channel-id`,
+        `Configuration recipe ${recipe.name} accepts --guild-id, not ${incompatible}`,
       )
     }
     return Object.freeze({
@@ -483,20 +539,47 @@ export function normalizeConfigRecipeRequest(
       }),
     })
   }
-  if ((selection.guildIds?.length ?? 0) > 0) {
+  if (recipe.requirements.scope.kind === "channel") {
+    if (
+      (selection.guildIds?.length ?? 0) > 0
+      || (selection.userIds?.length ?? 0) > 0
+    ) {
+      const incompatible = (selection.userIds?.length ?? 0) > 0
+        ? "--user-id"
+        : "--guild-id"
+      throw new ConfigurationError(
+        `Configuration recipe ${recipe.name} accepts --channel-id, not ${incompatible}`,
+      )
+    }
+    return Object.freeze({
+      name: recipe.name,
+      scope: Object.freeze({
+        ids: exactSnowflakes(
+          selection.channelIds,
+          `Configuration recipe ${recipe.name} channel scope`,
+          recipe.requirements.scope.maximum,
+        ),
+        kind: "channel" as const,
+      }),
+    })
+  }
+  if (
+    (selection.guildIds?.length ?? 0) > 0
+    || (selection.channelIds?.length ?? 0) > 0
+  ) {
     throw new ConfigurationError(
-      `Configuration recipe ${recipe.name} accepts --channel-id, not --guild-id`,
+      `Configuration recipe ${recipe.name} accepts --user-id only`,
     )
   }
   return Object.freeze({
     name: recipe.name,
     scope: Object.freeze({
       ids: exactSnowflakes(
-        selection.channelIds,
-        `Configuration recipe ${recipe.name} channel scope`,
+        selection.userIds,
+        `Configuration recipe ${recipe.name} user scope`,
         recipe.requirements.scope.maximum,
       ),
-      kind: "channel" as const,
+      kind: "user" as const,
     }),
   })
 }
@@ -517,7 +600,10 @@ function assertInsideOuterBoundary(
 ): void {
   const outer = request.scope.kind === "guild"
     ? document.readScope.guildIds
-    : document.readScope.channelIds
+    : request.scope.kind === "channel"
+      ? document.readScope.channelIds
+      : null
+  if (outer === null) return
   if (request.scope.kind === "channel" && outer.length === 0) return
   const outside = request.scope.ids.filter((id) => !outer.includes(id))
   if (outside.length > 0) {

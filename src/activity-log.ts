@@ -44,7 +44,12 @@ import {
   type ThreadCreationMode,
 } from "./constants.js"
 import { AuditLogError, errorMessage } from "./errors.js"
-import { OPERATION_KEY_HASH_PATTERN } from "./operation-store.js"
+import {
+  DIRECT_MESSAGE_ACTIONS,
+  OPERATION_KEY_HASH_PATTERN,
+  type DirectMessageAction,
+  type DirectMessageReceiptStage,
+} from "./operation-store.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 
 const MAX_ACTIVITY_READ_BYTES = 1_048_576
@@ -93,6 +98,24 @@ const GUILD_PROFILE_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "timestamp",
   "verification",
 ])
+const DIRECT_MESSAGE_ACTIVITY_KEYS = [
+  "action",
+  "channelId",
+  "error",
+  "id",
+  "kind",
+  "messageId",
+  "operationKeyHash",
+  "planDigest",
+  "recipientId",
+  "replyToMessageId",
+  "requestDigest",
+  "schemaVersion",
+  "stage",
+  "status",
+  "timestamp",
+  "verification",
+].sort()
 const GUILD_INCIDENT_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "error",
   "guildId",
@@ -556,6 +579,31 @@ export interface AutoModerationActivity {
   timestamp: string
   triggerType: "keyword" | "keyword-preset" | "member-profile" | "mention-spam" | "spam"
   verification: "drift" | "match" | null
+}
+
+export type DirectMessageActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface DirectMessageActivity {
+  action: DirectMessageAction
+  channelId: string | null
+  error: string | null
+  id: string
+  kind: "direct-message-change"
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string
+  recipientId: string
+  replyToMessageId: string | null
+  requestDigest: string
+  schemaVersion: number
+  stage: DirectMessageReceiptStage
+  status: DirectMessageActivityStatus
+  timestamp: string
+  verification: "match" | null
 }
 
 export type ForumPostActivityStatus =
@@ -1396,6 +1444,7 @@ export type ActivityEntry =
   | ChannelPermissionOverwriteActivity
   | ComponentMessageActivity
   | DeletionActivity
+  | DirectMessageActivity
   | ForumPostActivity
   | ForumTagActivity
   | GuildExpressionActivity
@@ -5102,6 +5151,103 @@ function parseGuildIncidentActivity(
   }
 }
 
+function parseDirectMessageActivity(
+  value: unknown,
+): DirectMessageActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const action = record.action as DirectMessageAction
+  const stage = record.stage as DirectMessageReceiptStage
+  const status = record.status as DirectMessageActivityStatus
+  if (
+    Object.keys(record).sort().join("\0")
+      !== DIRECT_MESSAGE_ACTIVITY_KEYS.join("\0")
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "direct-message-change"
+    || !(DIRECT_MESSAGE_ACTIONS as readonly unknown[]).includes(record.action)
+    || !["channel-ready", "message-dispatched", "reserved", "terminal"]
+      .includes(String(record.stage))
+    || !["completed", "failed", "pending", "uncertain"]
+      .includes(String(record.status))
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || typeof record.recipientId !== "string"
+    || !positiveActivitySnowflake(record.recipientId)
+    || !(record.channelId === null || (
+      typeof record.channelId === "string"
+      && positiveActivitySnowflake(record.channelId)
+    ))
+    || !(record.messageId === null || (
+      typeof record.messageId === "string"
+      && positiveActivitySnowflake(record.messageId)
+    ))
+    || !(record.replyToMessageId === null || (
+      typeof record.replyToMessageId === "string"
+      && positiveActivitySnowflake(record.replyToMessageId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || typeof record.requestDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.requestDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (action === "reply" && record.replyToMessageId === null)
+    || (["delete", "send"].includes(action) && record.replyToMessageId !== null)
+    || (action !== "send" && record.channelId === null)
+    || (["delete", "edit"].includes(action) && record.messageId === null)
+    || ((stage === "terminal") !== (status !== "pending"))
+    || (status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (stage === "reserved" && (
+      (action === "send" && (record.channelId !== null || record.messageId !== null))
+      || (action === "reply" && record.messageId !== null)
+    ))
+    || (stage === "channel-ready" && (
+      action !== "send"
+      || record.channelId === null
+      || record.messageId !== null
+    ))
+    || (stage === "message-dispatched" && (
+      record.channelId === null || record.messageId === null
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+      || record.channelId === null
+      || record.messageId === null
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    action,
+    channelId: record.channelId as string | null,
+    error: record.error as string | null,
+    id: record.id,
+    kind: "direct-message-change",
+    messageId: record.messageId as string | null,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    recipientId: record.recipientId,
+    replyToMessageId: record.replyToMessageId as string | null,
+    requestDigest: record.requestDigest,
+    schemaVersion: SCHEMA_VERSION,
+    stage,
+    status,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseAutoModerationActivity(
   value: unknown,
 ): AutoModerationActivity | undefined {
@@ -5598,6 +5744,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseNativeInteractionActivity(value)
     || parseAttachmentMessageActivity(value)
     || parseComponentMessageActivity(value)
+    || parseDirectMessageActivity(value)
     || parseAutoModerationActivity(value)
     || parseForumPostActivity(value)
     || parseThreadCreationActivity(value)

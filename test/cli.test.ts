@@ -53,6 +53,7 @@ import {
 } from "../src/config-operator.js"
 import {
   CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
+  CONFIG_RECIPE_NAMES,
   CONFIG_RECIPES,
   applyConfigRecipe,
   getConfigRecipe,
@@ -90,6 +91,7 @@ const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
+const USER_ID = "500000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const CONFIG_FILE = "/configuration/discord-mcp.json"
 
@@ -909,6 +911,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     guildIds: [GUILD_ID],
     json: true,
     name: "guild-builder",
+    userIds: [],
   })
   const recipeDigest = `sha256:${"a".repeat(64)}`
   assert.deepEqual(parseCliArguments([
@@ -932,6 +935,24 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     json: false,
     name: "channel-publisher",
     planDigest: recipeDigest,
+    userIds: [],
+  })
+  assert.deepEqual(parseCliArguments([
+    "recipe",
+    "plan",
+    "direct-messenger",
+    "/configuration/discord.json",
+    "--user-id",
+    USER_ID,
+  ]), {
+    action: "plan",
+    channelIds: [],
+    command: "recipe",
+    file: "/configuration/discord.json",
+    guildIds: [],
+    json: false,
+    name: "direct-messenger",
+    userIds: [USER_ID],
   })
   assert.deepEqual(parseCliArguments([
     "config",
@@ -2240,6 +2261,7 @@ test("CLI inspects additive recipes without credentials or file access", async (
   assert.match(textOutput.value(), /Discord MCP additive configuration recipes/)
   assert.match(textOutput.value(), /guild-builder/)
   assert.match(textOutput.value(), /channel-publisher/)
+  assert.match(textOutput.value(), /direct-messenger/)
   assert.match(textOutput.value(), /incident-response/)
   assert.match(textOutput.value(), /Gateway evidence: guild-layout with GUILDS; event-feed policy unchanged/)
   assert.match(textOutput.value(), /Gateway evidence: none; event-feed policy unchanged/)
@@ -2250,7 +2272,7 @@ test("CLI inspects additive recipes without credentials or file access", async (
     schemaVersion: CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
     status: "ok",
   })
-  assert.equal(CONFIG_RECIPES.length, 3)
+  assert.equal(CONFIG_RECIPES.length, CONFIG_RECIPE_NAMES.length)
 })
 
 test("CLI plans and applies an exact recipe without resolving its credential", async (context) => {

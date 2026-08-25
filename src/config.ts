@@ -70,6 +70,10 @@ export interface ConnectorConfig {
   allowChannelOrderingAudit: boolean
   allowChannelOrderingChanges: boolean
   allowDeletions: boolean
+  allowDirectMessageAudit: boolean
+  allowDirectMessageDeletion: boolean
+  allowDirectMessageDelivery: boolean
+  allowDirectMessageEditing: boolean
   allowForumPosts: boolean
   allowForumTagAudit: boolean
   allowForumTagChanges: boolean
@@ -159,6 +163,7 @@ export interface ConnectorConfig {
   channelMetadataIds: ReadonlySet<string>
   channelOrderingGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
+  directMessageUserIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
   expectedBotId: string | undefined
   forumPostChannelIds: ReadonlySet<string>
@@ -479,6 +484,11 @@ export function loadConnectorConfigDocument(
   const announcementSubscriptionTargetChannelIds = configScope(document, "announcementSubscriptionTargetChannelIds")
   const automodAlertChannelIds = configScope(document, "automodAlertChannelIds")
   const deleteChannelIds = configScope(document, "deleteChannelIds")
+  const directMessageUserIds = configScope(
+    document,
+    "directMessageUserIds",
+    CONNECTOR_LIMITS.directMessageUserAllowlist,
+  )
   const interactionChannelIds = configScope(document, "interactionChannelIds")
   const inviteCreationChannelIds = configScope(document, "inviteCreationChannelIds")
   const pinChannelIds = configScope(document, "pinChannelIds")
@@ -655,6 +665,23 @@ export function loadConnectorConfigDocument(
 
   const expectedApplicationId = document.identity.applicationId
   const expectedBotId = document.identity.botId
+  const allowDirectMessageAudit = configCapability(document, "directMessageAudit")
+  const allowDirectMessageDeletion = configCapability(document, "directMessageDeletion")
+  const allowDirectMessageDelivery = configCapability(document, "directMessageDelivery")
+  const allowDirectMessageEditing = configCapability(document, "directMessageEditing")
+  if (
+    (
+      allowDirectMessageAudit
+      || allowDirectMessageDeletion
+      || allowDirectMessageDelivery
+      || allowDirectMessageEditing
+    )
+    && directMessageUserIds.size === 0
+  ) {
+    throw new ConfigurationError(
+      "Direct-message capabilities require an exact direct-message user allowlist",
+    )
+  }
   const allowMessageForwarding = configCapability(document, "messageForwarding")
   const allowCrossGuildMessageForwarding = configCapability(document, "crossGuildMessageForwarding")
   if (allowCrossGuildMessageForwarding && !allowMessageForwarding) {
@@ -1079,6 +1106,10 @@ export function loadConnectorConfigDocument(
     allowChannelOrderingAudit,
     allowChannelOrderingChanges,
     allowDeletions: configCapability(document, "deletions"),
+    allowDirectMessageAudit,
+    allowDirectMessageDeletion,
+    allowDirectMessageDelivery,
+    allowDirectMessageEditing,
     allowGateway,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
@@ -1179,6 +1210,7 @@ export function loadConnectorConfigDocument(
     channelMetadataIds,
     channelOrderingGuildIds,
     deleteChannelIds,
+    directMessageUserIds,
     expectedApplicationId,
     expectedBotId,
     forumPostChannelIds,

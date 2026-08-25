@@ -1,0 +1,1841 @@
+import {
+  createHash,
+  createHmac,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto"
+
+import type {
+  ActivityStore,
+  DirectMessageActivity,
+  DirectMessageActivityStatus,
+} from "./activity-log.js"
+import {
+  CONNECTOR_LIMITS,
+  DISCORD_LIMITS,
+  DISCORD_MESSAGE_FLAGS,
+  DISCORD_MESSAGE_REFERENCE_TYPES,
+  DISCORD_MESSAGE_TYPES,
+  DISCORD_SNOWFLAKE_MAX,
+  DISCORD_SNOWFLAKE_PATTERN,
+  SCHEMA_VERSION,
+} from "./constants.js"
+import type {
+  DiscordClient,
+  DiscordDirectMessageChannelEvidence,
+  DiscordDirectMessageUserEvidence,
+} from "./discord-client.js"
+import {
+  DirectMessageEvidenceError,
+  DirectMessageExecutionError,
+  DirectMessageOperationConflictError,
+  DirectMessagePlanChangedError,
+  DiscordApiError,
+} from "./errors.js"
+import { InteractionLimiter } from "./interaction-limiter.js"
+import { assertDiscordMessageContent } from "./message-safety.js"
+import {
+  type DirectMessageAction,
+  type DirectMessageOperationReceipt,
+  type DirectMessageOperationStore,
+  type DirectMessageReceiptStage,
+  type OperationStore,
+  operationKeyHash,
+} from "./operation-store.js"
+import type { ScopePolicy } from "./policy.js"
+import {
+  createReviewedPlanKey,
+  REVIEWED_PLAN_DIGEST_PATTERN,
+  reviewedPlanDigest,
+} from "./reviewed-plan.js"
+import type {
+  DiscordApplication,
+  DiscordMessage,
+  DiscordUser,
+  RequestOptions,
+} from "./types.js"
+import {
+  writeResourceTarget,
+  type WriteCoordinator,
+} from "./write-coordination.js"
+
+export type DirectMessageChangeRequest =
+  | DirectMessageDeleteRequest
+  | DirectMessageEditRequest
+  | DirectMessageReplyRequest
+  | DirectMessageSendRequest
+
+interface DirectMessageRequestBase {
+  action: DirectMessageAction
+  operationKey: string
+  recipientId: string
+  reviewReason: string
+}
+
+export interface DirectMessageSendRequest extends DirectMessageRequestBase {
+  acknowledgeExpectedRecipientContact: true
+  action: "send"
+  content: string
+}
+
+export interface DirectMessageReplyRequest extends DirectMessageRequestBase {
+  acknowledgeExpectedRecipientContact: true
+  action: "reply"
+  channelId: string
+  content: string
+  replyToMessageId: string
+}
+
+export interface DirectMessageEditRequest extends DirectMessageRequestBase {
+  action: "edit"
+  channelId: string
+  content: string
+  messageId: string
+}
+
+export interface DirectMessageDeleteRequest extends DirectMessageRequestBase {
+  acknowledgeIrreversibleDeletion: true
+  action: "delete"
+  channelId: string
+  messageId: string
+}
+
+export type NormalizedDirectMessageChangeRequest =
+  | NormalizedDirectMessageDeleteRequest
+  | NormalizedDirectMessageEditRequest
+  | NormalizedDirectMessageReplyRequest
+  | NormalizedDirectMessageSendRequest
+
+interface NormalizedDirectMessageRequestBase {
+  action: DirectMessageAction
+  operationKeyHash: string
+  recipientId: string
+  reviewReason: string
+}
+
+export interface NormalizedDirectMessageSendRequest
+  extends NormalizedDirectMessageRequestBase {
+  acknowledgeExpectedRecipientContact: true
+  action: "send"
+  content: string
+}
+
+export interface NormalizedDirectMessageReplyRequest
+  extends NormalizedDirectMessageRequestBase {
+  acknowledgeExpectedRecipientContact: true
+  action: "reply"
+  channelId: string
+  content: string
+  replyToMessageId: string
+}
+
+export interface NormalizedDirectMessageEditRequest
+  extends NormalizedDirectMessageRequestBase {
+  action: "edit"
+  channelId: string
+  content: string
+  messageId: string
+}
+
+export interface NormalizedDirectMessageDeleteRequest
+  extends NormalizedDirectMessageRequestBase {
+  acknowledgeIrreversibleDeletion: true
+  action: "delete"
+  channelId: string
+  messageId: string
+}
+
+export type DirectMessageType =
+  | "chat-input-command"
+  | "context-menu-command"
+  | "default"
+  | "reply"
+
+export interface DirectMessageView {
+  attachmentCount: number
+  author: "connector" | "recipient"
+  authorId: string
+  channelId: string
+  componentCount: number
+  content: string
+  editedTimestamp: string | null
+  embedCount: number
+  id: string
+  mentionEveryone: boolean
+  mentionedRoleCount: number
+  mentionedUserCount: number
+  reactionCount: number
+  replyToMessageId: string | null
+  stickerCount: number
+  timestamp: string
+  type: DirectMessageType
+}
+
+export interface DirectMessagePage {
+  channelId: string
+  messages: DirectMessageView[]
+  nextBeforeMessageId: string | null
+  recipientId: string
+  schemaVersion: number
+}
+
+export interface DirectMessagePlan {
+  action: DirectMessageAction
+  applicationId: string
+  botId: string
+  channel: {
+    exactOneToOne: true
+    id: string
+    unknownFieldCount: number
+  } | null
+  createdAt: string
+  current: DirectMessageView | null
+  desired: {
+    content: string | null
+    replyToMessageId: string | null
+  }
+  digest: string
+  effect: "change" | "none"
+  mentionPolicy: {
+    parse: readonly []
+    repliedUser: false
+    roles: readonly []
+    users: readonly []
+  }
+  operationKeyHash: string
+  privacy: {
+    omittedFields: readonly [
+      "attachment-urls",
+      "avatars",
+      "profile-names",
+      "raw-discord-objects",
+      "raw-operation-key",
+    ]
+    persistence: "content-free-records-only"
+  }
+  rateLimit: {
+    globalWritesPerMinute: number
+    minimumRecipientIntervalMs: number
+  }
+  recipient: {
+    bot: false
+    eligible: true
+    id: string
+    system: false
+    unknownFieldCount: number
+  }
+  reviewReason: string
+  risks: string[]
+  schemaVersion: number
+  status: "already-current" | "planned"
+  warnings: string[]
+  writeRequired: boolean
+}
+
+export type DirectMessageVerificationReason =
+  | "message-drifted"
+  | "operation-failed"
+  | "operation-not-found"
+  | "operation-pending"
+  | "operation-uncertain"
+  | "receipt-target-mismatch"
+  | "request-mismatch"
+  | "verified"
+
+export interface DirectMessageVerificationResult {
+  action: DirectMessageAction
+  activityId: string | null
+  channelId: string | null
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string | null
+  readbackMatched: boolean
+  reason: DirectMessageVerificationReason
+  receiptStage: DirectMessageReceiptStage | null
+  receiptStatus: DirectMessageOperationReceipt["status"] | null
+  recipientId: string
+  requestMatched: boolean
+  schemaVersion: number
+  status: "blocked" | "drifted" | "not-found" | "verified"
+  timestamp: string | null
+}
+
+export interface DirectMessageChangeResult {
+  action: DirectMessageAction
+  activityId: string | null
+  channelId: string | null
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string
+  recipientId: string
+  recovered: boolean
+  schemaVersion: number
+  status: "already-current" | "completed"
+}
+
+export interface DirectMessageServiceClient {
+  createDirectMessage: DiscordClient["createDirectMessage"]
+  createDirectMessageChannel: DiscordClient["createDirectMessageChannel"]
+  deleteDirectMessage: DiscordClient["deleteDirectMessage"]
+  editDirectMessage: DiscordClient["editDirectMessage"]
+  getCurrentApplication: DiscordClient["getCurrentApplication"]
+  getCurrentUser: DiscordClient["getCurrentUser"]
+  getDirectMessage: DiscordClient["getDirectMessage"]
+  getDirectMessageChannel: DiscordClient["getDirectMessageChannel"]
+  getDirectMessageUser: DiscordClient["getDirectMessageUser"]
+  listDirectMessages: DiscordClient["listDirectMessages"]
+}
+
+export interface DirectMessageServiceOptions {
+  activityStore: ActivityStore
+  client: DirectMessageServiceClient
+  clock?: () => Date
+  limiter?: InteractionLimiter
+  operationStore: OperationStore
+  planKey?: Uint8Array
+  policy: ScopePolicy
+  randomId?: () => string
+  verificationKey: Uint8Array
+  writeCoordinator: WriteCoordinator
+}
+
+interface PlanEvidence {
+  channel: DiscordDirectMessageChannelEvidence | null
+  current: DirectMessageView | null
+  recipient: DiscordDirectMessageUserEvidence
+}
+
+const REVIEW_REASON_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
+const MESSAGE_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const SUPPORTED_MESSAGE_TYPES: Readonly<Record<number, DirectMessageType>> = Object.freeze({
+  [DISCORD_MESSAGE_TYPES.chatInputCommand]: "chat-input-command",
+  [DISCORD_MESSAGE_TYPES.contextMenuCommand]: "context-menu-command",
+  [DISCORD_MESSAGE_TYPES.default]: "default",
+  [DISCORD_MESSAGE_TYPES.reply]: "reply",
+})
+const PRIVACY = Object.freeze({
+  omittedFields: Object.freeze([
+    "attachment-urls",
+    "avatars",
+    "profile-names",
+    "raw-discord-objects",
+    "raw-operation-key",
+  ] as const),
+  persistence: "content-free-records-only" as const,
+})
+const MENTION_POLICY = Object.freeze({
+  parse: Object.freeze([]) as readonly [],
+  repliedUser: false as const,
+  roles: Object.freeze([]) as readonly [],
+  users: Object.freeze([]) as readonly [],
+})
+const UNAVAILABLE_PLAN_DIGEST =
+  "hmac-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+function exactKeys(
+  record: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const actual = Object.keys(record).sort()
+  const normalized = [...expected].sort()
+  return actual.length === normalized.length
+    && actual.every((key, index) => key === normalized[index])
+}
+
+function assertSnowflake(value: unknown, name: string): asserts value is string {
+  if (
+    typeof value !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(value)
+    || BigInt(value) < 1n
+    || BigInt(value) > DISCORD_SNOWFLAKE_MAX
+  ) {
+    throw new RangeError(`${name} must be a positive Discord snowflake ID`)
+  }
+}
+
+function assertValidUnicode(value: string, name: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code < 0xD800 || code > 0xDFFF) continue
+    const next = value.charCodeAt(index + 1)
+    if (code <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) {
+      index += 1
+      continue
+    }
+    throw new RangeError(`${name} contains invalid Unicode`)
+  }
+}
+
+function normalizeReviewReason(value: unknown): string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > CONNECTOR_LIMITS.directMessageReviewReasonCharacters
+    || value.trim() !== value
+    || REVIEW_REASON_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(
+      `Discord direct-message review reason must contain 1-${CONNECTOR_LIMITS.directMessageReviewReasonCharacters} trimmed characters without controls`,
+    )
+  }
+  assertValidUnicode(value, "Discord direct-message review reason")
+  return value
+}
+
+function normalizeBase(record: Record<string, unknown>) {
+  assertSnowflake(record.recipientId, "Discord direct-message recipient ID")
+  return {
+    operationKeyHash: operationKeyHash(record.operationKey as string),
+    recipientId: record.recipientId,
+    reviewReason: normalizeReviewReason(record.reviewReason),
+  }
+}
+
+export function normalizeDirectMessageChangeRequest(
+  request: DirectMessageChangeRequest,
+): NormalizedDirectMessageChangeRequest {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new RangeError("Discord direct-message request must be an exact object")
+  }
+  const record = request as unknown as Record<string, unknown>
+  if (record.action === "send") {
+    if (
+      !exactKeys(record, [
+        "acknowledgeExpectedRecipientContact",
+        "action",
+        "content",
+        "operationKey",
+        "recipientId",
+        "reviewReason",
+      ])
+      || record.acknowledgeExpectedRecipientContact !== true
+      || typeof record.content !== "string"
+    ) {
+      throw new RangeError(
+        "Discord direct-message send requires exact content, recipient, operation, review, and contact acknowledgement",
+      )
+    }
+    assertDiscordMessageContent(record.content)
+    return {
+      ...normalizeBase(record),
+      acknowledgeExpectedRecipientContact: true,
+      action: "send",
+      content: record.content,
+    }
+  }
+  if (record.action === "reply") {
+    if (
+      !exactKeys(record, [
+        "acknowledgeExpectedRecipientContact",
+        "action",
+        "channelId",
+        "content",
+        "operationKey",
+        "recipientId",
+        "replyToMessageId",
+        "reviewReason",
+      ])
+      || record.acknowledgeExpectedRecipientContact !== true
+      || typeof record.content !== "string"
+    ) {
+      throw new RangeError(
+        "Discord direct-message reply requires exact content, identities, operation, review, and contact acknowledgement",
+      )
+    }
+    assertSnowflake(record.channelId, "Discord direct-message channel ID")
+    assertSnowflake(record.replyToMessageId, "Discord direct-message reply target ID")
+    assertDiscordMessageContent(record.content)
+    return {
+      ...normalizeBase(record),
+      acknowledgeExpectedRecipientContact: true,
+      action: "reply",
+      channelId: record.channelId,
+      content: record.content,
+      replyToMessageId: record.replyToMessageId,
+    }
+  }
+  if (record.action === "edit") {
+    if (
+      !exactKeys(record, [
+        "action",
+        "channelId",
+        "content",
+        "messageId",
+        "operationKey",
+        "recipientId",
+        "reviewReason",
+      ])
+      || typeof record.content !== "string"
+    ) {
+      throw new RangeError(
+        "Discord direct-message edit requires exact content, identities, operation, and review",
+      )
+    }
+    assertSnowflake(record.channelId, "Discord direct-message channel ID")
+    assertSnowflake(record.messageId, "Discord direct-message message ID")
+    assertDiscordMessageContent(record.content)
+    return {
+      ...normalizeBase(record),
+      action: "edit",
+      channelId: record.channelId,
+      content: record.content,
+      messageId: record.messageId,
+    }
+  }
+  if (record.action === "delete") {
+    if (
+      !exactKeys(record, [
+        "acknowledgeIrreversibleDeletion",
+        "action",
+        "channelId",
+        "messageId",
+        "operationKey",
+        "recipientId",
+        "reviewReason",
+      ])
+      || record.acknowledgeIrreversibleDeletion !== true
+    ) {
+      throw new RangeError(
+        "Discord direct-message deletion requires exact identities, operation, review, and irreversible acknowledgement",
+      )
+    }
+    assertSnowflake(record.channelId, "Discord direct-message channel ID")
+    assertSnowflake(record.messageId, "Discord direct-message message ID")
+    return {
+      ...normalizeBase(record),
+      acknowledgeIrreversibleDeletion: true,
+      action: "delete",
+      channelId: record.channelId,
+      messageId: record.messageId,
+    }
+  }
+  throw new RangeError(
+    "Discord direct-message action must be send, reply, edit, or delete",
+  )
+}
+
+export function directMessageVerificationKey(token: string): Uint8Array {
+  if (typeof token !== "string" || !token.trim()) {
+    throw new RangeError(
+      "Discord direct-message verification requires a non-empty secret",
+    )
+  }
+  return createHmac("sha256", token)
+    .update("discord-mcp-direct-message-verification-key.v1\0")
+    .digest()
+}
+
+export function directMessageRequestDigest(
+  key: Uint8Array,
+  applicationId: string,
+  botId: string,
+  request: NormalizedDirectMessageChangeRequest,
+): string {
+  assertSnowflake(applicationId, "Discord connector application ID")
+  assertSnowflake(botId, "Discord connector bot ID")
+  return reviewedPlanDigest(key, {
+    applicationId,
+    botId,
+    domain: "discord-mcp-direct-message-request.v1",
+    request,
+  })
+}
+
+function matchingDigest(left: string, right: string): boolean {
+  if (
+    !REVIEWED_PLAN_DIGEST_PATTERN.test(left)
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(right)
+  ) return false
+  return timingSafeEqual(Buffer.from(left), Buffer.from(right))
+}
+
+function collectionCount(value: unknown, name: string): number {
+  if (value === undefined) return 0
+  if (!Array.isArray(value) || value.length > DISCORD_LIMITS.channelMessages) {
+    throw new DirectMessageEvidenceError(
+      `Discord direct-message ${name} evidence is invalid`,
+    )
+  }
+  return value.length
+}
+
+function projectedMessageType(value: unknown): DirectMessageType {
+  if (typeof value !== "number" || SUPPORTED_MESSAGE_TYPES[value] === undefined) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message type is unsupported",
+    )
+  }
+  return SUPPORTED_MESSAGE_TYPES[value]
+}
+
+function projectedReplyTarget(
+  message: DiscordMessage,
+  channelId: string,
+  type: DirectMessageType,
+): string | null {
+  const reference = message.message_reference
+  if (type !== "reply") {
+    if (reference !== undefined) {
+      throw new DirectMessageEvidenceError(
+        "Discord direct-message reference is unsupported for this message type",
+      )
+    }
+    return null
+  }
+  if (
+    !reference
+    || reference.type !== undefined
+      && reference.type !== DISCORD_MESSAGE_REFERENCE_TYPES.default
+    || reference.channel_id !== undefined && reference.channel_id !== channelId
+    || reference.guild_id !== undefined
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message reply reference is invalid",
+    )
+  }
+  assertSnowflake(
+    reference.message_id,
+    "Discord direct-message reply target ID",
+  )
+  return reference.message_id
+}
+
+function validateReadContent(content: unknown): asserts content is string {
+  if (
+    typeof content !== "string"
+    || content.length > DISCORD_LIMITS.messageContentCharacters
+    || MESSAGE_CONTROL_PATTERN.test(content)
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message content evidence is invalid",
+    )
+  }
+  try {
+    assertValidUnicode(content, "Discord direct-message content")
+  } catch {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message content evidence is invalid",
+    )
+  }
+}
+
+function projectDirectMessage(
+  message: DiscordMessage,
+  channelId: string,
+  botId: string,
+  recipientId: string,
+  expectedMessageId?: string,
+): DirectMessageView {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned invalid direct-message evidence",
+    )
+  }
+  assertSnowflake(message.id, "Discord direct-message message ID")
+  if (
+    message.channel_id !== channelId
+    || expectedMessageId !== undefined && message.id !== expectedMessageId
+    || message.guild_id !== undefined
+    || message.webhook_id !== undefined
+    || !message.author
+    || typeof message.author !== "object"
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned a message outside the exact direct-message boundary",
+    )
+  }
+  const authorId = message.author.id
+  const author = authorId === botId && message.author.bot === true
+    ? "connector"
+    : authorId === recipientId
+      && message.author.bot !== true
+      && message.author.system !== true
+      ? "recipient"
+      : null
+  if (author === null) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message author is outside the two verified participants",
+    )
+  }
+  validateReadContent(message.content)
+  if (
+    typeof message.timestamp !== "string"
+    || Number.isNaN(Date.parse(message.timestamp))
+    || !(
+      message.edited_timestamp === undefined
+      || message.edited_timestamp === null
+      || typeof message.edited_timestamp === "string"
+        && !Number.isNaN(Date.parse(message.edited_timestamp))
+    )
+    || message.poll !== undefined
+    || message.call !== undefined
+    || message.activity !== undefined
+    || collectionCount(message.message_snapshots, "snapshot") > 0
+    || (
+      message.flags !== undefined
+      && (
+        !Number.isSafeInteger(message.flags)
+        || message.flags < 0
+        || (message.flags & DISCORD_MESSAGE_FLAGS.hasSnapshot) !== 0
+      )
+    )
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message state is unsupported or malformed",
+    )
+  }
+  const type = projectedMessageType(message.type)
+  const stickerCount = Math.max(
+    collectionCount(message.sticker_items, "sticker item"),
+    collectionCount(message.stickers, "legacy sticker"),
+  )
+  return {
+    attachmentCount: collectionCount(message.attachments, "attachment"),
+    author,
+    authorId,
+    channelId,
+    componentCount: collectionCount(message.components, "component"),
+    content: message.content,
+    editedTimestamp: message.edited_timestamp ?? null,
+    embedCount: collectionCount(message.embeds, "embed"),
+    id: message.id,
+    mentionEveryone: message.mention_everyone === true,
+    mentionedRoleCount: collectionCount(message.mention_roles, "role mention"),
+    mentionedUserCount: collectionCount(message.mentions, "user mention"),
+    reactionCount: collectionCount(message.reactions, "reaction"),
+    replyToMessageId: projectedReplyTarget(message, channelId, type),
+    stickerCount,
+    timestamp: message.timestamp,
+    type,
+  }
+}
+
+function plainBotMessage(
+  message: DirectMessageView,
+  content: string,
+  replyToMessageId: string | null,
+): boolean {
+  return message.author === "connector"
+    && message.content === content
+    && message.replyToMessageId === replyToMessageId
+    && message.attachmentCount === 0
+    && message.componentCount === 0
+    && message.embedCount === 0
+    && !message.mentionEveryone
+    && message.mentionedRoleCount === 0
+    && message.mentionedUserCount === 0
+    && message.reactionCount === 0
+    && message.stickerCount === 0
+    && message.type === (replyToMessageId === null ? "default" : "reply")
+}
+
+function assertEditableBotMessage(message: DirectMessageView): void {
+  if (
+    message.author !== "connector"
+    || !["default", "reply"].includes(message.type)
+    || message.attachmentCount !== 0
+    || message.componentCount !== 0
+    || message.embedCount !== 0
+    || message.reactionCount !== 0
+    || message.stickerCount !== 0
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message edit and deletion require an exact plain-text connector-authored message",
+    )
+  }
+}
+
+function assertPinnedIdentity(
+  application: DiscordApplication,
+  user: DiscordUser,
+  applicationId: string,
+  botId: string,
+): void {
+  if (
+    !application
+    || typeof application !== "object"
+    || application.id !== applicationId
+    || application.bot?.id !== undefined && application.bot.id !== botId
+    || !user
+    || typeof user !== "object"
+    || user.id !== botId
+    || user.bot !== true
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord returned evidence for a different connector identity",
+    )
+  }
+}
+
+function assertEligibleRecipient(
+  recipient: DiscordDirectMessageUserEvidence,
+  recipientId: string,
+): void {
+  if (
+    recipient.id !== recipientId
+    || recipient.bot
+    || recipient.system
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message recipient is not an eligible ordinary user",
+    )
+  }
+}
+
+function directMessageOperationStore(
+  store: OperationStore,
+): DirectMessageOperationStore {
+  if (
+    !store.checkpointDirectMessage
+    || !store.finishDirectMessage
+    || !store.getDirectMessage
+    || !store.reserveDirectMessage
+  ) {
+    throw new DirectMessageExecutionError(
+      "Discord direct messages require a direct-message operation store",
+      { status: "blocked-operation-store-incompatible" },
+    )
+  }
+  return store as DirectMessageOperationStore
+}
+
+function directMessageNonce(
+  request: NormalizedDirectMessageChangeRequest,
+  channelId: string,
+): string {
+  return createHash("sha256")
+    .update("discord-mcp-direct-message-nonce.v1\0")
+    .update(request.action)
+    .update("\0")
+    .update(request.recipientId)
+    .update("\0")
+    .update(channelId)
+    .update("\0")
+    .update(request.operationKeyHash)
+    .digest("base64url")
+    .slice(0, DISCORD_LIMITS.messageNonceCharacters)
+}
+
+function safeErrorCode(error: unknown): string {
+  if (error instanceof DiscordApiError) {
+    return `DiscordApiError.${error.status}.${error.code ?? "unknown"}`
+  }
+  const name = error instanceof Error ? error.name : "UnknownError"
+  const normalized = name.replace(/[^A-Za-z0-9._:-]/g, "").slice(0, 128)
+  return normalized || "UnknownError"
+}
+
+function receiptView(receipt: DirectMessageOperationReceipt) {
+  return {
+    action: receipt.action,
+    activityId: receipt.activityId,
+    channelId: receipt.channelId,
+    error: receipt.error,
+    messageId: receipt.messageId,
+    operationKeyHash: receipt.operationKeyHash,
+    planDigest: receipt.planDigest,
+    recipientId: receipt.recipientId,
+    replyToMessageId: receipt.replyToMessageId,
+    stage: receipt.stage,
+    status: receipt.status,
+    timestamp: receipt.timestamp,
+    verification: receipt.verification,
+  }
+}
+
+function requestChannelId(
+  request: NormalizedDirectMessageChangeRequest,
+): string | null {
+  return request.action === "send" ? null : request.channelId
+}
+
+function requestMessageId(
+  request: NormalizedDirectMessageChangeRequest,
+): string | null {
+  return request.action === "edit" || request.action === "delete"
+    ? request.messageId
+    : null
+}
+
+function operationReceipt(options: {
+  activityId: string
+  channelId?: string | null
+  error?: string | null
+  messageId?: string | null
+  plan: DirectMessagePlan
+  request: NormalizedDirectMessageChangeRequest
+  requestDigest: string
+  stage: DirectMessageReceiptStage
+  status: DirectMessageOperationReceipt["status"]
+  timestamp: string
+  verification?: "match" | null
+}): DirectMessageOperationReceipt {
+  return {
+    action: options.request.action,
+    activityId: options.activityId,
+    channelId: options.channelId === undefined
+      ? requestChannelId(options.request)
+      : options.channelId,
+    error: options.error ?? null,
+    kind: "direct-message-change",
+    messageId: options.messageId === undefined
+      ? requestMessageId(options.request)
+      : options.messageId,
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    recipientId: options.request.recipientId,
+    replyToMessageId: options.request.action === "reply"
+      ? options.request.replyToMessageId
+      : options.request.action === "edit"
+        ? options.plan.current?.replyToMessageId ?? null
+        : null,
+    requestDigest: options.requestDigest,
+    schemaVersion: 2,
+    stage: options.stage,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
+function activityEntry(
+  receipt: DirectMessageOperationReceipt,
+): DirectMessageActivity {
+  return {
+    action: receipt.action,
+    channelId: receipt.channelId,
+    error: receipt.error,
+    id: receipt.activityId,
+    kind: "direct-message-change",
+    messageId: receipt.messageId,
+    operationKeyHash: receipt.operationKeyHash,
+    planDigest: receipt.planDigest,
+    recipientId: receipt.recipientId,
+    replyToMessageId: receipt.replyToMessageId,
+    requestDigest: receipt.requestDigest,
+    schemaVersion: SCHEMA_VERSION,
+    stage: receipt.stage,
+    status: receipt.status as DirectMessageActivityStatus,
+    timestamp: receipt.timestamp,
+    verification: receipt.verification === "match" ? "match" : null,
+  }
+}
+
+function knownFailure(error: unknown): boolean {
+  return error instanceof DiscordApiError
+    && error.status >= 400
+    && error.status < 500
+    && error.status !== 429
+}
+
+export class DirectMessageService {
+  readonly #activityStore: ActivityStore
+  readonly #client: DirectMessageServiceClient
+  readonly #clock: () => Date
+  readonly #limiter: InteractionLimiter
+  readonly #operationStore: DirectMessageOperationStore
+  readonly #planKey: Uint8Array
+  readonly #policy: ScopePolicy
+  readonly #randomId: () => string
+  readonly #verificationKey: Uint8Array
+  readonly #writeCoordinator: WriteCoordinator
+
+  constructor(options: DirectMessageServiceOptions) {
+    this.#activityStore = options.activityStore
+    this.#client = options.client
+    this.#clock = options.clock ?? (() => new Date())
+    this.#limiter = options.limiter ?? new InteractionLimiter({
+      maxWritesPerMinute: CONNECTOR_LIMITS.directMessageMaxWritesPerMinute,
+      minWriteIntervalMs: CONNECTOR_LIMITS.directMessageMinWriteIntervalMs,
+    })
+    this.#operationStore = directMessageOperationStore(options.operationStore)
+    this.#planKey = options.planKey ?? createReviewedPlanKey()
+    this.#policy = options.policy
+    this.#randomId = options.randomId ?? randomUUID
+    this.#verificationKey = options.verificationKey
+    this.#writeCoordinator = options.writeCoordinator
+  }
+
+  #assertActionPolicy(request: NormalizedDirectMessageChangeRequest): void {
+    if (request.action === "send" || request.action === "reply") {
+      this.#policy.assertDirectMessageDeliveryAllowed(request.recipientId)
+    } else if (request.action === "edit") {
+      this.#policy.assertDirectMessageEditingAllowed(request.recipientId)
+    } else {
+      this.#policy.assertDirectMessageDeletionAllowed(request.recipientId)
+    }
+  }
+
+  async #identity(
+    applicationId: string,
+    botId: string,
+    options: RequestOptions,
+  ): Promise<void> {
+    assertSnowflake(applicationId, "Discord connector application ID")
+    assertSnowflake(botId, "Discord connector bot ID")
+    const application = await this.#client.getCurrentApplication(options)
+    const user = await this.#client.getCurrentUser(options)
+    assertPinnedIdentity(application, user, applicationId, botId)
+  }
+
+  async #channel(
+    recipientId: string,
+    channelId: string,
+    options: RequestOptions,
+  ): Promise<DiscordDirectMessageChannelEvidence> {
+    const channel = await this.#client.getDirectMessageChannel(
+      channelId,
+      recipientId,
+      options,
+    )
+    assertEligibleRecipient(channel.recipient, recipientId)
+    return channel
+  }
+
+  async #buildPlan(
+    applicationId: string,
+    botId: string,
+    request: NormalizedDirectMessageChangeRequest,
+    options: RequestOptions,
+  ): Promise<{ evidence: PlanEvidence; plan: DirectMessagePlan }> {
+    this.#assertActionPolicy(request)
+    await this.#identity(applicationId, botId, options)
+    let channel: DiscordDirectMessageChannelEvidence | null = null
+    let current: DirectMessageView | null = null
+    let recipient: DiscordDirectMessageUserEvidence
+    if (request.action === "send") {
+      recipient = await this.#client.getDirectMessageUser(
+        request.recipientId,
+        options,
+      )
+      assertEligibleRecipient(recipient, request.recipientId)
+    } else {
+      channel = await this.#channel(
+        request.recipientId,
+        request.channelId,
+        options,
+      )
+      recipient = channel.recipient
+      const targetId = request.action === "reply"
+        ? request.replyToMessageId
+        : request.messageId
+      const message = await this.#client.getDirectMessage(
+        request.channelId,
+        targetId,
+        options,
+      )
+      current = projectDirectMessage(
+        message,
+        request.channelId,
+        botId,
+        request.recipientId,
+        targetId,
+      )
+      if (request.action === "edit" || request.action === "delete") {
+        assertEditableBotMessage(current)
+      }
+    }
+    const effect = request.action === "edit" && current?.content === request.content
+      ? "none"
+      : "change"
+    const desiredContent = request.action === "delete" ? null : request.content
+    const desiredReply = request.action === "reply"
+      ? request.replyToMessageId
+      : request.action === "edit"
+        ? current?.replyToMessageId ?? null
+        : null
+    const risks = [
+      "The operation affects a private conversation with one exact configured user",
+      "Exact recipient scope verifies connector policy but does not prove consent or prior contact",
+      "Discord direct-message mutations are never retried automatically",
+    ]
+    if (request.action === "delete") {
+      risks.push("Deletion is irreversible and the connector performs no rollback")
+    }
+    const warnings = [
+      "Message content and review text are transient and never enter durable records",
+      "All mentions are suppressed, including reply-author notifications",
+      "A 429 or ambiguous transport outcome quarantines the exact operation for review",
+    ]
+    if (request.action === "send") {
+      warnings.push(
+        "Planning does not open a DM channel; approved execution may create one before sending",
+      )
+    }
+    const digest = reviewedPlanDigest(this.#planKey, {
+      applicationId,
+      botId,
+      channel,
+      current,
+      desired: {
+        content: desiredContent,
+        replyToMessageId: desiredReply,
+      },
+      domain: "discord-mcp-direct-message-plan.v1",
+      effect,
+      mentionPolicy: MENTION_POLICY,
+      rateLimit: {
+        globalWritesPerMinute: CONNECTOR_LIMITS.directMessageMaxWritesPerMinute,
+        minimumRecipientIntervalMs: CONNECTOR_LIMITS.directMessageMinWriteIntervalMs,
+      },
+      recipient,
+      request,
+      risks,
+      warnings,
+    })
+    const plan: DirectMessagePlan = {
+      action: request.action,
+      applicationId,
+      botId,
+      channel: channel === null
+        ? null
+        : {
+            exactOneToOne: true,
+            id: channel.id,
+            unknownFieldCount: channel.unknownFieldCount,
+          },
+      createdAt: this.#clock().toISOString(),
+      current,
+      desired: {
+        content: desiredContent,
+        replyToMessageId: desiredReply,
+      },
+      digest,
+      effect,
+      mentionPolicy: MENTION_POLICY,
+      operationKeyHash: request.operationKeyHash,
+      privacy: PRIVACY,
+      rateLimit: {
+        globalWritesPerMinute: CONNECTOR_LIMITS.directMessageMaxWritesPerMinute,
+        minimumRecipientIntervalMs: CONNECTOR_LIMITS.directMessageMinWriteIntervalMs,
+      },
+      recipient: {
+        bot: false,
+        eligible: true,
+        id: recipient.id,
+        system: false,
+        unknownFieldCount: recipient.unknownFieldCount,
+      },
+      reviewReason: request.reviewReason,
+      risks,
+      schemaVersion: SCHEMA_VERSION,
+      status: effect === "none" ? "already-current" : "planned",
+      warnings,
+      writeRequired: effect === "change",
+    }
+    return { evidence: { channel, current, recipient }, plan }
+  }
+
+  async list(
+    applicationId: string,
+    botId: string,
+    recipientId: string,
+    channelId: string,
+    options: {
+      beforeMessageId?: string
+      limit?: number
+      request?: RequestOptions
+    } = {},
+  ): Promise<DirectMessagePage> {
+    assertSnowflake(recipientId, "Discord direct-message recipient ID")
+    assertSnowflake(channelId, "Discord direct-message channel ID")
+    if (options.beforeMessageId !== undefined) {
+      assertSnowflake(
+        options.beforeMessageId,
+        "Discord direct-message history cursor",
+      )
+    }
+    const limit = options.limit ?? CONNECTOR_LIMITS.directMessagePageDefault
+    if (
+      !Number.isInteger(limit)
+      || limit < 1
+      || limit > CONNECTOR_LIMITS.directMessagePage
+    ) {
+      throw new RangeError(
+        `Discord direct-message page limit must be 1-${CONNECTOR_LIMITS.directMessagePage}`,
+      )
+    }
+    this.#policy.assertDirectMessageAuditAllowed(recipientId)
+    await this.#identity(applicationId, botId, options.request ?? {})
+    await this.#channel(recipientId, channelId, options.request ?? {})
+    const messages = await this.#client.listDirectMessages(channelId, {
+      ...options.request,
+      ...(options.beforeMessageId === undefined
+        ? {}
+        : { before: options.beforeMessageId }),
+      limit,
+    })
+    if (!Array.isArray(messages) || messages.length > limit) {
+      throw new DirectMessageEvidenceError(
+        "Discord returned an invalid direct-message history page",
+      )
+    }
+    const projected = messages.map((message) => projectDirectMessage(
+      message,
+      channelId,
+      botId,
+      recipientId,
+    ))
+    return {
+      channelId,
+      messages: projected,
+      nextBeforeMessageId: projected.length === limit
+        ? projected.at(-1)?.id ?? null
+        : null,
+      recipientId,
+      schemaVersion: SCHEMA_VERSION,
+    }
+  }
+
+  async get(
+    applicationId: string,
+    botId: string,
+    recipientId: string,
+    channelId: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DirectMessageView> {
+    assertSnowflake(recipientId, "Discord direct-message recipient ID")
+    assertSnowflake(channelId, "Discord direct-message channel ID")
+    assertSnowflake(messageId, "Discord direct-message message ID")
+    this.#policy.assertDirectMessageAuditAllowed(recipientId)
+    await this.#identity(applicationId, botId, options)
+    await this.#channel(recipientId, channelId, options)
+    return projectDirectMessage(
+      await this.#client.getDirectMessage(channelId, messageId, options),
+      channelId,
+      botId,
+      recipientId,
+      messageId,
+    )
+  }
+
+  async plan(
+    applicationId: string,
+    botId: string,
+    request: DirectMessageChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<DirectMessagePlan> {
+    return this.#buildPlan(
+      applicationId,
+      botId,
+      normalizeDirectMessageChangeRequest(request),
+      options,
+    ).then(({ plan }) => plan)
+  }
+
+  async #verifyReceipt(
+    applicationId: string,
+    botId: string,
+    request: NormalizedDirectMessageChangeRequest,
+    receipt: DirectMessageOperationReceipt,
+    options: RequestOptions,
+  ): Promise<DirectMessageVerificationResult> {
+    const base = {
+      action: request.action,
+      activityId: receipt.activityId,
+      channelId: receipt.channelId,
+      messageId: receipt.messageId,
+      operationKeyHash: request.operationKeyHash,
+      planDigest: receipt.planDigest,
+      receiptStage: receipt.stage,
+      receiptStatus: receipt.status,
+      recipientId: request.recipientId,
+      requestMatched: true,
+      schemaVersion: SCHEMA_VERSION,
+      timestamp: receipt.timestamp,
+    }
+    if (
+      receipt.action !== request.action
+      || receipt.recipientId !== request.recipientId
+      || receipt.channelId !== null
+        && requestChannelId(request) !== null
+        && receipt.channelId !== requestChannelId(request)
+      || (
+        request.action === "edit" || request.action === "delete"
+          ? receipt.messageId !== request.messageId
+          : request.action === "reply"
+            && receipt.replyToMessageId !== request.replyToMessageId
+      )
+    ) {
+      return {
+        ...base,
+        readbackMatched: false,
+        reason: "receipt-target-mismatch",
+        status: "blocked",
+      }
+    }
+    if (
+      receipt.status === "pending"
+      || receipt.status === "failed"
+      || receipt.status === "uncertain"
+        && (receipt.channelId === null || receipt.messageId === null)
+    ) {
+      return {
+        ...base,
+        readbackMatched: false,
+        reason: receipt.status === "pending"
+          ? "operation-pending"
+          : receipt.status === "failed"
+            ? "operation-failed"
+            : "operation-uncertain",
+        status: "blocked",
+      }
+    }
+    await this.#identity(applicationId, botId, options)
+    await this.#channel(
+      request.recipientId,
+      receipt.channelId as string,
+      options,
+    )
+    let matched = false
+    if (request.action === "delete") {
+      try {
+        await this.#client.getDirectMessage(
+          receipt.channelId as string,
+          receipt.messageId as string,
+          options,
+        )
+      } catch (error) {
+        if (error instanceof DiscordApiError && error.status === 404) matched = true
+        else throw error
+      }
+    } else {
+      try {
+        const observed = projectDirectMessage(
+          await this.#client.getDirectMessage(
+            receipt.channelId as string,
+            receipt.messageId as string,
+            options,
+          ),
+          receipt.channelId as string,
+          botId,
+          request.recipientId,
+          receipt.messageId as string,
+        )
+        matched = plainBotMessage(
+          observed,
+          request.content,
+          request.action === "reply"
+            ? request.replyToMessageId
+            : request.action === "edit"
+              ? receipt.replyToMessageId
+              : null,
+        )
+      } catch (error) {
+        if (!(error instanceof DiscordApiError && error.status === 404)) throw error
+      }
+    }
+    return {
+      ...base,
+      readbackMatched: matched,
+      reason: matched ? "verified" : "message-drifted",
+      status: matched ? "verified" : "drifted",
+    }
+  }
+
+  async verify(
+    applicationId: string,
+    botId: string,
+    requestValue: DirectMessageChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<DirectMessageVerificationResult> {
+    const request = normalizeDirectMessageChangeRequest(requestValue)
+    this.#assertActionPolicy(request)
+    const requestDigest = directMessageRequestDigest(
+      this.#verificationKey,
+      applicationId,
+      botId,
+      request,
+    )
+    const receipt = await this.#operationStore.getDirectMessage(
+      "direct-message-change",
+      request.operationKeyHash,
+    )
+    const emptyBase = {
+      action: request.action,
+      activityId: null,
+      channelId: null,
+      messageId: null,
+      operationKeyHash: request.operationKeyHash,
+      planDigest: null,
+      readbackMatched: false,
+      receiptStage: null,
+      receiptStatus: null,
+      recipientId: request.recipientId,
+      requestMatched: false,
+      schemaVersion: SCHEMA_VERSION,
+      timestamp: null,
+    }
+    if (!receipt) {
+      return {
+        ...emptyBase,
+        reason: "operation-not-found",
+        status: "not-found",
+      }
+    }
+    if (!matchingDigest(receipt.requestDigest, requestDigest)) {
+      return {
+        ...emptyBase,
+        receiptStage: receipt.stage,
+        receiptStatus: receipt.status,
+        reason: "request-mismatch",
+        status: "blocked",
+      }
+    }
+    return this.#verifyReceipt(
+      applicationId,
+      botId,
+      request,
+      receipt,
+      options,
+    )
+  }
+
+  async execute(
+    applicationId: string,
+    botId: string,
+    requestValue: DirectMessageChangeRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<DirectMessageChangeResult> {
+    const request = normalizeDirectMessageChangeRequest(requestValue)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord direct-message plan digest is invalid")
+    }
+    this.#assertActionPolicy(request)
+    const requestDigest = directMessageRequestDigest(
+      this.#verificationKey,
+      applicationId,
+      botId,
+      request,
+    )
+    const existing = await this.#operationStore.getDirectMessage(
+      "direct-message-change",
+      request.operationKeyHash,
+    )
+    if (existing) {
+      if (!matchingDigest(existing.requestDigest, requestDigest)) {
+        throw new DirectMessageOperationConflictError(receiptView(existing))
+      }
+      if (
+        existing.status === "completed"
+        && matchingDigest(existing.planDigest, expectedDigest)
+      ) {
+        const verification = await this.#verifyReceipt(
+          applicationId,
+          botId,
+          request,
+          existing,
+          options,
+        )
+        if (verification.status === "verified") {
+          return {
+            action: request.action,
+            activityId: existing.activityId,
+            channelId: existing.channelId,
+            messageId: existing.messageId,
+            operationKeyHash: request.operationKeyHash,
+            planDigest: existing.planDigest,
+            recipientId: request.recipientId,
+            recovered: true,
+            schemaVersion: SCHEMA_VERSION,
+            status: "completed",
+          }
+        }
+      }
+      throw new DirectMessageOperationConflictError(receiptView(existing))
+    }
+    let built: { evidence: PlanEvidence; plan: DirectMessagePlan }
+    try {
+      built = await this.#buildPlan(
+        applicationId,
+        botId,
+        request,
+        options,
+      )
+    } catch (error) {
+      if (
+        error instanceof DirectMessageEvidenceError
+        || error instanceof DiscordApiError && error.status === 404
+      ) {
+        throw new DirectMessagePlanChangedError(
+          expectedDigest,
+          UNAVAILABLE_PLAN_DIGEST,
+        )
+      }
+      throw error
+    }
+    const { plan } = built
+    if (plan.digest !== expectedDigest) {
+      throw new DirectMessagePlanChangedError(expectedDigest, plan.digest)
+    }
+    if (plan.effect === "none") {
+      return {
+        action: request.action,
+        activityId: null,
+        channelId: requestChannelId(request),
+        messageId: requestMessageId(request),
+        operationKeyHash: request.operationKeyHash,
+        planDigest: plan.digest,
+        recipientId: request.recipientId,
+        recovered: false,
+        schemaVersion: SCHEMA_VERSION,
+        status: "already-current",
+      }
+    }
+    const targets = [writeResourceTarget("user", request.recipientId)]
+    if (request.action !== "send") {
+      targets.push(writeResourceTarget("channel", request.channelId))
+      targets.push(writeResourceTarget(
+        "message",
+        request.action === "reply" ? request.replyToMessageId : request.messageId,
+      ))
+    }
+    return this.#writeCoordinator.run(
+      {
+        kind: "direct-message-change",
+        operationKeyHash: request.operationKeyHash,
+        planDigest: plan.digest,
+        targets,
+      },
+      () => this.#executeReserved(
+        botId,
+        request,
+        requestDigest,
+        plan,
+        options,
+      ),
+    )
+  }
+
+  async #executeReserved(
+    botId: string,
+    request: NormalizedDirectMessageChangeRequest,
+    requestDigest: string,
+    plan: DirectMessagePlan,
+    options: RequestOptions,
+  ): Promise<DirectMessageChangeResult> {
+    const raced = await this.#operationStore.getDirectMessage(
+      "direct-message-change",
+      request.operationKeyHash,
+    )
+    if (raced) throw new DirectMessageOperationConflictError(receiptView(raced))
+    this.#limiter.reserve(request.recipientId)
+    const activityId = this.#randomId()
+    const reserved = operationReceipt({
+      activityId,
+      plan,
+      request,
+      requestDigest,
+      stage: "reserved",
+      status: "pending",
+      timestamp: this.#clock().toISOString(),
+    })
+    const reservation = await this.#operationStore.reserveDirectMessage(reserved)
+    if (!reservation.created) {
+      throw new DirectMessageOperationConflictError(
+        receiptView(reservation.receipt),
+      )
+    }
+    try {
+      await this.#activityStore.append(activityEntry(reserved))
+    } catch (error) {
+      const failed = operationReceipt({
+        activityId,
+        error: safeErrorCode(error),
+        plan,
+        request,
+        requestDigest,
+        stage: "terminal",
+        status: "failed",
+        timestamp: this.#clock().toISOString(),
+      })
+      await this.#operationStore.finishDirectMessage(failed).catch(() => undefined)
+      throw new DirectMessageExecutionError(
+        "Discord direct-message change was blocked because pending activity could not be recorded",
+        {
+          action: request.action,
+          activityId,
+          error: safeErrorCode(error),
+          operationKeyHash: request.operationKeyHash,
+          planDigest: plan.digest,
+          recipientId: request.recipientId,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-audit-failed",
+        },
+      )
+    }
+
+    let channelId = requestChannelId(request)
+    let messageId = requestMessageId(request)
+    let dispatchStarted = false
+    let mutationSucceeded = false
+    try {
+      if (request.action === "send") {
+        dispatchStarted = true
+        const channel = await this.#client.createDirectMessageChannel(
+          request.recipientId,
+          options,
+        )
+        assertEligibleRecipient(channel.recipient, request.recipientId)
+        channelId = channel.id
+        const checkpoint = operationReceipt({
+          activityId,
+          channelId,
+          plan,
+          request,
+          requestDigest,
+          stage: "channel-ready",
+          status: "pending",
+          timestamp: this.#clock().toISOString(),
+        })
+        await this.#operationStore.checkpointDirectMessage(checkpoint)
+        await this.#activityStore.append(activityEntry(checkpoint))
+      }
+      if (channelId === null) {
+        throw new DirectMessageEvidenceError(
+          "Discord direct-message execution lacks an exact channel identity",
+        )
+      }
+      if (request.action === "send" || request.action === "reply") {
+        dispatchStarted = true
+        const nonce = directMessageNonce(request, channelId)
+        const response = await this.#client.createDirectMessage(
+          channelId,
+          {
+            content: request.content,
+            nonce,
+            ...(request.action === "reply"
+              ? { replyToMessageId: request.replyToMessageId }
+              : {}),
+          },
+          options,
+        )
+        const projected = projectDirectMessage(
+          response,
+          channelId,
+          botId,
+          request.recipientId,
+        )
+        if (
+          !plainBotMessage(
+            projected,
+            request.content,
+            request.action === "reply" ? request.replyToMessageId : null,
+          )
+          || response.nonce !== undefined
+            && response.nonce !== null
+            && String(response.nonce) !== nonce
+        ) {
+          throw new DirectMessageEvidenceError(
+            "Discord direct-message creation response does not match the request",
+          )
+        }
+        messageId = projected.id
+        mutationSucceeded = true
+      } else if (request.action === "edit") {
+        dispatchStarted = true
+        const response = await this.#client.editDirectMessage(
+          channelId,
+          request.messageId,
+          request.content,
+          options,
+        )
+        const projected = projectDirectMessage(
+          response,
+          channelId,
+          botId,
+          request.recipientId,
+          request.messageId,
+        )
+        if (!plainBotMessage(
+          projected,
+          request.content,
+          plan.current?.replyToMessageId ?? null,
+        )) {
+          throw new DirectMessageEvidenceError(
+            "Discord direct-message edit response does not match the request",
+          )
+        }
+        messageId = request.messageId
+        mutationSucceeded = true
+      } else {
+        dispatchStarted = true
+        await this.#client.deleteDirectMessage(
+          channelId,
+          request.messageId,
+          options,
+        )
+        messageId = request.messageId
+        mutationSucceeded = true
+      }
+      if (messageId === null) {
+        throw new DirectMessageEvidenceError(
+          "Discord direct-message execution returned no exact message identity",
+        )
+      }
+      const dispatched = operationReceipt({
+        activityId,
+        channelId,
+        messageId,
+        plan,
+        request,
+        requestDigest,
+        stage: "message-dispatched",
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      })
+      await this.#operationStore.checkpointDirectMessage(dispatched)
+      await this.#activityStore.append(activityEntry(dispatched))
+
+      if (request.action === "delete") {
+        try {
+          await this.#client.getDirectMessage(channelId, messageId, options)
+          throw new DirectMessageEvidenceError(
+            "Discord direct-message deletion readback still contains the message",
+          )
+        } catch (error) {
+          if (!(error instanceof DiscordApiError && error.status === 404)) throw error
+        }
+      } else {
+        const observed = projectDirectMessage(
+          await this.#client.getDirectMessage(channelId, messageId, options),
+          channelId,
+          botId,
+          request.recipientId,
+          messageId,
+        )
+        const expectedReply = request.action === "reply"
+          ? request.replyToMessageId
+          : request.action === "edit"
+            ? plan.current?.replyToMessageId ?? null
+            : null
+        if (!plainBotMessage(observed, request.content, expectedReply)) {
+          throw new DirectMessageEvidenceError(
+            "Discord direct-message readback does not match the requested state",
+          )
+        }
+      }
+    } catch (error) {
+      const status = !mutationSucceeded && knownFailure(error)
+        ? "failed"
+        : "uncertain"
+      const terminal = operationReceipt({
+        activityId,
+        channelId,
+        error: safeErrorCode(error),
+        messageId,
+        plan,
+        request,
+        requestDigest,
+        stage: "terminal",
+        status,
+        timestamp: this.#clock().toISOString(),
+      })
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finishDirectMessage(terminal)
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(activityEntry(terminal))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new DirectMessageExecutionError(
+        "Discord direct-message change did not complete with a verified successful outcome",
+        {
+          action: request.action,
+          activityId,
+          activityRecordError,
+          channelId,
+          dispatchStarted,
+          error: safeErrorCode(error),
+          messageId,
+          operationKeyHash: request.operationKeyHash,
+          operationRecordError,
+          planDigest: plan.digest,
+          recipientId: request.recipientId,
+          schemaVersion: SCHEMA_VERSION,
+          status,
+        },
+      )
+    }
+
+    const completed = operationReceipt({
+      activityId,
+      channelId,
+      messageId,
+      plan,
+      request,
+      requestDigest,
+      stage: "terminal",
+      status: "completed",
+      timestamp: this.#clock().toISOString(),
+      verification: "match",
+    })
+    try {
+      await this.#operationStore.finishDirectMessage(completed)
+    } catch (error) {
+      await this.#activityStore.append(activityEntry({
+        ...completed,
+        error: safeErrorCode(error),
+        status: "uncertain",
+        verification: null,
+      })).catch(() => undefined)
+      throw new DirectMessageExecutionError(
+        "Discord direct-message change completed but its operation receipt failed",
+        {
+          action: request.action,
+          activityId,
+          channelId,
+          messageId,
+          operationKeyHash: request.operationKeyHash,
+          operationRecordError: safeErrorCode(error),
+          planDigest: plan.digest,
+          recipientId: request.recipientId,
+          schemaVersion: SCHEMA_VERSION,
+          status: "completed-operation-record-failed",
+        },
+      )
+    }
+    let activityRecordError: string | null = null
+    try {
+      await this.#activityStore.append(activityEntry(completed))
+    } catch (error) {
+      activityRecordError = safeErrorCode(error)
+    }
+    if (activityRecordError !== null) {
+      throw new DirectMessageExecutionError(
+        "Discord direct-message change completed but terminal activity could not be recorded",
+        {
+          action: request.action,
+          activityId,
+          activityRecordError,
+          channelId,
+          messageId,
+          operationKeyHash: request.operationKeyHash,
+          planDigest: plan.digest,
+          recipientId: request.recipientId,
+          schemaVersion: SCHEMA_VERSION,
+          status: "completed-activity-record-failed",
+        },
+      )
+    }
+    return {
+      action: request.action,
+      activityId,
+      channelId,
+      messageId,
+      operationKeyHash: request.operationKeyHash,
+      planDigest: plan.digest,
+      recipientId: request.recipientId,
+      recovered: false,
+      schemaVersion: SCHEMA_VERSION,
+      status: "completed",
+    }
+  }
+}
