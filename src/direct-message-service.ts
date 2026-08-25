@@ -11,6 +11,14 @@ import type {
   DirectMessageActivityStatus,
 } from "./activity-log.js"
 import {
+  compileComponentLayout,
+  componentLayoutsEqual,
+  parseDiscordComponentLayout,
+  reviewComponentLayout,
+  type ComponentLayoutInput,
+  type NormalizedComponentLayout,
+} from "./component-layout.js"
+import {
   CONNECTOR_LIMITS,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
@@ -36,6 +44,7 @@ import { InteractionLimiter } from "./interaction-limiter.js"
 import { assertDiscordMessageContent } from "./message-safety.js"
 import {
   type DirectMessageAction,
+  type DirectMessageFormat,
   type DirectMessageOperationReceipt,
   type DirectMessageOperationStore,
   type DirectMessageReceiptStage,
@@ -72,24 +81,38 @@ interface DirectMessageRequestBase {
   reviewReason: string
 }
 
+export interface DirectMessageTextBody {
+  content: string
+  kind: "text"
+}
+
+export interface DirectMessageComponentBody {
+  components: readonly ComponentLayoutInput[]
+  kind: "components-v2"
+}
+
+export type DirectMessageBody =
+  | DirectMessageComponentBody
+  | DirectMessageTextBody
+
 export interface DirectMessageSendRequest extends DirectMessageRequestBase {
   acknowledgeExpectedRecipientContact: true
   action: "send"
-  content: string
+  message: DirectMessageBody
 }
 
 export interface DirectMessageReplyRequest extends DirectMessageRequestBase {
   acknowledgeExpectedRecipientContact: true
   action: "reply"
   channelId: string
-  content: string
+  message: DirectMessageBody
   replyToMessageId: string
 }
 
 export interface DirectMessageEditRequest extends DirectMessageRequestBase {
   action: "edit"
   channelId: string
-  content: string
+  message: DirectMessageBody
   messageId: string
 }
 
@@ -113,11 +136,25 @@ interface NormalizedDirectMessageRequestBase {
   reviewReason: string
 }
 
+export interface NormalizedDirectMessageTextBody {
+  content: string
+  kind: "text"
+}
+
+export interface NormalizedDirectMessageComponentBody {
+  components: NormalizedComponentLayout
+  kind: "components-v2"
+}
+
+export type NormalizedDirectMessageBody =
+  | NormalizedDirectMessageComponentBody
+  | NormalizedDirectMessageTextBody
+
 export interface NormalizedDirectMessageSendRequest
   extends NormalizedDirectMessageRequestBase {
   acknowledgeExpectedRecipientContact: true
   action: "send"
-  content: string
+  message: NormalizedDirectMessageBody
 }
 
 export interface NormalizedDirectMessageReplyRequest
@@ -125,7 +162,7 @@ export interface NormalizedDirectMessageReplyRequest
   acknowledgeExpectedRecipientContact: true
   action: "reply"
   channelId: string
-  content: string
+  message: NormalizedDirectMessageBody
   replyToMessageId: string
 }
 
@@ -133,7 +170,7 @@ export interface NormalizedDirectMessageEditRequest
   extends NormalizedDirectMessageRequestBase {
   action: "edit"
   channelId: string
-  content: string
+  message: NormalizedDirectMessageBody
   messageId: string
 }
 
@@ -151,19 +188,29 @@ export type DirectMessageType =
   | "default"
   | "reply"
 
+export type DirectMessagePresentation =
+  | "static-components-v2"
+  | "text"
+  | "unsupported-rich"
+
 export interface DirectMessageView {
   attachmentCount: number
   author: "connector" | "recipient"
   authorId: string
   channelId: string
   componentCount: number
+  componentLayout: NormalizedComponentLayout | null
+  componentPreview: string | null
   content: string
   editedTimestamp: string | null
   embedCount: number
+  flags: number
   id: string
   mentionEveryone: boolean
   mentionedRoleCount: number
   mentionedUserCount: number
+  pinned: boolean
+  presentation: DirectMessagePresentation
   reactionCount: number
   replyToMessageId: string | null
   stickerCount: number
@@ -191,7 +238,8 @@ export interface DirectMessagePlan {
   createdAt: string
   current: DirectMessageView | null
   desired: {
-    content: string | null
+    message: NormalizedDirectMessageBody | null
+    preview: string | null
     replyToMessageId: string | null
   }
   digest: string
@@ -207,6 +255,7 @@ export interface DirectMessagePlan {
     omittedFields: readonly [
       "attachment-urls",
       "avatars",
+      "generated-component-ids",
       "profile-names",
       "raw-discord-objects",
       "raw-operation-key",
@@ -275,9 +324,11 @@ export interface DirectMessageChangeResult {
 
 export interface DirectMessageServiceClient {
   createDirectMessage: DiscordClient["createDirectMessage"]
+  createDirectComponentMessage: DiscordClient["createDirectComponentMessage"]
   createDirectMessageChannel: DiscordClient["createDirectMessageChannel"]
   deleteDirectMessage: DiscordClient["deleteDirectMessage"]
   editDirectMessage: DiscordClient["editDirectMessage"]
+  editDirectComponentMessage: DiscordClient["editDirectComponentMessage"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getDirectMessage: DiscordClient["getDirectMessage"]
@@ -307,6 +358,7 @@ interface PlanEvidence {
 
 const REVIEW_REASON_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const MESSAGE_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const DISCORD_MESSAGE_FLAGS_MAX = 0xFFFF_FFFF
 const SUPPORTED_MESSAGE_TYPES: Readonly<Record<number, DirectMessageType>> = Object.freeze({
   [DISCORD_MESSAGE_TYPES.chatInputCommand]: "chat-input-command",
   [DISCORD_MESSAGE_TYPES.contextMenuCommand]: "context-menu-command",
@@ -317,6 +369,7 @@ const PRIVACY = Object.freeze({
   omittedFields: Object.freeze([
     "attachment-urls",
     "avatars",
+    "generated-component-ids",
     "profile-names",
     "raw-discord-objects",
     "raw-operation-key",
@@ -391,6 +444,41 @@ function normalizeBase(record: Record<string, unknown>) {
   }
 }
 
+function normalizeDirectMessageBody(
+  value: unknown,
+): NormalizedDirectMessageBody {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord direct-message body must be an exact object")
+  }
+  const record = value as Record<string, unknown>
+  if (record.kind === "text") {
+    if (
+      !exactKeys(record, ["content", "kind"])
+      || typeof record.content !== "string"
+    ) {
+      throw new RangeError(
+        "Discord direct-message text body requires exact kind and content",
+      )
+    }
+    assertDiscordMessageContent(record.content)
+    return { content: record.content, kind: "text" }
+  }
+  if (record.kind === "components-v2") {
+    if (!exactKeys(record, ["components", "kind"])) {
+      throw new RangeError(
+        "Discord direct-message Components V2 body requires exact kind and components",
+      )
+    }
+    return {
+      components: reviewComponentLayout(record.components, []).layout,
+      kind: "components-v2",
+    }
+  }
+  throw new RangeError(
+    "Discord direct-message body kind must be text or components-v2",
+  )
+}
+
 export function normalizeDirectMessageChangeRequest(
   request: DirectMessageChangeRequest,
 ): NormalizedDirectMessageChangeRequest {
@@ -403,24 +491,22 @@ export function normalizeDirectMessageChangeRequest(
       !exactKeys(record, [
         "acknowledgeExpectedRecipientContact",
         "action",
-        "content",
+        "message",
         "operationKey",
         "recipientId",
         "reviewReason",
       ])
       || record.acknowledgeExpectedRecipientContact !== true
-      || typeof record.content !== "string"
     ) {
       throw new RangeError(
-        "Discord direct-message send requires exact content, recipient, operation, review, and contact acknowledgement",
+        "Discord direct-message send requires exact body, recipient, operation, review, and contact acknowledgement",
       )
     }
-    assertDiscordMessageContent(record.content)
     return {
       ...normalizeBase(record),
       acknowledgeExpectedRecipientContact: true,
       action: "send",
-      content: record.content,
+      message: normalizeDirectMessageBody(record.message),
     }
   }
   if (record.action === "reply") {
@@ -429,28 +515,26 @@ export function normalizeDirectMessageChangeRequest(
         "acknowledgeExpectedRecipientContact",
         "action",
         "channelId",
-        "content",
+        "message",
         "operationKey",
         "recipientId",
         "replyToMessageId",
         "reviewReason",
       ])
       || record.acknowledgeExpectedRecipientContact !== true
-      || typeof record.content !== "string"
     ) {
       throw new RangeError(
-        "Discord direct-message reply requires exact content, identities, operation, review, and contact acknowledgement",
+        "Discord direct-message reply requires exact body, identities, operation, review, and contact acknowledgement",
       )
     }
     assertSnowflake(record.channelId, "Discord direct-message channel ID")
     assertSnowflake(record.replyToMessageId, "Discord direct-message reply target ID")
-    assertDiscordMessageContent(record.content)
     return {
       ...normalizeBase(record),
       acknowledgeExpectedRecipientContact: true,
       action: "reply",
       channelId: record.channelId,
-      content: record.content,
+      message: normalizeDirectMessageBody(record.message),
       replyToMessageId: record.replyToMessageId,
     }
   }
@@ -459,26 +543,24 @@ export function normalizeDirectMessageChangeRequest(
       !exactKeys(record, [
         "action",
         "channelId",
-        "content",
+        "message",
         "messageId",
         "operationKey",
         "recipientId",
         "reviewReason",
       ])
-      || typeof record.content !== "string"
     ) {
       throw new RangeError(
-        "Discord direct-message edit requires exact content, identities, operation, and review",
+        "Discord direct-message edit requires exact body, identities, operation, and review",
       )
     }
     assertSnowflake(record.channelId, "Discord direct-message channel ID")
     assertSnowflake(record.messageId, "Discord direct-message message ID")
-    assertDiscordMessageContent(record.content)
     return {
       ...normalizeBase(record),
       action: "edit",
       channelId: record.channelId,
-      content: record.content,
+      message: normalizeDirectMessageBody(record.message),
       messageId: record.messageId,
     }
   }
@@ -536,7 +618,7 @@ export function directMessageRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-direct-message-request.v1",
+    domain: "discord-mcp-direct-message-request.v2",
     request,
   })
 }
@@ -670,12 +752,15 @@ function projectDirectMessage(
     || message.poll !== undefined
     || message.call !== undefined
     || message.activity !== undefined
+    || !(message.pinned === undefined || typeof message.pinned === "boolean")
+    || !(message.tts === undefined || typeof message.tts === "boolean")
     || collectionCount(message.message_snapshots, "snapshot") > 0
     || (
       message.flags !== undefined
       && (
         !Number.isSafeInteger(message.flags)
         || message.flags < 0
+        || message.flags > DISCORD_MESSAGE_FLAGS_MAX
         || (message.flags & DISCORD_MESSAGE_FLAGS.hasSnapshot) !== 0
       )
     )
@@ -685,23 +770,63 @@ function projectDirectMessage(
     )
   }
   const type = projectedMessageType(message.type)
+  const attachmentCount = collectionCount(message.attachments, "attachment")
+  const componentCount = collectionCount(message.components, "component")
+  const embedCount = collectionCount(message.embeds, "embed")
+  const flags = message.flags ?? 0
   const stickerCount = Math.max(
     collectionCount(message.sticker_items, "sticker item"),
     collectionCount(message.stickers, "legacy sticker"),
   )
+  let componentLayout: NormalizedComponentLayout | null = null
+  let componentPreview: string | null = null
+  let presentation: DirectMessagePresentation = "unsupported-rich"
+  if (
+    flags === DISCORD_MESSAGE_FLAGS.isComponentsV2
+    && message.content === ""
+    && attachmentCount === 0
+    && componentCount > 0
+    && embedCount === 0
+    && stickerCount === 0
+    && message.tts !== true
+  ) {
+    try {
+      componentLayout = parseDiscordComponentLayout(message.components)
+      componentPreview = reviewComponentLayout(componentLayout, []).preview
+      presentation = "static-components-v2"
+    } catch {
+      componentLayout = null
+      componentPreview = null
+    }
+  } else if (
+    (flags & DISCORD_MESSAGE_FLAGS.isComponentsV2) === 0
+    && message.content.trim().length > 0
+    && attachmentCount === 0
+    && componentCount === 0
+    && embedCount === 0
+    && stickerCount === 0
+    && message.tts !== true
+  ) {
+    presentation = "text"
+  }
   return {
-    attachmentCount: collectionCount(message.attachments, "attachment"),
+    attachmentCount,
     author,
     authorId,
     channelId,
-    componentCount: collectionCount(message.components, "component"),
+    componentCount,
+    componentLayout,
+    componentPreview,
     content: message.content,
     editedTimestamp: message.edited_timestamp ?? null,
-    embedCount: collectionCount(message.embeds, "embed"),
+    embedCount,
+    flags,
     id: message.id,
     mentionEveryone: message.mention_everyone === true,
     mentionedRoleCount: collectionCount(message.mention_roles, "role mention"),
     mentionedUserCount: collectionCount(message.mentions, "user mention"),
+    pinned: message.pinned ?? false,
+    presentation,
     reactionCount: collectionCount(message.reactions, "reaction"),
     replyToMessageId: projectedReplyTarget(message, channelId, type),
     stickerCount,
@@ -710,37 +835,86 @@ function projectDirectMessage(
   }
 }
 
-function plainBotMessage(
+function messageMatchesBody(
   message: DirectMessageView,
-  content: string,
+  body: NormalizedDirectMessageBody,
   replyToMessageId: string | null,
 ): boolean {
-  return message.author === "connector"
-    && message.content === content
+  const bodyMatches = body.kind === "text"
+    ? message.presentation === "text"
+      && message.flags === 0
+      && message.content === body.content
+      && message.componentLayout === null
+    : message.presentation === "static-components-v2"
+      && message.flags === DISCORD_MESSAGE_FLAGS.isComponentsV2
+      && message.content === ""
+      && message.componentLayout !== null
+      && componentLayoutsEqual(message.componentLayout, body.components)
+  return bodyMatches
+    && message.author === "connector"
     && message.replyToMessageId === replyToMessageId
     && message.attachmentCount === 0
-    && message.componentCount === 0
     && message.embedCount === 0
     && !message.mentionEveryone
     && message.mentionedRoleCount === 0
     && message.mentionedUserCount === 0
+    && !message.pinned
     && message.reactionCount === 0
     && message.stickerCount === 0
     && message.type === (replyToMessageId === null ? "default" : "reply")
 }
 
-function assertEditableBotMessage(message: DirectMessageView): void {
+function presentationForBody(
+  body: NormalizedDirectMessageBody,
+): DirectMessagePresentation {
+  return body.kind === "text" ? "text" : "static-components-v2"
+}
+
+function assertEditableBotMessage(
+  message: DirectMessageView,
+  body: NormalizedDirectMessageBody,
+): void {
   if (
     message.author !== "connector"
     || !["default", "reply"].includes(message.type)
     || message.attachmentCount !== 0
-    || message.componentCount !== 0
     || message.embedCount !== 0
+    || message.flags !== (body.kind === "text"
+      ? 0
+      : DISCORD_MESSAGE_FLAGS.isComponentsV2)
+    || message.mentionEveryone
+    || message.mentionedRoleCount !== 0
+    || message.mentionedUserCount !== 0
+    || message.pinned
+    || message.presentation !== presentationForBody(body)
     || message.reactionCount !== 0
     || message.stickerCount !== 0
   ) {
     throw new DirectMessageEvidenceError(
-      "Discord direct-message edit and deletion require an exact plain-text connector-authored message",
+      "Discord direct-message edit requires an exact same-format connector-authored message",
+    )
+  }
+}
+
+function assertDeletableBotMessage(message: DirectMessageView): void {
+  if (
+    message.author !== "connector"
+    || !["default", "reply"].includes(message.type)
+    || !["static-components-v2", "text"].includes(message.presentation)
+    || message.attachmentCount !== 0
+    || message.embedCount !== 0
+    || message.flags !== (message.presentation === "text"
+      ? 0
+      : DISCORD_MESSAGE_FLAGS.isComponentsV2)
+    || message.mentionEveryone
+    || message.mentionedRoleCount !== 0
+    || message.mentionedUserCount !== 0
+    || message.pinned
+    || message.reactionCount !== 0
+    || message.stickerCount !== 0
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message deletion requires an exact supported connector-authored message",
     )
   }
 }
@@ -804,7 +978,7 @@ function directMessageNonce(
   channelId: string,
 ): string {
   return createHash("sha256")
-    .update("discord-mcp-direct-message-nonce.v1\0")
+    .update("discord-mcp-direct-message-nonce.v2\0")
     .update(request.action)
     .update("\0")
     .update(request.recipientId)
@@ -831,6 +1005,7 @@ function receiptView(receipt: DirectMessageOperationReceipt) {
     activityId: receipt.activityId,
     channelId: receipt.channelId,
     error: receipt.error,
+    messageFormat: receipt.messageFormat,
     messageId: receipt.messageId,
     operationKeyHash: receipt.operationKeyHash,
     planDigest: receipt.planDigest,
@@ -841,6 +1016,20 @@ function receiptView(receipt: DirectMessageOperationReceipt) {
     timestamp: receipt.timestamp,
     verification: receipt.verification,
   }
+}
+
+function requestMessageFormat(
+  request: NormalizedDirectMessageChangeRequest,
+): DirectMessageFormat | null {
+  return request.action === "delete" ? null : request.message.kind
+}
+
+function directMessageBodyPreview(
+  body: NormalizedDirectMessageBody,
+): string | null {
+  return body.kind === "text"
+    ? null
+    : reviewComponentLayout(body.components, []).preview
 }
 
 function requestChannelId(
@@ -878,6 +1067,7 @@ function operationReceipt(options: {
       : options.channelId,
     error: options.error ?? null,
     kind: "direct-message-change",
+    messageFormat: requestMessageFormat(options.request),
     messageId: options.messageId === undefined
       ? requestMessageId(options.request)
       : options.messageId,
@@ -907,6 +1097,7 @@ function activityEntry(
     error: receipt.error,
     id: receipt.activityId,
     kind: "direct-message-change",
+    messageFormat: receipt.messageFormat,
     messageId: receipt.messageId,
     operationKeyHash: receipt.operationKeyHash,
     planDigest: receipt.planDigest,
@@ -1031,14 +1222,25 @@ export class DirectMessageService {
         request.recipientId,
         targetId,
       )
-      if (request.action === "edit" || request.action === "delete") {
-        assertEditableBotMessage(current)
+      if (request.action === "edit") {
+        assertEditableBotMessage(current, request.message)
+      } else if (request.action === "delete") {
+        assertDeletableBotMessage(current)
       }
     }
-    const effect = request.action === "edit" && current?.content === request.content
-      ? "none"
-      : "change"
-    const desiredContent = request.action === "delete" ? null : request.content
+    const effect = request.action === "edit"
+      && current !== null
+      && messageMatchesBody(
+        current,
+        request.message,
+        current.replyToMessageId,
+      )
+        ? "none"
+        : "change"
+    const desiredMessage = request.action === "delete" ? null : request.message
+    const desiredPreview = desiredMessage === null
+      ? null
+      : directMessageBodyPreview(desiredMessage)
     const desiredReply = request.action === "reply"
       ? request.replyToMessageId
       : request.action === "edit"
@@ -1053,7 +1255,7 @@ export class DirectMessageService {
       risks.push("Deletion is irreversible and the connector performs no rollback")
     }
     const warnings = [
-      "Message content and review text are transient and never enter durable records",
+      "Message text, component layouts, previews, and review text are transient and never enter durable records",
       "All mentions are suppressed, including reply-author notifications",
       "A 429 or ambiguous transport outcome quarantines the exact operation for review",
     ]
@@ -1062,16 +1264,26 @@ export class DirectMessageService {
         "Planning does not open a DM channel; approved execution may create one before sending",
       )
     }
+    if (
+      request.action !== "delete"
+      && request.message.kind === "components-v2"
+    ) {
+      warnings.push(
+        "Components V2 is irreversible for each created private message and same-format edits cannot remove it",
+        "The static layout registers no button, select, modal, media, file, or callback authority",
+      )
+    }
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       botId,
       channel,
       current,
       desired: {
-        content: desiredContent,
+        message: desiredMessage,
+        preview: desiredPreview,
         replyToMessageId: desiredReply,
       },
-      domain: "discord-mcp-direct-message-plan.v1",
+      domain: "discord-mcp-direct-message-plan.v2",
       effect,
       mentionPolicy: MENTION_POLICY,
       rateLimit: {
@@ -1097,7 +1309,8 @@ export class DirectMessageService {
       createdAt: this.#clock().toISOString(),
       current,
       desired: {
-        content: desiredContent,
+        message: desiredMessage,
+        preview: desiredPreview,
         replyToMessageId: desiredReply,
       },
       digest,
@@ -1247,6 +1460,7 @@ export class DirectMessageService {
     }
     if (
       receipt.action !== request.action
+      || receipt.messageFormat !== requestMessageFormat(request)
       || receipt.recipientId !== request.recipientId
       || receipt.channelId !== null
         && requestChannelId(request) !== null
@@ -1313,9 +1527,9 @@ export class DirectMessageService {
           request.recipientId,
           receipt.messageId as string,
         )
-        matched = plainBotMessage(
+        matched = messageMatchesBody(
           observed,
-          request.content,
+          request.message,
           request.action === "reply"
             ? request.replyToMessageId
             : request.action === "edit"
@@ -1601,17 +1815,28 @@ export class DirectMessageService {
       if (request.action === "send" || request.action === "reply") {
         dispatchStarted = true
         const nonce = directMessageNonce(request, channelId)
-        const response = await this.#client.createDirectMessage(
-          channelId,
-          {
-            content: request.content,
-            nonce,
-            ...(request.action === "reply"
-              ? { replyToMessageId: request.replyToMessageId }
-              : {}),
-          },
-          options,
-        )
+        const replyToMessageId = request.action === "reply"
+          ? request.replyToMessageId
+          : undefined
+        const response = request.message.kind === "text"
+          ? await this.#client.createDirectMessage(
+              channelId,
+              {
+                content: request.message.content,
+                nonce,
+                ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+              },
+              options,
+            )
+          : await this.#client.createDirectComponentMessage(
+              channelId,
+              {
+                components: compileComponentLayout(request.message.components),
+                nonce,
+                ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+              },
+              options,
+            )
         const projected = projectDirectMessage(
           response,
           channelId,
@@ -1619,9 +1844,9 @@ export class DirectMessageService {
           request.recipientId,
         )
         if (
-          !plainBotMessage(
+          !messageMatchesBody(
             projected,
-            request.content,
+            request.message,
             request.action === "reply" ? request.replyToMessageId : null,
           )
           || response.nonce !== undefined
@@ -1636,12 +1861,22 @@ export class DirectMessageService {
         mutationSucceeded = true
       } else if (request.action === "edit") {
         dispatchStarted = true
-        const response = await this.#client.editDirectMessage(
-          channelId,
-          request.messageId,
-          request.content,
-          options,
-        )
+        const response = request.message.kind === "text"
+          ? await this.#client.editDirectMessage(
+              channelId,
+              request.messageId,
+              request.message.content,
+              options,
+            )
+          : await this.#client.editDirectComponentMessage(
+              channelId,
+              request.messageId,
+              {
+                components: compileComponentLayout(request.message.components),
+                flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+              },
+              options,
+            )
         const projected = projectDirectMessage(
           response,
           channelId,
@@ -1649,9 +1884,9 @@ export class DirectMessageService {
           request.recipientId,
           request.messageId,
         )
-        if (!plainBotMessage(
+        if (!messageMatchesBody(
           projected,
-          request.content,
+          request.message,
           plan.current?.replyToMessageId ?? null,
         )) {
           throw new DirectMessageEvidenceError(
@@ -1711,7 +1946,11 @@ export class DirectMessageService {
           : request.action === "edit"
             ? plan.current?.replyToMessageId ?? null
             : null
-        if (!plainBotMessage(observed, request.content, expectedReply)) {
+        if (!messageMatchesBody(
+          observed,
+          request.message,
+          expectedReply,
+        )) {
           throw new DirectMessageEvidenceError(
             "Discord direct-message readback does not match the requested state",
           )
@@ -1764,7 +2003,6 @@ export class DirectMessageService {
         },
       )
     }
-
     const completed = operationReceipt({
       activityId,
       channelId,

@@ -46,8 +46,10 @@ import {
 import { AuditLogError, errorMessage } from "./errors.js"
 import {
   DIRECT_MESSAGE_ACTIONS,
+  DIRECT_MESSAGE_FORMATS,
   OPERATION_KEY_HASH_PATTERN,
   type DirectMessageAction,
+  type DirectMessageFormat,
   type DirectMessageReceiptStage,
 } from "./operation-store.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
@@ -104,6 +106,7 @@ const DIRECT_MESSAGE_ACTIVITY_KEYS = [
   "error",
   "id",
   "kind",
+  "messageFormat",
   "messageId",
   "operationKeyHash",
   "planDigest",
@@ -593,6 +596,7 @@ export interface DirectMessageActivity {
   error: string | null
   id: string
   kind: "direct-message-change"
+  messageFormat: DirectMessageFormat | null
   messageId: string | null
   operationKeyHash: string
   planDigest: string
@@ -5202,6 +5206,11 @@ function parseDirectMessageActivity(
     || (["delete", "send"].includes(action) && record.replyToMessageId !== null)
     || (action !== "send" && record.channelId === null)
     || (["delete", "edit"].includes(action) && record.messageId === null)
+    || (action === "delete"
+      ? record.messageFormat !== null
+      : !(DIRECT_MESSAGE_FORMATS as readonly unknown[]).includes(
+          record.messageFormat,
+        ))
     || ((stage === "terminal") !== (status !== "pending"))
     || (status === "pending" && (
       record.error !== null || record.verification !== null
@@ -5234,6 +5243,7 @@ function parseDirectMessageActivity(
     error: record.error as string | null,
     id: record.id,
     kind: "direct-message-change",
+    messageFormat: record.messageFormat as DirectMessageFormat | null,
     messageId: record.messageId as string | null,
     operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,

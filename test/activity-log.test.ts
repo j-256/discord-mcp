@@ -162,6 +162,7 @@ function directMessageActivity(
       : null,
     id,
     kind: "direct-message-change",
+    messageFormat: "text",
     messageId: dispatched ? "300" : null,
     operationKeyHash: `sha256:${"c".repeat(64)}`,
     planDigest: `hmac-sha256:${"d".repeat(64)}`,
@@ -1586,6 +1587,20 @@ test("JSONL activity log accepts only exact content-free private-message lifecyc
     }),
     /invalid content-free shape/,
   )
+  await assert.rejects(
+    store.append({
+      ...completed,
+      messageFormat: null,
+    }),
+    /invalid content-free shape/,
+  )
+  await assert.rejects(
+    store.append({
+      ...completed,
+      messageFormat: "embed",
+    } as unknown as DirectMessageActivity),
+    /invalid content-free shape/,
+  )
   await appendFile(file, `${JSON.stringify({
     ...completed,
     reviewReason: "private review reason",
@@ -1605,6 +1620,7 @@ test("JSONL activity log accepts only exact content-free private-message lifecyc
     "error",
     "id",
     "kind",
+    "messageFormat",
     "messageId",
     "operationKeyHash",
     "planDigest",

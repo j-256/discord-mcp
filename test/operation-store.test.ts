@@ -96,6 +96,7 @@ function directMessageReceipt(
       ? "DiscordApiError.500.unknown"
       : null,
     kind: "direct-message-change",
+    messageFormat: "text",
     messageId: dispatched ? "300000000000000001" : null,
     operationKeyHash: operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY),
     planDigest: PLAN_DIGEST,
@@ -356,6 +357,20 @@ test("direct-message receipts reject legacy shapes and unsafe stage transitions"
     } as unknown as DirectMessageOperationReceipt),
     /invalid shape/,
   )
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      messageFormat: null,
+    }),
+    /invalid message format/,
+  )
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      messageFormat: "embed",
+    } as unknown as DirectMessageOperationReceipt),
+    /invalid shape/,
+  )
   const { requestDigest: _requestDigest, ...missingDigest } = reserved
   await assert.rejects(
     malformedStore.reserveDirectMessage(
@@ -383,6 +398,13 @@ test("direct-message receipts reject legacy shapes and unsafe stage transitions"
     identityStore.checkpointDirectMessage({
       ...directMessageReceipt("channel-ready"),
       recipientId: "400000000000000002",
+    }),
+    /changed reserved identity/,
+  )
+  await assert.rejects(
+    identityStore.checkpointDirectMessage({
+      ...directMessageReceipt("channel-ready"),
+      messageFormat: "components-v2",
     }),
     /changed reserved identity/,
   )

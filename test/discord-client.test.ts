@@ -446,8 +446,6 @@ test("Discord client suppresses private-message mentions and never retries mutat
       allowed_mentions: {
         parse: [],
         replied_user: false,
-        roles: [],
-        users: [],
       },
       content: `Hello <@${DIRECT_MESSAGE_USER_ID}>`,
       enforce_nonce: true,
@@ -467,8 +465,6 @@ test("Discord client suppresses private-message mentions and never retries mutat
       allowed_mentions: {
         parse: [],
         replied_user: false,
-        roles: [],
-        users: [],
       },
       content: "Edited @everyone",
     }),
@@ -497,10 +493,22 @@ test("Discord client suppresses private-message mentions and never retries mutat
       content: "One shot",
       nonce: "direct-message-nonce",
     }),
+    () => rateLimited.createDirectComponentMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+      components: [{ content: "One shot component", type: 10 }],
+      nonce: "component-nonce",
+    }),
     () => rateLimited.editDirectMessage(
       DIRECT_MESSAGE_CHANNEL_ID,
       DIRECT_MESSAGE_ID,
       "One shot edit",
+    ),
+    () => rateLimited.editDirectComponentMessage(
+      DIRECT_MESSAGE_CHANNEL_ID,
+      DIRECT_MESSAGE_ID,
+      {
+        components: [{ content: "One shot component edit", type: 10 }],
+        flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+      },
     ),
     () => rateLimited.deleteDirectMessage(
       DIRECT_MESSAGE_CHANNEL_ID,
@@ -509,7 +517,77 @@ test("Discord client suppresses private-message mentions and never retries mutat
   ]) {
     await assert.rejects(mutation, DiscordApiError)
   }
-  assert.equal(attempts, 4)
+  assert.equal(attempts, 6)
+})
+
+test("Discord client sends exact private static Components V2 contracts", async () => {
+  const requests: Array<{
+    body: Record<string, unknown>
+    method: string | undefined
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        method: init?.method,
+        url: String(input),
+      })
+      return jsonResponse({ id: DIRECT_MESSAGE_ID })
+    },
+    token: TOKEN,
+  })
+  const components = [{ content: "Private static layout", type: 10 as const }]
+
+  await client.createDirectComponentMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+    components,
+    nonce: "component-nonce",
+    replyToMessageId: DIRECT_MESSAGE_REPLY_ID,
+  })
+  await client.editDirectComponentMessage(
+    DIRECT_MESSAGE_CHANNEL_ID,
+    DIRECT_MESSAGE_ID,
+    { components, flags: DISCORD_MESSAGE_FLAGS.isComponentsV2 },
+  )
+
+  assert.deepEqual(requests, [{
+    body: {
+      allowed_mentions: { parse: [], replied_user: false },
+      components,
+      enforce_nonce: true,
+      flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+      message_reference: {
+        channel_id: DIRECT_MESSAGE_CHANNEL_ID,
+        fail_if_not_exists: true,
+        message_id: DIRECT_MESSAGE_REPLY_ID,
+        type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+      },
+      nonce: "component-nonce",
+    },
+    method: "POST",
+    url: `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages`,
+  }, {
+    body: {
+      allowed_mentions: { parse: [], replied_user: false },
+      components,
+      flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+    },
+    method: "PATCH",
+    url: `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages/${DIRECT_MESSAGE_ID}`,
+  }])
+
+  assert.throws(
+    () => client.editDirectComponentMessage(
+      DIRECT_MESSAGE_CHANNEL_ID,
+      DIRECT_MESSAGE_ID,
+      { components, flags: 0 } as unknown as Parameters<
+        DiscordClient["editDirectComponentMessage"]
+      >[2],
+    ),
+    /preserve the exact IS_COMPONENTS_V2 flag/,
+  )
+  assert.equal(requests.length, 2)
 })
 
 test("Discord client uses the current paginated message pin route", async () => {
@@ -1470,8 +1548,6 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
       allowed_mentions: {
         parse: [],
         replied_user: false,
-        roles: [],
-        users: [],
       },
       content: "Private rejection",
       flags: 64,
@@ -1482,8 +1558,6 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     allowed_mentions: {
       parse: [],
       replied_user: false,
-      roles: [],
-      users: [],
     },
     attachments: [],
     components: [],

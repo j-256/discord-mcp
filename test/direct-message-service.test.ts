@@ -14,6 +14,7 @@ import type {
   ActivityStore,
 } from "../src/activity-log.js"
 import {
+  DISCORD_MESSAGE_FLAGS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
   DISCORD_MESSAGE_TYPES,
 } from "../src/constants.js"
@@ -23,6 +24,7 @@ import {
   directMessageVerificationKey,
   normalizeDirectMessageChangeRequest,
   type DirectMessageChangeRequest,
+  type DirectMessageComponentBody,
   type DirectMessageServiceClient,
 } from "../src/direct-message-service.js"
 import {
@@ -59,6 +61,7 @@ const RESULT_MESSAGE_ID = "900000000000000007"
 const TOKEN = "test-direct-message-token"
 const OPERATION_KEY = "direct-message-operation-key"
 const TIMESTAMP = "2026-08-25T12:00:00.000Z"
+const COMPONENT_TEXT = "private component marker"
 
 class MemoryActivityStore implements ActivityStore {
   readonly entries: ActivityEntry[] = []
@@ -136,6 +139,49 @@ function rawMessage(overrides: Partial<DiscordMessage> = {}): DiscordMessage {
   }
 }
 
+function componentBody(content = COMPONENT_TEXT): DirectMessageComponentBody {
+  return {
+    components: [{
+      accentColor: 0x12_34_56,
+      components: [
+        { content, kind: "text" },
+        { divider: true, kind: "separator", spacing: "large" },
+      ],
+      kind: "container",
+      spoiler: false,
+    }, {
+      content: "private component footer",
+      kind: "text",
+    }],
+    kind: "components-v2",
+  }
+}
+
+function rawComponentMessage(
+  content = COMPONENT_TEXT,
+  overrides: Partial<DiscordMessage> = {},
+): DiscordMessage {
+  return rawMessage({
+    components: [{
+      accent_color: 0x12_34_56,
+      components: [
+        { content, id: 2, type: 10 },
+        { divider: true, id: 3, spacing: 2, type: 14 },
+      ],
+      id: 1,
+      spoiler: false,
+      type: 17,
+    }, {
+      content: "private component footer",
+      id: 4,
+      type: 10,
+    }],
+    content: "",
+    flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+    ...overrides,
+  })
+}
+
 function clientFixture(options: {
   calls?: string[]
   message?: DiscordMessage
@@ -144,6 +190,10 @@ function clientFixture(options: {
   const calls = options.calls ?? []
   const message = options.message ?? rawMessage()
   return {
+    async createDirectComponentMessage() {
+      calls.push("create-component-message")
+      return message
+    },
     async createDirectMessage() {
       calls.push("create-message")
       return message
@@ -167,6 +217,10 @@ function clientFixture(options: {
     },
     async editDirectMessage() {
       calls.push("edit-message")
+      return message
+    },
+    async editDirectComponentMessage() {
+      calls.push("edit-component-message")
       return message
     },
     async getCurrentApplication() {
@@ -220,7 +274,7 @@ function sendRequest(content = "private secret marker"): DirectMessageChangeRequ
   return {
     acknowledgeExpectedRecipientContact: true,
     action: "send",
-    content,
+    message: { content, kind: "text" },
     operationKey: OPERATION_KEY,
     recipientId: RECIPIENT_ID,
     reviewReason: "operator private reason",
@@ -232,7 +286,7 @@ function replyRequest(content = "private reply marker"): DirectMessageChangeRequ
     acknowledgeExpectedRecipientContact: true,
     action: "reply",
     channelId: CHANNEL_ID,
-    content,
+    message: { content, kind: "text" },
     operationKey: `${OPERATION_KEY}-reply`,
     recipientId: RECIPIENT_ID,
     replyToMessageId: MESSAGE_ID,
@@ -244,11 +298,53 @@ function editRequest(content = "private replacement marker"): DirectMessageChang
   return {
     action: "edit",
     channelId: CHANNEL_ID,
-    content,
+    message: { content, kind: "text" },
     messageId: MESSAGE_ID,
     operationKey: `${OPERATION_KEY}-edit`,
     recipientId: RECIPIENT_ID,
     reviewReason: "review exact private edit",
+  }
+}
+
+function componentSendRequest(
+  content = COMPONENT_TEXT,
+): DirectMessageChangeRequest {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "send",
+    message: componentBody(content),
+    operationKey: `${OPERATION_KEY}-components-send`,
+    recipientId: RECIPIENT_ID,
+    reviewReason: "review exact static private layout",
+  }
+}
+
+function componentReplyRequest(
+  content = COMPONENT_TEXT,
+): DirectMessageChangeRequest {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "reply",
+    channelId: CHANNEL_ID,
+    message: componentBody(content),
+    operationKey: `${OPERATION_KEY}-components-reply`,
+    recipientId: RECIPIENT_ID,
+    replyToMessageId: MESSAGE_ID,
+    reviewReason: "review exact static private reply layout",
+  }
+}
+
+function componentEditRequest(
+  content = "private replacement component marker",
+): DirectMessageChangeRequest {
+  return {
+    action: "edit",
+    channelId: CHANNEL_ID,
+    message: componentBody(content),
+    messageId: MESSAGE_ID,
+    operationKey: `${OPERATION_KEY}-components-edit`,
+    recipientId: RECIPIENT_ID,
+    reviewReason: "review exact static private edit layout",
   }
 }
 
@@ -304,12 +400,58 @@ test("direct-message requests are closed and require action-specific acknowledge
     replyRequest(),
     editRequest(),
     deleteRequest(),
+    componentSendRequest(),
+    componentReplyRequest(),
+    componentEditRequest(),
   ]) {
     const normalized = normalizeDirectMessageChangeRequest(request)
     assert.equal(normalized.action, request.action)
     assert.match(normalized.operationKeyHash, /^sha256:[a-f0-9]{64}$/)
     assert.doesNotMatch(JSON.stringify(normalized), /direct-message-operation-key/)
   }
+  const normalizedComponents = normalizeDirectMessageChangeRequest(
+    componentSendRequest(),
+  )
+  assert.equal(normalizedComponents.action, "send")
+  if (normalizedComponents.message.kind !== "components-v2") {
+    assert.fail("Expected a normalized Components V2 body")
+  }
+  assert.deepEqual(normalizedComponents.message.components[0], {
+    accentColor: 0x12_34_56,
+    components: [
+      { content: COMPONENT_TEXT, kind: "text" },
+      { divider: true, kind: "separator", spacing: "large" },
+    ],
+    kind: "container",
+    spoiler: false,
+  })
+  assert.throws(
+    () => normalizeDirectMessageChangeRequest({
+      ...sendRequest(),
+      content: "legacy private body",
+    } as unknown as DirectMessageChangeRequest),
+    /requires exact body/,
+  )
+  assert.throws(
+    () => normalizeDirectMessageChangeRequest({
+      ...sendRequest(),
+      message: {
+        ...componentBody(),
+        content: "mixed private body",
+      },
+    } as unknown as DirectMessageChangeRequest),
+    /requires exact kind and components/,
+  )
+  assert.throws(
+    () => normalizeDirectMessageChangeRequest({
+      ...sendRequest(),
+      message: {
+        components: [{ customId: "unsafe", kind: "button" }],
+        kind: "components-v2",
+      },
+    } as unknown as DirectMessageChangeRequest),
+    /kind must be container, separator, or text/,
+  )
   assert.throws(
     () => normalizeDirectMessageChangeRequest({
       ...sendRequest(),
@@ -322,7 +464,7 @@ test("direct-message requests are closed and require action-specific acknowledge
       ...sendRequest(),
       userName: "fuzzy target",
     } as unknown as DirectMessageChangeRequest),
-    /requires exact content/,
+    /requires exact body/,
   )
   assert.throws(
     () => normalizeDirectMessageChangeRequest({
@@ -384,6 +526,7 @@ test("direct-message send planning remains read-only and profile-minimized", asy
 
     assert.equal(plan.status, "planned")
     assert.equal(plan.channel, null)
+    assert.equal(plan.desired.preview, null)
     assert.deepEqual(calls, ["get-application", "get-current-user", "get-user"])
     assert.doesNotMatch(JSON.stringify(plan), /Private Application|Connector Profile/)
     assert.equal(plan.recipient.id, RECIPIENT_ID)
@@ -428,6 +571,71 @@ test("direct-message reads expose content and bounded counts without profiles or
     assert.equal(page.messages[0]?.embedCount, 1)
     const serialized = JSON.stringify(page)
     assert.doesNotMatch(serialized, /private-url|private-name|private embed|Connector Profile/)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test("direct-message reads normalize static Components V2 and quarantine unsupported rich state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-read-"))
+  try {
+    const supported = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client: clientFixture({ message: rawComponentMessage() }),
+      operationStore: new FileOperationStore(directory),
+      policy: policy({ audit: true }),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const message = await supported.get(
+      APPLICATION_ID,
+      BOT_ID,
+      RECIPIENT_ID,
+      CHANNEL_ID,
+      MESSAGE_ID,
+    )
+
+    assert.equal(message.presentation, "static-components-v2")
+    assert.equal(message.flags, DISCORD_MESSAGE_FLAGS.isComponentsV2)
+    assert.equal(message.content, "")
+    assert.equal(message.componentCount, 2)
+    assert.match(message.componentPreview ?? "", /Text Display/)
+    assert.match(message.componentPreview ?? "", new RegExp(COMPONENT_TEXT))
+    assert.deepEqual(message.componentLayout, componentBody().components)
+    assert.doesNotMatch(JSON.stringify(message.componentLayout), /"id"/)
+
+    for (const unsupportedMessage of [
+      rawComponentMessage(COMPONENT_TEXT, {
+        components: [{
+          custom_id: "private-button-id",
+          id: 1,
+          label: "Private action",
+          style: 1,
+          type: 2,
+        }],
+      }),
+      rawComponentMessage(COMPONENT_TEXT, { tts: true }),
+    ]) {
+      const unsupported = new DirectMessageService({
+        activityStore: new MemoryActivityStore(),
+        client: clientFixture({ message: unsupportedMessage }),
+        operationStore: new FileOperationStore(directory),
+        policy: policy({ audit: true }),
+        verificationKey: directMessageVerificationKey(TOKEN),
+        writeCoordinator: PASSTHROUGH_COORDINATOR,
+      })
+      const view = await unsupported.get(
+        APPLICATION_ID,
+        BOT_ID,
+        RECIPIENT_ID,
+        CHANNEL_ID,
+        MESSAGE_ID,
+      )
+      assert.equal(view.presentation, "unsupported-rich")
+      assert.equal(view.componentLayout, null)
+      assert.equal(view.componentPreview, null)
+      assert.doesNotMatch(JSON.stringify(view), /private-button-id|Private action/)
+    }
   } finally {
     await rm(directory, { force: true, recursive: true })
   }
@@ -555,6 +763,111 @@ test("direct-message reply, edit, and deletion coordinate exact targets and veri
   }
 })
 
+test("direct-message Components V2 reply and same-format edit verify exact readback", async (t) => {
+  for (const action of ["reply", "edit"] as const) {
+    await t.test(action, async () => {
+      const directory = await mkdtemp(join(tmpdir(), `discord-mcp-dm-components-${action}-`))
+      try {
+        const calls: string[] = []
+        const target = action === "reply"
+          ? rawMessage({
+              author: { id: RECIPIENT_ID, username: "Private Recipient" },
+              content: "private recipient prompt",
+            })
+          : rawComponentMessage("private original component marker")
+        const request = action === "reply"
+          ? componentReplyRequest()
+          : componentEditRequest()
+        let current = target
+        const response = rawComponentMessage(
+          action === "reply"
+            ? COMPONENT_TEXT
+            : "private replacement component marker",
+          action === "reply"
+            ? {
+                id: RESULT_MESSAGE_ID,
+                message_reference: {
+                  channel_id: CHANNEL_ID,
+                  message_id: MESSAGE_ID,
+                  type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+                },
+                type: DISCORD_MESSAGE_TYPES.reply,
+              }
+            : {},
+        )
+        const base = clientFixture({ calls, message: target })
+        const client: DirectMessageServiceClient = {
+          ...base,
+          async createDirectComponentMessage(_channelId, input) {
+            calls.push("create-component-message")
+            assert.equal(action, "reply")
+            assert.equal(input.replyToMessageId, MESSAGE_ID)
+            current = response
+            return response
+          },
+          async createDirectMessage() {
+            assert.fail("Static private replies must not use the text mutation")
+          },
+          async editDirectComponentMessage(_channelId, _messageId, input) {
+            calls.push("edit-component-message")
+            assert.equal(action, "edit")
+            assert.equal(input.flags, DISCORD_MESSAGE_FLAGS.isComponentsV2)
+            current = response
+            return response
+          },
+          async editDirectMessage() {
+            assert.fail("Static private edits must not use the text mutation")
+          },
+          async getDirectMessage(_channelId, messageId) {
+            calls.push("get-message")
+            return action === "reply" && messageId === MESSAGE_ID
+              ? target
+              : current
+          },
+        }
+        const service = new DirectMessageService({
+          activityStore: new MemoryActivityStore(),
+          client,
+          clock: () => new Date(TIMESTAMP),
+          operationStore: new FileOperationStore(directory),
+          planKey: new Uint8Array(32).fill(action === "reply" ? 24 : 25),
+          policy: policy({ delivery: true, editing: true }),
+          randomId: () => `direct_message_activity_components_${action}`,
+          verificationKey: directMessageVerificationKey(TOKEN),
+          writeCoordinator: PASSTHROUGH_COORDINATOR,
+        })
+        const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+        const result = await service.execute(
+          APPLICATION_ID,
+          BOT_ID,
+          request,
+          plan.digest,
+        )
+
+        assert.equal(result.status, "completed")
+        assert.equal(
+          result.messageId,
+          action === "reply" ? RESULT_MESSAGE_ID : MESSAGE_ID,
+        )
+        assert.equal(
+          calls.filter((call) => call === (action === "reply"
+            ? "create-component-message"
+            : "edit-component-message")).length,
+          1,
+        )
+        const verified = await service.verify(
+          APPLICATION_ID,
+          BOT_ID,
+          request,
+        )
+        assert.equal(verified.status, "verified")
+      } finally {
+        await rm(directory, { force: true, recursive: true })
+      }
+    })
+  }
+})
+
 test("direct-message identical edit is a record-free no-op", async () => {
   const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-noop-"))
   try {
@@ -591,6 +904,68 @@ test("direct-message identical edit is a record-free no-op", async () => {
     assert.deepEqual(activities.entries, [])
   } finally {
     await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test("direct-message Components V2 edits are no-op exact and reject format conversion", async () => {
+  const noOpDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-noop-"))
+  try {
+    const calls: string[] = []
+    const request = componentEditRequest(COMPONENT_TEXT)
+    const service = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client: clientFixture({ calls, message: rawComponentMessage() }),
+      operationStore: new FileOperationStore(noOpDirectory),
+      policy: policy({ editing: true }),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+    assert.equal(plan.effect, "none")
+    assert.equal(plan.status, "already-current")
+    const result = await service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    )
+    assert.equal(result.status, "already-current")
+    assert.equal(calls.includes("edit-component-message"), false)
+  } finally {
+    await rm(noOpDirectory, { force: true, recursive: true })
+  }
+
+  for (const entry of [
+    {
+      message: rawComponentMessage(),
+      request: editRequest(),
+    },
+    {
+      message: rawMessage(),
+      request: componentEditRequest(),
+    },
+    {
+      message: rawComponentMessage(COMPONENT_TEXT, { pinned: true }),
+      request: componentEditRequest(),
+    },
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-format-"))
+    try {
+      const service = new DirectMessageService({
+        activityStore: new MemoryActivityStore(),
+        client: clientFixture({ message: entry.message }),
+        operationStore: new FileOperationStore(directory),
+        policy: policy({ editing: true }),
+        verificationKey: directMessageVerificationKey(TOKEN),
+        writeCoordinator: PASSTHROUGH_COORDINATOR,
+      })
+      await assert.rejects(
+        () => service.plan(APPLICATION_ID, BOT_ID, entry.request),
+        /same-format connector-authored message/,
+      )
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
   }
 })
 
@@ -746,6 +1121,108 @@ test("direct-message send execution checkpoints exact identities and recovers wi
   }
 })
 
+test("direct-message Components V2 send persists only its format and recovers after restart", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-send-"))
+  try {
+    const calls: string[] = []
+    const activities = new MemoryActivityStore()
+    const store = new FileOperationStore(directory)
+    const base = clientFixture({ calls, message: rawComponentMessage() })
+    const client: DirectMessageServiceClient = {
+      ...base,
+      async createDirectComponentMessage(channelId, input) {
+        calls.push("create-component-message")
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(input.replyToMessageId, undefined)
+        assert.deepEqual(input.components, [{
+          accent_color: 0x12_34_56,
+          components: [
+            { content: COMPONENT_TEXT, type: 10 },
+            { divider: true, spacing: 2, type: 14 },
+          ],
+          spoiler: false,
+          type: 17,
+        }, {
+          content: "private component footer",
+          type: 10,
+        }])
+        return rawComponentMessage(COMPONENT_TEXT, { nonce: input.nonce })
+      },
+      async createDirectMessage() {
+        assert.fail("Components V2 must not use the plain-text mutation")
+      },
+    }
+    const planKey = new Uint8Array(32).fill(23)
+    const options = {
+      activityStore: activities,
+      client,
+      clock: () => new Date(TIMESTAMP),
+      operationStore: store,
+      planKey,
+      policy: policy({ delivery: true }),
+      randomId: () => "direct_message_activity_components",
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    }
+    const service = new DirectMessageService(options)
+    const request = componentSendRequest()
+    const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+
+    assert.equal(plan.desired.message?.kind, "components-v2")
+    assert.match(plan.desired.preview ?? "", new RegExp(COMPONENT_TEXT))
+    assert.match(plan.warnings.join("\n"), /irreversible/)
+    const result = await service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    )
+    assert.equal(result.status, "completed")
+    assert.equal(calls.filter((call) => call === "create-component-message").length, 1)
+
+    const receipt = await store.getDirectMessage(
+      "direct-message-change",
+      operationKeyHash(request.operationKey),
+    )
+    assert.equal(receipt?.messageFormat, "components-v2")
+    assert.deepEqual(
+      activities.entries
+        .filter((entry) => entry.kind === "direct-message-change")
+        .map((entry) => entry.messageFormat),
+      ["components-v2", "components-v2", "components-v2", "components-v2"],
+    )
+
+    const restarted = new DirectMessageService({
+      ...options,
+      activityStore: new MemoryActivityStore(),
+    })
+    const recovered = await restarted.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    )
+    assert.equal(recovered.recovered, true)
+    assert.equal(calls.filter((call) => call === "create-component-message").length, 1)
+
+    const receiptFiles = (await readdir(directory, { recursive: true }))
+      .filter((entry) => entry.endsWith(".json"))
+    const receiptBytes = (await Promise.all(receiptFiles.map((entry) => (
+      readFile(join(directory, entry), "utf8")
+    )))).join("\n")
+    assert.doesNotMatch(
+      receiptBytes,
+      /private component marker|private component footer|static private layout/,
+    )
+    assert.doesNotMatch(
+      JSON.stringify(activities.entries),
+      /private component marker|private component footer|static private layout/,
+    )
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
 test("direct-message verification recovers an uncertain dispatch without scanning or retrying", async () => {
   const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-verify-"))
   try {
@@ -849,6 +1326,7 @@ test("direct-message verification blocks pending and failed receipts before Disc
       channelId: null,
       error: null,
       kind: "direct-message-change",
+      messageFormat: "text",
       messageId: null,
       operationKeyHash: normalized.operationKeyHash,
       planDigest: plan.digest,
@@ -1284,7 +1762,7 @@ test("direct-message edits reject legacy sticker and reaction state", async () =
         () => service.plan(APPLICATION_ID, BOT_ID, {
           action: "edit",
           channelId: CHANNEL_ID,
-          content: "replacement",
+          message: { content: "replacement", kind: "text" },
           messageId: MESSAGE_ID,
           operationKey: OPERATION_KEY,
           recipientId: RECIPIENT_ID,
@@ -1294,6 +1772,95 @@ test("direct-message edits reject legacy sticker and reaction state", async () =
       )
     } finally {
       await rm(directory, { force: true, recursive: true })
+    }
+  }
+})
+
+test("direct-message deletion accepts exact static Components V2 and rejects richer state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-delete-"))
+  try {
+    const calls: string[] = []
+    let exists = true
+    const message = rawComponentMessage()
+    const base = clientFixture({ calls, message })
+    const store = new FileOperationStore(directory)
+    const client: DirectMessageServiceClient = {
+      ...base,
+      async deleteDirectMessage() {
+        calls.push("delete-message")
+        exists = false
+      },
+      async getDirectMessage() {
+        calls.push("get-message")
+        if (!exists) throw apiError(404)
+        return message
+      },
+    }
+    const service = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client,
+      clock: () => new Date(TIMESTAMP),
+      operationStore: store,
+      planKey: new Uint8Array(32).fill(26),
+      policy: policy({ deletion: true }),
+      randomId: () => "direct_message_activity_component_delete",
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const request = deleteRequest()
+    const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+    assert.equal(plan.current?.presentation, "static-components-v2")
+    const result = await service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    )
+    assert.equal(result.status, "completed")
+    assert.equal(calls.filter((call) => call === "delete-message").length, 1)
+    const receipt = await store.getDirectMessage(
+      "direct-message-change",
+      operationKeyHash(request.operationKey),
+    )
+    assert.equal(receipt?.messageFormat, null)
+    const verified = await service.verify(APPLICATION_ID, BOT_ID, request)
+    assert.equal(verified.status, "verified")
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+
+  for (const message of [
+    rawComponentMessage(COMPONENT_TEXT, { pinned: true }),
+    rawComponentMessage(COMPONENT_TEXT, {
+      reactions: [{
+        burst_colors: [],
+        count: 1,
+        count_details: { burst: 0, normal: 1 },
+        emoji: { id: null, name: "x" },
+        me: false,
+        me_burst: false,
+      }],
+    }),
+    rawComponentMessage(COMPONENT_TEXT, {
+      components: [{ custom_id: "unsafe", id: 1, type: 2 }],
+    }),
+  ]) {
+    const unsafeDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-delete-unsafe-"))
+    try {
+      const service = new DirectMessageService({
+        activityStore: new MemoryActivityStore(),
+        client: clientFixture({ message }),
+        operationStore: new FileOperationStore(unsafeDirectory),
+        policy: policy({ deletion: true }),
+        verificationKey: directMessageVerificationKey(TOKEN),
+        writeCoordinator: PASSTHROUGH_COORDINATOR,
+      })
+      await assert.rejects(
+        () => service.plan(APPLICATION_ID, BOT_ID, deleteRequest()),
+        /exact supported connector-authored message/,
+      )
+    } finally {
+      await rm(unsafeDirectory, { force: true, recursive: true })
     }
   }
 })
@@ -1321,7 +1888,7 @@ test("direct-message edit and deletion reject messages not owned by the connecto
       () => service.plan(APPLICATION_ID, BOT_ID, {
         action: "edit",
         channelId: CHANNEL_ID,
-        content: "replacement",
+        message: { content: "replacement", kind: "text" },
         messageId: MESSAGE_ID,
         operationKey: OPERATION_KEY,
         recipientId: RECIPIENT_ID,

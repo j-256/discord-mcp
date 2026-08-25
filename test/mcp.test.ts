@@ -505,12 +505,13 @@ const USER_ID = "400000000000000001"
 const OTHER_USER_ID = "400000000000000002"
 const DIRECT_MESSAGE_OPERATION_KEY = "direct-message-operation-0001"
 const DIRECT_MESSAGE_CONTENT = "Private reviewed message"
+const DIRECT_MESSAGE_COMPONENT_TEXT = "Private reviewed component"
 
 function directMessageSendToolInput(planDigest?: string) {
   return {
     acknowledgeExpectedRecipientContact: true,
     action: "send" as const,
-    content: DIRECT_MESSAGE_CONTENT,
+    message: { content: DIRECT_MESSAGE_CONTENT, kind: "text" as const },
     operationKey: DIRECT_MESSAGE_OPERATION_KEY,
     ...(planDigest === undefined ? {} : { planDigest }),
     recipientId: USER_ID,
@@ -522,12 +523,35 @@ function directMessageEditToolInput(planDigest?: string) {
   return {
     action: "edit" as const,
     channelId: CHANNEL_ID,
-    content: DIRECT_MESSAGE_CONTENT,
+    message: { content: DIRECT_MESSAGE_CONTENT, kind: "text" as const },
     messageId: MESSAGE_ID,
     operationKey: DIRECT_MESSAGE_OPERATION_KEY,
     ...(planDigest === undefined ? {} : { planDigest }),
     recipientId: USER_ID,
     reviewReason: "Exact private-message edit reviewed",
+  }
+}
+
+function directMessageComponentSendToolInput(planDigest?: string) {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "send" as const,
+    message: {
+      components: [{
+        accentColor: 0x12_34_56,
+        components: [
+          { content: DIRECT_MESSAGE_COMPONENT_TEXT, kind: "text" as const },
+          { divider: true, kind: "separator" as const, spacing: "large" as const },
+        ],
+        kind: "container" as const,
+        spoiler: false,
+      }],
+      kind: "components-v2" as const,
+    },
+    operationKey: `${DIRECT_MESSAGE_OPERATION_KEY}-components`,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    recipientId: USER_ID,
+    reviewReason: "Expected static private contact reviewed",
   }
 }
 
@@ -7751,9 +7775,13 @@ function serviceFixture(overrides: {
   ): DirectMessageView | null => {
     if (request.action === "send") return null
     const connectorAuthored = request.action !== "reply"
+    const requestedContent = request.action !== "delete"
+      && request.message.kind === "text"
+      ? request.message.content
+      : ""
     const content = request.action === "edit"
       && overrides.directMessageWriteRequired === false
-      ? request.content
+      ? requestedContent
       : request.action === "delete"
         ? "Private message to delete"
         : "Previous private message"
@@ -7766,13 +7794,18 @@ function serviceFixture(overrides: {
       authorId: connectorAuthored ? BOT_ID : request.recipientId,
       channelId: request.channelId,
       componentCount: 0,
+      componentLayout: null,
+      componentPreview: null,
       content,
       editedTimestamp: null,
       embedCount: 0,
+      flags: 0,
       id: messageId,
       mentionEveryone: false,
       mentionedRoleCount: 0,
       mentionedUserCount: 0,
+      pinned: false,
+      presentation: "text",
       reactionCount: 0,
       replyToMessageId: null,
       stickerCount: 0,
@@ -7785,6 +7818,10 @@ function serviceFixture(overrides: {
   ): DirectMessagePlan => {
     const writeRequired = overrides.directMessageWriteRequired ?? true
     const current = directMessageView(request)
+    const desiredReview = request.action !== "delete"
+      && request.message.kind === "components-v2"
+      ? reviewComponentLayout(request.message.components, undefined)
+      : null
     return {
       action: request.action,
       applicationId: APPLICATION_ID,
@@ -7799,7 +7836,15 @@ function serviceFixture(overrides: {
       createdAt: "2026-08-25T00:00:01.000Z",
       current,
       desired: {
-        content: request.action === "delete" ? null : request.content,
+        message: request.action === "delete"
+          ? null
+          : request.message.kind === "text"
+            ? request.message
+            : {
+                components: (desiredReview as NonNullable<typeof desiredReview>).layout,
+                kind: "components-v2",
+              },
+        preview: desiredReview?.preview ?? null,
         replyToMessageId: request.action === "reply"
           ? request.replyToMessageId
           : current?.replyToMessageId ?? null,
@@ -7817,6 +7862,7 @@ function serviceFixture(overrides: {
         omittedFields: [
           "attachment-urls",
           "avatars",
+          "generated-component-ids",
           "profile-names",
           "raw-discord-objects",
           "raw-operation-key",
@@ -7838,7 +7884,12 @@ function serviceFixture(overrides: {
       risks: ["Private conversation scope"],
       schemaVersion: 1,
       status: writeRequired ? "planned" : "already-current",
-      warnings: ["No automatic mutation retry"],
+      warnings: [
+        "No automatic mutation retry",
+        ...(desiredReview === null
+          ? []
+          : ["Components V2 is irreversible for each created private message"]),
+      ],
       writeRequired,
     }
   }
@@ -7852,13 +7903,18 @@ function serviceFixture(overrides: {
     authorId: recipientId,
     channelId,
     componentCount: 0,
+    componentLayout: null,
+    componentPreview: null,
     content: DIRECT_MESSAGE_CONTENT,
     editedTimestamp: null,
     embedCount: 0,
+    flags: 0,
     id: messageId,
     mentionEveryone: false,
     mentionedRoleCount: 0,
     mentionedUserCount: 0,
+    pinned: false,
+    presentation: "text",
     reactionCount: 0,
     replyToMessageId: null,
     stickerCount: 0,
@@ -15037,6 +15093,77 @@ test("MCP private-message execution displays and approves the exact reviewed pla
   assert.doesNotMatch(confirmationMessage, new RegExp(DIRECT_MESSAGE_OPERATION_KEY))
 })
 
+test("MCP private-message Components V2 binds static layout approval and signed state", async (context) => {
+  let confirmationMessage = ""
+  const connected = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const executed = await connected.client.callTool({
+    arguments: directMessageComponentSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+
+  assert.equal(structuredContent(executed).status, "completed")
+  assert.equal(connected.calls.directMessageExecute, 1)
+  assert.match(confirmationMessage, /components-v2/)
+  assert.match(confirmationMessage, new RegExp(DIRECT_MESSAGE_COMPONENT_TEXT))
+  assert.match(confirmationMessage, /Text Display/)
+  assert.match(confirmationMessage, /irreversible/)
+
+  const invalidLayout = await connected.client.callTool({
+    arguments: {
+      ...directMessageComponentSendToolInput(),
+      message: {
+        components: [{ customId: "unsafe", kind: "button" }],
+        kind: "components-v2",
+      },
+    },
+    name: "plan_direct_message_change",
+  })
+  assert.equal(invalidLayout.isError, true)
+
+  const stdio = await connectedModernStdioFixture(context)
+  const request = directMessageComponentSendToolInput(DIGEST)
+  const initial = await stdio.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_direct_message_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  const changed = await stdio.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        message: {
+          ...request.message,
+          components: [{ content: "Changed private component", kind: "text" }],
+        },
+      },
+      inputResponses: {
+        confirm_direct_message_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_direct_message_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changed).status, "confirmation-invalid")
+  assert.equal(changed.isError, true)
+  assert.equal(stdio.calls.directMessageExecute, 0)
+})
+
 test("MCP private-message signed state rejects changed private intent", async (context) => {
   const fixture = await connectedModernStdioFixture(context)
   const request = directMessageSendToolInput(DIGEST)
@@ -15053,7 +15180,10 @@ test("MCP private-message signed state rejects changed private intent", async (c
   assert.equal(initial.resultType, "input_required")
   assert.equal(typeof initial.requestState, "string")
   for (const changed of [
-    { ...request, content: "Changed private message" },
+    {
+      ...request,
+      message: { content: "Changed private message", kind: "text" as const },
+    },
     { ...request, reviewReason: "Different private contact review" },
     { ...request, recipientId: OTHER_USER_ID },
     { ...request, operationKey: "direct-message-operation-0002" },
@@ -15140,6 +15270,7 @@ test("MCP private-message errors expose only strict content-free lifecycle evide
     activityId: "activity-direct-message",
     channelId: CHANNEL_ID,
     error: null,
+    messageFormat: "text" as const,
     messageId: MESSAGE_ID,
     operationKeyHash: operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY),
     planDigest: DIGEST,

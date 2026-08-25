@@ -1095,6 +1095,12 @@ export interface CreateDirectMessageInput {
   replyToMessageId?: string
 }
 
+export interface CreateDirectComponentMessageInput {
+  components: readonly DiscordStaticComponent[]
+  nonce: string
+  replyToMessageId?: string
+}
+
 export interface DiscordDirectMessageUserEvidence {
   bot: boolean
   id: string
@@ -1316,6 +1322,11 @@ export interface EditComponentMessageInput {
   allowedMentions: DiscordAllowedMentions
   components: readonly DiscordStaticComponent[]
   flags: number
+}
+
+export interface EditDirectComponentMessageInput {
+  components: readonly DiscordStaticComponent[]
+  flags: typeof DISCORD_MESSAGE_FLAGS.isComponentsV2
 }
 
 export interface ModifyGuildMemberTimeoutInput {
@@ -8682,8 +8693,6 @@ export class DiscordClient {
             allowed_mentions: {
               parse: [],
               replied_user: false,
-              roles: [],
-              users: [],
             },
             content,
             flags: 64,
@@ -8726,8 +8735,6 @@ export class DiscordClient {
           allowed_mentions: {
             parse: [],
             replied_user: false,
-            roles: [],
-            users: [],
           },
           attachments: [],
           components: [],
@@ -12065,11 +12072,57 @@ export class DiscordClient {
           allowed_mentions: {
             parse: [],
             replied_user: false,
-            roles: [],
-            users: [],
           },
           content: input.content,
           enforce_nonce: true,
+          ...(input.replyToMessageId === undefined
+            ? {}
+            : {
+                message_reference: {
+                  channel_id: channelId,
+                  fail_if_not_exists: true,
+                  message_id: input.replyToMessageId,
+                  type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+                },
+              }),
+          nonce: input.nonce,
+        },
+        diagnosticRoute: "/channels/{channel.id}/messages",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  createDirectComponentMessage(
+    channelId: string,
+    input: CreateDirectComponentMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertCompiledComponentLayout(input.components)
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord direct-message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertSearchSnowflake(
+      input.replyToMessageId,
+      "Discord direct-message reply target ID",
+    )
+    return this.#request(
+      "create_direct_message",
+      `/channels/${channelId}/messages`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: {
+            parse: [],
+            replied_user: false,
+          },
+          components: input.components,
+          enforce_nonce: true,
+          flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
           ...(input.replyToMessageId === undefined
             ? {}
             : {
@@ -12326,10 +12379,42 @@ export class DiscordClient {
           allowed_mentions: {
             parse: [],
             replied_user: false,
-            roles: [],
-            users: [],
           },
           content,
+        },
+        diagnosticRoute: "/channels/{channel.id}/messages/{message.id}",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  editDirectComponentMessage(
+    channelId: string,
+    messageId: string,
+    input: EditDirectComponentMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    assertPositiveSnowflake(messageId, "Discord direct-message message ID")
+    assertCompiledComponentLayout(input.components)
+    if (input.flags !== DISCORD_MESSAGE_FLAGS.isComponentsV2) {
+      throw new RangeError(
+        "Discord direct component-message edit must preserve the exact IS_COMPONENTS_V2 flag",
+      )
+    }
+    return this.#request(
+      "edit_direct_message",
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: {
+            parse: [],
+            replied_user: false,
+          },
+          components: input.components,
+          flags: input.flags,
         },
         diagnosticRoute: "/channels/{channel.id}/messages/{message.id}",
         suppressFailureCause: true,

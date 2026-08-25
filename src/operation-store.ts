@@ -158,6 +158,11 @@ export const DIRECT_MESSAGE_ACTIONS = [
 ] as const
 
 export type DirectMessageAction = typeof DIRECT_MESSAGE_ACTIONS[number]
+export const DIRECT_MESSAGE_FORMATS = [
+  "components-v2",
+  "text",
+] as const
+export type DirectMessageFormat = typeof DIRECT_MESSAGE_FORMATS[number]
 export type DirectMessageReceiptStage =
   | "channel-ready"
   | "message-dispatched"
@@ -170,6 +175,7 @@ export interface DirectMessageOperationReceipt {
   channelId: string | null
   error: string | null
   kind: DirectMessageOperationKind
+  messageFormat: DirectMessageFormat | null
   messageId: string | null
   operationKeyHash: string
   planDigest: string
@@ -307,6 +313,7 @@ const DIRECT_MESSAGE_RECEIPT_KEYS = [
   "channelId",
   "error",
   "kind",
+  "messageFormat",
   "messageId",
   "operationKeyHash",
   "planDigest",
@@ -578,6 +585,9 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
     || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.activityId)
     || !validSnowflake(record.recipientId)
     || !nullableSnowflake(record.channelId)
+    || ![null, ...DIRECT_MESSAGE_FORMATS].includes(
+      record.messageFormat as DirectMessageFormat | null,
+    )
     || !nullableSnowflake(record.messageId)
     || !nullableSnowflake(record.replyToMessageId)
     || typeof record.operationKeyHash !== "string"
@@ -602,6 +612,7 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
   const status = record.status as OperationReceiptStatus
   const channelId = record.channelId as string | null
   const messageId = record.messageId as string | null
+  const messageFormat = record.messageFormat as DirectMessageFormat | null
   const replyToMessageId = record.replyToMessageId as string | null
   if (
     (action === "reply" && replyToMessageId === null)
@@ -619,6 +630,14 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
   if (["delete", "edit"].includes(action) && messageId === null) {
     throw new OperationStoreError(
       "Discord direct-message operation receipt lacks its exact message identity",
+    )
+  }
+  if (
+    (action === "delete" && messageFormat !== null)
+    || (action !== "delete" && messageFormat === null)
+  ) {
+    throw new OperationStoreError(
+      "Discord direct-message operation receipt has invalid message format",
     )
   }
   if ((stage === "terminal") !== (status !== "pending")) {
@@ -683,6 +702,7 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
     channelId,
     error: record.error as string | null,
     kind: "direct-message-change",
+    messageFormat,
     messageId,
     operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,
@@ -792,6 +812,7 @@ function assertDirectMessageIdentity(
     reserved.action !== next.action
     || reserved.activityId !== next.activityId
     || reserved.kind !== next.kind
+    || reserved.messageFormat !== next.messageFormat
     || reserved.operationKeyHash !== next.operationKeyHash
     || reserved.planDigest !== next.planDigest
     || reserved.recipientId !== next.recipientId
@@ -840,6 +861,7 @@ function sameDirectMessageReceipt(
     && left.channelId === right.channelId
     && left.error === right.error
     && left.kind === right.kind
+    && left.messageFormat === right.messageFormat
     && left.messageId === right.messageId
     && left.operationKeyHash === right.operationKeyHash
     && left.planDigest === right.planDigest

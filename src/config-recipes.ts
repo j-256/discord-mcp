@@ -284,7 +284,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "directMessageDelivery",
       "directMessageEditing",
     ],
-    description: "Add exact-user one-to-one Discord private-message reads plus reviewed send, reply, plain-text connector-message edit, and irreversible deletion with forced mention suppression and content-free lifecycle evidence.",
+    description: "Add exact-user one-to-one Discord private-message reads plus reviewed plain-text or static Components V2 send, reply, same-format connector-message edit, and irreversible deletion with forced mention suppression and content-free lifecycle evidence.",
     gateway: {
       evidenceConnection: "none",
       eventFeedPolicy: "unchanged",
@@ -294,7 +294,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     privilegedIntents: [],
     risks: [
       "Private-message sends and replies contact an exact configured person outside a guild channel",
-      "Edits replace exact connector-authored private-message content and deletion is irreversible",
+      "Edits preserve the exact connector-authored private-message format, Components V2 cannot be removed from a message, and deletion is irreversible",
       "Exact recipient scope cannot establish consent, prior contact, or the recipient's expectations",
     ],
     scope: {
@@ -303,11 +303,11 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     },
     toolsets: ["direct-messages"],
     warnings: [
-      "Every mutation requires a fresh content-bound keyed plan, signed interactive approval, a request-bound one-shot schema-v2 receipt, pending content-free activity, no automatic mutation retry, and exact readback",
+      "Every mutation requires a fresh complete-body-bound keyed plan, signed interactive approval, a request-bound one-shot schema-v2 receipt, pending content-free activity, no automatic mutation retry, and exact readback",
       "All mentions and reply-author notifications are forcibly suppressed, writes are globally bounded to five per minute, and each recipient has a fixed five-second minimum interval",
       "Planning a new send never opens a DM channel; approved execution may open one before sending and checkpoints its exact ID before message dispatch",
       "Discord may reject contact because of recipient privacy, relationship, or shared-server state; the connector does not discover users, enumerate DM channels, create group DMs, or consume DM Gateway events",
-      "Message content and transient review reasons never enter activity records or operation receipts",
+      "Message text, component layouts, generated component IDs, previews, and transient review reasons never enter activity records or operation receipts",
     ],
   },
   {
