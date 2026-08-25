@@ -28,6 +28,7 @@ const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CONTAINER_EVIDENCE_FILENAME = "container-evidence.json"
 const CONTAINER_EVIDENCE_FORMAT = "discord-mcp.container-evidence.v2"
 const CONTAINER_CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONTAINER_CONFIG_SOURCE_FILE = "/source/discord-mcp.json"
 const CONFIG_APPLICATION_ID = "100000000000000001"
 const CONFIG_BOT_ID = "200000000000000001"
 const CONFIG_GUILD_ID = "300000000000000001"
@@ -123,6 +124,7 @@ function restrictedRunArguments(image, command = [], entrypoint, runtimeArgument
 
 async function verifyMountedConfiguration(image) {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-container-config-"))
+  const volume = `discord-mcp-container-config-${process.pid}-${randomUUID()}`
   try {
     const directory = await realpath(temporary)
     const configFile = join(directory, "discord-mcp.json")
@@ -154,9 +156,27 @@ async function verifyMountedConfiguration(image) {
     invariant(initReport.validation?.discordContacted === false, "config initialization contacted Discord")
     invariant(initReport.validation?.secretValuesRead === false, "config initialization read a secret")
 
-    // The image UID differs from the Linux runner owner
+    // Docker config and secret mounts are root-owned and readable by the image UID
     await chmod(configFile, 0o444)
-    const mounted = `type=bind,source=${configFile},target=${CONTAINER_CONFIG_FILE},readonly`
+    const created = await run("docker", ["volume", "create", volume], { capture: true })
+    invariant(created.stdout.trim() === volume, "Docker configuration volume creation failed")
+    const sourceMount = `type=bind,source=${configFile},target=${CONTAINER_CONFIG_SOURCE_FILE},readonly`
+    const writableVolume = `type=volume,source=${volume},target=/configuration`
+    await run(
+      "docker",
+      restrictedRunArguments(
+        image,
+        [
+          "--input-type=module",
+          "--eval",
+          `import { chmodSync, copyFileSync } from "node:fs"; copyFileSync("${CONTAINER_CONFIG_SOURCE_FILE}", "${CONTAINER_CONFIG_FILE}"); chmodSync("${CONTAINER_CONFIG_FILE}", 0o444)`,
+        ],
+        "node",
+        ["--user=root", `--mount=${sourceMount}`, `--mount=${writableVolume}`],
+      ),
+      { capture: true },
+    )
+    const mounted = `type=volume,source=${volume},target=/configuration,readonly`
     const validated = await run(
       "docker",
       restrictedRunArguments(
@@ -183,6 +203,10 @@ async function verifyMountedConfiguration(image) {
       secretValuesRead: false,
     }
   } finally {
+    await run("docker", ["volume", "rm", "--force", volume], {
+      allowedExitCodes: [0, 1],
+      capture: true,
+    }).catch(() => undefined)
     await rm(temporary, { force: true, recursive: true })
   }
 }
