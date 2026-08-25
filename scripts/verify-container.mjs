@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
 import {
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -153,6 +154,8 @@ async function verifyMountedConfiguration(image) {
     invariant(initReport.validation?.discordContacted === false, "config initialization contacted Discord")
     invariant(initReport.validation?.secretValuesRead === false, "config initialization read a secret")
 
+    // The image UID differs from the Linux runner owner
+    await chmod(configFile, 0o444)
     const mounted = `type=bind,source=${configFile},target=${CONTAINER_CONFIG_FILE},readonly`
     const validated = await run(
       "docker",
