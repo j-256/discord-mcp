@@ -15,7 +15,7 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 | Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, a separate exact-user private-message scope, risk-separated toolsets, and read-only setup presets |
 | Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, and no private-channel discovery or scope inheritance |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
-| Outcome integrity | Pending content-free evidence before mutation, non-retried writes, exact readback, durable coordination, and quarantine after ambiguity |
+| Outcome integrity | Pending content-free evidence, non-retried writes, exact readback, durable coordination, ambiguity quarantine, and bounded local invalid-request pressure |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
 | Plan review | Every canonical plan tool retains a complete text and structured result and can add a display-only, authority-free interactive review in MCP Apps hosts |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |

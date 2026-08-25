@@ -33,8 +33,14 @@ try {
   const tool = telemetry.startTool("get_message")
   await tool.run(async () => {
     const rest = telemetry.startDiscordRequest("get_message")
-    await rest.run(async () => undefined)
-    rest.end({ outcome: "ok", statusCode: 200 })
+    await rest.run(async () => {
+      rest.response({ sharedRateLimit: false, statusCode: 403 })
+    })
+    rest.end({
+      errorCategory: "discord-client-error",
+      outcome: "error",
+      statusCode: 403,
+    })
   })
   tool.end({ outcome: "ok" })
   telemetry.startTool(privateValue).end({

@@ -15879,7 +15879,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Every complete redacted application read result has one lossless UTF-8 byte budget. Oversized reads fail whole without previews or measured-size disclosure, while final mutation-capable outcomes remain visible.",
       "The optional Gateway requests no privileged intents, retains only scoped identifiers and fixed event kinds for the event feed, reports cursor discontinuities explicitly, and keeps only obfuscation-safe channel layout fields for the exact union of feed and channel-completeness guild scopes.",
       "Channel-completeness consumers bracket one bounded HTTP inventory pass with identical complete Gateway layouts, accept only a complete HTTP inventory or its exact non-obfuscated subset, discard metadata for obfuscated channels, and expose only count-based evidence about omitted metadata.",
-      "Observability is process-local unless separately enabled for privacy-safe OTLP export, and status surfaces expose only fixed operation aggregates and exporter health.",
+      "Observability is process-local unless separately enabled for privacy-safe OTLP export. Status surfaces expose only fixed operation aggregates, bounded connector-observed invalid-request pressure, exporter health, and explicit privacy guarantees; the invalid-request count excludes proven shared-scope 429 responses and is only a lower bound on the IP-wide total.",
       "Guild audit-log reads omit embedded Discord objects plus all change and option values, redact non-snowflake targets, persist nothing, and include reasons only by explicit opt-in.",
       "Guild ban audit uses a separate exact guild scope and complete BAN_MEMBERS evidence. It returns minimized user profiles, omits reasons by default, persists nothing, and requires exact user IDs for lookup.",
       "Member-directory reads require a separate exact guild allowlist, and member listing additionally requires the Guild Members privileged intent. They return bounded privacy-minimized records, persist nothing, and never turn a display name into a write target.",
@@ -16045,7 +16045,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "get_observability_status",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Read process-local aggregate MCP tool and Discord REST health, OTLP exporter health, and explicit telemetry privacy guarantees without contacting Discord.",
+      description: "Read process-local aggregate MCP tool and Discord REST health, bounded connector-observed pressure toward Discord's IP-wide invalid-request limit, OTLP exporter health, and explicit telemetry privacy guarantees without contacting Discord.",
       inputSchema: emptyInputSchema,
       outputSchema: toolOutputSchema,
       title: "Get Discord connector observability",
@@ -16054,7 +16054,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       const result = observability.getObservabilityStatus()
       return toolResult(
         result,
-        `Discord connector observed ${result.operations.totals.calls} completed operations`,
+        `Discord connector observed ${result.operations.totals.calls} completed operations and ${result.invalidRequests.observed.total} invalid responses in its rolling local window`,
       )
     }, secrets, observability),
   ))

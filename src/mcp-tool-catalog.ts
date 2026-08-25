@@ -531,7 +531,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "application-emojis",
   },
   get_observability_status: {
-    keywords: ["health", "metrics", "observability", "telemetry", "traces"],
+    keywords: ["health", "invalid-request", "metrics", "observability", "rate-limit", "telemetry", "traces"],
     toolset: "observability",
   },
   get_poll: {

@@ -8425,6 +8425,13 @@ export class DiscordClient {
         } catch (error) {
           throw transportFailure(error)
         }
+        try {
+          const rateLimitScope = response.headers.get("X-RateLimit-Scope")
+          observation?.response({
+            sharedRateLimit: rateLimitScope?.trim().toLowerCase() === "shared",
+            statusCode: response.status,
+          })
+        } catch {}
 
         let responseText: string
         try {

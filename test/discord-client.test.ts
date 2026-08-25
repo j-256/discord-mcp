@@ -111,6 +111,7 @@ function directMessageChannelPayload(overrides: Record<string, unknown> = {}) {
 interface RecordedObservation {
   completions: OperationCompletion[]
   operation: string
+  responses?: Array<{ sharedRateLimit: boolean; statusCode: number }>
   retries: number
   runs: number
 }
@@ -128,6 +129,13 @@ function recordingObserver(records: RecordedObservation[]) {
       return {
         end(completion: OperationCompletion) {
           record.completions.push(completion)
+        },
+        response(response: { sharedRateLimit: boolean; statusCode: number }) {
+          if ([401, 403, 429].includes(response.statusCode)) {
+            const responses = record.responses || []
+            responses.push(response)
+            record.responses = responses
+          }
         },
         retry() {
           record.retries += 1
@@ -218,6 +226,7 @@ test("Discord client sends one exact non-retried current-application flag PATCH"
   assert.deepEqual(records, [{
     completions: [{ errorCategory: "discord-rate-limited", outcome: "error", statusCode: 429 }],
     operation: "modify_current_application_flags",
+    responses: [{ sharedRateLimit: false, statusCode: 429 }],
     retries: 0,
     runs: 1,
   }])
@@ -1053,7 +1062,11 @@ test("Discord client observes only fixed REST operations, outcomes, status, and 
     fetchImplementation: async () => {
       calls += 1
       if (calls === 1) {
-        return jsonResponse({ message: "private rate-limit detail", retry_after: 0 }, 429)
+        return jsonResponse(
+          { message: "private rate-limit detail", retry_after: 0 },
+          429,
+          { "X-RateLimit-Scope": "shared" },
+        )
       }
       if (calls === 3) {
         return jsonResponse({ message: "private forbidden detail" }, 403)
@@ -1072,6 +1085,7 @@ test("Discord client observes only fixed REST operations, outcomes, status, and 
     {
       completions: [{ outcome: "ok" }],
       operation: "list_messages",
+      responses: [{ sharedRateLimit: true, statusCode: 429 }],
       retries: 1,
       runs: 1,
     },
@@ -1082,6 +1096,7 @@ test("Discord client observes only fixed REST operations, outcomes, status, and 
         statusCode: 403,
       }],
       operation: "get_channel",
+      responses: [{ sharedRateLimit: false, statusCode: 403 }],
       retries: 0,
       runs: 1,
     },
@@ -1092,6 +1107,36 @@ test("Discord client observes only fixed REST operations, outcomes, status, and 
   assert.equal(observed.includes(TOKEN), false)
 })
 
+test("Discord client isolates response-observer failures from request behavior", async () => {
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      bot: true,
+      id: "1",
+      username: "bot",
+    }),
+    observer: {
+      startDiscordRequest() {
+        return {
+          end() {},
+          response() {
+            throw new Error("observer failed")
+          },
+          retry() {},
+          run<T>(callback: () => Promise<T>) {
+            return callback()
+          },
+        }
+      },
+    },
+    token: TOKEN,
+  })
+
+  const user = await client.getCurrentUser()
+
+  assert.equal(user.id, "1")
+})
+
 test("Discord client classifies transport timeout and caller cancellation without details", async () => {
   const categories: OperationalErrorCategory[] = []
   const observer = {
@@ -1100,6 +1145,7 @@ test("Discord client classifies transport timeout and caller cancellation withou
         end(completion: OperationCompletion) {
           if (completion.errorCategory) categories.push(completion.errorCategory)
         },
+        response() {},
         retry() {},
         run<T>(callback: () => Promise<T>) {
           return callback()

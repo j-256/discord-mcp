@@ -14735,6 +14735,13 @@ test("MCP observability reports successful, returned-error, and thrown-error too
     name: "get_observability_status",
   })
   const status = structuredContent(statusResult) as unknown as {
+    invalidRequests: {
+      coverage: string
+      ipWideTotalKnown: boolean
+      observed: { total: number }
+      sharedScope429Excluded: boolean
+      state: string
+    }
     operations: {
       mcpTools: Array<{
         active: number
@@ -14748,6 +14755,22 @@ test("MCP observability reports successful, returned-error, and thrown-error too
     }
     privacy: Record<string, boolean>
   }
+  assert.deepEqual(status.invalidRequests, {
+    coverage: "this-process-only",
+    discordDocumentedLimit: 10_000,
+    discordDocumentedWindowMs: 600_000,
+    ipWideTotalKnown: false,
+    observed: {
+      forbidden403: 0,
+      rateLimited429: 0,
+      total: 0,
+      unauthorized401: 0,
+    },
+    sharedScope429Excluded: true,
+    state: "clear",
+    thresholdReachedByThisProcess: false,
+    windowResolutionMs: 1_000,
+  })
   const byName = new Map(status.operations.mcpTools.map((entry) => [entry.operation, entry]))
   assert.deepEqual(byName.get("list_guilds")?.outcomes, {
     error: 0,
@@ -14788,8 +14811,12 @@ test("MCP observability reports successful, returned-error, and thrown-error too
   assert.ok(content && "text" in content)
   if (!content || !("text" in content)) throw new Error("Expected observability text")
   const envelope = JSON.parse(content.text) as {
-    data: { operations: { mcpTools: Array<{ active: number; calls: number; operation: string }> } }
+    data: {
+      invalidRequests: { observed: { total: number } }
+      operations: { mcpTools: Array<{ active: number; calls: number; operation: string }> }
+    }
   }
+  assert.equal(envelope.data.invalidRequests.observed.total, 0)
   const completedStatus = envelope.data.operations.mcpTools.find(
     ({ operation }) => operation === "get_observability_status",
   )

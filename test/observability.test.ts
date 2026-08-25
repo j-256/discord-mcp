@@ -215,11 +215,13 @@ test("local operational telemetry keeps bounded aggregate data and fixed privacy
   telemetry.start()
 
   const tool = telemetry.startTool("get_message")
+  tool.response({ sharedRateLimit: false, statusCode: 401 })
   monotonicClock = 12.3456
   tool.end({ outcome: "ok" })
   tool.end({ outcome: "error", errorCategory: "unknown" })
 
   const rest = telemetry.startDiscordRequest("get_message")
+  rest.response({ sharedRateLimit: false, statusCode: 429 })
   rest.retry()
   monotonicClock = 37.3456
   wallClock += 1_000
@@ -237,6 +239,22 @@ test("local operational telemetry keeps bounded aggregate data and fixed privacy
 
   const snapshot = telemetry.getObservabilityStatus()
   assert.equal(snapshot.exporter.state, "disabled")
+  assert.deepEqual(snapshot.invalidRequests, {
+    coverage: "this-process-only",
+    discordDocumentedLimit: 10_000,
+    discordDocumentedWindowMs: 600_000,
+    ipWideTotalKnown: false,
+    observed: {
+      forbidden403: 0,
+      rateLimited429: 1,
+      total: 1,
+      unauthorized401: 0,
+    },
+    sharedScope429Excluded: true,
+    state: "observed",
+    thresholdReachedByThisProcess: false,
+    windowResolutionMs: 1_000,
+  })
   assert.deepEqual(snapshot.privacy, {
     argumentsStored: false,
     contentStored: false,
@@ -259,7 +277,13 @@ test("local operational telemetry keeps bounded aggregate data and fixed privacy
   assert.equal(snapshot.operations.discordRest.find(({ operation }) => operation === "get_message")?.duration.buckets.find(({ leMs }) => leMs === 25)?.count, 1)
   assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(secret))
   assert.doesNotMatch(logLines.join(""), new RegExp(secret))
-  assert.equal(logLines.length, 4)
+  assert.equal(logLines.length, 5)
+  assert.deepEqual(JSON.parse(logLines[1] || "{}"), {
+    component: "discord-rest",
+    event: "invalid-response-observed",
+    statusCode: 429,
+    timestamp: "2026-08-20T00:00:00.000Z",
+  })
   await telemetry.stop()
 })
 

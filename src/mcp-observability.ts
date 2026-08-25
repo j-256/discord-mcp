@@ -36,7 +36,7 @@ export function registerDiscordObservabilityMcp(
     {
       annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
       cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
-      description: "Process-local Discord REST and MCP tool health aggregates, exporter health, and explicit telemetry privacy guarantees.",
+      description: "Process-local Discord REST and MCP tool health aggregates, bounded connector-observed invalid-request pressure, exporter health, and explicit telemetry privacy guarantees.",
       mimeType: "application/json",
       title: "Discord connector observability",
     },

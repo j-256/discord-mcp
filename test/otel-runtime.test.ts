@@ -200,5 +200,6 @@ test("OTLP runtime keeps privacy-safe protobuf export and parent context isolate
   const metricWire = Buffer.concat(metrics.map(({ body }) => body)).toString("utf8")
   assert.match(metricWire, /mcp\.tool\.calls/)
   assert.match(metricWire, /discord\.rest\.calls/)
+  assert.match(metricWire, /discord\.rest\.invalid_requests/)
   assert.match(metricWire, /discord-mcp\.integration-test/)
 })

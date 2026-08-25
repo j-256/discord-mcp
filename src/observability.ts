@@ -55,6 +55,11 @@ import {
   type McpToolRiskClass,
 } from "./observability-catalog.js"
 import {
+  InvalidRequestPressureTracker,
+  type DiscordResponseObservation,
+  type InvalidRequestPressureSnapshot,
+} from "./invalid-request-pressure.js"
+import {
   startOtlpRuntime,
   type OtlpHealthSink,
   type OtlpRuntimeHandle,
@@ -95,6 +100,7 @@ export interface OperationCompletion {
 
 export interface OperationObservation {
   end(completion: OperationCompletion): void
+  response(response: DiscordResponseObservation): void
   retry(): void
   run<T>(callback: () => Promise<T>): Promise<T>
 }
@@ -159,6 +165,7 @@ export interface ObservabilitySnapshot {
     enabled: boolean
     failures: number
   }
+  invalidRequests: InvalidRequestPressureSnapshot
   operations: {
     discordRest: OperationSnapshot[]
     mcpTools: OperationSnapshot[]
@@ -190,6 +197,7 @@ interface Instruments {
   restCalls: Counter
   restDuration: Histogram
   restErrors: Counter
+  restInvalidRequests: Counter
   restRetries: Counter
   toolCalls: Counter
   toolDuration: Histogram
@@ -312,6 +320,7 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
   #exportState: ObservabilitySnapshot["exporter"]["state"]
   #exportSuccesses = 0
   #instruments: Instruments | undefined
+  readonly #invalidRequests: InvalidRequestPressureTracker
   #logFailures = 0
   readonly #monotonicClock: () => number
   readonly #operations = new Map<string, MutableOperation>()
@@ -329,6 +338,7 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
     this.#config = options.config
     this.#exportState = options.config.exportEnabled ? "not-started" : "disabled"
     this.#monotonicClock = options.monotonicClock || performance.now.bind(performance)
+    this.#invalidRequests = new InvalidRequestPressureTracker(this.#monotonicClock)
     this.#otlpFactory = options.otlpFactory || startOtlpRuntime
     this.#shutdownTimeoutMs = options.shutdownTimeoutMs
       ?? OBSERVABILITY_DEFAULTS.shutdownTimeoutMs
@@ -360,6 +370,9 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
       }),
       restErrors: meter.createCounter("discord.rest.errors", {
         description: "Failed Discord REST operations",
+      }),
+      restInvalidRequests: meter.createCounter("discord.rest.invalid_requests", {
+        description: "Connector-observed Discord invalid HTTP responses",
       }),
       restRetries: meter.createCounter("discord.rest.retries", {
         description: "Discord REST retries",
@@ -562,6 +575,22 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
           timestamp: this.#timestamp(),
         })
       },
+      response: (response) => {
+        if (completed || options.kind !== "discord-rest") return
+        try {
+          if (!this.#invalidRequests.record(response)) return
+          const attributes = {
+            "http.response.status_code": response.statusCode,
+          }
+          this.#instruments?.restInvalidRequests.add(1, attributes)
+          this.#writeLog({
+            component: "discord-rest",
+            event: "invalid-response-observed",
+            statusCode: response.statusCode,
+            timestamp: this.#timestamp(),
+          })
+        } catch {}
+      },
       retry: () => {
         if (!completed) retries += 1
       },
@@ -652,6 +681,7 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
         enabled: this.#config.jsonLogsEnabled,
         failures: this.#logFailures,
       },
+      invalidRequests: this.#invalidRequests.snapshot(),
       operations: {
         discordRest,
         mcpTools,
