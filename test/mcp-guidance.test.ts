@@ -724,6 +724,7 @@ function guidanceService(options: {
     executeApplicationIntentEnablement: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
+    executeGuildApplicationCommandChange: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberNicknameChange: unexpected,
     executeMemberVoiceChange: unexpected,
@@ -758,6 +759,7 @@ function guidanceService(options: {
     planMessageForward: unexpected,
     planChannelClone: unexpected,
     planNativeInteractionCommand: unexpected,
+    planGuildApplicationCommandChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
     getApplicationEmoji: unexpected,
@@ -1997,6 +1999,8 @@ function guidanceService(options: {
       return {
         administrationEnabled: false,
         administrationGuildIds: [],
+        applicationCommandChangesEnabled: false,
+        applicationCommandGuildIds: [],
         applicationEmojiAuditEnabled: false,
         applicationEmojiChangesEnabled: false,
         applicationEmojiCreationEnabled: false,
@@ -5030,6 +5034,39 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   )
   assert.match(applicationEmojiDeletion, /missing global-impact acknowledgement/)
 
+  const guildApplicationCommandRequest = {
+    action: "create",
+    definition: {
+      defaultMemberPermissions: ["MANAGE_GUILD"],
+      name: "inspect_member",
+      nameLocalizations: [],
+      nsfw: false,
+      type: "user",
+    },
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+  }
+  const guildApplicationCommand = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(guildApplicationCommandRequest) },
+    name: MCP_PROMPT_NAMES.reviewGuildApplicationCommandChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(guildApplicationCommand.split("\n")[1] || ""),
+    guildApplicationCommandRequest,
+  )
+  assert.match(
+    guildApplicationCommand,
+    /Call only plan_guild_application_command_change/,
+  )
+  assert.match(
+    guildApplicationCommand,
+    /Do not call execute_guild_application_command_change/,
+  )
+  assert.match(guildApplicationCommand, /complete current and desired definitions/)
+  assert.match(guildApplicationCommand, /every command-permission entry/)
+  assert.match(guildApplicationCommand, /permanently clear the target's command permissions/)
+  assert.match(guildApplicationCommand, /newly created command rather than an upsert/)
+
   const applicationIntent = promptText(await client.getPrompt({
     arguments: {
       acknowledgePrivilegeExpansion: "true",
@@ -6447,6 +6484,17 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          action: "delete",
+          commandId: APPLICATION_EMOJI_ID,
+          guildId: GUILD_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildApplicationCommandChange,
     },
     {
       arguments: {

@@ -83,7 +83,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 29
+export const OPERATOR_REPORT_SCHEMA_VERSION = 30
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -98,6 +98,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   announcementSubscriptionChangePolicy: "announcement-subscription-change-policy",
   applicationEmojiAuditPolicy: "application-emoji-audit-policy",
   applicationEmojiChangePolicy: "application-emoji-change-policy",
+  applicationCommandChangePolicy: "application-command-change-policy",
   applicationIntentChangePolicy: "application-intent-change-policy",
   applicationBotVisibility: "application-bot-visibility",
   applicationDefaultPermissions: "application-default-permissions",
@@ -835,6 +836,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowApplicationEmojiAudit || config.allowApplicationEmojiChanges,
       "application-emojis",
       "Application emoji audit and reviewed changes",
+    ],
+    [
+      config.allowApplicationCommandChanges,
+      "application-commands",
+      "Reviewed guild application-command changes",
     ],
     [
       config.allowApplicationIntentChanges,
@@ -2984,6 +2990,17 @@ export async function diagnoseConnector(
         `Reviewed application emoji changes are bound to the verified pinned current application and ${config.applicationEmojiRoots.length} canonical creation roots with application-wide coordination, one-shot execution, and exact metadata or absence readback`,
       ))
     }
+    checks.push(config.allowApplicationCommandChanges
+      ? check(
+        DOCTOR_CHECK_IDS.applicationCommandChangePolicy,
+        "pass",
+        `Reviewed guild application-command changes are constrained to ${config.applicationCommandGuildIds.size} exact guilds with complete typed definitions, full-localization and permission-inventory review, signed approval, durable collection coordination, one non-retried write, and exact survivor readback`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.applicationCommandChangePolicy,
+        "pass",
+        "Reviewed guild application-command changes are disabled",
+      ))
     const applicationIntentRequirements = applicationPostureRequirementsForConfig(config)
     const applicationIntentTargets = [
       ...(applicationIntentRequirements.guildMembersIntentRequired

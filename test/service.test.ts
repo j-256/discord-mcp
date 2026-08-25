@@ -504,6 +504,9 @@ function serviceFixture(overrides: {
     async deleteGuildApplicationCommand() {
       throw new Error("Unexpected application-command deletion")
     },
+    async editGuildApplicationCommand() {
+      throw new Error("Unexpected application-command update")
+    },
     async deleteGuildTemplate() {
       throw new Error("Unexpected guild-template deletion")
     },
@@ -760,6 +763,9 @@ function serviceFixture(overrides: {
     },
     async listGuildApplicationCommands() {
       throw new Error("Unexpected application-command listing")
+    },
+    async listGuildApplicationCommandsWithLocalizations() {
+      throw new Error("Unexpected localized application-command listing")
     },
     async listGuildApplicationCommandPermissions() {
       throw new Error("Unexpected application-command permission listing")
@@ -2045,6 +2051,9 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       async listGuildApplicationCommandPermissions() {
         return []
       },
+      async listGuildApplicationCommandsWithLocalizations() {
+        return []
+      },
       async listGuildIntegrations(): Promise<DiscordGuildIntegrationSummary[]> {
         return [{
           accountPresent: true,
@@ -2076,6 +2085,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     },
     configOverrides: {
       capabilities: {
+        applicationCommandChanges: true,
         forumTagAudit: true,
         forumTagChanges: true,
         deletions: true,
@@ -2113,6 +2123,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         guildIds: [GUILD_ID],
       },
       scopes: {
+        applicationCommandGuildIds: [GUILD_ID],
         forumTagChannelIds: [CHANNEL_ID],
         channelCloneGuildIds: [GUILD_ID],
         channelCloneSourceIds: [CHANNEL_ID],
@@ -2249,6 +2260,25 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     emojiId: AUTOMOD_RULE_ID,
     operationKey,
   }, digest))
+  const guildApplicationCommandRequest = {
+    action: "create" as const,
+    definition: {
+      defaultMemberPermissions: ["MANAGE_GUILD" as const],
+      name: "inspect_member",
+      nameLocalizations: [],
+      nsfw: false,
+      type: "user" as const,
+    },
+    guildId: GUILD_ID,
+    operationKey,
+  }
+  const guildApplicationCommandPlan = await service.planGuildApplicationCommandChange(
+    guildApplicationCommandRequest,
+  )
+  await captured(() => service.executeGuildApplicationCommandChange(
+    guildApplicationCommandRequest,
+    guildApplicationCommandPlan.digest,
+  ))
   await captured(() => service.executeGuildProfileChange({
     auditReason: "reviewed",
     guildId: GUILD_ID,
@@ -2533,7 +2563,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 46)
+  assert.equal(byKind.size, 47)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -2586,6 +2616,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       ],
       "guild-expression-change": [{
         collection: "emojis",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "guild-application-command-change": [{
+        collection: "application-commands",
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
@@ -2758,6 +2793,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
                 ? channelClonePlan.digest
               : entry.kind === "channel-ordering"
                 ? channelOrderPlan.digest
+                : entry.kind === "guild-application-command-change"
+                  ? guildApplicationCommandPlan.digest
                 : digest
     if (["webhook-message-edit", "webhook-message-send"].includes(entry.kind)) {
       assert.match(entry.planDigest, /^hmac-sha256:[a-f0-9]{64}$/)
@@ -2775,7 +2812,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 46)
+  assert.equal(writeCoordinator.intents.length, 47)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {

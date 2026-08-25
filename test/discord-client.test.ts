@@ -1812,7 +1812,7 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
   }
   const responses = [
     jsonResponse([command]),
-    jsonResponse(command),
+    jsonResponse(command, 201),
     new Response(null, { status: 204 }),
     new Response(null, { status: 204 }),
     new Response(null, { status: 204 }),
@@ -1849,12 +1849,25 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
 
   await client.listGuildApplicationCommands("100", "200")
   await client.createGuildApplicationCommand("100", "200", {
-    defaultMemberPermissions: "0",
+    defaultMemberPermissions: [],
     description: command.description,
+    descriptionLocalizations: [],
     name: command.name,
+    nameLocalizations: [],
     nsfw: false,
-    options: command.options,
-    type: 1,
+    options: [{
+      autocomplete: false,
+      choices: [],
+      description: command.options[0]!.description,
+      descriptionLocalizations: [],
+      maxLength: command.options[0]!.max_length,
+      minLength: command.options[0]!.min_length,
+      name: command.options[0]!.name,
+      nameLocalizations: [],
+      required: command.options[0]!.required,
+      type: "string",
+    }],
+    type: "chat-input",
   })
   await client.deleteGuildApplicationCommand("100", "200", "300")
   await client.createDeferredInteractionResponse("400", interactionToken)
@@ -1901,9 +1914,22 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
   assert.deepEqual(requests[1]?.body, {
     default_member_permissions: "0",
     description: command.description,
+    description_localizations: null,
     name: command.name,
+    name_localizations: null,
     nsfw: false,
-    options: command.options,
+    options: [{
+      autocomplete: false,
+      choices: [],
+      description: command.options[0]!.description,
+      description_localizations: null,
+      max_length: command.options[0]!.max_length,
+      min_length: command.options[0]!.min_length,
+      name: command.options[0]!.name,
+      name_localizations: null,
+      required: command.options[0]!.required,
+      type: 3,
+    }],
     type: 1,
   })
   assert.equal("contexts" in (requests[1]?.body as Record<string, unknown>), false)
@@ -1930,6 +1956,156 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     content: "Reviewed response",
     embeds: [],
   })
+})
+
+test("Discord client uses full-localization reviewed command routes and exact success statuses", async () => {
+  const definition = {
+    defaultMemberPermissions: ["MANAGE_GUILD" as const],
+    description: "Review exact command evidence",
+    descriptionLocalizations: [{ locale: "de" as const, value: "Exakte Belege pruefen" }],
+    name: "review",
+    nameLocalizations: [{ locale: "de" as const, value: "pruefen" }],
+    nsfw: false,
+    options: [],
+    type: "chat-input" as const,
+  }
+  const command = {
+    application_id: "100",
+    default_member_permissions: "32",
+    description: definition.description,
+    description_localizations: { de: "Exakte Belege pruefen" },
+    guild_id: "200",
+    id: "300",
+    name: definition.name,
+    name_localizations: { de: "pruefen" },
+    nsfw: false,
+    options: [],
+    type: 1,
+    version: "301",
+  }
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  const responses = [
+    jsonResponse([command]),
+    jsonResponse(command, 201),
+    jsonResponse({ ...command, version: "302" }),
+    new Response(null, { status: 204 }),
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      const response = responses.shift()
+      if (!response) throw new Error("Unexpected request")
+      return response
+    },
+    token: TOKEN,
+  })
+
+  await client.listGuildApplicationCommandsWithLocalizations("100", "200")
+  await client.createGuildApplicationCommand("100", "200", definition)
+  await client.editGuildApplicationCommand("100", "200", "300", definition)
+  await client.deleteGuildApplicationCommand("100", "200", "300")
+
+  assert.deepEqual(requests.map(({ method, url }) => ({ method, url })), [{
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands?with_localizations=true`,
+  }, {
+    method: "POST",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands`,
+  }, {
+    method: "PATCH",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands/300`,
+  }, {
+    method: "DELETE",
+    url: `${API_BASE_URL}/applications/100/guilds/200/commands/300`,
+  }])
+  assert.deepEqual(requests[1]?.body, {
+    default_member_permissions: "32",
+    description: definition.description,
+    description_localizations: { de: "Exakte Belege pruefen" },
+    name: definition.name,
+    name_localizations: { de: "pruefen" },
+    nsfw: false,
+    options: [],
+    type: 1,
+  })
+  assert.deepEqual(requests[2]?.body, {
+    default_member_permissions: "32",
+    description: definition.description,
+    description_localizations: { de: "Exakte Belege pruefen" },
+    name: definition.name,
+    name_localizations: { de: "pruefen" },
+    nsfw: false,
+    options: [],
+  })
+})
+
+test("Discord client rejects command upserts and never retries reviewed writes", async () => {
+  const definition = {
+    defaultMemberPermissions: null,
+    description: "Review exact command evidence",
+    descriptionLocalizations: [],
+    name: "review",
+    nameLocalizations: [],
+    nsfw: false,
+    options: [],
+    type: "chat-input" as const,
+  }
+  const privateMarker = "private-command-description"
+  let calls = 0
+  const upsert = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      return jsonResponse({ message: privateMarker }, 200)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    upsert.createGuildApplicationCommand("100", "200", definition),
+    (error: unknown) => (
+      error instanceof Error
+      && error.name === "DiscordTransportError"
+      && /unexpected success status/.test(error.message)
+      && !error.message.includes(privateMarker)
+    ),
+  )
+  assert.equal(calls, 1)
+
+  calls = 0
+  const limited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      return jsonResponse({ message: privateMarker, retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    limited.editGuildApplicationCommand("100", "200", "300", definition),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && !error.message.includes(privateMarker)
+    ),
+  )
+  assert.equal(calls, 1)
+
+  const wrongDeleteStatus = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({}, 200),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    wrongDeleteStatus.deleteGuildApplicationCommand("100", "200", "300"),
+    /unexpected success status/,
+  )
 })
 
 test("Discord client bounds and protects application-command inventories", async () => {

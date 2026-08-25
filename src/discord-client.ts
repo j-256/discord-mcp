@@ -93,6 +93,10 @@ import {
   type ModifyGuildIncidentActionsInput,
 } from "./guild-incident.js"
 import {
+  guildApplicationCommandApiBody,
+  type GuildApplicationCommandDefinition,
+} from "./guild-application-command-definition.js"
+import {
   normalizeDesiredMemberNickname,
   projectMemberNickname,
 } from "./member-nickname.js"
@@ -108,7 +112,6 @@ import type {
 import type {
   DiscordApplication,
   DiscordApplicationCommand,
-  DiscordApplicationCommandOption,
   DiscordApplicationRoleConnectionMetadata,
   DiscordApplicationSku,
   DiscordBan,
@@ -154,14 +157,8 @@ export interface DiscordClientOptions {
   token: string
 }
 
-export interface CreateGuildApplicationCommandInput {
-  defaultMemberPermissions: string
-  description: string
-  name: string
-  nsfw: boolean
-  options: readonly DiscordApplicationCommandOption[]
-  type: number
-}
+export type CreateGuildApplicationCommandInput = GuildApplicationCommandDefinition
+export type EditGuildApplicationCommandInput = GuildApplicationCommandDefinition
 
 export interface GuildPageOptions extends RequestOptions {
   after?: string
@@ -1495,6 +1492,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_component_message",
   "create_direct_attachment_message",
   "create_guild_auto_moderation_rule",
+  "create_guild_application_command",
   "create_guild_ban",
   "create_interaction_response",
   "create_immediate_interaction_response",
@@ -1522,6 +1520,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_own_reaction",
   "delete_user_reaction",
   "edit_component_message",
+  "edit_guild_application_command",
   "edit_original_interaction_response",
   "follow_announcement_channel",
   "get_application_emoji",
@@ -8687,6 +8686,25 @@ export class DiscordClient {
     )
   }
 
+  listGuildApplicationCommandsWithLocalizations(
+    applicationId: string,
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand[]> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    return this.#request(
+      "list_guild_application_commands",
+      `/applications/${applicationId}/guilds/${guildId}/commands?with_localizations=true`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands",
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
   async listGuildApplicationCommandPermissions(
     applicationId: string,
     guildId: string,
@@ -8715,21 +8733,43 @@ export class DiscordClient {
   ): Promise<DiscordApplicationCommand> {
     assertSearchSnowflake(applicationId, "Discord application-command application ID")
     assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    const body = guildApplicationCommandApiBody(input)
     return this.#request(
       "create_guild_application_command",
       `/applications/${applicationId}/guilds/${guildId}/commands`,
       {
         ...options,
         automaticRateLimitRetry: false,
-        body: {
-          default_member_permissions: input.defaultMemberPermissions,
-          description: input.description,
-          name: input.name,
-          nsfw: input.nsfw,
-          options: input.options,
-          type: input.type,
-        },
+        body,
         diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands",
+        expectedSuccessStatus: 201,
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  editGuildApplicationCommand(
+    applicationId: string,
+    guildId: string,
+    commandId: string,
+    input: EditGuildApplicationCommandInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(guildId, "Discord application-command guild ID")
+    assertSearchSnowflake(commandId, "Discord application-command ID")
+    const { type: _type, ...body } = guildApplicationCommandApiBody(input)
+    return this.#request(
+      "edit_guild_application_command",
+      `/applications/${applicationId}/guilds/${guildId}/commands/${commandId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body,
+        diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands/{command.id}",
+        expectedSuccessStatus: 200,
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
         suppressFailureCause: true,
       },
     )
@@ -8751,6 +8791,7 @@ export class DiscordClient {
         ...options,
         automaticRateLimitRetry: false,
         diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands/{command.id}",
+        expectedSuccessStatus: 204,
         suppressFailureCause: true,
       },
     )

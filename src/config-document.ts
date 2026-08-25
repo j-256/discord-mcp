@@ -129,6 +129,7 @@ function humanizeConfigKey(value: string): string {
 
 export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "administration",
+  "applicationCommandChanges",
   "applicationEmojiAudit",
   "applicationEmojiChanges",
   "applicationIntentChanges",
@@ -231,6 +232,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
 
 export const CONFIG_SCOPE_NAMES = Object.freeze([
   "adminGuildIds",
+  "applicationCommandGuildIds",
   "announcementCrosspostChannelIds",
   "announcementSubscriptionSourceChannelIds",
   "announcementSubscriptionTargetChannelIds",
@@ -414,6 +416,8 @@ const INVITE_CREATION_CAPABILITY_DESCRIPTION = "Enable reviewed finite invite cr
 const INVITE_CREATION_SCOPE_DESCRIPTION = "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
 const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for exclusive private invite capability files"
 const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed additive application privileged-intent enablement"
+const APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-guild application-command creation, complete-state update, and exact-ID deletion"
+const APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed application-command changes"
 const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
 const BULK_BANS_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban execution"
 const BULK_BAN_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
@@ -434,6 +438,9 @@ const DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION = "Enable reviewed edits of 
 const DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION = "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access"
 
 function capabilityDescription(documentKey: string): string {
+  if (documentKey === "applicationCommandChanges") {
+    return APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION
+  }
   if (documentKey === "applicationIntentChanges") {
     return APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION
   }
@@ -486,6 +493,9 @@ function capabilityDescription(documentKey: string): string {
 }
 
 function scopeDescription(documentKey: string): string {
+  if (documentKey === "applicationCommandGuildIds") {
+    return APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION
+  }
   if (documentKey === "channelMetadataIds") {
     return CHANNEL_METADATA_SCOPE_DESCRIPTION
   }

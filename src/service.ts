@@ -267,6 +267,7 @@ import {
   ConfigurationError,
   ComponentMessagePlanChangedError,
   DeletionPlanChangedError,
+  GuildApplicationCommandPlanChangedError,
   GuildPrunePlanChangedError,
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
@@ -431,6 +432,16 @@ import type {
   NativeInteractionCommandServiceOptions,
 } from "./native-interaction-command-service.js"
 import { NativeInteractionCommandService } from "./native-interaction-command-service.js"
+import type {
+  GuildApplicationCommandChangeRequest,
+  GuildApplicationCommandPlan,
+  GuildApplicationCommandResult,
+  GuildApplicationCommandServiceOptions,
+} from "./guild-application-command-service.js"
+import {
+  GuildApplicationCommandService,
+  normalizeGuildApplicationCommandChangeRequest,
+} from "./guild-application-command-service.js"
 import type {
   MemberDirectoryListOptions,
   MemberDirectorySearchOptions,
@@ -750,6 +761,7 @@ export interface DiscordServiceClient {
   createGuildChannel: DiscordClient["createGuildChannel"]
   createChannelInvite: DiscordClient["createChannelInvite"]
   createGuildApplicationCommand: DiscordClient["createGuildApplicationCommand"]
+  editGuildApplicationCommand: DiscordClient["editGuildApplicationCommand"]
   deleteGuildApplicationCommand: DiscordClient["deleteGuildApplicationCommand"]
   deleteApplicationEmoji: DiscordClient["deleteApplicationEmoji"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
@@ -847,6 +859,7 @@ export interface DiscordServiceClient {
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
+  listGuildApplicationCommandsWithLocalizations: DiscordClient["listGuildApplicationCommandsWithLocalizations"]
   listGuildApplicationCommandPermissions: DiscordClient["listGuildApplicationCommandPermissions"]
   listGlobalApplicationCommands: DiscordClient["listGlobalApplicationCommands"]
   listGuildBans: DiscordClient["listGuildBans"]
@@ -942,6 +955,10 @@ export interface ConnectorServiceOptions {
   >
   applicationIntentOptions?: Pick<
     ApplicationIntentServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildApplicationCommandOptions?: Pick<
+    GuildApplicationCommandServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   announcementCrosspostOptions?: Pick<
@@ -1318,6 +1335,7 @@ export class ConnectorService {
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #applicationEmojiService: ApplicationEmojiService
   readonly #applicationCommandAuditService: ApplicationCommandAuditService
+  readonly #guildApplicationCommandService: GuildApplicationCommandService
   readonly #applicationRoleConnectionMetadataAuditService: ApplicationRoleConnectionMetadataAuditService
   readonly #applicationSkuAuditService: ApplicationSkuAuditService
   readonly #applicationIntentService: ApplicationIntentService
@@ -1451,6 +1469,13 @@ export class ConnectorService {
     this.#applicationCommandAuditService = new ApplicationCommandAuditService({
       client: this.#client,
       policy: this.#policy,
+    })
+    this.#guildApplicationCommandService = new GuildApplicationCommandService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildApplicationCommandOptions,
     })
     this.#applicationRoleConnectionMetadataAuditService = new ApplicationRoleConnectionMetadataAuditService({
       client: this.#client,
@@ -2999,6 +3024,20 @@ export class ConnectorService {
   ): Promise<NativeInteractionCommandPlan> {
     const identity = await this.#verifyIdentity(options)
     return this.#nativeInteractionCommandService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildApplicationCommandChange(
+    request: GuildApplicationCommandChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildApplicationCommandPlan> {
+    normalizeGuildApplicationCommandChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildApplicationCommandService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -5243,6 +5282,52 @@ export class ConnectorService {
       planDigest,
       targets,
       () => this.#announcementSubscriptionService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildApplicationCommandChange(
+    request: GuildApplicationCommandChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildApplicationCommandResult> {
+    const normalized = normalizeGuildApplicationCommandChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild application-command plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#guildApplicationCommandService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new GuildApplicationCommandPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#guildApplicationCommandService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "guild-application-command-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("application-commands", normalized.guildId)],
+      () => this.#guildApplicationCommandService.execute(
         identity.application.id,
         identity.bot.id,
         request,

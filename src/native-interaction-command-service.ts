@@ -215,19 +215,25 @@ export function nativeInteractionCommandContract(
 
 function commandInput(contract: NativeInteractionCommandContract): CreateGuildApplicationCommandInput {
   return {
-    defaultMemberPermissions: contract.defaultMemberPermissions,
+    defaultMemberPermissions: [],
     description: contract.description,
+    descriptionLocalizations: [],
     name: contract.name,
+    nameLocalizations: [],
     nsfw: contract.nsfw,
     options: [{
+      autocomplete: false,
+      choices: [],
       description: contract.option.description,
-      max_length: contract.option.maximumLength,
-      min_length: contract.option.minimumLength,
+      descriptionLocalizations: [],
+      maxLength: contract.option.maximumLength,
+      minLength: contract.option.minimumLength,
       name: contract.option.name,
+      nameLocalizations: [],
       required: contract.option.required,
-      type: STRING_OPTION_TYPE,
+      type: contract.option.type,
     }],
-    type: CHAT_INPUT_COMMAND_TYPE,
+    type: contract.type,
   }
 }
 

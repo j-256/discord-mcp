@@ -201,6 +201,8 @@ function status(
     policy: {
       administrationEnabled: false,
       administrationGuildIds: [],
+      applicationCommandChangesEnabled: false,
+      applicationCommandGuildIds: [],
       applicationEmojiAuditEnabled: false,
       applicationEmojiChangesEnabled: false,
       applicationEmojiCreationEnabled: false,
@@ -440,6 +442,7 @@ function toolService(): DiscordToolService {
     executeApplicationIntentEnablement: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
+    executeGuildApplicationCommandChange: unexpected,
     executeRoleOrder: unexpected,
     executeMemberNicknameChange: unexpected,
     executeMemberRoleChange: unexpected,
@@ -473,6 +476,7 @@ function toolService(): DiscordToolService {
     planAnnouncementSubscription: unexpected,
     planMessageForward: unexpected,
     planNativeInteractionCommand: unexpected,
+    planGuildApplicationCommandChange: unexpected,
     getThreadMembership: unexpected,
     getThreadState: unexpected,
     planThreadChange: unexpected,
@@ -3044,6 +3048,51 @@ test("doctor and setup explain identity-bound reviewed application emoji scope",
   assert.match(omitted.warnings.join("\n"), /application-emojis toolset/)
 })
 
+test("doctor and setup explain reviewed guild application-command scope", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      applicationCommandChanges: true,
+    },
+    scopes: {
+      applicationCommandGuildIds: [GUILD_ID],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const check = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationCommandChangePolicy,
+  )
+  assert.equal(check?.status, "pass")
+  assert.match(check?.summary || "", /1 exact guilds/)
+  assert.match(check?.summary || "", /complete typed definitions/)
+  assert.match(check?.summary || "", /full-localization and permission-inventory review/)
+  assert.match(check?.summary || "", /one non-retried write/)
+  assert.match(check?.summary || "", /exact survivor readback/)
+  assert.match(omitted.warnings.join("\n"), /application-commands toolset/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.applicationCommandChangePolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+})
+
 test("doctor and setup explain reviewed application privileged-intent enablement", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5408,6 +5457,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_direct_message_change",
     "review_forum_post",
     "review_forum_tag_change",
+    "review_guild_application_command_change",
     "review_guild_blueprint",
     "review_guild_expression_change",
     "review_guild_incident_action_change",
@@ -5526,6 +5576,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_component_message",
     "execute_direct_message_change",
     "execute_forum_tag_change",
+    "execute_guild_application_command_change",
     "execute_guild_blueprint",
     "execute_guild_expression_change",
     "execute_guild_incident_action_change",

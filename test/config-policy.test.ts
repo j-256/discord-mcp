@@ -192,6 +192,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
   assert.deepEqual(new ScopePolicy(config).describe(), {
     administrationEnabled: false,
     administrationGuildIds: [],
+    applicationCommandChangesEnabled: false,
+    applicationCommandGuildIds: [],
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
@@ -573,6 +575,53 @@ test("configuration and policy independently gate exact-user private attachments
   assert.throws(
     () => guildOnly.assertDirectMessageAttachmentAllowed(USER_ID),
     /delivery is disabled/,
+  )
+})
+
+test("configuration and policy isolate reviewed guild application-command changes", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { applicationCommandChanges: true },
+    readScope: { guildIds: [GUILD_ID] },
+    scopes: { applicationCommandGuildIds: [GUILD_ID] },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowApplicationCommandChanges, true)
+  assert.deepEqual([...config.applicationCommandGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().applicationCommandChangesEnabled, true)
+  assert.deepEqual(policy.describe().applicationCommandGuildIds, [GUILD_ID])
+  assert.doesNotThrow(
+    () => policy.assertGuildApplicationCommandChangeAllowed(GUILD_ID),
+  )
+  assert.throws(
+    () => policy.assertGuildApplicationCommandChangeAllowed(OTHER_GUILD_ID),
+    /configured read scope/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { applicationCommandChanges: true },
+    }, { homeDirectory: "/test/home" }),
+    /applicationCommandChanges.*requires.*applicationCommandGuildIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { applicationCommandGuildIds: [OTHER_GUILD_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /applicationCommandGuildIds.*subset.*guildIds/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    scopes: { applicationCommandGuildIds: [GUILD_ID] },
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildApplicationCommandChangeAllowed(GUILD_ID),
+    /changes are disabled/,
   )
 })
 
@@ -1262,6 +1311,8 @@ test("configuration and policy require an exact administration guild and protect
   assert.deepEqual(policy.describe(), {
     administrationEnabled: true,
     administrationGuildIds: [GUILD_ID],
+    applicationCommandChangesEnabled: false,
+    applicationCommandGuildIds: [],
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
@@ -4795,6 +4846,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
   assert.deepEqual(policy.describe(), {
     administrationEnabled: false,
     administrationGuildIds: [],
+    applicationCommandChangesEnabled: false,
+    applicationCommandGuildIds: [],
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,

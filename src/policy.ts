@@ -13,6 +13,8 @@ import type { DiscordChannel, DiscordGuild } from "./types.js"
 export interface PolicyDescription {
   administrationEnabled: boolean
   administrationGuildIds: string[]
+  applicationCommandChangesEnabled: boolean
+  applicationCommandGuildIds: string[]
   applicationEmojiAuditEnabled: boolean
   applicationEmojiChangesEnabled: boolean
   applicationEmojiCreationEnabled: boolean
@@ -223,6 +225,7 @@ export class ScopePolicy {
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
+  readonly #allowApplicationCommandChanges: boolean
   readonly #allowApplicationEmojiAudit: boolean
   readonly #allowApplicationEmojiChanges: boolean
   readonly #allowApplicationIntentChanges: boolean
@@ -331,6 +334,7 @@ export class ScopePolicy {
   readonly #attachmentMaxBytes: number
   readonly #attachmentRoots: readonly string[]
   readonly #applicationEmojiRoots: readonly string[]
+  readonly #applicationCommandGuildIds: ReadonlySet<string>
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
@@ -422,6 +426,7 @@ export class ScopePolicy {
   > & Partial<Pick<
     ConnectorConfig,
     | "allowAnnouncementCrossposts"
+    | "allowApplicationCommandChanges"
     | "allowDirectMessageAudit"
     | "allowDirectMessageAttachments"
     | "allowDirectMessageDeletion"
@@ -532,6 +537,7 @@ export class ScopePolicy {
     | "attachmentMaxBytes"
     | "attachmentRoots"
     | "applicationEmojiRoots"
+    | "applicationCommandGuildIds"
     | "automodAlertChannelIds"
     | "automodGuildIds"
     | "banAuditGuildIds"
@@ -599,6 +605,7 @@ export class ScopePolicy {
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
+    this.#allowApplicationCommandChanges = config.allowApplicationCommandChanges ?? false
     this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
     this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
     this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
@@ -712,6 +719,7 @@ export class ScopePolicy {
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
     this.#attachmentRoots = config.attachmentRoots ?? []
     this.#applicationEmojiRoots = config.applicationEmojiRoots ?? []
+    this.#applicationCommandGuildIds = config.applicationCommandGuildIds ?? new Set()
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
@@ -793,6 +801,9 @@ export class ScopePolicy {
     return {
       administrationEnabled: this.#allowAdministration && this.#adminGuildIds.size > 0,
       administrationGuildIds: [...this.#adminGuildIds].sort(),
+      applicationCommandChangesEnabled: this.#allowApplicationCommandChanges
+        && this.#applicationCommandGuildIds.size > 0,
+      applicationCommandGuildIds: [...this.#applicationCommandGuildIds].sort(),
       applicationEmojiAuditEnabled: this.#allowApplicationEmojiAudit,
       applicationEmojiChangesEnabled: this.#allowApplicationEmojiAudit
         && this.#allowApplicationEmojiChanges,
@@ -1224,6 +1235,25 @@ export class ScopePolicy {
   assertGuildAllowed(guildId: string): void {
     if (!this.guildAllowed(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the configured read scope`)
+    }
+  }
+
+  assertGuildApplicationCommandChangeAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowApplicationCommandChanges) {
+      throw new PolicyError(
+        "Discord guild application-command changes are disabled by connector configuration",
+      )
+    }
+    if (this.#applicationCommandGuildIds.size === 0) {
+      throw new PolicyError(
+        "Discord guild application-command changes require an exact guild allowlist",
+      )
+    }
+    if (!this.#applicationCommandGuildIds.has(guildId)) {
+      throw new PolicyError(
+        `Discord guild ${guildId} is outside the application-command change scope`,
+      )
     }
   }
 

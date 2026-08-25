@@ -32,11 +32,26 @@ export interface DiscordApplicationIntegrationTypeConfiguration {
   oauth2_install_params?: DiscordApplicationInstallParams
 }
 
+export interface DiscordApplicationCommandOptionChoice {
+  name: string
+  name_localizations?: Record<string, string> | null
+  value: number | string
+}
+
 export interface DiscordApplicationCommandOption {
+  autocomplete?: boolean
+  channel_types?: number[]
+  choices?: DiscordApplicationCommandOptionChoice[]
   description: string
+  description_localizations?: Record<string, string> | null
+  file_types?: string[]
+  max_value?: number
   max_length?: number
+  min_value?: number
   min_length?: number
   name: string
+  name_localizations?: Record<string, string> | null
+  options?: DiscordApplicationCommandOption[]
   required?: boolean
   type: number
 }
@@ -44,13 +59,17 @@ export interface DiscordApplicationCommandOption {
 export interface DiscordApplicationCommand {
   application_id: string
   contexts?: number[] | null
+  default_permission?: boolean
   default_member_permissions?: string | null
   description: string
+  description_localizations?: Record<string, string> | null
   dm_permission?: boolean
   guild_id?: string
+  handler?: number
   id: string
   integration_types?: number[] | null
   name: string
+  name_localizations?: Record<string, string> | null
   nsfw?: boolean
   options?: DiscordApplicationCommandOption[]
   type: number

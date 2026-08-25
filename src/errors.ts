@@ -973,6 +973,42 @@ export class NativeInteractionCommandExecutionError extends Error {
   }
 }
 
+export class GuildApplicationCommandPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild application-command state does not match the reviewed plan")
+    this.name = "GuildApplicationCommandPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildApplicationCommandOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild application-command operation key has already been reserved")
+    this.name = "GuildApplicationCommandOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildApplicationCommandExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildApplicationCommandExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildApplicationCommandEvidenceError extends Error {
+  override name = "GuildApplicationCommandEvidenceError"
+}
+
 export class NativeInteractionResponseError extends Error {
   readonly result: unknown
 

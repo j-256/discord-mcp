@@ -425,6 +425,14 @@ import {
   type NativeInteractionCommandRequest,
 } from "../src/native-interaction-command-service.js"
 import {
+  guildApplicationCommandDefinitionDigest,
+  type GuildApplicationCommandDefinition,
+} from "../src/guild-application-command-definition.js"
+import type {
+  GuildApplicationCommandChangeRequest,
+  GuildApplicationCommandPlan,
+} from "../src/guild-application-command-service.js"
+import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_TEMPLATE_NAMES,
   MCP_RESOURCE_TEMPLATE_URIS,
@@ -637,6 +645,7 @@ const ANNOUNCEMENT_SUBSCRIPTION_OPERATION_KEY = "announcement-subscription-attem
 const ANNOUNCEMENT_SOURCE_CHANNEL_ID = "200000000000000003"
 const ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID = "370000000000000002"
 const NATIVE_INTERACTION_COMMAND_OPERATION_KEY = "native-command-attempt-0001"
+const GUILD_APPLICATION_COMMAND_OPERATION_KEY = "guild-application-command-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
 const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
 const POLL_QUESTION = "Which release theme should we choose?"
@@ -1194,6 +1203,143 @@ function nativeInteractionCommandPlan(
       ? request.action === "install" ? "already-installed" : "already-absent"
       : "planned",
     warnings: ["One exact managed guild command"],
+  }
+}
+
+function guildApplicationCommandDefinition(
+  overrides: Partial<Extract<GuildApplicationCommandDefinition, { type: "chat-input" }>> = {},
+): Extract<GuildApplicationCommandDefinition, { type: "chat-input" }> {
+  return {
+    defaultMemberPermissions: ["MANAGE_GUILD"],
+    description: "Deploy one reviewed release",
+    descriptionLocalizations: [{ locale: "de", value: "Eine geprufte Version bereitstellen" }],
+    name: "deploy",
+    nameLocalizations: [{ locale: "de", value: "bereitstellen" }],
+    nsfw: false,
+    options: [],
+    type: "chat-input",
+    ...overrides,
+  }
+}
+
+function guildApplicationCommandPlan(
+  request: GuildApplicationCommandChangeRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): GuildApplicationCommandPlan {
+  const baseline = guildApplicationCommandDefinition({
+    description: request.action === "update"
+      && request.definition.type === "chat-input"
+      && !writeRequired
+      ? request.definition.description
+      : "Previously deployed release",
+    name: request.action === "update" && !writeRequired
+      ? request.definition.name
+      : "deploy",
+    nameLocalizations: request.action === "update" && !writeRequired
+      ? request.definition.nameLocalizations
+      : [],
+  })
+  const existing = request.action === "create"
+    || request.action === "delete" && !writeRequired
+    ? null
+    : baseline
+  const desired = request.action === "delete" ? null : request.definition
+  const commandId = request.action === "create" ? null : request.commandId
+  const commandType = request.action === "create"
+    ? request.definition.type
+    : existing?.type ?? null
+  const existingDefinitionDigest = existing
+    ? guildApplicationCommandDefinitionDigest(existing)
+    : null
+  const desiredDefinitionDigest = desired
+    ? guildApplicationCommandDefinitionDigest(desired)
+    : null
+  const renamed = request.action === "update"
+    && existing !== null
+    && existing.name !== request.definition.name
+  const permissionEffect = existing !== null
+    && (request.action === "delete" || renamed)
+    ? "target-overwrites-cleared-by-discord" as const
+    : "none" as const
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    commandId,
+    commandType,
+    createdAt: "2026-08-25T00:00:00.000Z",
+    desiredDefinition: desired,
+    desiredDefinitionDigest,
+    digest,
+    effect: writeRequired ? "change" : "none",
+    existingDefinition: existing,
+    existingDefinitionDigest,
+    guild: { id: request.guildId, name: "Private guild name" },
+    inventory: {
+      counts: {
+        "chat-input": existing ? 1 : 0,
+        message: 0,
+        user: 0,
+      },
+      digest: OPERATION_KEY_HASH,
+      entries: existing && commandId
+        ? [{
+            commandId,
+            definitionDigest: existingDefinitionDigest!,
+            name: existing.name,
+            type: existing.type,
+            version: "710000000000000001",
+          }]
+        : [],
+      limits: {
+        "chat-input": 100,
+        message: 15,
+        user: 15,
+      },
+      returned: existing ? 1 : 0,
+      totalLimit: 130,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permissionEffect,
+    permissions: {
+      digest: `sha256:${"c".repeat(64)}`,
+      entries: existing && commandId
+        ? [{
+            commandId,
+            entryDigest: `sha256:${"d".repeat(64)}`,
+            overwriteCount: 1,
+          }]
+        : [],
+      returned: existing ? 1 : 0,
+      target: existing && commandId
+        ? {
+            commandId,
+            entryDigest: `sha256:${"d".repeat(64)}`,
+            overwrites: [{ allowed: true, id: ROLE_ID, type: 1 }],
+          }
+        : null,
+    },
+    privacy: {
+      definitionsPersisted: false,
+      namesPersisted: false,
+      permissionTargetsPersisted: false,
+      planTextTransient: true,
+    },
+    risks: permissionEffect === "none"
+      ? ["One non-retried exact command write"]
+      : ["Renaming or deleting permanently clears target permission overwrites"],
+    schemaVersion: 1,
+    status: writeRequired
+      ? "planned"
+      : request.action === "delete" ? "already-absent" : "already-current",
+    verification: {
+      commandInventory: "exact-full-localization-readback",
+      permissionInventory: "exact-survivor-readback",
+      retriesAfterReservation: false,
+    },
+    warnings: ["Command text is transient untrusted evidence"],
+    writeRequired,
   }
 }
 
@@ -7213,6 +7359,8 @@ function fixturePolicy(): PolicyDescription {
   return {
     administrationEnabled: false,
     administrationGuildIds: [],
+    applicationCommandChangesEnabled: false,
+    applicationCommandGuildIds: [],
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
@@ -7537,6 +7685,9 @@ function serviceFixture(overrides: {
   nativeInteractionCommandError?: Error
   nativeInteractionCommandMutation?: "create" | "delete" | "none"
   nativeInteractionCommandPlanDigest?: string
+  guildApplicationCommandError?: Error
+  guildApplicationCommandPlanDigest?: string
+  guildApplicationCommandWriteRequired?: boolean
   onboardingEffect?: "change" | "none"
   onboardingError?: Error
   onboardingPlanDigest?: string
@@ -7629,6 +7780,10 @@ function serviceFixture(overrides: {
   }
   const guildBlueprintCaptureCalls = { capture: 0 }
   const nativeInteractionCommandCalls = {
+    execute: 0,
+    plan: 0,
+  }
+  const guildApplicationCommandCalls = {
     execute: 0,
     plan: 0,
   }
@@ -8555,6 +8710,40 @@ function serviceFixture(overrides: {
         status: planned.mutation === "none"
           ? request.action === "install" ? "already-installed" : "already-absent"
           : "completed",
+      }
+    },
+    async executeGuildApplicationCommandChange(request, planDigest) {
+      if (overrides.guildApplicationCommandError) {
+        throw overrides.guildApplicationCommandError
+      }
+      guildApplicationCommandCalls.execute += 1
+      const planned = guildApplicationCommandPlan(
+        request,
+        planDigest,
+        overrides.guildApplicationCommandWriteRequired ?? true,
+      )
+      const commandId = request.action === "create"
+        ? "720000000000000001"
+        : request.commandId
+      return {
+        action: request.action,
+        activityId: planned.writeRequired
+          ? "activity-guild-application-command"
+          : null,
+        applicationId: APPLICATION_ID,
+        commandId,
+        commandType: planned.commandType,
+        guildId: request.guildId,
+        observed: null,
+        observedInventoryDigest: planned.inventory.digest,
+        observedPermissionDigest: planned.permissions.digest,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        schemaVersion: 1,
+        status: planned.writeRequired
+          ? "completed"
+          : request.action === "delete" ? "already-absent" : "already-current",
       }
     },
     async executeThreadChange(request, planDigest) {
@@ -11379,6 +11568,14 @@ function serviceFixture(overrides: {
         overrides.nativeInteractionCommandMutation,
       )
     },
+    async planGuildApplicationCommandChange(request) {
+      guildApplicationCommandCalls.plan += 1
+      return guildApplicationCommandPlan(
+        request,
+        overrides.guildApplicationCommandPlanDigest || DIGEST,
+        overrides.guildApplicationCommandWriteRequired ?? true,
+      )
+    },
     async planPollCreation(request) {
       calls.pollCreationPlan += 1
       return pollCreationPlan(
@@ -11539,6 +11736,7 @@ function serviceFixture(overrides: {
     guildBlueprintCaptureCalls,
     guildIncidentCalls,
     guildProfileCalls,
+    guildApplicationCommandCalls,
     nativeInteractionCommandCalls,
     service,
     welcomeScreenCalls,
@@ -11855,6 +12053,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_announcement_subscription",
       "plan_native_interaction_command",
       "execute_native_interaction_command",
+      "plan_guild_application_command_change",
+      "execute_guild_application_command_change",
       "plan_guild_template_change",
       "execute_guild_template_change",
       "get_webhook_message",
@@ -13785,6 +13985,30 @@ test("progressive discovery enables the complete reviewed guild-expression workf
     [
       "plan_guild_expression_change",
       "execute_guild_expression_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed guild application-command workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_guild_application_command_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_guild_application_command_change",
+    "plan_guild_application_command_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_guild_application_command_change",
+      "execute_guild_application_command_change",
       "discover_discord_tools",
     ],
   )
@@ -18070,6 +18294,136 @@ test("MCP managed native command execution skips no-ops and stops on refusal or 
   assert.equal(driftResult.isError, true)
   assert.equal(driftConfirmations, 0)
   assert.equal(drift.nativeInteractionCommandCalls.execute, 0)
+})
+
+test("MCP guild application-command planning is typed and signed approval binds complete evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const setup = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const definition = guildApplicationCommandDefinition()
+  const input = {
+    action: "create" as const,
+    definition,
+    guildId: GUILD_ID,
+    operationKey: GUILD_APPLICATION_COMMAND_OPERATION_KEY,
+  }
+  const planned = await setup.client.callTool({
+    arguments: input,
+    name: "plan_guild_application_command_change",
+  })
+  assert.equal(structuredContent(planned).commandType, "chat-input")
+  assert.equal(structuredContent(planned).effect, "change")
+  assert.equal(setup.guildApplicationCommandCalls.plan, 1)
+
+  const result = await setup.client.callTool({
+    arguments: { ...input, planDigest: DIGEST },
+    name: "execute_guild_application_command_change",
+  })
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(setup.guildApplicationCommandCalls.plan, 2)
+  assert.equal(setup.guildApplicationCommandCalls.execute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, /Desired complete definition:/)
+  assert.match(confirmationMessage, /Deploy one reviewed release/)
+  assert.match(confirmationMessage, /bereitstellen/)
+  assert.match(confirmationMessage, /Permission inventory digest:/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(GUILD_APPLICATION_COMMAND_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_APPLICATION_COMMAND_OPERATION_KEY),
+  )
+})
+
+test("MCP guild application-command execution skips no-ops and stops on refusal or drift", async (context) => {
+  const definition = guildApplicationCommandDefinition()
+  const updateInput = {
+    action: "update" as const,
+    commandId: "720000000000000001",
+    definition,
+    guildId: GUILD_ID,
+    operationKey: GUILD_APPLICATION_COMMAND_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { guildApplicationCommandWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: updateInput,
+    name: "execute_guild_application_command_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.guildApplicationCommandCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "create",
+      definition,
+      guildId: GUILD_ID,
+      operationKey: GUILD_APPLICATION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_guild_application_command_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.guildApplicationCommandCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildApplicationCommandPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: {
+      action: "create",
+      definition,
+      guildId: GUILD_ID,
+      operationKey: GUILD_APPLICATION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_guild_application_command_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.guildApplicationCommandCalls.execute, 0)
+
+  const invalidDeletion = await drift.client.callTool({
+    arguments: {
+      acknowledgeDeletion: false,
+      action: "delete",
+      commandId: "720000000000000001",
+      guildId: GUILD_ID,
+      operationKey: GUILD_APPLICATION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_guild_application_command_change",
+  })
+  assert.equal(invalidDeletion.isError, true)
 })
 
 test("MCP poll reads preserve exact answer IDs and return voter IDs only", async (context) => {

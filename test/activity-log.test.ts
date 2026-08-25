@@ -31,6 +31,7 @@ import {
   type DirectMessageActivity,
   type ForumPostActivity,
   type ForumTagActivity,
+  type GuildApplicationCommandActivity,
   type GuildExpressionActivity,
   type GuildIncidentActivity,
   type GuildProfileActivity,
@@ -911,6 +912,35 @@ function nativeInteractionCommand(
     id,
     kind: "native-interaction-command-change",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function guildApplicationCommand(
+  id: string,
+  status: GuildApplicationCommandActivity["status"],
+): GuildApplicationCommandActivity {
+  return {
+    action: "create",
+    applicationId: "500",
+    botId: "600",
+    commandId: status === "completed" ? "300" : null,
+    commandType: "chat-input",
+    desiredDefinitionDigest: `sha256:${"4".repeat(64)}`,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    existingDefinitionDigest: null,
+    guildId: "100",
+    id,
+    inventoryDigest: `sha256:${"5".repeat(64)}`,
+    kind: "guild-application-command-change",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    permissionDigest: `sha256:${"6".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
     schemaVersion: 1,
     status,
@@ -3081,6 +3111,49 @@ test("JSONL activity log keeps native Interaction command and response evidence 
     JSON.stringify(result),
     /private-command|private inventory|private historical request|private historical token/,
   )
+})
+
+test("JSONL activity log keeps guild application-command definitions content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-command-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-command-name",
+    "private-command-description",
+    "private-choice-value",
+  ]
+
+  await store.append(guildApplicationCommand("1", "pending"))
+  await store.append(guildApplicationCommand("1", "completed"))
+  await assert.rejects(
+    store.append({
+      ...guildApplicationCommand("2", "pending"),
+      commandName: privateValues[0],
+    } as GuildApplicationCommandActivity),
+    /invalid content-free shape/,
+  )
+  await appendFile(file, `${JSON.stringify({
+    ...guildApplicationCommand("3", "completed"),
+    description: privateValues[1],
+    option: privateValues[2],
+  })}\n`, "utf8")
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.equal(result.entries.length, 2)
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(result.entries.map(({ kind, status }) => ({ kind, status })), [{
+    kind: "guild-application-command-change",
+    status: "completed",
+  }, {
+    kind: "guild-application-command-change",
+    status: "pending",
+  }])
+  for (const value of privateValues) {
+    assert.equal(result.entries.some((entry) => JSON.stringify(entry).includes(value)), false)
+  }
+  assert.equal(persisted.includes(privateValues[0] as string), false)
 })
 
 test("JSONL activity log keeps permission-overwrite evidence content-free", async (context) => {

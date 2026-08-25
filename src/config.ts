@@ -49,6 +49,7 @@ export interface ConnectorConfig {
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
+  allowApplicationCommandChanges: boolean
   allowApplicationEmojiAudit: boolean
   allowApplicationEmojiChanges: boolean
   allowApplicationIntentChanges: boolean
@@ -149,6 +150,7 @@ export interface ConnectorConfig {
   allowWidgetSettingsAudit: boolean
   allowWidgetSettingsChanges: boolean
   applicationEmojiRoots: readonly string[]
+  applicationCommandGuildIds: ReadonlySet<string>
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
@@ -443,6 +445,11 @@ export function loadConnectorConfigDocument(
   const allowedChannelIds = new Set(document.readScope.channelIds)
   const allowedGuildIds = new Set(document.readScope.guildIds)
   const automodGuildIds = configScope(document, "automodGuildIds")
+  const applicationCommandGuildIds = configScope(
+    document,
+    "applicationCommandGuildIds",
+    CONNECTOR_LIMITS.applicationCommandGuildAllowlist,
+  )
   const banAuditGuildIds = configScope(document, "banAuditGuildIds")
   const bulkBanGuildIds = configScope(document, "bulkBanGuildIds")
   const guildPruneGuildIds = configScope(document, "guildPruneGuildIds")
@@ -587,6 +594,7 @@ export function loadConnectorConfigDocument(
 
   for (const [name, guildIds] of [
     [configPolicyPath("adminGuildIds"), adminGuildIds],
+    [configPolicyPath("applicationCommandGuildIds"), applicationCommandGuildIds],
     [configPolicyPath("automodGuildIds"), automodGuildIds],
     [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
     [configPolicyPath("bulkBanGuildIds"), bulkBanGuildIds],
@@ -669,6 +677,15 @@ export function loadConnectorConfigDocument(
 
   const expectedApplicationId = document.identity.applicationId
   const expectedBotId = document.identity.botId
+  const allowApplicationCommandChanges = configCapability(
+    document,
+    "applicationCommandChanges",
+  )
+  if (allowApplicationCommandChanges && applicationCommandGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowApplicationCommandChanges")} requires ${configPolicyPath("applicationCommandGuildIds")}`,
+    )
+  }
   const allowDirectMessageAudit = configCapability(document, "directMessageAudit")
   const allowDirectMessageAttachments = configCapability(
     document,
@@ -1100,6 +1117,7 @@ export function loadConnectorConfigDocument(
 
   return {
     adminGuildIds,
+    allowApplicationCommandChanges,
     allowApplicationEmojiAudit,
     allowApplicationEmojiChanges,
     allowApplicationIntentChanges,
@@ -1209,6 +1227,7 @@ export function loadConnectorConfigDocument(
       document.storage.applicationEmojiRoots,
       "$.storage.applicationEmojiRoots",
     ),
+    applicationCommandGuildIds,
     auditFile: resolveConnectorConfigDocumentAuditFile(document, environment, options),
     attachmentChannelIds,
     attachmentMaxBytes: configLimit(

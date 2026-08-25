@@ -15,6 +15,10 @@
           "type": "boolean",
           "description": "Enable administration policy"
         },
+        "applicationCommandChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed exact-guild application-command creation, complete-state update, and exact-ID deletion"
+        },
         "applicationEmojiAudit": {
           "type": "boolean",
           "description": "Enable application emoji audit policy"
@@ -794,6 +798,16 @@
           },
           "description": "Exact Discord ID allowlist for admin guild ids"
         },
+        "applicationCommandGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact guild ID allowlist for reviewed application-command changes"
+        },
         "announcementCrosspostChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1541,12 +1555,13 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 60,
+          "maxItems": 61,
           "type": "array",
           "items": {
             "type": "string",
             "enum": [
               "activity",
+              "application-commands",
               "application-emojis",
               "application-security",
               "announcement-crossposts",

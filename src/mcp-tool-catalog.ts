@@ -56,6 +56,7 @@ type McpToolWorkflow =
   | "forum-post"
   | "forum-tag-change"
   | "guild-blueprint"
+  | "guild-application-command-change"
   | "guild-scaffold"
   | "guild-expression-change"
   | "guild-incident-action-change"
@@ -399,6 +400,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "command", "execute", "install", "interaction", "remove", "slash"],
     toolset: "native-interactions",
     workflow: "native-interaction-command",
+  },
+  execute_guild_application_command_change: {
+    keywords: ["application", "command", "create", "delete", "execute", "localization", "permission", "slash", "update"],
+    toolset: "application-commands",
+    workflow: "guild-application-command-change",
   },
   execute_role_creation: {
     keywords: ["create", "execute", "permission", "role"],
@@ -955,6 +961,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "command", "install", "interaction", "plan", "remove", "slash"],
     toolset: "native-interactions",
     workflow: "native-interaction-command",
+  },
+  plan_guild_application_command_change: {
+    keywords: ["application", "command", "create", "delete", "localization", "permission", "plan", "review", "slash", "update"],
+    toolset: "application-commands",
+    workflow: "guild-application-command-change",
   },
   plan_role_creation: {
     keywords: ["create", "permission", "plan", "review", "role"],

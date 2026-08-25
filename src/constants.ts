@@ -23,6 +23,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 
 export const MCP_TOOLSET_NAMES = [
   "activity",
+  "application-commands",
   "application-emojis",
   "application-security",
   "announcement-crossposts",
@@ -180,9 +181,20 @@ export const FORUM_TAG_ACTIONS = [
 export type ForumTagAction = typeof FORUM_TAG_ACTIONS[number]
 
 export const DISCORD_LIMITS = Object.freeze({
+  applicationCommandAggregateCharacters: 8_000,
+  applicationCommandChoiceCharacters: 100,
+  applicationCommandChoices: 25,
+  applicationCommandDescriptionCharacters: 100,
+  applicationCommandFileTypes: 10,
   applicationCommandGlobalCommands: 131,
   applicationCommandGuildCommands: 130,
+  applicationCommandGuildChatInputCommands: 100,
+  applicationCommandGuildMessageCommands: 15,
+  applicationCommandGuildUserCommands: 15,
   applicationCommandInventoryResponseBytes: 2_500_000,
+  applicationCommandNameCharacters: 32,
+  applicationCommandOptions: 25,
+  applicationCommandStringCharacters: 6_000,
   applicationRoleConnectionMetadataDescriptionCharacters: 200,
   applicationRoleConnectionMetadataFields: 32,
   applicationRoleConnectionMetadataKeyCharacters: 50,
@@ -478,6 +490,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   observabilityServiceNameCharacters: 64,
   observabilityTimeoutMs: 60_000,
   configBytes: 131_072,
+  applicationCommandGuildAllowlist: 100,
   credentialFileBytes: 4_096,
   operationReceiptBytes: 16_384,
   scaffoldChannels: 20,
