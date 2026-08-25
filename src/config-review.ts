@@ -22,6 +22,7 @@ import {
   DISCORD_LIMITS,
   GUILD_PRUNE_DEFAULTS,
   INTERACTION_DEFAULTS,
+  MCP_READ_RESPONSE_DEFAULTS,
   NATIVE_INTERACTION_DEFAULTS,
 } from "./constants.js"
 import { ConfigChangeError } from "./errors.js"
@@ -147,6 +148,7 @@ const LIMIT_DEFAULTS = Object.freeze({
   guildPruneMaxMembers: GUILD_PRUNE_DEFAULTS.maximumMemberCount,
   interactionMaxWritesPerMinute: INTERACTION_DEFAULTS.maxWritesPerMinute,
   interactionMinWriteIntervalMs: INTERACTION_DEFAULTS.minWriteIntervalMs,
+  mcpReadResponseMaxBytes: MCP_READ_RESPONSE_DEFAULTS.maxBytes,
   nativeInteractionMaxPending: NATIVE_INTERACTION_DEFAULTS.maximumPending,
   nativeInteractionTtlSeconds: NATIVE_INTERACTION_DEFAULTS.ttlSeconds,
 })

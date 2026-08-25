@@ -37,6 +37,8 @@ import {
 import {
   CONNECTOR_LIMITS,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  MCP_READ_RESPONSE_DEFAULTS,
+  MCP_READ_RESPONSE_LIMITS,
 } from "../src/constants.js"
 import { ConfigDocumentError } from "../src/errors.js"
 
@@ -93,6 +95,7 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     limits: {
       attachmentMaxBytes: 1_024,
       interactionMaxWritesPerMinute: 10,
+      mcpReadResponseMaxBytes: MCP_READ_RESPONSE_LIMITS.minimumBytes,
     },
     observability: {
       exportEnabled: true,
@@ -153,6 +156,20 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     { ...valid, capabilities: { ...valid.capabilities, deletion: true } },
     { ...valid, scopes: { ...valid.scopes, attachmentChannelIds: CHANNEL_ID } },
     { ...valid, limits: { ...valid.limits, attachmentMaxBytes: "1024" } },
+    {
+      ...valid,
+      limits: {
+        ...valid.limits,
+        mcpReadResponseMaxBytes: MCP_READ_RESPONSE_LIMITS.minimumBytes - 1,
+      },
+    },
+    {
+      ...valid,
+      limits: {
+        ...valid.limits,
+        mcpReadResponseMaxBytes: MCP_READ_RESPONSE_LIMITS.maximumBytes + 1,
+      },
+    },
     {
       ...valid,
       storage: { ...valid.storage, inviteCapabilityRoots: ["/private/invite\ncapabilities"] },
@@ -243,6 +260,10 @@ test("native configuration loads only referenced secrets and rejects ambient pol
   )
   assert.deepEqual([...config.attachmentChannelIds], [CHANNEL_ID])
   assert.equal(config.attachmentMaxBytes, 1_024)
+  assert.equal(
+    config.mcpReadResponseMaxBytes,
+    MCP_READ_RESPONSE_DEFAULTS.maxBytes,
+  )
   assert.deepEqual([...config.allowedGuildIds], [GUILD_ID])
   assert.deepEqual(
     config.observability.export?.traces.headers,

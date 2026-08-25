@@ -82,7 +82,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 27
+export const OPERATOR_REPORT_SCHEMA_VERSION = 28
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -173,6 +173,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   pollVoterAuditPolicy: "poll-voter-audit-policy",
   reactionModerationPolicy: "reaction-moderation-policy",
   reactionUserAuditPolicy: "reaction-user-audit-policy",
+  readResponseBudget: "read-response-budget",
   roleCreationPolicy: "role-creation-policy",
   roleConfigurationPolicy: "role-configuration-policy",
   roleDeletionAuditPolicy: "role-deletion-audit-policy",
@@ -1300,6 +1301,11 @@ export async function diagnoseConnector(
       DOCTOR_CHECK_IDS.toolSurface,
       "pass",
       `MCP tool surface is ${config.mcpToolSurface} with ${config.mcpToolsets.size} of ${MCP_TOOLSET_NAMES.length} risk-separated toolsets and ${selectedCanonicalMcpToolNames(config.mcpToolsets).length} canonical tools`,
+    ))
+    checks.push(check(
+      DOCTOR_CHECK_IDS.readResponseBudget,
+      "pass",
+      `Complete redacted MCP read results are limited to ${config.mcpReadResponseMaxBytes} UTF-8 bytes; oversized reads fail whole without truncation and final mutation outcomes are preserved`,
     ))
     if (!config.allowAttachments) {
       checks.push(check(

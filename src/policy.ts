@@ -2,6 +2,7 @@ import type { ConnectorConfig } from "./config.js"
 import {
   DISCORD_CHANNEL_TYPES,
   GATEWAY_DEFAULTS,
+  MCP_READ_RESPONSE_DEFAULTS,
   MCP_TOOLSET_NAMES,
   type McpToolsetName,
   type McpToolSurface,
@@ -126,6 +127,7 @@ export interface PolicyDescription {
   mentionUserCount: number
   mcpToolsets: McpToolsetName[]
   mcpToolSurface: McpToolSurface
+  mcpReadResponseMaxBytes: number
   onboardingAuditEnabled: boolean
   onboardingChangesEnabled: boolean
   onboardingGuildIds: string[]
@@ -364,6 +366,7 @@ export class ScopePolicy {
   readonly #nativeInteractionUserIds: ReadonlySet<string>
   readonly #mcpToolsets: ReadonlySet<McpToolsetName>
   readonly #mcpToolSurface: McpToolSurface
+  readonly #mcpReadResponseMaxBytes: number
   readonly #onboardingGuildIds: ReadonlySet<string>
   readonly #permissionOverwriteChannelIds: ReadonlySet<string>
   readonly #protectedUserIds: ReadonlySet<string>
@@ -547,6 +550,7 @@ export class ScopePolicy {
     | "forumTagChannelIds"
     | "mcpToolsets"
     | "mcpToolSurface"
+    | "mcpReadResponseMaxBytes"
     | "onboardingGuildIds"
     | "permissionOverwriteChannelIds"
     | "pinChannelIds"
@@ -730,6 +734,8 @@ export class ScopePolicy {
     this.#nativeInteractionUserIds = config.nativeInteractionUserIds ?? new Set()
     this.#mcpToolsets = config.mcpToolsets ?? new Set(MCP_TOOLSET_NAMES)
     this.#mcpToolSurface = config.mcpToolSurface ?? "full"
+    this.#mcpReadResponseMaxBytes = config.mcpReadResponseMaxBytes
+      ?? MCP_READ_RESPONSE_DEFAULTS.maxBytes
     this.#onboardingGuildIds = config.onboardingGuildIds ?? new Set()
     this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
     this.#protectedUserIds = config.protectedUserIds
@@ -956,6 +962,7 @@ export class ScopePolicy {
       mentionUserCount: this.#mentionUserIds.size,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
+      mcpReadResponseMaxBytes: this.#mcpReadResponseMaxBytes,
       onboardingAuditEnabled: this.#allowOnboardingAudit
         && this.#onboardingGuildIds.size > 0,
       onboardingChangesEnabled: this.#allowOnboardingAudit

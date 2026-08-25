@@ -15,10 +15,14 @@ import type {
   NativeInteractionChangeKind,
   NativeInteractionSource,
 } from "./native-interaction-broker.js"
-import { redactedJson } from "./mcp-output.js"
+import {
+  assertMcpReadResultBudget,
+  redactedJson,
+} from "./mcp-output.js"
 
 export interface GatewayMcpOptions {
   gateway: GatewayEventSource
+  mcpReadResponseMaxBytes: number
   nativeInteractions?: NativeInteractionSource
   notificationDelayMs?: number
   secrets: readonly (string | undefined)[]
@@ -73,14 +77,15 @@ function gatewayResource(
   data: unknown,
   provenance: "discord-gateway" | "local-gateway-runtime",
   secrets: readonly (string | undefined)[],
+  maxBytes: number,
 ) {
-  return {
+  return assertMcpReadResultBudget({
     contents: [{
       mimeType: "application/json",
       text: redactedJson(gatewayEnvelope(data, provenance), secrets),
       uri: uri.href,
     }],
-  }
+  }, maxBytes, "resource")
 }
 
 function uriForChange(kind: GatewayChangeKind): string {
@@ -117,6 +122,7 @@ export function registerDiscordGatewayMcp(
       gateway.getStatus(),
       "local-gateway-runtime",
       secrets,
+      options.mcpReadResponseMaxBytes,
     ),
   )
   server.registerResource(
@@ -134,6 +140,7 @@ export function registerDiscordGatewayMcp(
       gateway.listEvents(),
       "discord-gateway",
       secrets,
+      options.mcpReadResponseMaxBytes,
     ),
   )
 

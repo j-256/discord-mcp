@@ -2071,6 +2071,7 @@ function guidanceService(options: {
         mentionUserCount: 0,
         mcpToolsets: [...MCP_TOOLSET_NAMES],
         mcpToolSurface: "full",
+        mcpReadResponseMaxBytes: 1_048_576,
         onboardingAuditEnabled: false,
         onboardingChangesEnabled: false,
         onboardingGuildIds: [],

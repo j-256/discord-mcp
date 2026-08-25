@@ -168,6 +168,7 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.expectedBotId, "300000000000000002")
   assert.equal(config.gatewayEventBufferSize, 100)
   assert.equal(config.mcpToolSurface, "full")
+  assert.equal(config.mcpReadResponseMaxBytes, 1_048_576)
   assert.deepEqual([...config.mcpToolsets], MCP_TOOLSET_NAMES)
   assert.deepEqual(config.observability, {
     export: undefined,
@@ -330,6 +331,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     mentionUserCount: 0,
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
+    mcpReadResponseMaxBytes: 1_048_576,
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
     protectedUserCount: 0,
@@ -1170,6 +1172,7 @@ test("configuration and policy require an exact administration guild and protect
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
+    mcpReadResponseMaxBytes: 1_048_576,
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
     protectedUserCount: 1,
@@ -4695,6 +4698,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
+    mcpReadResponseMaxBytes: 1_048_576,
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
     protectedUserCount: 0,

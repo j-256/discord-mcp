@@ -13,7 +13,7 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 | Concern | Enforced behavior |
 | --- | --- |
 | Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, risk-separated toolsets, and read-only setup presets |
-| Read safety | Bounded requests, strict response validation, privacy-tiered projections, untrusted-content handling, and no hidden direct-message access |
+| Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, and no hidden direct-message access |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence before mutation, one non-retried write, exact readback, durable coordination, and quarantine after ambiguity |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
@@ -112,11 +112,13 @@ The `server-observer` preset exposes guild metadata, roles, permission diagnosti
 
 The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
 
+`limits.mcpReadResponseMaxBytes` bounds one complete redacted MCP application read result by compact UTF-8 JSON bytes. It defaults to 1 MiB and accepts 64 KiB through 8 MiB. An oversized tool read returns a fixed content-free `response-too-large` error; an oversized resource or prompt fails with a fixed protocol error. The connector never clips structured JSON, emits a preview, spills withheld data, or reports the measured size. Final results from mutation-capable tools are always preserved because Discord may already have changed. Protocol discovery and notifications are outside this result boundary; use toolsets and progressive discovery to control catalog size.
+
 Credential-authenticated Incoming-webhook messages use one additional local input: `storage.webhookCredentialRoot`, an existing canonical process-owned `0700` directory. Connector-created webhook credentials are written there as exclusive exact-ID `0600` files, with both file contents and the containing directory synchronized, and become immediately available to independently gated exact lookup, bounded plain-text delivery, editing, and reviewed deletion. Reviewed webhook deletion removes only that inspected exact-ID file after Discord proves the webhook absent, synchronizes the directory again, and reports cleanup failure as drift without confusing it with remote outcome uncertainty. MCP accepts no token, execution URL, credential path, username or avatar override, thread target, embed, file, component, poll, or raw webhook payload. Use `scopes.webhookMessageChannelIds` to allowlist each direct text or announcement channel, then enable only the required `webhookMessageAudit`, `webhookMessageDelivery`, `webhookMessageChanges`, or `webhookMessageDeletions` capability.
 
 Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or migration mode. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
-Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
+Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, effective read-response budget, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
 
 ### Review any policy replacement
 
@@ -250,7 +252,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
 | `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
 | `discord-mcp activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |
-| `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
+| `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
 | `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |

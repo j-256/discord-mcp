@@ -23,7 +23,11 @@ import {
   type ConnectorConfigDocument,
 } from "../src/config-document.js"
 import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
-import { MCP_TOOLSET_NAMES, type McpToolsetName } from "../src/constants.js"
+import {
+  MCP_READ_RESPONSE_DEFAULTS,
+  MCP_TOOLSET_NAMES,
+  type McpToolsetName,
+} from "../src/constants.js"
 
 const APPLICATION_ID = "300000000000000001"
 const BOT_ID = "400000000000000001"
@@ -224,6 +228,7 @@ test("configuration change plans use field-specific limit and inverse-boundary d
       attachmentMaxBytes: 1_024,
       interactionMaxWritesPerMinute: 5,
       interactionMinWriteIntervalMs: 5_000,
+      mcpReadResponseMaxBytes: 65_536,
       nativeInteractionMaxPending: 5,
       nativeInteractionTtlSeconds: 60,
     },
@@ -234,6 +239,7 @@ test("configuration change plans use field-specific limit and inverse-boundary d
       attachmentMaxBytes: 2_048,
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 10_000,
+      mcpReadResponseMaxBytes: 131_072,
       nativeInteractionMaxPending: 10,
       nativeInteractionTtlSeconds: 120,
     },
@@ -245,6 +251,7 @@ test("configuration change plans use field-specific limit and inverse-boundary d
   for (const path of [
     "$.limits.attachmentMaxBytes",
     "$.limits.interactionMaxWritesPerMinute",
+    "$.limits.mcpReadResponseMaxBytes",
     "$.limits.nativeInteractionMaxPending",
     "$.limits.nativeInteractionTtlSeconds",
   ]) {
@@ -269,7 +276,10 @@ test("configuration change plans retain explicit default representation as metad
     channelIds: [CHANNEL_ID],
     credentialVariable: TOKEN_ALIAS,
     guildIds: [GUILD_ID],
-    limits: { interactionMaxWritesPerMinute: 10 },
+    limits: {
+      interactionMaxWritesPerMinute: 10,
+      mcpReadResponseMaxBytes: MCP_READ_RESPONSE_DEFAULTS.maxBytes,
+    },
     name: "support-bot",
     observability: { exportEnabled: false, jsonLogsEnabled: false },
     runtime: { nativeCommandName: "discord-mcp" },
@@ -285,6 +295,7 @@ test("configuration change plans retain explicit default representation as metad
   for (const path of [
     "$.capabilities.interactions",
     "$.limits.interactionMaxWritesPerMinute",
+    "$.limits.mcpReadResponseMaxBytes",
     "$.observability.exportEnabled",
     "$.observability.jsonLogsEnabled",
     "$.runtime.nativeCommandName",

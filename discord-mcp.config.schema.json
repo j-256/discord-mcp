@@ -505,6 +505,12 @@
           "maximum": 9007199254740991,
           "description": "Numeric policy limit for interaction min write interval ms"
         },
+        "mcpReadResponseMaxBytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 8388608,
+          "description": "Maximum UTF-8 bytes for one complete redacted MCP read result"
+        },
         "nativeInteractionMaxPending": {
           "type": "integer",
           "minimum": 0,

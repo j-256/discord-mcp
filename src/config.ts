@@ -17,6 +17,8 @@ import {
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   GUILD_PRUNE_DEFAULTS,
   INTERACTION_DEFAULTS,
+  MCP_READ_RESPONSE_DEFAULTS,
+  MCP_READ_RESPONSE_LIMITS,
   NATIVE_INTERACTION_COMMAND_NAME_PATTERN,
   NATIVE_INTERACTION_DEFAULTS,
   NATIVE_INTERACTION_LIMITS,
@@ -178,6 +180,7 @@ export interface ConnectorConfig {
   interactionMaxWritesPerMinute: number
   interactionMinWriteIntervalMs: number
   inviteCapabilityRoots: readonly string[]
+  mcpReadResponseMaxBytes: number
   inviteCreationChannelIds: ReadonlySet<string>
   inviteGuildIds: ReadonlySet<string>
   mentionUserIds: ReadonlySet<string>
@@ -1253,6 +1256,13 @@ export function loadConnectorConfigDocument(
     nativeInteractionUserIds,
     mcpToolsets: new Set(document.tools.toolsets),
     mcpToolSurface: document.tools.surface,
+    mcpReadResponseMaxBytes: configLimit(
+      document,
+      "mcpReadResponseMaxBytes",
+      MCP_READ_RESPONSE_DEFAULTS.maxBytes,
+      MCP_READ_RESPONSE_LIMITS.minimumBytes,
+      MCP_READ_RESPONSE_LIMITS.maximumBytes,
+    ),
     observability: loadObservabilityDocumentConfig(
       document.observability,
       environment,

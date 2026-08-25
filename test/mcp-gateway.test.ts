@@ -12,6 +12,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio"
 import {
   DISCORD_CHANNEL_FLAGS,
   DISCORD_CHANNEL_TYPES,
+  MCP_READ_RESPONSE_DEFAULTS,
 } from "../src/constants.js"
 import { GatewayEventStore } from "../src/gateway-events.js"
 import { registerDiscordGatewayMcp } from "../src/mcp-gateway.js"
@@ -83,6 +84,7 @@ function createServer(
   )
   registerDiscordGatewayMcp(server, {
     gateway,
+    mcpReadResponseMaxBytes: MCP_READ_RESPONSE_DEFAULTS.maxBytes,
     ...(nativeInteractions ? { nativeInteractions } : {}),
     notificationDelayMs,
     secrets: [TOKEN],

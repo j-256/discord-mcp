@@ -6,10 +6,14 @@ import {
   MCP_RESOURCE_URIS,
 } from "./mcp-guidance-catalog.js"
 import type { NativeInteractionSource } from "./native-interaction-broker.js"
-import { redactedJson } from "./mcp-output.js"
+import {
+  assertMcpReadResultBudget,
+  redactedJson,
+} from "./mcp-output.js"
 
 export interface NativeInteractionMcpOptions {
   interactions: NativeInteractionSource
+  mcpReadResponseMaxBytes: number
   secrets: readonly (string | undefined)[]
 }
 
@@ -27,9 +31,10 @@ function resource(
   data: unknown,
   provenance: "discord-gateway" | "local-interaction-runtime",
   secrets: readonly (string | undefined)[],
+  maxBytes: number,
 ) {
   const external = provenance === "discord-gateway"
-  return {
+  return assertMcpReadResultBudget({
     contents: [{
       mimeType: "application/json",
       text: redactedJson({
@@ -47,7 +52,7 @@ function resource(
       }, secrets),
       uri: uri.href,
     }],
-  }
+  }, maxBytes, "resource")
 }
 
 export function registerDiscordNativeInteractionMcp(
@@ -69,6 +74,7 @@ export function registerDiscordNativeInteractionMcp(
       options.interactions.getStatus(),
       "local-interaction-runtime",
       options.secrets,
+      options.mcpReadResponseMaxBytes,
     ),
   )
   server.registerResource(
@@ -86,6 +92,7 @@ export function registerDiscordNativeInteractionMcp(
       await options.interactions.listPending(),
       "discord-gateway",
       options.secrets,
+      options.mcpReadResponseMaxBytes,
     ),
   )
 }

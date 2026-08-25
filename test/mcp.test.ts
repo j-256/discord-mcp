@@ -30,6 +30,7 @@ import {
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
   MCP_DISCOVERY_TOOL_NAME,
+  MCP_READ_RESPONSE_LIMITS,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
   REACTION_LIMITS,
@@ -431,6 +432,7 @@ import {
   MCP_PLAN_REVIEW_TOOL_META,
 } from "../src/mcp-plan-review-app.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
+import { serializedMcpResultBytes } from "../src/mcp-output.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityDocumentConfig } from "../src/observability-config.js"
 import { OperationalTelemetry } from "../src/observability.js"
@@ -7134,6 +7136,7 @@ function fixturePolicy(): PolicyDescription {
     mentionUserCount: 0,
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
+    mcpReadResponseMaxBytes: 1_048_576,
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],
@@ -11013,6 +11016,7 @@ async function connectedFixture(
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
     gateway?: GatewayEventSource
     nativeInteractions?: NativeInteractionSource
+    runtimeMcpReadResponseMaxBytes?: number
   } = {},
 ) {
   const serviceData = serviceFixture(options.serviceOverrides)
@@ -11020,8 +11024,14 @@ async function connectedFixture(
     token: TOKEN,
     ...options.configOverrides,
   }
+  const loadedConfig = loadFixtureConfig(configOverrides)
   const server = createDiscordMcpServer({
-    config: loadFixtureConfig(configOverrides),
+    config: options.runtimeMcpReadResponseMaxBytes === undefined
+      ? loadedConfig
+      : {
+          ...loadedConfig,
+          mcpReadResponseMaxBytes: options.runtimeMcpReadResponseMaxBytes,
+        },
     environment: {
       DISCORD_BOT_TOKEN: TOKEN,
     },
@@ -11956,6 +11966,102 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     })
   }
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("MCP read-response budget refuses whole tool, resource, and prompt results", async (context) => {
+  const { client } = await connectedFixture(context, {
+    runtimeMcpReadResponseMaxBytes: 1,
+  })
+
+  const read = await client.callTool({
+    arguments: {},
+    name: "get_connector_status",
+  })
+  assert.equal(read.isError, true)
+  assert.equal(structuredContent(read).status, "response-too-large")
+  assert.equal(JSON.stringify(read).includes(APPLICATION_ID), false)
+  assert.equal(JSON.stringify(read).includes(BOT_ID), false)
+
+  for (const uri of [
+    MCP_RESOURCE_URIS.safety,
+    MCP_RESOURCE_URIS.policy,
+    MCP_RESOURCE_URIS.gatewayStatus,
+    MCP_RESOURCE_URIS.nativeInteractionStatus,
+    MCP_RESOURCE_URIS.observability,
+    MCP_PLAN_REVIEW_APP_URI,
+  ]) {
+    await assert.rejects(
+      () => client.readResource({ uri }),
+      /withheld an oversized read result/,
+    )
+  }
+  await assert.rejects(
+    () => client.getPrompt({
+      arguments: { channelId: CHANNEL_ID, limit: "1" },
+      name: MCP_PROMPT_NAMES.summarizeChannel,
+    }),
+    /withheld an oversized read result/,
+  )
+})
+
+test("minimum MCP read-response budget retains essential static and local surfaces", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      limits: {
+        mcpReadResponseMaxBytes: MCP_READ_RESPONSE_LIMITS.minimumBytes,
+      },
+    },
+  })
+
+  const results = await Promise.all([
+    client.callTool({ arguments: {}, name: "get_connector_status" }),
+    client.readResource({ uri: MCP_RESOURCE_URIS.safety }),
+    client.readResource({ uri: MCP_RESOURCE_URIS.policy }),
+    client.readResource({ uri: MCP_RESOURCE_URIS.observability }),
+    client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI }),
+    client.getPrompt({
+      arguments: { channelId: CHANNEL_ID, limit: "1" },
+      name: MCP_PROMPT_NAMES.summarizeChannel,
+    }),
+  ])
+
+  for (const result of results) {
+    assert.ok(
+      serializedMcpResultBytes(result) <= MCP_READ_RESPONSE_LIMITS.minimumBytes,
+    )
+  }
+})
+
+test("MCP read-response budget preserves final writes and budgets pre-write input requests", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    runtimeMcpReadResponseMaxBytes: 1,
+  })
+
+  const sent = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "safe message",
+      idempotencyKey: "response-budget-write-0001",
+    },
+    name: "send_message",
+  })
+  assert.equal(structuredContent(sent).status, "completed")
+  assert.equal(calls.send, 1)
+
+  const pendingDeletion = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      messageIds: [MESSAGE_ID],
+      operationKey: OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "delete_messages",
+  })
+  assert.equal(pendingDeletion.isError, true)
+  assert.equal(structuredContent(pendingDeletion).status, "response-too-large")
+  assert.equal(calls.plan, 1)
+  assert.equal(calls.delete, 0)
 })
 
 test("MCP server validates the exact reviewed channel-workflow Gateway layout scope", async () => {

@@ -11,6 +11,7 @@ import {
   MCP_TOOL_CATALOG,
   type CanonicalMcpToolName,
 } from "./mcp-tool-catalog.js"
+import { assertMcpReadResultBudget } from "./mcp-output.js"
 
 export const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui"
 export const MCP_PLAN_REVIEW_APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -866,7 +867,10 @@ export function attachPlanReviewApp(
   })
 }
 
-export function registerDiscordPlanReviewApp(server: McpServer): void {
+export function registerDiscordPlanReviewApp(
+  server: McpServer,
+  mcpReadResponseMaxBytes: number,
+): void {
   server.registerResource(
     MCP_RESOURCE_NAMES.planReviewApp,
     MCP_PLAN_REVIEW_APP_URI,
@@ -880,13 +884,13 @@ export function registerDiscordPlanReviewApp(server: McpServer): void {
       mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
       title: "Discord plan review",
     },
-    async (uri) => ({
+    async (uri) => assertMcpReadResultBudget({
       contents: [{
         _meta: MCP_PLAN_REVIEW_APP_RESOURCE_META,
         mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
         text: MCP_PLAN_REVIEW_APP_HTML,
         uri: uri.href,
       }],
-    }),
+    }, mcpReadResponseMaxBytes, "resource"),
   )
 }

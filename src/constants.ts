@@ -483,6 +483,15 @@ export const CONNECTOR_LIMITS = Object.freeze({
   widgetSettingsGuildAllowlist: 100,
 })
 
+export const MCP_READ_RESPONSE_DEFAULTS = Object.freeze({
+  maxBytes: 1_024 * 1_024,
+})
+
+export const MCP_READ_RESPONSE_LIMITS = Object.freeze({
+  maximumBytes: 8 * 1_024 * 1_024,
+  minimumBytes: 64 * 1_024,
+})
+
 export const STAGE_INSTANCE_ACTIONS = [
   "end",
   "start",

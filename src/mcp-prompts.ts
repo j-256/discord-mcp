@@ -80,7 +80,10 @@ import { MESSAGE_PIN_STATES } from "./message-pin-service.js"
 import { normalizeDesiredMemberNickname } from "./member-nickname.js"
 import { policyCompletablePromptSchema } from "./mcp-completions.js"
 import { MCP_PROMPT_NAMES } from "./mcp-guidance-catalog.js"
-import { redactMcpValue } from "./mcp-output.js"
+import {
+  assertMcpReadResultBudget,
+  redactMcpValue,
+} from "./mcp-output.js"
 import type { PolicyDescription } from "./policy.js"
 import {
   normalizeReactionModerationRequest,
@@ -2531,7 +2534,7 @@ function promptText(input: object, steps: readonly string[]): string {
   ].join("\n")
 }
 
-function userPrompt(
+function createUserPrompt(
   text: string,
   description: string,
   secrets: readonly (string | undefined)[],
@@ -2552,11 +2555,26 @@ export function registerDiscordPrompts(
   server: McpServer,
   options: {
     completionPolicy?: PolicyDescription
+    mcpReadResponseMaxBytes: number
     secrets: readonly (string | undefined)[]
     toolsets: ReadonlySet<McpToolsetName>
   },
 ): void {
-  const { completionPolicy, secrets, toolsets } = options
+  const {
+    completionPolicy,
+    mcpReadResponseMaxBytes,
+    secrets,
+    toolsets,
+  } = options
+  const userPrompt = (
+    text: string,
+    description: string,
+    promptSecrets: readonly (string | undefined)[],
+  ) => assertMcpReadResultBudget(
+    createUserPrompt(text, description, promptSecrets),
+    mcpReadResponseMaxBytes,
+    "prompt",
+  )
   if (toolsets.has("native-interactions")) server.registerPrompt(
     MCP_PROMPT_NAMES.reviewPendingNativeInteractions,
     {

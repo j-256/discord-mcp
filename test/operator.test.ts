@@ -8,6 +8,7 @@ import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_APPLICATION_FLAGS,
+  MCP_READ_RESPONSE_LIMITS,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
 import {
@@ -328,6 +329,7 @@ function status(
       mentionUserCount: 0,
       mcpToolsets: [...MCP_TOOLSET_NAMES],
       mcpToolSurface: "full",
+      mcpReadResponseMaxBytes: 1_048_576,
       onboardingAuditEnabled: false,
       onboardingChangesEnabled: false,
       onboardingGuildIds: [],
@@ -962,9 +964,39 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
     new RegExp(`2 of ${MCP_TOOLSET_NAMES.length}`),
   )
   assert.match(toolSurface?.summary || "", /5 canonical tools/)
+  const readResponseBudget = doctor.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.readResponseBudget,
+  )
+  assert.equal(readResponseBudget?.status, "pass")
+  assert.match(readResponseBudget?.summary || "", /1048576 UTF-8 bytes/)
+  assert.match(readResponseBudget?.summary || "", /fail whole without truncation/)
+  assert.match(readResponseBudget?.summary || "", /mutation outcomes are preserved/)
   assert.equal(setup.toolSurface, "progressive")
   assert.deepEqual(setup.toolsets, ["connector", "messages"])
   assert.match(setup.warnings.join("\n"), /interactions toolset/)
+})
+
+test("doctor reports the configured lossless MCP read-response boundary", async () => {
+  const report = await diagnoseConnector({
+    configOverrides: {
+      limits: {
+        mcpReadResponseMaxBytes: MCP_READ_RESPONSE_LIMITS.minimumBytes,
+      },
+      token: TOKEN,
+    },
+    nodeVersion: "22.14.0",
+  })
+  const budget = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.readResponseBudget,
+  )
+
+  assert.equal(budget?.status, "pass")
+  assert.match(
+    budget?.summary || "",
+    new RegExp(`${MCP_READ_RESPONSE_LIMITS.minimumBytes} UTF-8 bytes`),
+  )
+  assert.match(budget?.summary || "", /fail whole without truncation/)
+  assert.match(budget?.summary || "", /mutation outcomes are preserved/)
 })
 
 test("doctor and setup explain effective interaction policy without Discord writes", async () => {

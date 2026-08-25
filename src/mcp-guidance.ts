@@ -58,6 +58,7 @@ export type DiscordGuidanceService = Pick<
 
 export interface DiscordGuidanceOptions {
   completionPolicy?: PolicyDescription
+  mcpReadResponseMaxBytes: number
   policy: PolicyDescription
   secrets: readonly (string | undefined)[]
   service: DiscordGuidanceService

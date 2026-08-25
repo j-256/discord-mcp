@@ -5,10 +5,14 @@ import {
   MCP_RESOURCE_NAMES,
   MCP_RESOURCE_URIS,
 } from "./mcp-guidance-catalog.js"
-import { redactedJson } from "./mcp-output.js"
+import {
+  assertMcpReadResultBudget,
+  redactedJson,
+} from "./mcp-output.js"
 import type { OperationalObserver } from "./observability.js"
 
 export interface ObservabilityMcpOptions {
+  mcpReadResponseMaxBytes: number
   observability: OperationalObserver
   secrets: readonly (string | undefined)[]
 }
@@ -36,7 +40,7 @@ export function registerDiscordObservabilityMcp(
       mimeType: "application/json",
       title: "Discord connector observability",
     },
-    async (uri) => ({
+    async (uri) => assertMcpReadResultBudget({
       contents: [{
         mimeType: "application/json",
         text: redactedJson({
@@ -50,6 +54,6 @@ export function registerDiscordObservabilityMcp(
         }, options.secrets),
         uri: uri.href,
       }],
-    }),
+    }, options.mcpReadResponseMaxBytes, "resource"),
   )
 }

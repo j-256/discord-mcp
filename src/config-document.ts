@@ -24,6 +24,8 @@ import {
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   GATEWAY_DEFAULTS,
+  MCP_READ_RESPONSE_DEFAULTS,
+  MCP_READ_RESPONSE_LIMITS,
   MCP_TOOLSET_NAMES,
   MCP_TOOL_SURFACES,
   type McpToolsetName,
@@ -294,6 +296,7 @@ export const CONFIG_LIMIT_NAMES = Object.freeze([
   "guildPruneMaxMembers",
   "interactionMaxWritesPerMinute",
   "interactionMinWriteIntervalMs",
+  "mcpReadResponseMaxBytes",
   "nativeInteractionMaxPending",
   "nativeInteractionTtlSeconds",
 ] as const)
@@ -512,9 +515,15 @@ const limitShape = Object.fromEntries(
     name,
     z.number()
       .int()
-      .min(0)
-      .max(Number.MAX_SAFE_INTEGER)
-      .describe(`Numeric policy limit for ${humanizeConfigKey(name)}`)
+      .min(name === "mcpReadResponseMaxBytes"
+        ? MCP_READ_RESPONSE_LIMITS.minimumBytes
+        : 0)
+      .max(name === "mcpReadResponseMaxBytes"
+        ? MCP_READ_RESPONSE_LIMITS.maximumBytes
+        : Number.MAX_SAFE_INTEGER)
+      .describe(name === "mcpReadResponseMaxBytes"
+        ? "Maximum UTF-8 bytes for one complete redacted MCP read result"
+        : `Numeric policy limit for ${humanizeConfigKey(name)}`)
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodNumber>>
@@ -1296,8 +1305,12 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       required: false,
     })),
     ...CONFIG_LIMIT_NAMES.map((name) => ({
-      defaultValue: undefined,
-      description: `Numeric policy limit for ${humanizeConfigKey(name)}`,
+      defaultValue: name === "mcpReadResponseMaxBytes"
+        ? MCP_READ_RESPONSE_DEFAULTS.maxBytes
+        : undefined,
+      description: name === "mcpReadResponseMaxBytes"
+        ? "Maximum UTF-8 bytes for one complete redacted MCP read result"
+        : `Numeric policy limit for ${humanizeConfigKey(name)}`,
       kind: "integer" as const,
       path: `$.limits.${name}`,
       required: false,
