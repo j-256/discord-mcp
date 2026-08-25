@@ -15,6 +15,17 @@ import {
   ApplicationEmojiService,
   normalizeApplicationEmojiChangeRequest,
 } from "./application-emoji-service.js"
+import type {
+  ApplicationIntentEnablementPlan,
+  ApplicationIntentEnablementRequest,
+  ApplicationIntentEnablementResult,
+  ApplicationIntentServiceOptions,
+} from "./application-intent-service.js"
+import {
+  applicationIntentPolicyRequirement,
+  ApplicationIntentService,
+  normalizeApplicationIntentEnablementRequest,
+} from "./application-intent-service.js"
 import {
   projectApplicationPosture,
   projectApplicationPrivilegedIntents,
@@ -767,6 +778,7 @@ export interface DiscordServiceClient {
   listVoiceRegions: DiscordClient["listVoiceRegions"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyApplicationEmoji: DiscordClient["modifyApplicationEmoji"]
+  modifyCurrentApplicationFlags: DiscordClient["modifyCurrentApplicationFlags"]
   modifyCurrentMemberNickname: DiscordClient["modifyCurrentMemberNickname"]
   modifyGuildMemberNickname: DiscordClient["modifyGuildMemberNickname"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
@@ -824,6 +836,10 @@ export interface ConnectorServiceOptions {
   activityStore?: ActivityStore
   applicationEmojiOptions?: Pick<
     ApplicationEmojiServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  applicationIntentOptions?: Pick<
+    ApplicationIntentServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   announcementCrosspostOptions?: Pick<
@@ -1107,6 +1123,34 @@ function voiceChannelStatusSource(
   return new DisabledGatewayVoiceChannelStatusSource()
 }
 
+export function applicationPostureRequirementsForConfig(
+  config: ConnectorConfig,
+): ApplicationPostureRequirements {
+  const contentDependentWrites = (
+    config.allowAnnouncementCrossposts
+    && config.announcementCrosspostChannelIds.size > 0
+  ) || (
+    config.allowInteractions
+    && config.interactionChannelIds.size > 0
+  ) || (
+    config.allowMessageForwarding
+    && config.messageForwardSourceChannelIds.size > 0
+    && config.messageForwardTargetChannelIds.size > 0
+  )
+  const messageContentIntent: ApplicationMessageContentRequirement =
+    contentDependentWrites
+      ? "required"
+      : config.mcpToolsets.has("messages")
+        ? "recommended"
+        : "not-required"
+  return {
+    guildMembersIntentRequired: config.allowMemberDirectory
+      && config.memberDirectoryGuildIds.size > 0,
+    messageContentIntent,
+    nativeInteractionIngressRequired: config.allowNativeInteractions,
+  }
+}
+
 export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
@@ -1114,6 +1158,7 @@ export class ConnectorService {
   readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #applicationEmojiService: ApplicationEmojiService
+  readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
@@ -1209,6 +1254,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.applicationEmojiOptions,
+    })
+    this.#applicationIntentService = new ApplicationIntentService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.applicationIntentOptions,
     })
     this.#announcementSubscriptionService = new AnnouncementSubscriptionService({
       activityStore: this.#activityStore,
@@ -1627,29 +1679,7 @@ export class ConnectorService {
   }
 
   #applicationPostureRequirements(): ApplicationPostureRequirements {
-    const contentDependentWrites = (
-      this.#config.allowAnnouncementCrossposts
-      && this.#config.announcementCrosspostChannelIds.size > 0
-    ) || (
-      this.#config.allowInteractions
-      && this.#config.interactionChannelIds.size > 0
-    ) || (
-      this.#config.allowMessageForwarding
-      && this.#config.messageForwardSourceChannelIds.size > 0
-      && this.#config.messageForwardTargetChannelIds.size > 0
-    )
-    const messageContentIntent: ApplicationMessageContentRequirement =
-      contentDependentWrites
-        ? "required"
-        : this.#config.mcpToolsets.has("messages")
-          ? "recommended"
-          : "not-required"
-    return {
-      guildMembersIntentRequired: this.#config.allowMemberDirectory
-        && this.#config.memberDirectoryGuildIds.size > 0,
-      messageContentIntent,
-      nativeInteractionIngressRequired: this.#config.allowNativeInteractions,
-    }
+    return applicationPostureRequirementsForConfig(this.#config)
   }
 
   #applicationPosture(identity: VerifiedIdentity): ApplicationPostureResult {
@@ -3074,6 +3104,24 @@ export class ConnectorService {
     return this.#applicationEmojiService.plan(
       identity.application.id,
       identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planApplicationIntentEnablement(
+    request: ApplicationIntentEnablementRequest,
+    options: RequestOptions = {},
+  ): Promise<ApplicationIntentEnablementPlan> {
+    const normalized = normalizeApplicationIntentEnablementRequest(request)
+    this.#policy.assertApplicationIntentChangeAllowed()
+    const requirements = this.#applicationPostureRequirements()
+    applicationIntentPolicyRequirement(normalized.intent, requirements)
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationIntentService.plan(
+      identity.application.id,
+      identity.bot.id,
+      requirements,
       request,
       options,
     )
@@ -5076,6 +5124,42 @@ export class ConnectorService {
         options,
       ),
     )
+  }
+
+  async executeApplicationIntentEnablement(
+    request: ApplicationIntentEnablementRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationIntentEnablementResult> {
+    const normalized = normalizeApplicationIntentEnablementRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord application intent plan digest is invalid")
+    }
+    this.#policy.assertApplicationIntentChangeAllowed()
+    const requirements = this.#applicationPostureRequirements()
+    applicationIntentPolicyRequirement(normalized.intent, requirements)
+    const identity = await this.#verifyIdentity(options)
+    try {
+      return await this.#coordinateWrite(
+        "application-intent-enablement",
+        request.operationKey,
+        planDigest,
+        [writeApplicationCollectionTarget(
+          "privileged-intents",
+          identity.application.id,
+        )],
+        () => this.#applicationIntentService.execute(
+          identity.application.id,
+          identity.bot.id,
+          requirements,
+          request,
+          planDigest,
+          options,
+        ),
+      )
+    } finally {
+      this.#identityPromise = undefined
+    }
   }
 
   async executeScheduledEventChange(

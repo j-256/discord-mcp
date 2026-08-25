@@ -477,6 +477,10 @@ test("configuration metadata covers every runtime field and emits a strict schem
     /finite invite creation with private-file capability delivery/,
   )
   assert.match(
+    String(capabilities.applicationIntentChanges?.description),
+    /reviewed additive application privileged-intent enablement/,
+  )
+  assert.match(
     String(scopes.inviteCreationChannelIds?.description),
     /direct guild-channel ID allowlist/,
   )

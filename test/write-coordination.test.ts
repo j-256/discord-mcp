@@ -304,6 +304,14 @@ test("coordination rejects invalid construction and intent identities", async (c
     }), async () => "unsafe"),
     /requires one application collection target/,
   )
+  await assert.rejects(
+    () => invalidClaimId.run(intent([
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ], {
+      kind: "application-intent-enablement",
+    }), async () => "unsafe"),
+    /privileged-intents collection target/,
+  )
 })
 
 test("application emoji claims use one application-wide target", async (context) => {
@@ -346,6 +354,55 @@ test("application emoji claims use one application-wide target", async (context)
   assert.notEqual(
     writeCoordinationTargetHash(target),
     writeCoordinationTargetHash(writeGuildCollectionTarget("emojis", APPLICATION_ID)),
+  )
+})
+
+test("application intent claims use the exact application-wide security target", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-intent-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "coordination")
+  const operationStore = new FileOperationStore(join(root, "operations"))
+  const coordinator = new FileWriteCoordinator(directory, operationStore)
+  const target = writeApplicationCollectionTarget(
+    "privileged-intents",
+    APPLICATION_ID,
+  )
+  const operationKeyHashValue = operationKeyHash(OPERATION_KEY)
+
+  const result = await coordinator.run(intent([target], {
+    kind: "application-intent-enablement",
+  }), async () => {
+    const pending = {
+      activityId: "application-intent-activity-0001",
+      applicationId: APPLICATION_ID,
+      error: null,
+      kind: "application-intent-enablement" as const,
+      operationKeyHash: operationKeyHashValue,
+      planDigest: PLAN_DIGEST,
+      resourceId: null,
+      schemaVersion: 1 as const,
+      status: "pending" as const,
+      timestamp: "2026-08-24T00:00:00.000Z",
+      verification: null,
+    }
+    await operationStore.reserveApplication(pending)
+    await operationStore.finishApplication({
+      ...pending,
+      resourceId: APPLICATION_ID,
+      status: "completed",
+      timestamp: "2026-08-24T00:00:01.000Z",
+      verification: "match",
+    })
+    return "application-security"
+  })
+
+  assert.equal(result, "application-security")
+  assert.deepEqual(await claimFiles(directory), [])
+  assert.notEqual(
+    writeCoordinationTargetHash(target),
+    writeCoordinationTargetHash(
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ),
   )
 })
 

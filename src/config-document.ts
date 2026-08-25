@@ -129,6 +129,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "administration",
   "applicationEmojiAudit",
   "applicationEmojiChanges",
+  "applicationIntentChanges",
   "announcementCrossposts",
   "announcementSubscriptionAudit",
   "announcementSubscriptionChanges",
@@ -387,8 +388,12 @@ const CHANNEL_METADATA_SCOPE_DESCRIPTION = "Exact Discord ID allowlist for revie
 const INVITE_CREATION_CAPABILITY_DESCRIPTION = "Enable reviewed finite invite creation with private-file capability delivery"
 const INVITE_CREATION_SCOPE_DESCRIPTION = "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
 const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for exclusive private invite capability files"
+const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed additive application privileged-intent enablement"
 
 function capabilityDescription(documentKey: string): string {
+  if (documentKey === "applicationIntentChanges") {
+    return APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION
+  }
   if (documentKey === "channelMetadataChanges") {
     return CHANNEL_METADATA_CAPABILITY_DESCRIPTION
   }

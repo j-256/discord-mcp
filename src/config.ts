@@ -48,6 +48,7 @@ export interface ConnectorConfig {
   allowAdministration: boolean
   allowApplicationEmojiAudit: boolean
   allowApplicationEmojiChanges: boolean
+  allowApplicationIntentChanges: boolean
   allowAnnouncementCrossposts: boolean
   allowAnnouncementSubscriptionAudit: boolean
   allowAnnouncementSubscriptionChanges: boolean
@@ -804,6 +805,7 @@ export function loadConnectorConfigDocument(
   }
   const allowApplicationEmojiAudit = configCapability(document, "applicationEmojiAudit")
   const allowApplicationEmojiChanges = configCapability(document, "applicationEmojiChanges")
+  const allowApplicationIntentChanges = configCapability(document, "applicationIntentChanges")
   if (allowApplicationEmojiChanges && !allowApplicationEmojiAudit) {
     throw new ConfigurationError(
       `${configPolicyPath("allowApplicationEmojiChanges")} requires ${configPolicyPath("allowApplicationEmojiAudit")}`,
@@ -948,6 +950,7 @@ export function loadConnectorConfigDocument(
     adminGuildIds,
     allowApplicationEmojiAudit,
     allowApplicationEmojiChanges,
+    allowApplicationIntentChanges,
     announcementCrosspostChannelIds,
     announcementSubscriptionSourceChannelIds,
     announcementSubscriptionTargetChannelIds,

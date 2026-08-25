@@ -40,6 +40,7 @@ type McpToolWorkflow =
   | "announcement-crosspost"
   | "announcement-subscription"
   | "application-emoji-change"
+  | "application-intent-enablement"
   | "attachment-message"
   | "automod-change"
   | "channel-cloning"
@@ -174,6 +175,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "create", "delete", "emoji", "execute", "rename"],
     toolset: "application-emojis",
     workflow: "application-emoji-change",
+  },
+  execute_application_intent_enablement: {
+    keywords: ["application", "enable", "execute", "guild members", "intent", "message content", "privileged"],
+    toolset: "application-security",
+    workflow: "application-intent-enablement",
   },
   execute_message_forward: {
     keywords: ["copy", "execute", "forward", "message", "snapshot"],
@@ -741,6 +747,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "create", "delete", "emoji", "plan", "rename", "review"],
     toolset: "application-emojis",
     workflow: "application-emoji-change",
+  },
+  plan_application_intent_enablement: {
+    keywords: ["application", "enable", "guild members", "intent", "message content", "plan", "privileged", "review"],
+    toolset: "application-security",
+    workflow: "application-intent-enablement",
   },
   plan_forum_post: {
     keywords: ["create", "forum", "plan", "post", "review", "thread"],

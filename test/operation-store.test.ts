@@ -109,6 +109,28 @@ function applicationReceipt(
   }
 }
 
+function applicationIntentReceipt(
+  status: ApplicationOperationReceipt["status"] = "pending",
+): ApplicationOperationReceipt {
+  return {
+    activityId: "application-intent-activity-0001",
+    applicationId: GUILD_ID,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    kind: "application-intent-enablement",
+    operationKeyHash: operationKeyHash("application-intent-operation-0001"),
+    planDigest: PLAN_DIGEST,
+    resourceId: ["completed", "uncertain"].includes(status) ? GUILD_ID : null,
+    schemaVersion: 1,
+    status,
+    timestamp: status === "pending"
+      ? "2026-08-24T00:00:00.000Z"
+      : "2026-08-24T00:00:01.000Z",
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
 test("operation keys are domain-hashed and strictly bounded", () => {
   assert.match(operationKeyHash(OPERATION_KEY), /^sha256:[a-f0-9]{64}$/)
   assert.equal(operationKeyHash(OPERATION_KEY), operationKeyHash(OPERATION_KEY))
@@ -301,6 +323,46 @@ test("file operation store rejects malformed application receipt identity and ou
       resourceId: CHANNEL_ID,
     }),
     OperationStoreError,
+  )
+})
+
+test("file operation store keeps application intent receipts content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-intent-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = applicationIntentReceipt()
+  const completed = applicationIntentReceipt("completed")
+
+  await store.reserveApplication(pending)
+  await store.finishApplication(completed)
+  assert.deepEqual(
+    await store.getApplication(pending.kind, pending.operationKeyHash),
+    completed,
+  )
+
+  const operationDirectories = await readdir(directory)
+  const operationDirectory = join(directory, operationDirectories[0] as string)
+  const text = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.match(text, /application-intent-enablement/)
+  assert.doesNotMatch(text, /review reason|raw flags|application-intent-operation-0001/)
+
+  await assert.rejects(
+    () => store.finishApplication({
+      ...completed,
+      resourceId: "999999999999999999",
+    }),
+    /invalid application-wide outcome evidence/,
+  )
+  await assert.rejects(
+    () => store.finishApplication({
+      ...completed,
+      verification: "drift",
+    }),
+    /invalid application-wide outcome evidence/,
   )
 })
 

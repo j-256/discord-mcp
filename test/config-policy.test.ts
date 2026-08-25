@@ -195,6 +195,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationIntentChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -866,6 +867,7 @@ test("configuration and policy require an exact administration guild and protect
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationIntentChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -4170,6 +4172,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationIntentChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -4539,6 +4542,29 @@ test("configuration and policy bind application emojis to pinned identity and lo
   } finally {
     await rm(temporary, { force: true, recursive: true })
   }
+})
+
+test("configuration and policy isolate additive application intent changes", () => {
+  const enabled = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      applicationIntentChanges: true,
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(enabled)
+
+  assert.equal(enabled.allowApplicationIntentChanges, true)
+  assert.equal(policy.describe().applicationIntentChangesEnabled, true)
+  assert.doesNotThrow(() => policy.assertApplicationIntentChangeAllowed())
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.equal(disabled.describe().applicationIntentChangesEnabled, false)
+  assert.throws(
+    () => disabled.assertApplicationIntentChangeAllowed(),
+    /privileged-intent changes are disabled/,
+  )
 })
 
 test("configuration and policy isolate soundboard audit, changes, and local audio roots", async () => {

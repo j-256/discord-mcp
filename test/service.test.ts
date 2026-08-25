@@ -17,6 +17,7 @@ import {
   type FixtureConfigOverrides,
 } from "./config-fixture.js"
 import {
+  DISCORD_APPLICATION_FLAGS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_MESSAGE_FLAGS,
 } from "../src/constants.js"
@@ -325,6 +326,7 @@ function role(
 function serviceFixture(overrides: {
   application?: DiscordApplication
   applicationEmojiOptions?: ConnectorServiceOptions["applicationEmojiOptions"]
+  applicationIntentOptions?: ConnectorServiceOptions["applicationIntentOptions"]
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
@@ -868,6 +870,9 @@ function serviceFixture(overrides: {
     async modifyApplicationEmoji() {
       throw new Error("Unexpected application emoji modification")
     },
+    async modifyCurrentApplicationFlags() {
+      throw new Error("Unexpected current-application flag modification")
+    },
     async modifyGuildAutoModerationRule() {
       throw new Error("Unexpected AutoMod rule modification")
     },
@@ -990,6 +995,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.applicationEmojiOptions
         ? { applicationEmojiOptions: overrides.applicationEmojiOptions }
+        : {}),
+      ...(overrides.applicationIntentOptions
+        ? { applicationIntentOptions: overrides.applicationIntentOptions }
         : {}),
       ...(overrides.automodOptions
         ? { automodOptions: overrides.automodOptions }
@@ -1164,6 +1172,36 @@ test("service rejects channel-clone scope before identity access", async () => {
   )
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
+})
+
+test("service rejects application intent policy before identity access", async () => {
+  const disabled = serviceFixture()
+  const request = {
+    acknowledgePrivilegeExpansion: true as const,
+    intent: "guild-members" as const,
+    operationKey: "application-intent-preflight-0001",
+    reviewReason: "Enable the configured member directory",
+  }
+  await assert.rejects(
+    () => disabled.service.planApplicationIntentEnablement(request),
+    /privileged-intent changes are disabled/,
+  )
+  assert.equal(disabled.calls.application, 0)
+  assert.equal(disabled.calls.user, 0)
+
+  const unjustified = serviceFixture({
+    configOverrides: {
+      capabilities: {
+        applicationIntentChanges: true,
+      },
+    },
+  })
+  await assert.rejects(
+    () => unjustified.service.planApplicationIntentEnablement(request),
+    /requires member-directory policy/,
+  )
+  assert.equal(unjustified.calls.application, 0)
+  assert.equal(unjustified.calls.user, 0)
 })
 
 test("service rejects integration and webhook scope before identity access", async () => {
@@ -4204,6 +4242,109 @@ test("service pins application emoji scope to verified identity and coordinates 
   assert.equal(operationStore.applicationReceipt?.kind, "application-emoji-change")
   assert.equal(operationStore.applicationReceipt?.applicationId, APPLICATION_ID)
   assert.equal(operationStore.applicationReceipt?.resourceId, emojiId)
+})
+
+test("service coordinates reviewed application intents and invalidates changed identity evidence", async () => {
+  const operationStore = new MemoryApplicationOperationStore()
+  const coordinationIntents: WriteCoordinationIntent[] = []
+  const writeCoordinator: WriteCoordinator = {
+    run(intent, operation) {
+      coordinationIntents.push(intent)
+      return operation()
+    },
+  }
+  const unknownFlag = 1n << 40n
+  let currentFlags = unknownFlag
+    | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited
+  let identityReads = 0
+  let mutationCalls = 0
+  let outgoingFlags: number | null = null
+  const currentApplication = (): DiscordApplication => ({
+    ...application(),
+    description: "private application text",
+    flags_new: currentFlags.toString(10),
+    name: "private application name",
+  })
+  const { calls, service } = serviceFixture({
+    applicationIntentOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(41),
+      randomId: () => "activity-application-intent",
+    },
+    client: {
+      async getCurrentApplication() {
+        identityReads += 1
+        return currentApplication()
+      },
+      async modifyCurrentApplicationFlags(input) {
+        mutationCalls += 1
+        outgoingFlags = input.flags
+        currentFlags |= BigInt(input.flags)
+        return currentApplication()
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        applicationIntentChanges: true,
+        memberDirectory: true,
+      },
+      scopes: {
+        memberDirectoryGuildIds: [GUILD_ID],
+      },
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgePrivilegeExpansion: true as const,
+    intent: "guild-members" as const,
+    operationKey: "application-intent-service-attempt-0001",
+    reviewReason: "Enable the schema-v2 member directory",
+  }
+
+  const plan = await service.planApplicationIntentEnablement(request)
+  const result = await service.executeApplicationIntentEnablement(
+    request,
+    plan.digest,
+  )
+  const status = await service.getStatus()
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.policyRequirement, "required")
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed.enabled, true)
+  assert.equal(result.observed.limitedToggle, true)
+  assert.equal(status.application.id, APPLICATION_ID)
+  assert.equal(mutationCalls, 1)
+  assert.equal(
+    outgoingFlags,
+    Number(
+      DISCORD_APPLICATION_FLAGS.gatewayGuildMembersLimited
+      | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited,
+    ),
+  )
+  assert.equal(identityReads, 5)
+  assert.equal(calls.user, 2)
+  assert.deepEqual(coordinationIntents, [{
+    kind: "application-intent-enablement",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [{
+      applicationId: APPLICATION_ID,
+      collection: "privileged-intents",
+      kind: "application-collection",
+    }],
+  }])
+  assert.equal(calls.activityEntries.length, 2)
+  assert.doesNotMatch(
+    JSON.stringify(calls.activityEntries),
+    /private application|Enable the schema-v2|1099511627776/,
+  )
+  assert.equal(
+    operationStore.applicationReceipt?.kind,
+    "application-intent-enablement",
+  )
+  assert.equal(operationStore.applicationReceipt?.resourceId, APPLICATION_ID)
 })
 
 test("service pins identity through privacy-safe AutoMod reads and reviewed changes", async () => {

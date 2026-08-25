@@ -860,6 +860,27 @@ export interface ApplicationEmojiActivity {
   verification: "drift" | "match" | null
 }
 
+export type ApplicationIntentActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ApplicationIntentActivity {
+  applicationId: string
+  botId: string
+  error: string | null
+  id: string
+  intent: "guild-members" | "message-content"
+  kind: "application-intent-enablement"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: ApplicationIntentActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type SoundboardActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1229,6 +1250,7 @@ export type ActivityEntry =
   | AnnouncementCrosspostActivity
   | AnnouncementSubscriptionActivity
   | ApplicationEmojiActivity
+  | ApplicationIntentActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
   | ChannelCloneActivity
@@ -3965,6 +3987,62 @@ function parseApplicationEmojiActivity(
   }
 }
 
+function parseApplicationIntentActivity(
+  value: unknown,
+): ApplicationIntentActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "application-intent-enablement"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["guild-members", "message-content"].includes(String(record.intent))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.botId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.botId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (record.status === "failed" && (
+      record.error === null || record.verification !== null
+    ))
+    || (record.status === "uncertain" && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    applicationId: record.applicationId,
+    botId: record.botId,
+    error: record.error,
+    id: record.id,
+    intent: record.intent as ApplicationIntentActivity["intent"],
+    kind: "application-intent-enablement",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ApplicationIntentActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseScheduledEventActivity(
   value: unknown,
 ): ScheduledEventActivity | undefined {
@@ -4966,6 +5044,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
     || parseApplicationEmojiActivity(value)
+    || parseApplicationIntentActivity(value)
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)

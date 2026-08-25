@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  DISCORD_APPLICATION_FLAGS,
   DISCORD_MESSAGE_FLAGS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
 } from "../src/constants.js"
@@ -150,6 +151,74 @@ test("Discord client sends bot authentication only to its configured API origin"
   assert.equal(requestUrl, `${API_BASE_URL}/applications/@me`)
   assert.equal(authorization, `Bot ${TOKEN}`)
   assert.equal(redirect, "error")
+})
+
+test("Discord client sends one exact non-retried current-application flag PATCH", async () => {
+  const requests: Array<{
+    authorization: string | null
+    body: string | null
+    method: string | undefined
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("Authorization"),
+        body: String(init?.body ?? ""),
+        method: init?.method,
+        url: String(input),
+      })
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.modifyCurrentApplicationFlags({ flags: 557_056 }),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+    ),
+  )
+  assert.deepEqual(requests, [{
+    authorization: `Bot ${TOKEN}`,
+    body: JSON.stringify({ flags: 557_056 }),
+    method: "PATCH",
+    url: `${API_BASE_URL}/applications/@me`,
+  }])
+  assert.deepEqual(records, [{
+    completions: [{ errorCategory: "discord-rate-limited", outcome: "error", statusCode: 429 }],
+    operation: "modify_current_application_flags",
+    retries: 0,
+    runs: 1,
+  }])
+
+  assert.throws(
+    () => client.modifyCurrentApplicationFlags({ flags: -1 }),
+    /flags input is invalid/,
+  )
+  assert.throws(
+    () => client.modifyCurrentApplicationFlags({ flags: 0 }),
+    /flags input is invalid/,
+  )
+  assert.throws(
+    () => client.modifyCurrentApplicationFlags({
+      flags: Number(DISCORD_APPLICATION_FLAGS.gatewayPresence),
+    }),
+    /flags input is invalid/,
+  )
+  assert.throws(
+    () => client.modifyCurrentApplicationFlags({
+      flags: 1,
+      name: "not allowed",
+    } as unknown as { flags: number }),
+    /flags input is invalid/,
+  )
+  assert.equal(requests.length, 1)
 })
 
 test("Discord client encodes bounded message pagination without undefined cursors", async () => {

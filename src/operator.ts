@@ -72,7 +72,10 @@ import {
   saveProfile,
   type ConnectorProfile,
 } from "./profile.js"
-import { ConnectorService } from "./service.js"
+import {
+  applicationPostureRequirementsForConfig,
+  ConnectorService,
+} from "./service.js"
 import {
   applySetupPreset,
   type SetupPresetDescriptor,
@@ -94,6 +97,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   announcementSubscriptionChangePolicy: "announcement-subscription-change-policy",
   applicationEmojiAuditPolicy: "application-emoji-audit-policy",
   applicationEmojiChangePolicy: "application-emoji-change-policy",
+  applicationIntentChangePolicy: "application-intent-change-policy",
   applicationBotVisibility: "application-bot-visibility",
   applicationDefaultPermissions: "application-default-permissions",
   applicationEventWebhooks: "application-event-webhooks",
@@ -764,12 +768,25 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowStageInstanceChanges && config.stageChannelIds.size === 0) {
     warnings.push("The Stage-instance change toggle is enabled but changes remain blocked because an exact Stage-channel allowlist is required")
   }
+  const applicationIntentRequirements = applicationPostureRequirementsForConfig(config)
+  if (
+    config.allowApplicationIntentChanges
+    && !applicationIntentRequirements.guildMembersIntentRequired
+    && applicationIntentRequirements.messageContentIntent === "not-required"
+  ) {
+    warnings.push("Application privileged-intent enablement is enabled, but no configured capability requires or recommends an eligible intent")
+  }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
     [
       config.allowApplicationEmojiAudit || config.allowApplicationEmojiChanges,
       "application-emojis",
       "Application emoji audit and reviewed changes",
+    ],
+    [
+      config.allowApplicationIntentChanges,
+      "application-security",
+      "Reviewed application privileged-intent enablement",
     ],
     [config.allowAttachments, "attachments", "Attachment messages"],
     [
@@ -2629,6 +2646,34 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
         "pass",
         `Reviewed application emoji changes are bound to the verified pinned current application and ${config.applicationEmojiRoots.length} canonical creation roots with application-wide coordination, one-shot execution, and exact metadata or absence readback`,
+      ))
+    }
+    const applicationIntentRequirements = applicationPostureRequirementsForConfig(config)
+    const applicationIntentTargets = [
+      ...(applicationIntentRequirements.guildMembersIntentRequired
+        ? ["Guild Members"]
+        : []),
+      ...(applicationIntentRequirements.messageContentIntent === "not-required"
+        ? []
+        : [`Message Content (${applicationIntentRequirements.messageContentIntent})`]),
+    ]
+    if (!config.allowApplicationIntentChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationIntentChangePolicy,
+        "pass",
+        "Reviewed application privileged-intent enablement is disabled",
+      ))
+    } else if (applicationIntentTargets.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationIntentChangePolicy,
+        "warn",
+        "Application privileged-intent enablement is enabled, but strict policy does not require or recommend Guild Members or Message Content",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.applicationIntentChangePolicy,
+        "pass",
+        `Reviewed application privileged-intent enablement is limited to ${applicationIntentTargets.join(" and ")}, additive-only, policy-justified, application-wide coordinated, one-shot, content-free audited, and exact-readback verified`,
       ))
     }
     if (!config.allowGuildExpressionChanges) {

@@ -49,6 +49,10 @@ import type {
   ApplicationEmojiPrivacyProjection,
   ProjectedApplicationEmoji,
 } from "../src/application-emoji-service.js"
+import type {
+  ApplicationIntentEnablementPlan,
+  ApplicationIntentEnablementRequest,
+} from "../src/application-intent-service.js"
 import { projectApplicationPosture } from "../src/application-posture.js"
 import type {
   AttachmentMessagePlan,
@@ -277,6 +281,8 @@ import {
   AnnouncementSubscriptionOperationConflictError,
   ApplicationEmojiExecutionError,
   ApplicationEmojiOperationConflictError,
+  ApplicationIntentExecutionError,
+  ApplicationIntentOperationConflictError,
   AttachmentMessageExecutionError,
   AttachmentMessageOperationConflictError,
   AutoModerationExecutionError,
@@ -580,6 +586,8 @@ const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
 const APPLICATION_EMOJI_ID = "381000000000000001"
 const APPLICATION_EMOJI_OPERATION_KEY = "application-emoji-attempt-0001"
 const APPLICATION_EMOJI_PATH = "/test/discord-mcp/reviewed-application-emoji.png"
+const APPLICATION_INTENT_OPERATION_KEY = "application-intent-attempt-0001"
+const APPLICATION_INTENT_REVIEW_REASON = "Enable the schema-v2 member directory"
 const SOUNDBOARD_SOUND_ID = "391000000000000001"
 const SOUNDBOARD_OPERATION_KEY = "soundboard-change-attempt-0001"
 const SOUNDBOARD_PATH = "/test/discord-mcp/reviewed-sound.mp3"
@@ -3517,6 +3525,64 @@ function applicationEmojiPlan(
       metadataReadback: "exact-application-emoji",
     },
     warnings: ["Application emoji metadata and paths are untrusted data"],
+    writeRequired: effect === "change",
+  }
+}
+
+function applicationIntentPlan(
+  request: ApplicationIntentEnablementRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ApplicationIntentEnablementPlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    createdAt: "2026-08-24T00:00:00.000Z",
+    current: {
+      enabled: effect === "none",
+      evidenceSource: "flags-new",
+      fullAuthorization: false,
+      limitedToggle: effect === "none",
+    },
+    desired: {
+      enabled: true,
+      method: "limited-application-flag",
+    },
+    digest,
+    effect,
+    intent: request.intent,
+    operationKeyHash: OPERATION_KEY_HASH,
+    policyRequirement: request.intent === "guild-members"
+      ? "required"
+      : "recommended",
+    privacy: {
+      omittedFields: [
+        "raw-application-flags",
+        "review-reason",
+        "raw-operation-key",
+        "raw-discord-application",
+      ],
+      persistence: "content-free-records-only",
+    },
+    risks: [
+      "Application-wide privileged access",
+      "External Developer Portal race",
+      "No Discord audit-log reason",
+      "One-shot operation key",
+    ],
+    schemaVersion: 1,
+    status: effect === "change" ? "planned" : "already-current",
+    verification: {
+      applicationIdentity: "exact",
+      flagTransition: "exact-additive-single-intent",
+      freshReadback: true,
+      nonTargetFlags: "preserved",
+      response: "strict-current-application",
+    },
+    warnings: [
+      "Review reason is ephemeral",
+      "Raw flags and operation key are private",
+    ],
     writeRequired: effect === "change",
   }
 }
@@ -6661,6 +6727,7 @@ function fixturePolicy(): PolicyDescription {
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationIntentChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -6858,6 +6925,9 @@ function serviceFixture(overrides: {
   applicationEmojiEffect?: "change" | "none"
   applicationEmojiError?: Error
   applicationEmojiPlanDigest?: string
+  applicationIntentEffect?: "change" | "none"
+  applicationIntentError?: Error
+  applicationIntentPlanDigest?: string
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -7049,6 +7119,8 @@ function serviceFixture(overrides: {
     applicationEmojiGet: 0,
     applicationEmojiList: 0,
     applicationEmojiPlan: 0,
+    applicationIntentExecute: 0,
+    applicationIntentPlan: 0,
     autoModerationExecute: 0,
     autoModerationGet: 0,
     autoModerationList: 0,
@@ -7429,6 +7501,32 @@ function serviceFixture(overrides: {
           : "completed",
       }
     },
+    async executeApplicationIntentEnablement(request, planDigest) {
+      if (overrides.applicationIntentError) throw overrides.applicationIntentError
+      calls.applicationIntentExecute += 1
+      const planned = applicationIntentPlan(
+        request,
+        planDigest,
+        overrides.applicationIntentEffect,
+      )
+      return {
+        activityId: planned.effect === "none" ? null : "activity-application-intent",
+        applicationId: APPLICATION_ID,
+        intent: request.intent,
+        observed: planned.effect === "none"
+          ? planned.current
+          : {
+              enabled: true,
+              evidenceSource: "flags-new",
+              fullAuthorization: false,
+              limitedToggle: true,
+            },
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
     async getApplicationEmoji(emojiId) {
       calls.applicationEmojiGet += 1
       return {
@@ -7460,6 +7558,14 @@ function serviceFixture(overrides: {
         request,
         overrides.applicationEmojiPlanDigest || DIGEST,
         overrides.applicationEmojiEffect,
+      )
+    },
+    async planApplicationIntentEnablement(request) {
+      calls.applicationIntentPlan += 1
+      return applicationIntentPlan(
+        request,
+        overrides.applicationIntentPlanDigest || DIGEST,
+        overrides.applicationIntentEffect,
       )
     },
     async auditChannelOrder(guildId) {
@@ -10735,6 +10841,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_guild_expression_change",
       "plan_application_emoji_change",
       "execute_application_emoji_change",
+      "plan_application_intent_enablement",
+      "execute_application_intent_enablement",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
       "execute_guild_soundboard_change",
@@ -10851,6 +10959,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const applicationEmoji = result.tools.find((tool) => (
     tool.name === "execute_application_emoji_change"
   ))
+  const applicationIntent = result.tools.find((tool) => (
+    tool.name === "execute_application_intent_enablement"
+  ))
   const soundboard = result.tools.find((tool) => (
     tool.name === "execute_guild_soundboard_change"
   ))
@@ -10918,6 +11029,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     guildIncident,
     guildExpression,
     applicationEmoji,
+    applicationIntent,
     soundboard,
     scheduledEvent,
     channelMetadata,
@@ -11087,6 +11199,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_guild_settings_change",
     "plan_guild_expression_change",
     "plan_application_emoji_change",
+    "plan_application_intent_enablement",
     "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
     "plan_role_configuration",
@@ -12723,6 +12836,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     applicationEmojiGet: 0,
     applicationEmojiList: 0,
     applicationEmojiPlan: 0,
+    applicationIntentExecute: 0,
+    applicationIntentPlan: 0,
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
@@ -20387,6 +20502,291 @@ test("MCP application emoji execution exposes uncertain and one-shot conflict ou
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(APPLICATION_EMOJI_OPERATION_KEY),
+  )
+})
+
+test("MCP application intent planning accepts only exact acknowledged policy targets", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const validRequests = [
+    {
+      acknowledgePrivilegeExpansion: true,
+      intent: "guild-members",
+      operationKey: APPLICATION_INTENT_OPERATION_KEY,
+      reviewReason: APPLICATION_INTENT_REVIEW_REASON,
+    },
+    {
+      acknowledgePrivilegeExpansion: true,
+      intent: "message-content",
+      operationKey: APPLICATION_INTENT_OPERATION_KEY,
+      reviewReason: "Enable configured native message search",
+    },
+  ]
+  for (const request of validRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_application_intent_enablement",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+    assert.equal(structuredContent(result).intent, request.intent)
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(request.operationKey))
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(request.reviewReason))
+    assert.equal(Object.hasOwn(structuredContent(result), "flags"), false)
+  }
+
+  for (const request of [
+    { ...validRequests[0], acknowledgePrivilegeExpansion: false },
+    { ...validRequests[0], intent: "presence" },
+    { ...validRequests[0], applicationId: APPLICATION_ID },
+    { ...validRequests[0], reviewReason: " \n" },
+    { ...validRequests[0], operationKey: "short" },
+  ]) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_application_intent_enablement",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.applicationIntentPlan, validRequests.length)
+})
+
+test("MCP application intent execution binds signed approval to exact privilege evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      acknowledgePrivilegeExpansion: true,
+      intent: "guild-members",
+      operationKey: APPLICATION_INTENT_OPERATION_KEY,
+      planDigest: DIGEST,
+      reviewReason: APPLICATION_INTENT_REVIEW_REASON,
+    },
+    name: "execute_application_intent_enablement",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+  assert.equal(structuredContent(result).intent, "guild-members")
+  assert.equal(calls.applicationIntentPlan, 1)
+  assert.equal(calls.applicationIntentExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    APPLICATION_INTENT_REVIEW_REASON,
+    OPERATION_KEY_HASH,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Policy requirement: required/)
+  assert.match(confirmationMessage, /Current named state:/)
+  assert.match(confirmationMessage, /Private fields projected out:/)
+  assert.match(confirmationMessage, /application-wide privilege expansion/)
+  assert.match(confirmationMessage, /non-retried additive limited-flag PATCH/)
+  assert.match(confirmationMessage, /untrusted data/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(APPLICATION_INTENT_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(APPLICATION_INTENT_OPERATION_KEY),
+  )
+})
+
+test("MCP application intent execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    acknowledgePrivilegeExpansion: true,
+    intent: "guild-members",
+    operationKey: APPLICATION_INTENT_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: APPLICATION_INTENT_REVIEW_REASON,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { applicationIntentEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_intent_enablement",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.applicationIntentExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_intent_enablement",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.applicationIntentExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { applicationIntentPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_intent_enablement",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.applicationIntentExecute, 0)
+})
+
+test("MCP application intent signed state rejects changed privilege intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    acknowledgePrivilegeExpansion: true,
+    intent: "guild-members" as const,
+    operationKey: APPLICATION_INTENT_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: APPLICATION_INTENT_REVIEW_REASON,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_application_intent_enablement",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, intent: "message-content" },
+    { ...request, operationKey: "application-intent-attempt-0002" },
+    { ...request, reviewReason: "Changed privilege rationale" },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_application_intent_enablement: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_application_intent_enablement",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.applicationIntentExecute, 0)
+})
+
+test("MCP application intent execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    acknowledgePrivilegeExpansion: true,
+    intent: "guild-members",
+    operationKey: APPLICATION_INTENT_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: APPLICATION_INTENT_REVIEW_REASON,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationIntentError: new ApplicationIntentExecutionError(
+        `Discord application intent outcome is uncertain: ${TOKEN}`,
+        { error: TOKEN, status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_intent_enablement",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.doesNotMatch(JSON.stringify(uncertainResult), new RegExp(TOKEN))
+
+  const rateLimited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationIntentError: new ApplicationIntentExecutionError(
+        "Discord application intent enablement was rate limited",
+        { status: "failed" },
+        {
+          cause: new DiscordApiError({
+            message: "Discord rate limited the request",
+            method: "PATCH",
+            retryAfterMs: 1_000,
+            route: "/applications/@me",
+            status: 429,
+          }),
+        },
+      ),
+    },
+  })
+  const rateLimitedResult = await rateLimited.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_intent_enablement",
+  })
+  assert.equal(structuredContent(rateLimitedResult).status, "rate-limited")
+  assert.equal(
+    (structuredContent(rateLimitedResult).error as Record<string, unknown>)
+      .retryAfterMs,
+    1_000,
+  )
+
+  const receipt = {
+    activityId: "activity-application-intent",
+    applicationId: APPLICATION_ID,
+    error: null,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-24T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationIntentError: new ApplicationIntentOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_intent_enablement",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(APPLICATION_INTENT_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(APPLICATION_INTENT_REVIEW_REASON),
   )
 })
 

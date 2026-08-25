@@ -666,6 +666,7 @@ function guidanceService(options: {
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
     executeApplicationEmojiChange: unexpected,
+    executeApplicationIntentEnablement: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeMemberRoleChange: unexpected,
@@ -1919,6 +1920,7 @@ function guidanceService(options: {
     },
     planGuildExpressionChange: unexpected,
     planApplicationEmojiChange: unexpected,
+    planApplicationIntentEnablement: unexpected,
     planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
     planVoiceChannelStatusChange: unexpected,
@@ -1940,6 +1942,7 @@ function guidanceService(options: {
         applicationEmojiChangesEnabled: false,
         applicationEmojiCreationEnabled: false,
         applicationEmojiRootCount: 0,
+        applicationIntentChangesEnabled: false,
         announcementCrosspostChannelIds: [],
         announcementCrosspostsEnabled: false,
         announcementSubscriptionAuditEnabled: false,
@@ -4651,6 +4654,34 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   )
   assert.match(applicationEmojiDeletion, /missing global-impact acknowledgement/)
 
+  const applicationIntent = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgePrivilegeExpansion: "true",
+      intent: "guild-members",
+      operationKey: OPERATION_KEY,
+      reviewReason: "Enable the schema-v2 member directory",
+    },
+    name: MCP_PROMPT_NAMES.reviewApplicationIntentEnablement,
+  }))
+  assert.deepEqual(JSON.parse(applicationIntent.split("\n")[1] || ""), {
+    acknowledgePrivilegeExpansion: true,
+    intent: "guild-members",
+    operationKey: OPERATION_KEY,
+    reviewReason: "Enable the schema-v2 member directory",
+  })
+  assert.match(
+    applicationIntent,
+    /Call only plan_application_intent_enablement/,
+  )
+  assert.match(
+    applicationIntent,
+    /Do not call execute_application_intent_enablement/,
+  )
+  assert.match(applicationIntent, /policy requirement/)
+  assert.match(applicationIntent, /authoritative named current state/)
+  assert.match(applicationIntent, /raw flags/)
+  assert.match(applicationIntent, /uncertain same-application predecessor/)
+
   const guildExpression = promptText(await client.getPrompt({
     arguments: {
       action: "update",
@@ -5943,6 +5974,34 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         operationKey: OPERATION_KEY,
       },
       name: MCP_PROMPT_NAMES.reviewApplicationEmojiChange,
+    },
+    {
+      arguments: {
+        acknowledgePrivilegeExpansion: "false",
+        intent: "guild-members",
+        operationKey: OPERATION_KEY,
+        reviewReason: "Enable the schema-v2 member directory",
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationIntentEnablement,
+    },
+    {
+      arguments: {
+        acknowledgePrivilegeExpansion: "true",
+        intent: "presence",
+        operationKey: OPERATION_KEY,
+        reviewReason: "Enable Presence",
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationIntentEnablement,
+    },
+    {
+      arguments: {
+        acknowledgePrivilegeExpansion: "true",
+        applicationId: APPLICATION_ID,
+        intent: "message-content",
+        operationKey: OPERATION_KEY,
+        reviewReason: "Enable configured message search",
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationIntentEnablement,
     },
     {
       arguments: {

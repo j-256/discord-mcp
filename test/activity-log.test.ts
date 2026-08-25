@@ -15,6 +15,7 @@ import {
   type AnnouncementCrosspostActivity,
   type AnnouncementSubscriptionActivity,
   type ApplicationEmojiActivity,
+  type ApplicationIntentActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
   type ChannelCloneActivity,
@@ -1209,6 +1210,28 @@ function applicationEmoji(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function applicationIntent(
+  id: string,
+  status: ApplicationIntentActivity["status"],
+): ApplicationIntentActivity {
+  return {
+    applicationId: "100",
+    botId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    id,
+    intent: "guild-members",
+    kind: "application-intent-enablement",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-24T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -3719,6 +3742,59 @@ test("JSONL activity log keeps application emoji evidence content-free", async (
       "verification",
     ],
   )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps application intent evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-review-reason",
+    "private-operation-key",
+    "private-raw-flags",
+    "private-application-name",
+  ]
+
+  await store.append(applicationIntent("1", "pending"))
+  await store.append({
+    ...applicationIntent("2", "completed"),
+    applicationName: privateValues[3],
+    operationKey: privateValues[1],
+    rawFlags: privateValues[2],
+    reviewReason: privateValues[0],
+  } as ApplicationIntentActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...applicationIntent("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "applicationId",
+    "botId",
+    "error",
+    "id",
+    "intent",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "status",
+    "timestamp",
+    "verification",
+  ])
   for (const value of privateValues) {
     assert.equal(JSON.stringify(result).includes(value), false)
     assert.equal(persisted.includes(value), false)

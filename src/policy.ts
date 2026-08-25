@@ -16,6 +16,7 @@ export interface PolicyDescription {
   applicationEmojiChangesEnabled: boolean
   applicationEmojiCreationEnabled: boolean
   applicationEmojiRootCount: number
+  applicationIntentChangesEnabled: boolean
   announcementCrosspostChannelIds: string[]
   announcementCrosspostsEnabled: boolean
   announcementSubscriptionAuditEnabled: boolean
@@ -197,6 +198,7 @@ export class ScopePolicy {
   readonly #allowAdministration: boolean
   readonly #allowApplicationEmojiAudit: boolean
   readonly #allowApplicationEmojiChanges: boolean
+  readonly #allowApplicationIntentChanges: boolean
   readonly #allowAnnouncementCrossposts: boolean
   readonly #allowAnnouncementSubscriptionAudit: boolean
   readonly #allowAnnouncementSubscriptionChanges: boolean
@@ -374,6 +376,7 @@ export class ScopePolicy {
     | "allowAnnouncementCrossposts"
     | "allowApplicationEmojiAudit"
     | "allowApplicationEmojiChanges"
+    | "allowApplicationIntentChanges"
     | "allowAnnouncementSubscriptionAudit"
     | "allowAnnouncementSubscriptionChanges"
     | "allowAttachments"
@@ -529,6 +532,7 @@ export class ScopePolicy {
     this.#allowAdministration = config.allowAdministration
     this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
     this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
+    this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
     this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
     this.#allowAnnouncementSubscriptionAudit = config.allowAnnouncementSubscriptionAudit
       ?? false
@@ -705,6 +709,7 @@ export class ScopePolicy {
         && this.#allowApplicationEmojiChanges
         && this.#applicationEmojiRoots.length > 0,
       applicationEmojiRootCount: this.#applicationEmojiRoots.length,
+      applicationIntentChangesEnabled: this.#allowApplicationIntentChanges,
       announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
       announcementCrosspostsEnabled: this.#allowAnnouncementCrossposts
         && this.#announcementCrosspostChannelIds.size > 0,
@@ -1607,6 +1612,14 @@ export class ScopePolicy {
     this.assertApplicationEmojiAuditable()
     if (!this.#allowApplicationEmojiChanges) {
       throw new PolicyError("Discord application emoji changes are disabled by connector configuration")
+    }
+  }
+
+  assertApplicationIntentChangeAllowed(): void {
+    if (!this.#allowApplicationIntentChanges) {
+      throw new PolicyError(
+        "Discord application privileged-intent changes are disabled by connector configuration",
+      )
     }
   }
 

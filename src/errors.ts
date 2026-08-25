@@ -1071,6 +1071,42 @@ export class ApplicationEmojiEvidenceError extends Error {
   override name = "ApplicationEmojiEvidenceError"
 }
 
+export class ApplicationIntentPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord application intent snapshot does not match the reviewed plan")
+    this.name = "ApplicationIntentPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ApplicationIntentOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord application intent operation key has already been reserved")
+    this.name = "ApplicationIntentOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ApplicationIntentExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ApplicationIntentExecutionError"
+    this.result = result
+  }
+}
+
+export class ApplicationIntentEvidenceError extends Error {
+  override name = "ApplicationIntentEvidenceError"
+}
+
 export class GuildExpressionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

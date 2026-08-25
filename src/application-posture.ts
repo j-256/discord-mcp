@@ -66,6 +66,12 @@ const KNOWN_APPLICATION_FLAG_BITS = Object.values(DISCORD_APPLICATION_FLAGS).red
 )
 
 export type ApplicationIntentStatus = "disabled" | "enabled" | "unknown"
+export type ApplicationFlagEvidenceSource = "flags" | "flags-new"
+
+export interface ApplicationFlagEvidence {
+  source: ApplicationFlagEvidenceSource
+  value: bigint
+}
 export type ApplicationConnectorFit =
   | "blocked"
   | "compatible"
@@ -274,21 +280,30 @@ function bitCount(value: bigint): number {
   return count
 }
 
-function applicationFlags(record: Record<string, unknown>): bigint | null {
+export function projectApplicationFlagEvidence(
+  application: DiscordApplication,
+): ApplicationFlagEvidence | null {
+  const record = recordValue(application)
   if (record.flags_new !== undefined) {
     if (
       typeof record.flags_new !== "string"
       || record.flags_new.length > MAX_PERMISSION_DIGITS
       || !DECIMAL_PATTERN.test(record.flags_new)
     ) return null
-    return BigInt(record.flags_new)
+    return {
+      source: "flags-new",
+      value: BigInt(record.flags_new),
+    }
   }
   if (
     record.flags === undefined
     || !Number.isSafeInteger(record.flags)
     || (record.flags as number) < 0
   ) return null
-  return BigInt(record.flags as number)
+  return {
+    source: "flags",
+    value: BigInt(record.flags as number),
+  }
 }
 
 function intentStatus(
@@ -302,8 +317,7 @@ function intentStatus(
 export function projectApplicationPrivilegedIntents(
   application: DiscordApplication,
 ): ApplicationPostureResult["privilegedIntents"] {
-  const record = recordValue(application)
-  const flags = applicationFlags(record)
+  const flags = projectApplicationFlagEvidence(application)?.value ?? null
   return {
     guildMembers: intentStatus(
       flags,
@@ -557,7 +571,7 @@ export function projectApplicationPosture(
     || typeof record.bot_require_code_grant !== "boolean"
   ) throw evidenceError()
 
-  const flags = applicationFlags(record)
+  const flags = projectApplicationFlagEvidence(application)?.value ?? null
   const privilegedIntents = projectApplicationPrivilegedIntents(application)
 
   const contextsReported = record.integration_types_config !== undefined

@@ -6,6 +6,7 @@ import {
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_LIMITS,
   DISCORD_API_BASE_URL,
+  DISCORD_APPLICATION_FLAGS,
   DISCORD_CHANNEL_FLAGS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_FORUM_LAYOUTS,
@@ -1288,6 +1289,15 @@ export interface EditComponentMessageInput {
 export interface ModifyGuildMemberTimeoutInput {
   communicationDisabledUntil: string | null
 }
+
+export interface ModifyCurrentApplicationFlagsInput {
+  flags: number
+}
+
+const CURRENT_APPLICATION_LIMITED_INTENT_FLAG_MASK =
+  DISCORD_APPLICATION_FLAGS.gatewayPresenceLimited
+  | DISCORD_APPLICATION_FLAGS.gatewayGuildMembersLimited
+  | DISCORD_APPLICATION_FLAGS.gatewayMessageContentLimited
 
 export interface DiscordVoiceStateSummary {
   channelId: string | null
@@ -8234,6 +8244,36 @@ export class DiscordClient {
 
   getCurrentApplication(options: RequestOptions = {}): Promise<DiscordApplication> {
     return this.#request("get_current_application", "/applications/@me", options)
+  }
+
+  modifyCurrentApplicationFlags(
+    input: ModifyCurrentApplicationFlagsInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplication> {
+    if (
+      !input
+      || typeof input !== "object"
+      || Array.isArray(input)
+      || Object.keys(input).join("\0") !== "flags"
+      || !Number.isSafeInteger(input.flags)
+      || input.flags <= 0
+      || (
+        BigInt(input.flags)
+        & ~CURRENT_APPLICATION_LIMITED_INTENT_FLAG_MASK
+      ) !== 0n
+    ) {
+      throw new RangeError("Discord current-application flags input is invalid")
+    }
+    return this.#request(
+      "modify_current_application_flags",
+      "/applications/@me",
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: { flags: input.flags },
+        expectedSuccessStatus: 200,
+      },
+    )
   }
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {

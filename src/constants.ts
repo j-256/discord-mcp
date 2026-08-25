@@ -25,6 +25,7 @@ export type McpToolSurface = typeof MCP_TOOL_SURFACES[number]
 export const MCP_TOOLSET_NAMES = [
   "activity",
   "application-emojis",
+  "application-security",
   "announcement-crossposts",
   "announcement-subscriptions",
   "attachments",

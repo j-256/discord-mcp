@@ -29,6 +29,7 @@ export const OPERATION_KINDS = [
   "announcement-crosspost",
   "announcement-subscription",
   "application-emoji-change",
+  "application-intent-enablement",
   "attachment-message",
   "automod-change",
   "channel-clone",
@@ -78,7 +79,9 @@ export const OPERATION_KINDS = [
 ] as const
 
 export type OperationKind = typeof OPERATION_KINDS[number]
-export type ApplicationOperationKind = "application-emoji-change"
+export type ApplicationOperationKind =
+  | "application-emoji-change"
+  | "application-intent-enablement"
 export type GuildOperationKind = Exclude<OperationKind, ApplicationOperationKind>
 export type StandardGuildOperationKind = Exclude<GuildOperationKind, "component-message">
 export type OperationReceiptStatus = "completed" | "failed" | "pending" | "uncertain"
@@ -158,8 +161,19 @@ export interface ApplicationOperationStore extends OperationStore {
   ): Promise<ApplicationOperationReservation>
 }
 
+const APPLICATION_OPERATION_KINDS: readonly ApplicationOperationKind[] = [
+  "application-emoji-change",
+  "application-intent-enablement",
+]
+
+export function isApplicationOperationKind(
+  kind: OperationKind,
+): kind is ApplicationOperationKind {
+  return (APPLICATION_OPERATION_KINDS as readonly OperationKind[]).includes(kind)
+}
+
 const GUILD_OPERATION_KINDS = OPERATION_KINDS.filter(
-  (kind): kind is GuildOperationKind => kind !== "application-emoji-change",
+  (kind): kind is GuildOperationKind => !isApplicationOperationKind(kind),
 )
 
 const OPERATION_RECEIPT_SCHEMA_VERSION = 1
@@ -318,7 +332,8 @@ function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
     Object.keys(record).sort().join("\0")
       !== [...APPLICATION_RECEIPT_KEYS].sort().join("\0")
     || record.schemaVersion !== OPERATION_RECEIPT_SCHEMA_VERSION
-    || record.kind !== "application-emoji-change"
+    || typeof record.kind !== "string"
+    || !(APPLICATION_OPERATION_KINDS as readonly string[]).includes(record.kind)
     || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
     || typeof record.activityId !== "string"
     || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.activityId)
@@ -377,11 +392,25 @@ function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
       "Incomplete Discord application operation receipt contains verification state",
     )
   }
+  if (
+    record.kind === "application-intent-enablement"
+    && (
+      record.verification === "drift"
+      || (
+        ["completed", "uncertain"].includes(String(record.status))
+        && record.resourceId !== record.applicationId
+      )
+    )
+  ) {
+    throw new OperationStoreError(
+      "Discord application intent receipt has invalid application-wide outcome evidence",
+    )
+  }
   return {
     activityId: record.activityId,
     applicationId: record.applicationId,
     error: record.error,
-    kind: "application-emoji-change",
+    kind: record.kind as ApplicationOperationKind,
     operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,
     resourceId: record.resourceId,

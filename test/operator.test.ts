@@ -203,6 +203,7 @@ function status(
       applicationEmojiChangesEnabled: false,
       applicationEmojiCreationEnabled: false,
       applicationEmojiRootCount: 0,
+      applicationIntentChangesEnabled: false,
       announcementCrosspostChannelIds: [],
       announcementCrosspostsEnabled: false,
       announcementSubscriptionAuditEnabled: false,
@@ -407,6 +408,7 @@ function toolService(): DiscordToolService {
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
     executeApplicationEmojiChange: unexpected,
+    executeApplicationIntentEnablement: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeRoleOrder: unexpected,
@@ -490,6 +492,7 @@ function toolService(): DiscordToolService {
     planGuildProfileChange: unexpected,
     planGuildExpressionChange: unexpected,
     planApplicationEmojiChange: unexpected,
+    planApplicationIntentEnablement: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
     planSoundboardChange: unexpected,
@@ -2708,6 +2711,59 @@ test("doctor and setup explain identity-bound reviewed application emoji scope",
   )
   assert.match(setup.warnings.join("\n"), /creation remains blocked/)
   assert.match(omitted.warnings.join("\n"), /application-emojis toolset/)
+})
+
+test("doctor and setup explain reviewed application privileged-intent enablement", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      applicationIntentChanges: true,
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const inertPolicy = fixturePolicy({
+    capabilities: {
+      applicationIntentChanges: true,
+    },
+    tools: {
+      toolsets: ["connector"],
+    },
+  })
+  const inert = await diagnoseConnector({
+    configOverrides: inertPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: inertPolicy,
+    service: statusProvider(),
+  })
+
+  const enabledCheck = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationIntentChangePolicy,
+  )
+  assert.equal(enabledCheck?.status, "pass")
+  assert.match(enabledCheck?.summary || "", /additive-only/)
+  assert.match(enabledCheck?.summary || "", /policy-justified/)
+  assert.match(enabledCheck?.summary || "", /content-free audited/)
+  assert.match(enabledCheck?.summary || "", /exact-readback verified/)
+  const disabledCheck = disabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationIntentChangePolicy,
+  )
+  assert.equal(disabledCheck?.status, "pass")
+  assert.match(disabledCheck?.summary || "", /disabled/)
+  const inertCheck = inert.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationIntentChangePolicy,
+  )
+  assert.equal(inertCheck?.status, "warn")
+  assert.match(inertCheck?.summary || "", /does not require or recommend/)
+  assert.match(omitted.warnings.join("\n"), /no configured capability requires or recommends/)
+  assert.match(omitted.warnings.join("\n"), /application-security toolset/)
 })
 
 test("doctor and setup explain privacy-safe reviewed scheduled event scope", async (context) => {
@@ -5005,6 +5061,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_announcement_crosspost",
     "review_announcement_subscription",
     "review_application_emoji_change",
+    "review_application_intent_enablement",
     "review_attachment_message",
     "review_automod_change",
     "review_channel_clone",
@@ -5114,6 +5171,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_announcement_crosspost",
     "execute_announcement_subscription",
     "execute_application_emoji_change",
+    "execute_application_intent_enablement",
     "execute_automod_change",
     "execute_channel_clone",
     "execute_channel_deletion",
@@ -5159,6 +5217,10 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
+  assert.equal(
+    report.readOnlyTools.includes("plan_application_intent_enablement"),
+    true,
+  )
   assert.equal(report.readOnlyTools.includes("audit_channel_order"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_clone"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_order"), true)

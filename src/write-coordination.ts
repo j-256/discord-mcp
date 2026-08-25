@@ -22,6 +22,7 @@ import {
 import {
   OPERATION_KEY_HASH_PATTERN,
   OPERATION_KINDS,
+  isApplicationOperationKind,
   type OperationKind,
   type OperationReceiptStatus,
   type OperationStore,
@@ -59,6 +60,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
 
 export const WRITE_COORDINATION_APPLICATION_COLLECTIONS = [
   "emojis",
+  "privileged-intents",
 ] as const
 
 export type WriteCoordinationResourceKind =
@@ -330,19 +332,35 @@ function normalizeTargets(
   const byDescriptor = new Map<string, WriteCoordinationTarget>()
   for (const value of values) {
     const target = parseTarget(value)
-    if (
-      (kind === "application-emoji-change")
-        !== (target.kind === "application-collection")
-    ) {
+    if (isApplicationOperationKind(kind) !== (target.kind === "application-collection")) {
       throw new WriteCoordinationStateError(
         "Discord write coordination target scope does not match its operation",
       )
     }
     byDescriptor.set(targetDescriptor(target), target)
   }
-  if (kind === "application-emoji-change" && byDescriptor.size !== 1) {
+  if (isApplicationOperationKind(kind) && byDescriptor.size !== 1) {
     throw new WriteCoordinationStateError(
-      "Discord application emoji coordination requires one application collection target",
+      "Discord application coordination requires one application collection target",
+    )
+  }
+  const applicationTarget = [...byDescriptor.values()][0]
+  if (
+    kind === "application-emoji-change"
+    && applicationTarget?.kind === "application-collection"
+    && applicationTarget.collection !== "emojis"
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord application emoji coordination requires the emoji collection target",
+    )
+  }
+  if (
+    kind === "application-intent-enablement"
+    && applicationTarget?.kind === "application-collection"
+    && applicationTarget.collection !== "privileged-intents"
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord application intent coordination requires the privileged-intents collection target",
     )
   }
   return [...byDescriptor.entries()]
@@ -1041,10 +1059,10 @@ export class FileWriteCoordinator implements WriteCoordinator {
   async #receiptEvidence(record: WriteClaimRecord): Promise<ReceiptEvidence> {
     try {
       if (
-        record.kind === "application-emoji-change"
+        isApplicationOperationKind(record.kind)
         && !this.#operationStore.getApplication
       ) return "unreadable"
-      const receipt = record.kind === "application-emoji-change"
+      const receipt = isApplicationOperationKind(record.kind)
         ? await this.#operationStore.getApplication!(
           record.kind,
           record.operationKeyHash,

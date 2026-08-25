@@ -23,6 +23,10 @@
           "type": "boolean",
           "description": "Enable application emoji changes policy"
         },
+        "applicationIntentChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed additive application privileged-intent enablement"
+        },
         "announcementCrossposts": {
           "type": "boolean",
           "description": "Enable announcement crossposts policy"
@@ -1407,13 +1411,14 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 56,
+          "maxItems": 57,
           "type": "array",
           "items": {
             "type": "string",
             "enum": [
               "activity",
               "application-emojis",
+              "application-security",
               "announcement-crossposts",
               "announcement-subscriptions",
               "attachments",
