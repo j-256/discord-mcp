@@ -66,6 +66,15 @@ export interface DiscordApplicationRoleConnectionMetadata {
   type: number
 }
 
+export interface DiscordApplicationSku {
+  application_id: string
+  flags: number
+  id: string
+  name: string
+  slug: string
+  type: number
+}
+
 export interface DiscordBan {
   reason?: string | null
   user: DiscordUser

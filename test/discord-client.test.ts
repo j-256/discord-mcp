@@ -1893,6 +1893,80 @@ test("Discord client bounds and protects linked-role metadata inventories", asyn
   )
 })
 
+test("Discord client bounds and protects current-application SKU inventories", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const record = {
+    application_id: "100",
+    flags: 4,
+    id: "200",
+    name: "Supporter",
+    slug: "supporter",
+    type: 2,
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse([record])
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.listApplicationSkus("100"), [record])
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/skus`,
+  }])
+
+  const privateMarker = "private-sku-evidence"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateMarker }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    refused.listApplicationSkus("100"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.message.includes("request failed")
+      && !error.message.includes(privateMarker)
+      && error.cause === undefined
+    ),
+  )
+
+  const transport = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateMarker)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transport.listApplicationSkus("100"),
+    (error: unknown) => (
+      error instanceof Error
+      && !error.message.includes(privateMarker)
+    ),
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(DISCORD_LIMITS.applicationSkuResponseBytes + 1),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.listApplicationSkus("100"),
+    /exceeded its local response bound/u,
+  )
+  assert.throws(
+    () => client.listApplicationSkus("invalid"),
+    /application SKU application ID/u,
+  )
+})
+
 test("Discord client never retries or reveals an Interaction token after callback failure", async () => {
   const interactionToken = "private.interaction-token"
   let requests = 0

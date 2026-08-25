@@ -12,6 +12,7 @@ export type DiscordGuidanceService = Pick<
   ConnectorService,
   | "auditApplicationCommands"
   | "auditApplicationRoleConnectionMetadata"
+  | "auditApplicationSkus"
   | "auditForumTags"
   | "auditChannelDeletion"
   | "auditRoleDeletion"

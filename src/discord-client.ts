@@ -101,6 +101,7 @@ import type {
   DiscordApplicationCommand,
   DiscordApplicationCommandOption,
   DiscordApplicationRoleConnectionMetadata,
+  DiscordApplicationSku,
   DiscordBan,
   DiscordChannel,
   DiscordCreatedForumPost,
@@ -1539,6 +1540,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_integrations",
   "list_application_emojis",
   "list_application_role_connection_metadata",
+  "list_application_skus",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_global_application_commands",
@@ -8588,6 +8590,23 @@ export class DiscordClient {
         ...options,
         diagnosticRoute: "/applications/{application.id}/role-connections/metadata",
         maxResponseBytes: DISCORD_LIMITS.applicationRoleConnectionMetadataResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  listApplicationSkus(
+    applicationId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationSku[]> {
+    assertSearchSnowflake(applicationId, "Discord application SKU application ID")
+    return this.#request(
+      "list_application_skus",
+      `/applications/${applicationId}/skus`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/skus",
+        maxResponseBytes: DISCORD_LIMITS.applicationSkuResponseBytes,
         suppressFailureCause: true,
       },
     )

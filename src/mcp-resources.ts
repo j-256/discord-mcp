@@ -236,6 +236,8 @@ export function registerDiscordResources(
           "",
           "Current-application linked-role metadata audit re-verifies pinned identity before fetching the complete maximum-five schema owned by that application. It reports exact structural keys, transient untrusted primary labels, normalized comparison semantics, localization counts, verification-endpoint presence, and count-only future evidence. Verification URLs, localization values, user metadata values, guild role configuration, raw payloads, and unknown field values are omitted; the private resource is uncached and nothing is persisted. The audit cannot select another application, prove guild role usage or user eligibility, or mutate the metadata schema.",
           "",
+          "Current-application SKU audit re-verifies pinned identity before fetching the complete bounded catalog owned by that application. It reports exact SKU IDs, transient untrusted names and slugs, normalized known types, availability and purchase-scope flags, and count-only future evidence. Benefits, prices, media, store URLs, entitlement and subscription data, purchaser and beneficiary identifiers, payment data, raw payloads, and unknown values are omitted; the private resource is uncached and nothing is persisted. Availability is not entitlement, revenue, payment, or access evidence, and an unavailable reason cannot be inferred. The audit cannot select another application or perform any monetization mutation.",
+          "",
           "Channel-completeness consumers retain only ID, type, position, parent ID, and the explicit obfuscation bit in an exact-guild Gateway layout. They bracket one bounded HTTP channel read with identical complete layout snapshots, accept only the complete layout ID set or its exact non-obfuscated subset, discard HTTP metadata for obfuscated channels, and return only counts rather than hidden metadata. Ordinary channel listing remains explicitly visibility-bounded.",
           "",
           "Operational status is process-local by default. It includes a bounded rolling lower bound on connector-observed responses that contribute to Discord's IP-wide invalid-request limit, excludes proven shared-scope 429 responses, and never claims to know traffic from other processes. Optional OTLP export requires a separate feature gate and carries only fixed operation categories, aggregates, durations, invalid-response status codes, and exporter health without Discord identifiers, content, routes, arguments, results, headers, or error details.",
@@ -483,6 +485,27 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.auditApplicationRoleConnectionMetadata({
+        signal: context.mcpReq.signal,
+      }),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.applicationSkus,
+    MCP_RESOURCE_URIS.applicationSkus,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete verified current-application SKU catalog with exact IDs, bounded transient untrusted names and slugs, normalized known types, availability and purchase-scope flags, and count-only future evidence. Benefits, prices, media, store URLs, entitlements, subscriptions, purchaser and beneficiary identifiers, payment data, raw payloads, and unknown values are omitted. Nothing is persisted.",
+      mimeType: "application/json",
+      title: "Privacy-safe Discord application SKUs",
+    },
+    (uri, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditApplicationSkus({
         signal: context.mcpReq.signal,
       }),
     ),

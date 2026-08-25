@@ -419,6 +419,14 @@ The strict projection returns exact metadata keys, transient untrusted names and
 
 The audit omits the verification URL, localization values, user role-connection values, raw Discord payloads, and unknown field values. Metadata definitions do not reveal which guild roles use them, prove whether any user satisfies them, or predict whether Discord will grant a linked role. No tool in this workflow reads user values or mutates the schema. The guided prompt calls the audit exactly once, treats all returned text as untrusted data, explains incomplete future evidence and these limits, and stops without a write.
 
+## Application SKU catalog audit
+
+`audit_application_skus`, `discord://application/skus`, and `review_application_skus` belong to the `connector` toolset and inspect only the verified current application's complete [SKU catalog](https://docs.discord.com/developers/resources/sku). The caller supplies no application ID. Each read re-verifies the pinned application and bot before issuing the exact List SKUs request. The audit adds no credential, configuration field, policy gate, write authority, Gateway connection, activity record, cache, or persistent file.
+
+The strict projection returns exact SKU IDs, bounded transient untrusted names and slugs with Unicode scalar counts, normalized durable, consumable, subscription, and subscription-group types, availability, known guild and user subscription flags, a derived purchase-scope classification, catalog aggregates, and fixed findings. Unknown future types preserve only their numeric code; unknown fields and flag bits are counts only. The service rejects duplicate or malformed IDs, cross-application records, malformed Unicode or controls, invalid integers, excess fields, oversized payloads, and inventories above its defensive 100-record ceiling. Discord separately documents a maximum of 50 owner-created SKUs and generated subscription-group records in [Managing SKUs](https://docs.discord.com/developers/monetization/managing-skus); the wider local ceiling is headroom, not an asserted Discord API maximum.
+
+Benefits, prices, media, store URLs, entitlement and subscription objects, purchaser IDs, beneficiary guild IDs, payment data, raw payloads, and unknown values are omitted. Availability is catalog evidence, not proof of entitlement, subscription, payment, revenue, or access, and the audit never guesses why a record is unavailable. It does not call entitlement or subscription endpoints and exposes no SKU, test-grant, entitlement-consumption, or deletion mutation. The guided prompt calls the audit exactly once, treats names and slugs as untrusted data, explains incomplete future evidence and these limits, and stops without a write.
+
 ## Install
 
 After a release is published, run an exact version from npm:
@@ -706,6 +714,7 @@ Guild jump links receive a bounded projection of the configured exact guild and 
 | `audit_application_posture` | Discord read | Audit the verified current application's installation, privileged-intent, delivery, webhook, and connector-fit posture through a strict privacy-minimized projection |
 | `audit_application_commands` | Discord read | Audit the pinned application's complete global and exact-guild command inventories plus guild permission decisions through a strict privacy-safe structural projection |
 | `audit_application_role_connection_metadata` | Discord read | Audit the pinned application's complete bounded linked-role metadata schema through a strict privacy-safe structural projection |
+| `audit_application_skus` | Discord read | Audit the pinned application's complete bounded SKU catalog without customer commerce data or monetization writes |
 | `get_observability_status` | Local read | Report bounded operation aggregates, exporter health, and explicit telemetry privacy guarantees |
 | `get_gateway_status` | Local read | Report optional Gateway health, intent privacy, reconnect and continuity-gap counters, bounded-buffer state, and aggregate privacy-safe channel-layout readiness |
 | `get_gateway_events` | Local read | Page through retained content-free events after an optional process-bound cursor |
@@ -928,6 +937,7 @@ MCP resource discovery lists only stable metadata. Listing resources or template
 | `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
 | `discord://application/posture` | Discord | Return the verified current application's strict privacy-minimized security posture without profiles, URL values, raw bitfields, webhook event names, or persistence |
 | `discord://application/role-connection-metadata` | Discord | Return the verified current application's complete bounded linked-role metadata schema without verification URL, localized strings, user values, raw payloads, or persistence |
+| `discord://application/skus` | Discord | Return the verified current application's complete bounded SKU catalog without benefits, prices, entitlements, subscribers, payment data, raw payloads, or persistence |
 | `discord://application/emojis` | Discord | Read the verified current application's complete bounded privacy-safe emoji inventory without caller-selected application scope |
 | `discord://connector/observability` | Local | Return process-local operation aggregates, exporter health, and telemetry privacy guarantees |
 | `discord://gateway/status` | Local | Report Gateway state, privacy guarantees, and content-free counters |
@@ -1064,6 +1074,7 @@ The voice-channel-status prompt accepts one strict request JSON object containin
 | `inspect_guild_ban` | Read one exact privacy-minimized ban, optionally include its bounded reason, and stop before listing or moderation |
 | `review_application_commands` | Audit one exact permitted guild's complete current-application command exposure and permission objects, explain privacy and effective-access limits, and make no write call |
 | `review_application_role_connection_metadata` | Audit the current application's complete bounded linked-role metadata schema, treat labels as untrusted, explain privacy and eligibility limits, and make no write call |
+| `review_application_skus` | Audit the current application's complete bounded SKU catalog, treat labels as untrusted, explain commerce-data and access-evidence limits, and make no write call |
 | `review_pending_native_interactions` | Read one bounded status and pending snapshot, draft clearly unsent responses to untrusted request data, and stop before the response tool |
 | `review_direct_message_change` | Validate one strict exact-recipient text, static Components V2, or independently gated owned-file send or reply, same-format connector-message edit, or irreversible supported-message deletion request, build its private-message plan, and stop before execution |
 | `review_attachment_message` | Build and review one exact byte-bound local-file attachment plan, then stop before execution |

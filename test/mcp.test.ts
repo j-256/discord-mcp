@@ -462,6 +462,7 @@ import {
 } from "./config-fixture.js"
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
+import { fixtureApplicationSkuAudit } from "./application-sku-audit-fixture.js"
 import type {
   ThreadChangePlan,
   ThreadChangeRequest,
@@ -7446,6 +7447,8 @@ function serviceFixture(overrides: {
   applicationIntentPlanDigest?: string
   applicationRoleConnectionMetadataError?: Error
   applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
+  applicationSkuError?: Error
+  applicationSkuResult?: ReturnType<typeof fixtureApplicationSkuAudit>
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -8088,6 +8091,13 @@ function serviceFixture(overrides: {
           applicationId: APPLICATION_ID,
           botId: BOT_ID,
         })
+    },
+    async auditApplicationSkus() {
+      if (overrides.applicationSkuError) throw overrides.applicationSkuError
+      return overrides.applicationSkuResult || fixtureApplicationSkuAudit({
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+      })
     },
     async executeDirectMessageChange(request, planDigest) {
       if (overrides.directMessageError) throw overrides.directMessageError
@@ -11731,6 +11741,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_application_posture",
       "audit_application_commands",
       "audit_application_role_connection_metadata",
+      "audit_application_skus",
       "get_connector_status",
       "parse_discord_reference",
       "get_observability_status",
@@ -13979,6 +13990,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "audit_application_posture",
       "audit_application_commands",
       "audit_application_role_connection_metadata",
+      "audit_application_skus",
       "get_connector_status",
       "parse_discord_reference",
       "read_messages",
@@ -13992,6 +14004,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     [
       "review_application_commands",
       "review_application_role_connection_metadata",
+      "review_application_skus",
       "summarize_channel",
       "search_guild_messages",
     ],
@@ -14673,6 +14686,30 @@ test("progressive discovery reveals the pinned linked-role metadata audit indepe
   )
 })
 
+test("progressive discovery reveals the pinned application SKU audit independently", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["connector"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "audit_application_skus" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "audit_application_skus",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["audit_application_skus", "discover_discord_tools"],
+  )
+})
+
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
@@ -14687,6 +14724,10 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   const linkedRoles = structuredContent(await client.callTool({
     arguments: {},
     name: "audit_application_role_connection_metadata",
+  }))
+  const applicationSkus = structuredContent(await client.callTool({
+    arguments: {},
+    name: "audit_application_skus",
   }))
   const status = structuredContent(await client.callTool({
     arguments: {},
@@ -14737,6 +14778,18 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     projectionComplete: true,
   })
   assert.doesNotMatch(JSON.stringify(linkedRoles), new RegExp(TOKEN, "u"))
+  assert.deepEqual(applicationSkus.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+  })
+  assert.deepEqual(applicationSkus.inventory, {
+    completeness: "complete-current-application",
+    count: 1,
+    documentedOwnerCreatedLimit: 50,
+    localRecordLimit: 100,
+    projectionComplete: true,
+  })
+  assert.doesNotMatch(JSON.stringify(applicationSkus), new RegExp(TOKEN, "u"))
 
   const resource = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
   const content = resource.contents[0]
@@ -14752,6 +14805,7 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /Exact-reference parsing accepts one complete canonical Discord/)
   assert.match(content.text, /never scans prose, resolves a name, contacts Discord/)
   assert.match(content.text, /Current-application linked-role metadata audit re-verifies pinned identity/u)
+  assert.match(content.text, /Current-application SKU audit re-verifies pinned identity/u)
 })
 
 test("MCP linked-role metadata audit redacts configured secrets from transient labels", async (context) => {
@@ -14772,6 +14826,31 @@ test("MCP linked-role metadata audit redacts configured secrets from transient l
   const response = await client.callTool({
     arguments: {},
     name: "audit_application_role_connection_metadata",
+  })
+
+  assert.notEqual(response.isError, true)
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(TOKEN, "u"))
+  assert.match(JSON.stringify(response), /\[redacted\]/u)
+})
+
+test("MCP application SKU audit redacts configured secrets from transient labels", async (context) => {
+  const result = fixtureApplicationSkuAudit({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+  })
+  const record = result.records[0]
+  assert.ok(record)
+  record.name = TOKEN
+  record.slug = `slug-${TOKEN}`
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      applicationSkuResult: result,
+    },
+  })
+
+  const response = await client.callTool({
+    arguments: {},
+    name: "audit_application_skus",
   })
 
   assert.notEqual(response.isError, true)

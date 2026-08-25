@@ -800,6 +800,9 @@ function serviceFixture(overrides: {
     async listApplicationRoleConnectionMetadata() {
       return []
     },
+    async listApplicationSkus() {
+      return []
+    },
     async listGuildStickers() {
       return []
     },
@@ -1379,6 +1382,63 @@ test("service pins linked-role metadata audits to verified current application i
   assert.ok(reads.every(({ signal }) => signal === controller.signal))
   assert.equal(reads[2]?.applicationId, APPLICATION_ID)
   assert.doesNotMatch(JSON.stringify(result), /private\.example/u)
+})
+
+test("service pins SKU audits to verified current application identity", async () => {
+  const controller = new AbortController()
+  const reads: Array<{
+    applicationId?: string
+    operation: string
+    signal: AbortSignal | undefined
+  }> = []
+  const { calls, service } = serviceFixture({
+    client: {
+      async getCurrentApplication(options) {
+        calls.application += 1
+        reads.push({ operation: "application", signal: options?.signal })
+        return application()
+      },
+      async getCurrentUser(options) {
+        calls.user += 1
+        reads.push({ operation: "bot", signal: options?.signal })
+        return bot()
+      },
+      async listApplicationSkus(applicationId, options) {
+        reads.push({
+          applicationId,
+          operation: "skus",
+          signal: options?.signal,
+        })
+        return [{
+          application_id: APPLICATION_ID,
+          flags: 4,
+          id: "610000000000000001",
+          name: "Supporter",
+          slug: "supporter",
+          type: 2,
+        }]
+      },
+    },
+  })
+
+  const result = await service.auditApplicationSkus({
+    signal: controller.signal,
+  })
+
+  assert.deepEqual(result.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+  })
+  assert.equal(result.inventory.count, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(reads.map((read) => read.operation), [
+    "application",
+    "bot",
+    "skus",
+  ])
+  assert.ok(reads.every(({ signal }) => signal === controller.signal))
+  assert.equal(reads[2]?.applicationId, APPLICATION_ID)
 })
 
 test("service rejects forum-tag scope before identity or channel access", async () => {
