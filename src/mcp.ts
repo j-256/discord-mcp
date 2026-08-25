@@ -47,6 +47,10 @@ import {
   type BulkGuildBanRequest,
 } from "./bulk-guild-ban-service.js"
 import {
+  normalizeGuildPruneRequest,
+  type GuildPruneRequest,
+} from "./guild-prune-service.js"
+import {
   normalizeAttachmentMessageRequest,
   type AttachmentMessageRequest,
 } from "./attachment-message-service.js"
@@ -189,6 +193,9 @@ import {
   BulkGuildBanExecutionError,
   BulkGuildBanOperationConflictError,
   BulkGuildBanPlanChangedError,
+  GuildPruneExecutionError,
+  GuildPruneOperationConflictError,
+  GuildPrunePlanChangedError,
   AnnouncementCrosspostExecutionError,
   AnnouncementCrosspostOperationConflictError,
   AnnouncementCrosspostPlanChangedError,
@@ -536,6 +543,7 @@ import {
 
 const ADMINISTRATION_CONFIRMATION_KEY = "confirm_member_moderation"
 const BULK_GUILD_BAN_CONFIRMATION_KEY = "confirm_bulk_guild_ban"
+const GUILD_PRUNE_CONFIRMATION_KEY = "confirm_guild_prune"
 const ANNOUNCEMENT_CROSSPOST_CONFIRMATION_KEY = "confirm_announcement_crosspost"
 const ANNOUNCEMENT_SUBSCRIPTION_CONFIRMATION_KEY = "confirm_announcement_subscription"
 const APPLICATION_EMOJI_CONFIRMATION_KEY = "confirm_application_emoji_change"
@@ -4536,6 +4544,32 @@ const bulkGuildBanExecuteInputSchema = z.strictObject({
   ...bulkGuildBanFields,
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
 })
+const guildPruneIncludeRoleIdsSchema = z.array(positiveSnowflakeSchema)
+  .max(CONNECTOR_LIMITS.guildPruneIncludeRoles)
+  .refine(
+    (roleIds) => new Set(roleIds).size === roleIds.length,
+    { message: "includeRoleIds must be unique" },
+  )
+const guildPruneFields = {
+  acknowledgeNonExactMemberSet: z.literal(true)
+    .describe("Acknowledge that Discord never reveals the candidate or removed member IDs"),
+  auditReason: auditReasonSchema,
+  days: z.number().int()
+    .min(DISCORD_LIMITS.guildPruneDaysMinimum)
+    .max(DISCORD_LIMITS.guildPruneDaysMaximum),
+  guildId: positiveSnowflakeSchema,
+  includeRoleIds: guildPruneIncludeRoleIdsSchema.optional(),
+  maximumEstimatedMemberCount: z.number().int()
+    .min(1)
+    .max(CONNECTOR_LIMITS.guildPruneMaximumMembers)
+    .describe("Pre-dispatch estimated-member ceiling, also bounded by local policy"),
+  operationKey: oneShotOperationKeySchema,
+}
+const guildPrunePlanInputSchema = z.strictObject(guildPruneFields)
+const guildPruneExecuteInputSchema = z.strictObject({
+  ...guildPruneFields,
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+})
 const activityInputSchema = z.strictObject({
   limit: z.number().int().min(1).max(CONNECTOR_LIMITS.activityEntries)
     .default(CONNECTOR_LIMITS.activityPageDefault),
@@ -5797,6 +5831,27 @@ const bulkGuildBanConfirmationRequestSchema: {
   required: ["approve"],
   type: "object",
 }
+const guildPruneConfirmationRequestSchema: {
+  properties: {
+    approve: {
+      description: string
+      title: string
+      type: "boolean"
+    }
+  }
+  required: string[]
+  type: "object"
+} = {
+  properties: {
+    approve: {
+      description: "Set true only after reviewing the non-exact cohort, fresh estimate, pre-dispatch ceilings, include roles, protected identities, audit reason, permission evidence, risks, one-shot operation key hash, and plan digest",
+      title: "Approve guild prune",
+      type: "boolean",
+    },
+  },
+  required: ["approve"],
+  type: "object",
+}
 const administrationRequestStateSchema = z.strictObject({
   action: z.enum(MEMBER_MODERATION_ACTIONS),
   auditReason: auditReasonSchema,
@@ -5817,6 +5872,20 @@ const bulkGuildBanRequestStateSchema = z.strictObject({
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
   targetSetDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   userIds: bulkGuildBanUserIdsSchema,
+})
+const guildPruneRequestStateSchema = z.strictObject({
+  acknowledgeNonExactMemberSet: z.literal(true),
+  auditReason: auditReasonSchema,
+  days: z.number().int()
+    .min(DISCORD_LIMITS.guildPruneDaysMinimum)
+    .max(DISCORD_LIMITS.guildPruneDaysMaximum),
+  guildId: positiveSnowflakeSchema,
+  includeRoleIds: guildPruneIncludeRoleIdsSchema,
+  maximumEstimatedMemberCount: z.number().int()
+    .min(1)
+    .max(CONNECTOR_LIMITS.guildPruneMaximumMembers),
+  operationKeyHash: z.string().regex(OPERATION_KEY_HASH_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
 })
 const channelCreationRequestStateSchema = z.strictObject({
   auditReason: auditReasonSchema,
@@ -6759,6 +6828,15 @@ const bulkGuildBanConflictReceiptSchema = z.strictObject({
   timestamp: z.iso.datetime({ offset: true }),
   verification: z.enum(["drift", "match"]).nullable(),
 })
+const guildPruneConflictReceiptSchema = z.strictObject({
+  activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN),
+  error: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable(),
+  guildId: positiveSnowflakeSchema,
+  operationKeyHash: z.string().regex(OPERATION_KEY_HASH_PATTERN),
+  status: z.enum(["completed", "failed", "pending", "uncertain"]),
+  timestamp: z.iso.datetime({ offset: true }),
+  verification: z.enum(["drift", "match"]).nullable(),
+})
 const memberVoiceConflictReceiptSchema = z.strictObject({
   activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN),
   error: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable(),
@@ -7282,6 +7360,7 @@ export interface DiscordToolService {
   executeReactionModeration: ConnectorService["executeReactionModeration"]
   executeMemberModeration: ConnectorService["executeMemberModeration"]
   executeBulkGuildBan: ConnectorService["executeBulkGuildBan"]
+  executeGuildPrune: ConnectorService["executeGuildPrune"]
   executeMemberNicknameChange: ConnectorService["executeMemberNicknameChange"]
   executeMemberRoleChange: ConnectorService["executeMemberRoleChange"]
   executeMemberVoiceChange: ConnectorService["executeMemberVoiceChange"]
@@ -7401,6 +7480,7 @@ export interface DiscordToolService {
   planReactionModeration: ConnectorService["planReactionModeration"]
   planMemberModeration: ConnectorService["planMemberModeration"]
   planBulkGuildBan: ConnectorService["planBulkGuildBan"]
+  planGuildPrune: ConnectorService["planGuildPrune"]
   planMemberNicknameChange: ConnectorService["planMemberNicknameChange"]
   planMemberRoleChange: ConnectorService["planMemberRoleChange"]
   planMemberVoiceChange: ConnectorService["planMemberVoiceChange"]
@@ -7529,6 +7609,32 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
       if (resultStatus === "partial" || resultStatus === "partial-with-drift") {
         status = "bulk-guild-ban-partial"
       }
+      if (resultStatus === "blocked-audit-failed") status = resultStatus
+      if (resultStatus === "completed-operation-record-failed") status = resultStatus
+      if (resultStatus === "completed-audit-failed") status = resultStatus
+    }
+    if (error.cause instanceof DiscordApiError && error.cause.status === 429) {
+      details.retryAfterMs = error.cause.retryAfterMs ?? null
+      status = "rate-limited"
+    }
+  }
+  if (error instanceof GuildPrunePlanChangedError) {
+    details.actualDigest = error.actualDigest
+    details.expectedDigest = error.expectedDigest
+  }
+  if (error instanceof GuildPruneOperationConflictError) {
+    const receipt = guildPruneConflictReceiptSchema.safeParse(error.receipt)
+    details.receipt = receipt.success
+      ? receipt.data
+      : { status: "unavailable" }
+    status = "operation-key-conflict"
+  }
+  if (error instanceof GuildPruneExecutionError) {
+    details.result = error.result
+    if (error.result && typeof error.result === "object" && "status" in error.result) {
+      const resultStatus = String(error.result.status)
+      if (resultStatus === "uncertain") status = "outcome-uncertain"
+      if (resultStatus === "failed") status = "guild-prune-failed"
       if (resultStatus === "blocked-audit-failed") status = resultStatus
       if (resultStatus === "completed-operation-record-failed") status = resultStatus
       if (resultStatus === "completed-audit-failed") status = resultStatus
@@ -8832,6 +8938,7 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
   if (error instanceof ComponentMessagePlanChangedError) status = "plan-changed"
   if (error instanceof AdministrationPlanChangedError) status = "plan-changed"
   if (error instanceof BulkGuildBanPlanChangedError) status = "plan-changed"
+  if (error instanceof GuildPrunePlanChangedError) status = "plan-changed"
   if (error instanceof ChannelCreationPlanChangedError) status = "plan-changed"
   if (error instanceof ChannelMetadataPlanChangedError) status = "plan-changed"
   if (error instanceof VoiceChannelStatusPlanChangedError) status = "plan-changed"
@@ -14732,6 +14839,114 @@ function bulkGuildBanConfirmationOutcome(
   }
 }
 
+function guildPruneRequest(
+  input: z.infer<typeof guildPrunePlanInputSchema>
+    | z.infer<typeof guildPruneExecuteInputSchema>,
+): GuildPruneRequest {
+  return {
+    acknowledgeNonExactMemberSet: true,
+    auditReason: input.auditReason,
+    days: input.days,
+    guildId: input.guildId,
+    ...(input.includeRoleIds !== undefined
+      ? { includeRoleIds: input.includeRoleIds }
+      : {}),
+    maximumEstimatedMemberCount: input.maximumEstimatedMemberCount,
+    operationKey: input.operationKey,
+  }
+}
+
+function guildPruneConfirmationMessage(
+  plan: Awaited<ReturnType<ConnectorService["planGuildPrune"]>>,
+  request: GuildPruneRequest,
+): string {
+  const protections = plan.protections.flatMap((protection, index) => [
+    `Protected identity ${index + 1}: ${protection.userId}`,
+    `- Sources: ${protection.sources.join(", ")}`,
+    `- Membership: ${protection.membership}`,
+    `- Protection: ${protection.protection}`,
+    `- Outside-cohort role IDs: ${protection.outsideCohortRoleIds.join(", ") || "none"}`,
+  ])
+  return [
+    `Approve one destructive Discord request to prune an estimated ${plan.estimatedMemberCount} non-exact guild members?`,
+    `Guild: ${plan.guildId}`,
+    `Pinned application ID: ${plan.applicationId}`,
+    `Pinned bot ID: ${plan.botId}`,
+    `Discord-defined inactivity threshold: ${plan.cohort.inactivityDays} days`,
+    `Include-role IDs that widen the cohort: ${plan.includeRoleIds.join(", ") || "none"}`,
+    `Reviewed estimate: ${plan.estimatedMemberCount}`,
+    `Request pre-dispatch ceiling: ${plan.maximumEstimatedMemberCount}`,
+    `Policy pre-dispatch ceiling: ${plan.policyMaximumMemberCount}`,
+    `Exact candidate member IDs available: ${plan.cohort.exactMemberIdsAvailable}`,
+    `Roleless members always included: ${plan.cohort.rolelessMembersAlwaysIncluded}`,
+    ...protections,
+    `Discord audit-log reason: ${JSON.stringify(request.auditReason)}`,
+    `Required bot permissions: ${plan.permission.required.join(", ")}`,
+    `Effective bot permissions: ${plan.permission.effectivePermissionNames.join(", ")}`,
+    `Bot highest role position: ${plan.permission.botHighestRolePosition}`,
+    `Estimated planning evidence requests: ${plan.estimatedRequests.planningEvidence}`,
+    `Estimated destructive requests: ${plan.estimatedRequests.destructive}`,
+    `One-shot operation key hash: ${plan.operationKeyHash}`,
+    `Plan digest: ${plan.digest}`,
+    "Risks:",
+    ...plan.risks.map((risk) => `- ${risk}`),
+    "Warnings:",
+    ...plan.warnings.map((warning) => `- ${warning}`),
+    "Discord never reveals the candidate or removed member IDs. Neither ceiling is enforced by Discord during the mutation, so external changes after the final estimate can change or increase the actual count.",
+    "Execution claims the guild member collection, @everyone, and every selected role, reserves the one-shot key, writes pending content-free activity, and dispatches one non-retried request with count computation enabled.",
+    "Set approve to true only after checking the cohort definition, count estimate, ceilings, role widening, protections, reason, permissions, risks, warnings, operation-key hash, and plan digest.",
+  ].join("\n")
+}
+
+function guildPruneRequestStatePayload(
+  request: GuildPruneRequest,
+  planDigest: string,
+) {
+  const normalized = normalizeGuildPruneRequest(request)
+  return {
+    acknowledgeNonExactMemberSet: true,
+    auditReason: normalized.auditReason,
+    days: normalized.days,
+    guildId: normalized.guildId,
+    includeRoleIds: normalized.includeRoleIds,
+    maximumEstimatedMemberCount: normalized.maximumEstimatedMemberCount,
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest,
+  }
+}
+
+function validGuildPruneRequestState(
+  value: unknown,
+  request: GuildPruneRequest,
+  planDigest: string,
+): boolean {
+  const parsed = guildPruneRequestStateSchema.safeParse(value)
+  if (!parsed.success) return false
+  return stableString(parsed.data) === stableString(
+    guildPruneRequestStatePayload(request, planDigest),
+  )
+}
+
+function guildPruneConfirmationOutcome(
+  request: GuildPruneRequest,
+  planDigest: string,
+  status: string,
+  reason: string,
+) {
+  const normalized = normalizeGuildPruneRequest(request)
+  return {
+    days: normalized.days,
+    guildId: normalized.guildId,
+    includeRoleIds: normalized.includeRoleIds,
+    maximumEstimatedMemberCount: normalized.maximumEstimatedMemberCount,
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest,
+    reason,
+    schemaVersion: SCHEMA_VERSION,
+    status,
+  }
+}
+
 function assertGuildChannelLayoutGateway(
   config: ConnectorConfig,
   gateway: GatewayEventSource,
@@ -14897,6 +15112,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Role ordering uses a separate exact guild scope: call audit_role_order for the complete canonical hierarchy, or call plan_role_order with one exact target role, anchor role, and above-or-below placement. Review current and desired ranks, the complete affected segment, aggregate holder assignments, hierarchy-sensitive permissions, connector hierarchy and MANAGE_ROLES evidence, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_role_order with identical inputs and the digest. Execution requires signed interactive approval and durable guild-role coordination, sends one non-retried target-position PATCH, and verifies the complete response and fresh hierarchy. @everyone, managed roles, connector-held roles, unsafe affected segments, unknown future fields, arbitrary numeric positions, metadata changes, permission changes, membership changes, retries, and rollback are unsupported. An uncertain outcome quarantines the guild role collection.",
       "Member moderation accepts exact guild and user IDs only. Choose a unique one-shot operation key, call plan_member_moderation, and review the pinned application and bot identities, target, action, parameters, audit reason, complete permission and hierarchy evidence, privacy boundary, risks, warnings, operation-key hash, readback boundary, and keyed digest. Then call execute_member_moderation with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, one-shot receipt reservation, pending content-free activity, one non-retried mutation, and exact fresh readback. Never retry after reservation or an uncertain outcome.",
       "Bulk guild bans require a separate exact guild scope and capability. Choose a unique one-shot operation key, call plan_bulk_guild_ban with two through the Discord endpoint maximum of unique exact user IDs, and review every pinned identity, transient target profile, membership and ban state, complete BAN_MEMBERS plus MANAGE_GUILD permission and hierarchy evidence, batch-wide message deletion window, audit reason, request estimates, privacy boundary, partial-success risk, warnings, operation-key hash, target-set digest, readback boundary, and keyed plan digest. Then call execute_bulk_guild_ban with identical inputs and the digest. Execution requires signed interactive approval, durable coordination across the complete exact target set, pending content-free activity, one non-retried batch request, and fresh exact ban readback for every target. Successful bans are never rolled back, failed subsets are never retried automatically, and any later action requires a new plan and key.",
+      "Guild pruning requires separate non-exact audit and execution capabilities, an exact guild allowlist, an independent toolset, an operator policy ceiling, and exact allowlisting for every role used to widen the cohort. Call plan_guild_prune with literal acknowledgement that Discord never reveals candidate or removed member IDs, review the fresh estimated count, request and policy pre-dispatch ceilings, inactivity window, role semantics, connector permissions, protected-identity shields, risks, warnings, operation-key hash, and keyed digest, then call execute_guild_prune with identical inputs and the digest. Execution requires signed interactive approval, guild-wide member and exact-role coordination, pending content-free activity, and one non-retried request with count computation. Discord does not enforce either ceiling during mutation; response-count drift is explicit and an ambiguous outcome quarantines the member collection for operator review.",
       "Never bypass a disabled policy, protected target, changed plan, interaction guard, or interactive confirmation.",
     ]
   const server = new McpServer(
@@ -24367,6 +24583,152 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
           [BULK_GUILD_BAN_CONFIRMATION_KEY]: inputRequired.elicit({
             message: bulkGuildBanConfirmationMessage(plan, request),
             requestedSchema: bulkGuildBanConfirmationRequestSchema,
+          }),
+        },
+        requestState: signedState,
+      })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("plan_guild_prune", server.registerTool(
+    "plan_guild_prune",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Prepare a process-bound keyed plan for one bounded non-exact Discord guild prune. Verifies pinned identity, exact guild and include-role policy, complete KICK_MEMBERS plus MANAGE_GUILD evidence, safe role widening, protected-identity shields, a fresh native count estimate, two pre-dispatch ceilings, and the one-shot operation key without writing or claiming unavailable member IDs.",
+      inputSchema: guildPrunePlanInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Plan bounded Discord guild prune",
+    },
+    safeToolHandler("plan_guild_prune", async (
+      input: z.infer<typeof guildPrunePlanInputSchema>,
+      context,
+    ) => {
+      const request = guildPruneRequest(input)
+      const result = await service.planGuildPrune(request, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord guild prune plan ${result.digest} estimates ${result.estimatedMemberCount} non-exact members in guild ${result.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("execute_guild_prune", server.registerTool(
+    "execute_guild_prune",
+    {
+      annotations: DESTRUCTIVE_ANNOTATIONS,
+      description: "Execute one bounded non-exact Discord guild prune after host write approval, signed interactive approval, a final fresh matching count plan, durable guild-member and exact-role coordination, one-shot receipt reservation, and pending content-free activity. Dispatches once without retry and settles only from Discord's strict returned count; exact member IDs remain unavailable.",
+      inputSchema: guildPruneExecuteInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Execute reviewed Discord guild prune",
+    },
+    safeToolHandler("execute_guild_prune", async (
+      input: z.infer<typeof guildPruneExecuteInputSchema>,
+      context,
+    ) => {
+      const request = guildPruneRequest(input)
+      const requestState = context.mcpReq.requestState()
+      if (requestState !== undefined) {
+        if (!validGuildPruneRequestState(requestState, request, input.planDigest)) {
+          const result = guildPruneConfirmationOutcome(
+            request,
+            input.planDigest,
+            "confirmation-invalid",
+            "Signed confirmation state does not match the exact guild, inactivity window, include roles, non-exact acknowledgement, pre-dispatch ceiling, audit reason, one-shot operation key hash, or plan digest",
+          )
+          return toolResult(result, result.reason, { isError: true })
+        }
+        const response = inputResponse(
+          context.mcpReq.inputResponses,
+          GUILD_PRUNE_CONFIRMATION_KEY,
+        )
+        if (response.kind === "elicit" && ["cancel", "decline"].includes(response.action)) {
+          const reason = response.action === "cancel"
+            ? "Discord guild prune confirmation was canceled"
+            : "Discord guild prune confirmation was declined"
+          const result = guildPruneConfirmationOutcome(
+            request,
+            input.planDigest,
+            "confirmation-declined",
+            reason,
+          )
+          return toolResult(result, reason)
+        }
+        const confirmation = acceptedContent(
+          context.mcpReq.inputResponses,
+          GUILD_PRUNE_CONFIRMATION_KEY,
+          administrationConfirmationSchema,
+        )
+        if (!confirmation || confirmation.approve !== true) {
+          const result = guildPruneConfirmationOutcome(
+            request,
+            input.planDigest,
+            "confirmation-invalid",
+            "Discord guild prune requires explicit approval of the displayed non-exact cohort plan",
+          )
+          return toolResult(result, result.reason, { isError: true })
+        }
+        const result = await service.executeGuildPrune(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        )
+        const summary = result.status === "completed"
+          ? "completed with a returned count matching the reviewed estimate"
+          : result.status === "completed-with-drift"
+            ? "completed with returned-count drift"
+            : "required no write because the fresh reviewed estimate was zero"
+        return toolResult(
+          result,
+          `Discord guild prune ${summary} in guild ${result.guildId}; exact member IDs are unavailable`,
+        )
+      }
+      if (context.mcpReq.inputResponses !== undefined) {
+        const result = guildPruneConfirmationOutcome(
+          request,
+          input.planDigest,
+          "confirmation-invalid",
+          "Discord confirmation responses require signed request state",
+        )
+        return toolResult(result, result.reason, { isError: true })
+      }
+
+      const plan = await service.planGuildPrune(request, {
+        signal: context.mcpReq.signal,
+      })
+      if (plan.digest !== input.planDigest) {
+        const normalized = normalizeGuildPruneRequest(request)
+        const result = {
+          actualDigest: plan.digest,
+          expectedDigest: input.planDigest,
+          guildId: normalized.guildId,
+          reason: "The fresh Discord guild, role, protected-member, permission, or prune-count evidence does not match the requested guild-prune digest",
+          schemaVersion: SCHEMA_VERSION,
+          status: "plan-changed",
+        }
+        return toolResult(result, result.reason, { isError: true })
+      }
+      if (!plan.writeRequired) {
+        const result = await service.executeGuildPrune(
+          request,
+          input.planDigest,
+          { signal: context.mcpReq.signal },
+        )
+        return toolResult(
+          result,
+          `Discord guild prune required no write because the reviewed estimate is zero in guild ${result.guildId}`,
+        )
+      }
+      const signedState = await requestStateCodec.mint(
+        guildPruneRequestStatePayload(request, input.planDigest),
+        context,
+      )
+      return inputRequired({
+        inputRequests: {
+          [GUILD_PRUNE_CONFIRMATION_KEY]: inputRequired.elicit({
+            message: guildPruneConfirmationMessage(plan, request),
+            requestedSchema: guildPruneConfirmationRequestSchema,
           }),
         },
         requestState: signedState,

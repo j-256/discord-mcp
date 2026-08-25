@@ -261,6 +261,11 @@ function status(
       guildProfileAuditEnabled: false,
       guildProfileChangesEnabled: false,
       guildProfileGuildIds: [],
+      guildPruneAuditEnabled: false,
+      guildPruneGuildIds: [],
+      guildPruneIncludeRoleIds: [],
+      guildPruneMaxMembers: 0,
+      guildPrunesEnabled: false,
       guildSettingsAuditEnabled: false,
       guildSettingsChangesEnabled: false,
       guildSettingsGuildIds: [],
@@ -523,6 +528,7 @@ function toolService(): DiscordToolService {
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
     executeBulkGuildBan: unexpected,
+    executeGuildPrune: unexpected,
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
@@ -577,6 +583,7 @@ function toolService(): DiscordToolService {
     verifyGuildScaffold: unexpected,
     planMemberModeration: unexpected,
     planBulkGuildBan: unexpected,
+    planGuildPrune: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
     planRoleDeletion: unexpected,
@@ -1176,6 +1183,60 @@ test("doctor and setup explain reviewed native bulk-ban boundaries without Disco
   assert.match(changes?.summary || "", /one non-retried native batch request/)
   assert.match(changes?.summary || "", /explicit partial outcomes/)
   assert.match(omitted.warnings.join("\n"), /bulk-bans toolset/)
+})
+
+test("doctor and setup explain bounded non-exact guild-prune boundaries without Discord writes", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      guildPruneAudit: true,
+      guildPrunes: true,
+    },
+    limits: {
+      guildPruneMaxMembers: 12,
+    },
+    scopes: {
+      guildPruneGuildIds: [GUILD_ID],
+      guildPruneIncludeRoleIds: ["300000000000000001"],
+      protectedUserIds: ["400000000000000001"],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: fixturePolicy({
+      capabilities: {
+        guildPruneAudit: true,
+        guildPrunes: true,
+      },
+      scopes: {
+        guildPruneGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
+    }),
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildPruneAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildPruneChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /1 exact guilds/)
+  assert.match(audit?.summary || "", /1 optional include roles/)
+  assert.match(audit?.summary || "", /12-member policy ceiling/)
+  assert.match(audit?.summary || "", /KICK_MEMBERS plus MANAGE_GUILD/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /two pre-dispatch count ceilings/)
+  assert.match(changes?.summary || "", /durable member-collection and exact-role claims/)
+  assert.match(changes?.summary || "", /returned-count settlement/)
+  assert.match(changes?.summary || "", /no exact-member or rollback claim/)
+  assert.match(omitted.warnings.join("\n"), /guild-prunes toolset/)
 })
 
 test("doctor and setup explain reviewed channel-creation scope without Discord writes", async () => {
@@ -5129,6 +5190,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_incident_action_change",
     "review_guild_integration_deletion",
     "review_guild_profile_change",
+    "review_guild_prune",
     "review_guild_scaffold",
     "review_guild_settings_change",
     "review_guild_template_change",
@@ -5238,6 +5300,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_guild_incident_action_change",
     "execute_guild_integration_deletion",
     "execute_guild_profile_change",
+    "execute_guild_prune",
     "execute_guild_settings_change",
     "execute_guild_soundboard_change",
     "execute_guild_template_change",

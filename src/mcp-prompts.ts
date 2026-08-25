@@ -1931,6 +1931,46 @@ const reviewBulkGuildBanPromptSchema = z.strictObject({
   userIds: bulkGuildBanUserIdsPromptSchema.describe("Exact comma-separated user ID set"),
 })
 
+const guildPruneIncludeRoleIdsPromptSchema = z.string()
+  .max(
+    (DISCORD_LIMITS.snowflakeCharacters + 1)
+    * CONNECTOR_LIMITS.guildPruneIncludeRoles
+    - 1,
+  )
+  .refine((value) => {
+    if (value === "") return true
+    const roleIds = value.split(",")
+    return roleIds.length <= CONNECTOR_LIMITS.guildPruneIncludeRoles
+      && new Set(roleIds).size === roleIds.length
+      && roleIds.every((roleId) => (
+        positiveSnowflakeSchema.safeParse(roleId).success
+        && BigInt(roleId).toString() === roleId
+      ))
+  }, `includeRoleIds must be empty or a comma-separated list of at most ${CONNECTOR_LIMITS.guildPruneIncludeRoles} unique canonical positive Discord snowflakes without spaces`)
+const reviewGuildPrunePromptSchema = z.strictObject({
+  acknowledgeNonExactMemberSet: z.literal("true")
+    .describe("Required acknowledgment that Discord never exposes candidate or removed member IDs"),
+  auditReason: promptAuditReasonSchema.describe("Reason for the Discord audit log"),
+  days: decimalIntegerSchema(
+    DISCORD_LIMITS.guildPruneDaysMinimum,
+    DISCORD_LIMITS.guildPruneDaysMaximum,
+    "days",
+  ).describe("Discord-defined inactivity threshold in days"),
+  guildId: positiveSnowflakeSchema.describe("Exact separately allowlisted guild-prune guild ID"),
+  includeRoleIds: guildPruneIncludeRoleIdsPromptSchema
+    .describe("Empty or exact comma-separated allowlisted role IDs that widen the cohort"),
+  maximumEstimatedMemberCount: decimalIntegerSchema(
+    1,
+    CONNECTOR_LIMITS.guildPruneMaximumMembers,
+    "maximumEstimatedMemberCount",
+  ).describe("Caller-selected pre-dispatch estimate ceiling, also bounded by local policy"),
+  operationKey: z.string()
+    .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
+    .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
+    .regex(IDEMPOTENCY_KEY_PATTERN)
+    .describe("Unique one-shot operation key; keep it unchanged through review and never reuse it after reservation"),
+})
+
 const reviewMemberModerationPromptSchema = z.strictObject({
   action: z.enum(MEMBER_MODERATION_ACTIONS).describe("Exact moderation action"),
   auditReason: promptAuditReasonSchema.describe("Reason for the Discord audit log"),
@@ -4204,6 +4244,48 @@ export function registerDiscordPrompts(
           ],
         ),
         "Plan-only Discord bulk guild-ban review",
+        secrets,
+      )
+    },
+  )
+  if (toolsets.has("guild-prunes")) server.registerPrompt(
+    MCP_PROMPT_NAMES.reviewGuildPrune,
+    {
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewGuildPrune,
+        reviewGuildPrunePromptSchema,
+        completionPolicy,
+      ),
+      description: "Create and review one bounded non-exact guild-prune plan without executing it.",
+      title: "Review Discord guild prune",
+    },
+    (input) => {
+      const toolInput = {
+        acknowledgeNonExactMemberSet: true,
+        auditReason: input.auditReason,
+        days: parseDecimalInteger(input.days),
+        guildId: input.guildId,
+        ...(input.includeRoleIds === ""
+          ? {}
+          : { includeRoleIds: input.includeRoleIds.split(",") }),
+        maximumEstimatedMemberCount: parseDecimalInteger(
+          input.maximumEstimatedMemberCount,
+        ),
+        operationKey: input.operationKey,
+      }
+      return userPrompt(
+        promptText(
+          toolInput,
+          [
+            "1. Call only plan_guild_prune with the exact fields from the input object.",
+            "2. Present the pinned application and bot IDs, Discord-defined inactivity threshold, include-role cohort rule, fresh estimated count, request and policy ceilings, complete KICK_MEMBERS plus MANAGE_GUILD evidence, selected role evidence, every protected identity and shield, privacy projection, request estimates, risks, warnings, one-shot operation-key hash, verification boundary, creation time, and keyed plan digest for review.",
+            "3. Identify an unsafe or unallowlisted role, protected identity without an outside-cohort role shield, insufficient or unknown permission, hierarchy conflict, estimate above either ceiling, spent operation key, or changed evidence as a blocker.",
+            "4. Explain that Discord never exposes exact candidate or removed member IDs, does not enforce either count ceiling during mutation, and returns only a count as settled outcome evidence.",
+            "5. Explain that execution performs a final fresh plan, requires signed interactive approval, claims the guild member collection and exact roles, reserves the one-shot key, writes pending content-free activity, and sends one non-retried request without rollback.",
+            "6. Stop after reviewing the plan. Do not call execute_guild_prune in this workflow, even if the plan appears correct.",
+          ],
+        ),
+        "Plan-only Discord guild-prune review",
         secrets,
       )
     },

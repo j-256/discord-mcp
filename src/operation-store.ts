@@ -45,6 +45,7 @@ export const OPERATION_KINDS = [
   "guild-expression-change",
   "guild-incident-action-change",
   "guild-profile-change",
+  "guild-prune",
   "guild-scaffold",
   "guild-settings-change",
   "guild-template-change",

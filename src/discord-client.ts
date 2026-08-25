@@ -1295,6 +1295,10 @@ export interface DiscordBulkGuildBanResponse {
   failedUserIds: string[]
 }
 
+export interface DiscordGuildPruneResponse {
+  pruned: number
+}
+
 export interface ModifyCurrentApplicationFlagsInput {
   flags: number
 }
@@ -1422,6 +1426,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "add_own_reaction",
   "add_thread_member",
   "bulk_guild_ban",
+  "begin_guild_prune",
   "crosspost_message",
   "create_application_emoji",
   "create_component_message",
@@ -8017,6 +8022,44 @@ function projectBulkGuildBanResponse(
   }
 }
 
+function projectGuildPruneResponse(value: unknown): DiscordGuildPruneResponse {
+  const invalid = (): DiscordTransportError => new DiscordTransportError(
+    "Discord returned invalid guild prune evidence",
+    "discord-client-error",
+  )
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid()
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).join("\0") !== "pruned") throw invalid()
+  if (!Number.isSafeInteger(record.pruned) || (record.pruned as number) < 0) throw invalid()
+  return { pruned: record.pruned as number }
+}
+
+function assertGuildPruneParameters(
+  guildId: string,
+  days: number,
+  includeRoleIds: readonly string[],
+): void {
+  assertPositiveSnowflake(guildId, "Discord guild prune guild ID")
+  assertIntegerRange(
+    days,
+    DISCORD_LIMITS.guildPruneDaysMinimum,
+    DISCORD_LIMITS.guildPruneDaysMaximum,
+    "Discord guild prune inactivity days",
+  )
+  if (
+    !Array.isArray(includeRoleIds)
+    || includeRoleIds.length > DISCORD_LIMITS.guildPruneIncludeRoles
+    || new Set(includeRoleIds).size !== includeRoleIds.length
+  ) {
+    throw new RangeError(
+      `Discord guild prune include roles must contain at most ${DISCORD_LIMITS.guildPruneIncludeRoles} unique IDs`,
+    )
+  }
+  for (const roleId of includeRoleIds) {
+    assertPositiveSnowflake(roleId, "Discord guild prune include-role ID")
+  }
+}
+
 function projectGuildApplicationCommandPermissions(
   value: unknown,
   applicationId: string,
@@ -10843,6 +10886,57 @@ export class DiscordClient {
       diagnosticRoute: "/guilds/{guild.id}/bans/{user.id}",
       suppressFailureCause: true,
     })
+  }
+
+  async getGuildPruneCount(
+    guildId: string,
+    days: number,
+    includeRoleIds: readonly string[],
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildPruneResponse> {
+    assertGuildPruneParameters(guildId, days, includeRoleIds)
+    const route = `/guilds/${guildId}/prune${queryString({
+      days,
+      include_roles: includeRoleIds.length > 0 ? includeRoleIds.join(",") : undefined,
+    })}`
+    const response = await this.#request<unknown>("get_guild_prune_count", route, {
+      ...options,
+      diagnosticRoute: "/guilds/{guild.id}/prune",
+      expectedSuccessStatus: 200,
+      maxResponseBytes: DISCORD_LIMITS.guildPruneResponseBytes,
+      suppressFailureCause: true,
+    })
+    return projectGuildPruneResponse(response)
+  }
+
+  async beginGuildPrune(
+    guildId: string,
+    days: number,
+    includeRoleIds: readonly string[],
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildPruneResponse> {
+    assertGuildPruneParameters(guildId, days, includeRoleIds)
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "begin_guild_prune",
+      `/guilds/${guildId}/prune`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          compute_prune_count: true,
+          days,
+          ...(includeRoleIds.length > 0 ? { include_roles: includeRoleIds } : {}),
+        },
+        diagnosticRoute: "/guilds/{guild.id}/prune",
+        expectedSuccessStatus: 200,
+        maxResponseBytes: DISCORD_LIMITS.guildPruneResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildPruneResponse(response)
   }
 
   async bulkGuildBan(

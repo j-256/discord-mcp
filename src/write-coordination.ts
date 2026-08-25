@@ -12,7 +12,11 @@ import {
 } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
-import { DISCORD_LIMITS, DISCORD_SNOWFLAKE_PATTERN } from "./constants.js"
+import {
+  CONNECTOR_LIMITS,
+  DISCORD_LIMITS,
+  DISCORD_SNOWFLAKE_PATTERN,
+} from "./constants.js"
 import {
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
@@ -47,6 +51,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "incident-actions",
   "invites",
   "integrations",
+  "members",
   "onboarding",
   "roles",
   "scheduled-events",
@@ -185,8 +190,8 @@ const MAX_CLAIM_BYTES = 16_384
 const MAX_RESOLUTION_BYTES = 32_768
 const MAX_TARGETS = 8
 const MAX_DELETION_TARGETS = 100
-const MAX_BULK_GUILD_BAN_TARGETS = DISCORD_LIMITS.bulkGuildBanUsers
-const MAX_ROLE_DELETION_TARGETS = 9
+const MAX_BULK_GUILD_BAN_TARGETS = DISCORD_LIMITS.bulkGuildBanUsers + 1
+const MAX_ROLE_DELETION_TARGETS = 10
 const CLAIM_FILE = "claim.json"
 const ACKNOWLEDGEMENT_FILE = "acknowledgement.json"
 const RESOLUTION_REASON = "operator-reviewed"
@@ -324,10 +329,16 @@ function normalizeTargets(
     ? MAX_DELETION_TARGETS
     : kind === "bulk-guild-ban"
       ? MAX_BULK_GUILD_BAN_TARGETS
-      : kind === "role-deletion"
-        ? MAX_ROLE_DELETION_TARGETS
-        : MAX_TARGETS
-  const minimum = kind === "bulk-guild-ban" ? 2 : 1
+      : kind === "guild-prune"
+        ? CONNECTOR_LIMITS.guildPruneIncludeRoles + 2
+        : kind === "role-deletion"
+          ? MAX_ROLE_DELETION_TARGETS
+          : MAX_TARGETS
+  const minimum = kind === "bulk-guild-ban"
+    ? 3
+    : kind === "guild-prune"
+      ? 2
+      : 1
   if (!Array.isArray(values) || values.length < minimum || values.length > maximum) {
     throw new WriteCoordinationStateError(
       `Discord write coordination requires ${minimum}-${maximum} targets for ${kind}`,
@@ -343,15 +354,41 @@ function normalizeTargets(
     }
     byDescriptor.set(targetDescriptor(target), target)
   }
+  if (kind === "bulk-guild-ban") {
+    const targets = [...byDescriptor.values()]
+    const memberTargets = targets.filter((target) => target.kind === "member")
+    const collectionTargets = targets.filter((target) => (
+      target.kind === "guild-collection" && target.collection === "members"
+    ))
+    if (
+      byDescriptor.size !== values.length
+      || memberTargets.length < 2
+      || collectionTargets.length !== 1
+      || memberTargets.length + collectionTargets.length !== targets.length
+    ) {
+      throw new WriteCoordinationStateError(
+        "Discord bulk guild ban coordination requires one member collection and unique exact members",
+      )
+    }
+  }
   if (
-    kind === "bulk-guild-ban"
+    kind === "guild-prune"
     && (
       byDescriptor.size !== values.length
-      || [...byDescriptor.values()].some((target) => target.kind !== "member")
+      || [...byDescriptor.values()].filter((target) => (
+        target.kind === "guild-collection" && target.collection === "members"
+      )).length !== 1
+      || [...byDescriptor.values()].filter((target) => target.kind === "role").length < 1
+      || [...byDescriptor.values()].some((target) => (
+        target.kind !== "guild-collection" && target.kind !== "role"
+      ))
+      || [...byDescriptor.values()].some((target) => (
+        target.kind === "guild-collection" && target.collection !== "members"
+      ))
     )
   ) {
     throw new WriteCoordinationStateError(
-      "Discord bulk guild ban coordination requires unique exact member targets",
+      "Discord guild prune coordination requires one member collection and exact roles",
     )
   }
   if (isApplicationOperationKind(kind) && byDescriptor.size !== 1) {

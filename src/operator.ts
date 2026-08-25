@@ -82,7 +82,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 25
+export const OPERATOR_REPORT_SCHEMA_VERSION = 26
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -111,6 +111,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   banAuditPolicy: "ban-audit-policy",
   bulkBanAuditPolicy: "bulk-ban-audit-policy",
   bulkBanChangePolicy: "bulk-ban-change-policy",
+  guildPruneAuditPolicy: "guild-prune-audit-policy",
+  guildPruneChangePolicy: "guild-prune-change-policy",
   botIdentity: "bot-identity",
   channelCloneAuditPolicy: "channel-clone-audit-policy",
   channelCloneChangePolicy: "channel-clone-change-policy",
@@ -547,6 +549,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowBulkBans && !config.allowBulkBanAudit) {
     warnings.push("The bulk-ban change toggle is enabled but execution remains blocked because reviewed bulk-ban audit is disabled")
   }
+  if (config.allowGuildPruneAudit && config.guildPruneGuildIds.size === 0) {
+    warnings.push("The guild-prune audit toggle is enabled but planning remains blocked because no exact guild-prune guild allowlist is configured")
+  }
+  if (config.allowGuildPrunes && !config.allowGuildPruneAudit) {
+    warnings.push("The guild-prune change toggle is enabled but execution remains blocked because reviewed guild-prune audit is disabled")
+  }
   if (config.allowChannelCreation && config.channelCreationGuildIds.size === 0) {
     warnings.push("The channel-creation toggle is enabled but channel creation remains blocked because no channel-creation guild allowlist is configured")
   }
@@ -790,6 +798,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowBulkBanAudit || config.allowBulkBans,
       "bulk-bans",
       "Reviewed bulk guild bans",
+    ],
+    [
+      config.allowGuildPruneAudit || config.allowGuildPrunes,
+      "guild-prunes",
+      "Reviewed bounded guild pruning",
     ],
     [
       config.allowApplicationEmojiAudit || config.allowApplicationEmojiChanges,
@@ -1349,6 +1362,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.bulkBanChangePolicy,
         "pass",
         `Bulk guild-ban execution is constrained to ${config.bulkBanGuildIds.size} exact guilds with complete-set durable member claims, signed approval, one non-retried native batch request, explicit partial outcomes, and exact per-target readback`,
+      ))
+    }
+    if (!config.allowGuildPruneAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildPruneAuditPolicy,
+        "pass",
+        "Reviewed bounded guild-prune planning is disabled",
+      ))
+    } else if (config.guildPruneGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildPruneAuditPolicy,
+        "warn",
+        "Guild-prune audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildPruneAuditPolicy,
+        "pass",
+        `Guild-prune planning is constrained to ${config.guildPruneGuildIds.size} exact guilds, ${config.guildPruneIncludeRoleIds.size} optional include roles, a ${config.guildPruneMaxMembers}-member policy ceiling, protected-identity role shields, complete KICK_MEMBERS plus MANAGE_GUILD evidence, and no writes`,
+      ))
+    }
+    if (!config.allowGuildPrunes) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildPruneChangePolicy,
+        "pass",
+        "Reviewed bounded guild-prune execution is disabled",
+      ))
+    } else if (!config.allowGuildPruneAudit || config.guildPruneGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildPruneChangePolicy,
+        "warn",
+        "Guild-prune execution is enabled, but reviewed audit and a non-empty exact guild allowlist are required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildPruneChangePolicy,
+        "pass",
+        `Guild-prune execution is constrained to ${config.guildPruneGuildIds.size} exact guilds with two pre-dispatch count ceilings, signed approval, durable member-collection and exact-role claims, one non-retried request, returned-count settlement, and no exact-member or rollback claim`,
       ))
     }
     if (!config.allowChannelCreation) {

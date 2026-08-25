@@ -141,6 +141,24 @@ const BULK_GUILD_BAN_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "timestamp",
   "verification",
 ])
+const GUILD_PRUNE_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "actualPrunedCount",
+  "days",
+  "error",
+  "guildId",
+  "id",
+  "includeRoleIds",
+  "kind",
+  "maximumEstimatedMemberCount",
+  "operationKeyHash",
+  "planDigest",
+  "policyMaximumMemberCount",
+  "reviewedEstimatedMemberCount",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+])
 
 export type DeletionActivityStatus =
   | "completed"
@@ -241,6 +259,32 @@ export interface BulkGuildBanActivity {
   responseFailedUserIds: string[]
   schemaVersion: number
   status: BulkGuildBanActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
+export type GuildPruneActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildPruneActivity {
+  actualPrunedCount: number | null
+  days: number
+  error: string | null
+  guildId: string
+  id: string
+  includeRoleIds: string[]
+  kind: "guild-prune"
+  maximumEstimatedMemberCount: number
+  operationKeyHash: string
+  planDigest: string
+  policyMaximumMemberCount: number
+  reviewedEstimatedMemberCount: number
+  schemaVersion: number
+  status: GuildPruneActivityStatus
   timestamp: string
   verification: "drift" | "match" | null
 }
@@ -1334,6 +1378,7 @@ export type ActivityEntry =
   | GuildExpressionActivity
   | GuildIncidentActivity
   | GuildProfileActivity
+  | GuildPruneActivity
   | GuildSettingsActivity
   | GuildTemplateActivity
   | InteractionActivity
@@ -1889,6 +1934,109 @@ function parseBulkGuildBanActivity(
     responseFailedUserIds,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as BulkGuildBanActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseGuildPruneActivity(value: unknown): GuildPruneActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const status = String(record.status)
+  if (
+    Object.keys(record).length !== GUILD_PRUNE_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !GUILD_PRUNE_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-prune"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || !Number.isInteger(record.days)
+    || (record.days as number) < DISCORD_LIMITS.guildPruneDaysMinimum
+    || (record.days as number) > DISCORD_LIMITS.guildPruneDaysMaximum
+    || !canonicalActivitySnowflakeIds(
+      record.includeRoleIds,
+      0,
+      CONNECTOR_LIMITS.guildPruneIncludeRoles,
+    )
+    || !Number.isInteger(record.maximumEstimatedMemberCount)
+    || (record.maximumEstimatedMemberCount as number) < 1
+    || (record.maximumEstimatedMemberCount as number) > CONNECTOR_LIMITS.guildPruneMaximumMembers
+    || !Number.isInteger(record.policyMaximumMemberCount)
+    || (record.policyMaximumMemberCount as number) < 1
+    || (record.policyMaximumMemberCount as number) > CONNECTOR_LIMITS.guildPruneMaximumMembers
+    || !Number.isSafeInteger(record.reviewedEstimatedMemberCount)
+    || (record.reviewedEstimatedMemberCount as number) < 0
+    || (record.reviewedEstimatedMemberCount as number) > (record.maximumEstimatedMemberCount as number)
+    || (record.reviewedEstimatedMemberCount as number) > (record.policyMaximumMemberCount as number)
+    || !(record.actualPrunedCount === null || (
+      Number.isSafeInteger(record.actualPrunedCount)
+      && (record.actualPrunedCount as number) >= 0
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+  ) {
+    return undefined
+  }
+  const actualPrunedCount = record.actualPrunedCount as number | null
+  const reviewedEstimatedMemberCount = record.reviewedEstimatedMemberCount as number
+  if (
+    (status === "pending" && (
+      actualPrunedCount !== null
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      actualPrunedCount !== reviewedEstimatedMemberCount
+      || record.error !== null
+      || record.verification !== "match"
+    ))
+    || (status === "completed-with-drift" && (
+      actualPrunedCount === null
+      || actualPrunedCount === reviewedEstimatedMemberCount
+      || record.error !== null
+      || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      actualPrunedCount !== null
+      || record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    actualPrunedCount,
+    days: record.days as number,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    includeRoleIds: record.includeRoleIds as string[],
+    kind: "guild-prune",
+    maximumEstimatedMemberCount: record.maximumEstimatedMemberCount as number,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    policyMaximumMemberCount: record.policyMaximumMemberCount as number,
+    reviewedEstimatedMemberCount,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GuildPruneActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
@@ -5334,6 +5482,7 @@ function parseStageInstanceActivity(
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAnnouncementCrosspostActivity(value)
     || parseBulkGuildBanActivity(value)
+    || parseGuildPruneActivity(value)
     || parseMessageForwardActivity(value)
     || parseAnnouncementSubscriptionActivity(value)
     || parseNativeInteractionCommandActivity(value)

@@ -450,6 +450,7 @@ test("coordination accepts one exact maximum-size deletion batch and rejects exp
 
 test("coordination requires two through 200 unique member targets for bulk guild bans", async (context) => {
   const { coordinator, directory } = await fixture(context)
+  const memberCollection = writeGuildCollectionTarget("members", GUILD_ID)
   const memberTargets = Array.from(
     { length: 200 },
     (_, index) => writeResourceTarget(
@@ -462,19 +463,19 @@ test("coordination requires two through 200 unique member targets for bulk guild
     kind: "bulk-guild-ban",
     operationKeyHash: operationKeyHash(OPERATION_KEY),
     planDigest: PLAN_DIGEST,
-    targets: memberTargets,
+    targets: [memberCollection, ...memberTargets],
   }, async () => (await claimFiles(directory)).length)
 
-  assert.equal(publishedTargets, 200)
+  assert.equal(publishedTargets, 201)
   assert.deepEqual(await claimFiles(directory), [])
   await assert.rejects(
     () => coordinator.run({
       kind: "bulk-guild-ban",
       operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
       planDigest: PLAN_DIGEST,
-      targets: memberTargets.slice(0, 1),
+      targets: [memberCollection, ...memberTargets.slice(0, 1)],
     }, async () => "unsafe"),
-    /requires 2-200 targets/,
+    /requires 3-201 targets for bulk-guild-ban/,
   )
   await assert.rejects(
     () => coordinator.run({
@@ -482,29 +483,104 @@ test("coordination requires two through 200 unique member targets for bulk guild
       operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
       planDigest: PLAN_DIGEST,
       targets: [
+        memberCollection,
         ...memberTargets,
         writeResourceTarget("member", "400000000000000201"),
       ],
     }, async () => "unsafe"),
-    /requires 2-200 targets/,
+    /requires 3-201 targets/,
   )
   await assert.rejects(
     () => coordinator.run({
       kind: "bulk-guild-ban",
       operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
       planDigest: PLAN_DIGEST,
-      targets: [memberTargets[0]!, memberTargets[0]!],
+      targets: [memberCollection, memberTargets[0]!, memberTargets[0]!],
     }, async () => "unsafe"),
-    /unique exact member targets/,
+    /unique exact members/,
   )
   await assert.rejects(
     () => coordinator.run({
       kind: "bulk-guild-ban",
       operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
       planDigest: PLAN_DIGEST,
-      targets: [memberTargets[0]!, writeResourceTarget("role", MESSAGE_ID)],
+      targets: [memberCollection, memberTargets[0]!, writeResourceTarget("role", MESSAGE_ID)],
     }, async () => "unsafe"),
-    /unique exact member targets/,
+    /unique exact members/,
+  )
+})
+
+test("coordination requires one member collection and one through six unique roles for guild prune", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const memberCollection = writeGuildCollectionTarget("members", GUILD_ID)
+  const roleTargets = Array.from(
+    { length: 6 },
+    (_, index) => writeResourceTarget(
+      "role",
+      (400_000_000_000_001_001n + BigInt(index)).toString(),
+    ),
+  )
+
+  const publishedTargets = await coordinator.run({
+    kind: "guild-prune",
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    targets: [memberCollection, ...roleTargets],
+  }, async () => (await claimFiles(directory)).length)
+
+  assert.equal(publishedTargets, 7)
+  assert.deepEqual(await claimFiles(directory), [])
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-prune",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberCollection],
+    }, async () => "unsafe"),
+    /requires 2-7 targets for guild-prune/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-prune",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberCollection, roleTargets[0]!, roleTargets[0]!],
+    }, async () => "unsafe"),
+    /one member collection and exact roles/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-prune",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [
+        memberCollection,
+        ...roleTargets,
+        writeResourceTarget("role", "400000000000001007"),
+      ],
+    }, async () => "unsafe"),
+    /requires 2-7 targets for guild-prune/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-prune",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [
+        writeGuildCollectionTarget("roles", GUILD_ID),
+        roleTargets[0]!,
+      ],
+    }, async () => "unsafe"),
+    /one member collection and exact roles/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-prune",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberCollection, writeResourceTarget("member", MESSAGE_ID)],
+    }, async () => "unsafe"),
+    /one member collection and exact roles/,
   )
 })
 
@@ -518,6 +594,7 @@ test("coordination permits only the exact role-deletion evidence target count", 
     writeGuildCollectionTarget("emojis", GUILD_ID),
     writeGuildCollectionTarget("integrations", GUILD_ID),
     writeGuildCollectionTarget("invites", GUILD_ID),
+    writeGuildCollectionTarget("members", GUILD_ID),
     writeGuildCollectionTarget("onboarding", GUILD_ID),
     writeGuildCollectionTarget("roles", GUILD_ID),
   ]
@@ -541,7 +618,7 @@ test("coordination permits only the exact role-deletion evidence target count", 
         writeGuildCollectionTarget("templates", GUILD_ID),
       ],
     }, async () => "unsafe"),
-    /requires 1-9 targets for role-deletion/,
+    /requires 1-10 targets for role-deletion/,
   )
 })
 

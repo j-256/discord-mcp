@@ -410,6 +410,9 @@ function serviceFixture(overrides: {
     async bulkGuildBan() {
       throw new Error("Unexpected bulk guild ban")
     },
+    async beginGuildPrune() {
+      throw new Error("Unexpected guild prune")
+    },
     async crosspostMessage() {
       throw new Error("unexpected")
     },
@@ -622,6 +625,9 @@ function serviceFixture(overrides: {
     },
     async getGuildProfile() {
       throw new Error("Unexpected guild profile lookup")
+    },
+    async getGuildPruneCount() {
+      throw new Error("Unexpected guild prune count")
     },
     async getGuildAuditLog() {
       calls.guildAuditLog += 1
@@ -2094,6 +2100,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       "integration-deletion": [
         { id: INTEGRATION_ID, kind: "integration" },
         { collection: "integrations", guildId: GUILD_ID, kind: "guild-collection" },
+        { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
         { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
         { id: INTEGRATION_BOT_ID, kind: "member" },
       ],
@@ -2106,12 +2113,19 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: CHANNEL_ID, kind: "channel" },
         { collection: "invites", guildId: GUILD_ID, kind: "guild-collection" },
       ],
-      "member-nickname-change": [{ id: MEMBER_USER_ID, kind: "member" }],
+      "member-nickname-change": [
+        { id: MEMBER_USER_ID, kind: "member" },
+        { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
       "member-role-change": [
         { id: MEMBER_USER_ID, kind: "member" },
         { id: CREATED_ROLE_ID, kind: "role" },
+        { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
       ],
-      "member-voice-change": [{ id: MEMBER_USER_ID, kind: "member" }],
+      "member-voice-change": [
+        { id: MEMBER_USER_ID, kind: "member" },
+        { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
+      ],
       "message-deletion": [{ id: MESSAGE_ID, kind: "message" }],
       "message-forward": [
         { id: MESSAGE_ID, kind: "message" },
@@ -2149,6 +2163,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
           guildId: GUILD_ID,
           kind: "guild-collection",
         },
+        { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
       ],
       "role-ordering": [
         { id: CREATED_ROLE_ID, kind: "role" },
@@ -2170,6 +2185,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       "thread-governance-change": [
         { id: THREAD_ID, kind: "channel" },
         { id: MEMBER_USER_ID, kind: "member" },
+        { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
       ],
       "webhook-deletion": [
         { id: CHANNEL_ID, kind: "channel" },
@@ -5306,7 +5322,10 @@ test("service coordinates exact member moderation after verifying identity", asy
     kind: "member-moderation",
     operationKeyHash: operationKeyHash(request.operationKey),
     planDigest: plan.digest,
-    targets: [{ id: targetId, kind: "member" }],
+    targets: [
+      { id: targetId, kind: "member" },
+      { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
+    ],
   }])
 })
 
@@ -5397,10 +5416,108 @@ test("service coordinates one reviewed bulk guild ban over every exact member ta
     operationKeyHash: operationKeyHash(request.operationKey),
     planDigest: plan.digest,
     targets: [
+      { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
       { id: targetA, kind: "member" },
       { id: targetB, kind: "member" },
     ],
   }])
+})
+
+test("service coordinates one reviewed guild prune across member and exact role domains", async () => {
+  const includeRoleId = "700000000000000021"
+  const shieldRoleId = "700000000000000022"
+  const botRoleId = "700000000000000023"
+  const protectedUserId = "700000000000000024"
+  const writeCoordinator = new CapturingWriteCoordinator()
+  let estimate = 2
+  const { service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000025" }
+      },
+      async getGuildMember(_guildId, userId) {
+        if (userId === BOT_ID) {
+          return { roles: [botRoleId], user: bot() }
+        }
+        assert.equal(userId, protectedUserId)
+        return {
+          roles: [shieldRoleId],
+          user: { id: protectedUserId, username: "protected" },
+        }
+      },
+      async getGuildPruneCount() {
+        return { pruned: estimate }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          { ...role(includeRoleId, 0n, "cohort"), position: 1 },
+          { ...role(shieldRoleId, 0n, "shield"), position: 2 },
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.KICK_MEMBERS | DISCORD_PERMISSIONS.MANAGE_GUILD,
+              "connector",
+            ),
+            position: 10,
+          },
+        ]
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        guildPruneAudit: true,
+        guildPrunes: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildPruneGuildIds: [GUILD_ID],
+        guildPruneIncludeRoleIds: [includeRoleId],
+        protectedUserIds: [protectedUserId],
+      },
+    },
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeNonExactMemberSet: true as const,
+    auditReason: "Reviewed inactive-member cleanup",
+    days: 14,
+    guildId: GUILD_ID,
+    includeRoleIds: [includeRoleId],
+    maximumEstimatedMemberCount: 10,
+    operationKey: "guild-prune-attempt-0001",
+  }
+
+  const plan = await service.planGuildPrune(request)
+  await assert.rejects(
+    () => service.executeGuildPrune(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  assert.equal(plan.estimatedMemberCount, 2)
+  assert.equal(plan.cohort.exactMemberIdsAvailable, false)
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "guild-prune",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [
+      { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
+      { id: GUILD_ID, kind: "role" },
+      { id: includeRoleId, kind: "role" },
+    ],
+  }])
+
+  estimate = 0
+  const noOpRequest = {
+    ...request,
+    operationKey: "guild-prune-attempt-0002",
+  }
+  const noOpPlan = await service.planGuildPrune(noOpRequest)
+  const noOpResult = await service.executeGuildPrune(noOpRequest, noOpPlan.digest)
+  assert.equal(noOpResult.status, "noop")
+  assert.equal(writeCoordinator.intents.length, 1)
 })
 
 test("service pins identity through the narrow reviewed current-bot nickname route", async () => {

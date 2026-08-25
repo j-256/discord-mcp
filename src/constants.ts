@@ -47,6 +47,7 @@ export const MCP_TOOLSET_NAMES = [
   "guild-expressions",
   "guild-incidents",
   "guild-profile",
+  "guild-prunes",
   "guild-scaffolds",
   "guild-settings",
   "guild-templates",
@@ -166,6 +167,10 @@ export const DISCORD_TOKEN_ENVIRONMENT_PATTERN = /^DISCORD_(?:[A-Z0-9]+_)*TOKEN$
 
 export const GUILD_SYSTEM_CHANNEL_KNOWN_FLAG_MASK = 0b11_1111
 
+export const GUILD_PRUNE_DEFAULTS = Object.freeze({
+  maximumMemberCount: 25,
+})
+
 export const FORUM_TAG_ACTIONS = [
   "create",
   "delete",
@@ -212,6 +217,10 @@ export const DISCORD_LIMITS = Object.freeze({
   channelRateLimitSeconds: 21_600,
   channelTopicCharacters: 1_024,
   guildNicknameCharacters: 32,
+  guildPruneDaysMaximum: 30,
+  guildPruneDaysMinimum: 1,
+  guildPruneIncludeRoles: 100,
+  guildPruneResponseBytes: 1_024,
   guildDescriptionCharacters: 120,
   guildNameCharacters: 100,
   guildNameMinimumCharacters: 2,
@@ -405,6 +414,9 @@ export const CONNECTOR_LIMITS = Object.freeze({
   gatewayEventBufferSize: 1_000,
   gatewayEventPage: 100,
   guildProfileGuildAllowlist: 100,
+  guildPruneIncludeRoles: 5,
+  guildPruneMaximumMembers: 250,
+  guildPruneRoleAllowlist: 100,
   guildBlueprintPublications: 10,
   guildIncidentGuildAllowlist: 100,
   guildSettingsGuildAllowlist: 100,

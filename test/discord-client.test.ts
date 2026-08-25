@@ -1680,6 +1680,160 @@ test("Discord client never retries bulk guild bans and redacts sensitive failure
   )
 })
 
+test("Discord client reads and begins one exact guild prune contract", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body === undefined ? null : JSON.parse(String(init.body)),
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({ pruned: requests.length === 1 ? 4 : 3 })
+    },
+    token: TOKEN,
+  })
+
+  const estimate = await client.getGuildPruneCount("100", 14, ["402", "401"])
+  const result = await client.beginGuildPrune(
+    "100",
+    14,
+    ["402", "401"],
+    "Safety review / case 42",
+  )
+
+  assert.deepEqual(estimate, { pruned: 4 })
+  assert.deepEqual(result, { pruned: 3 })
+  assert.deepEqual(requests, [{
+    body: null,
+    method: "GET",
+    reason: null,
+    url: `${API_BASE_URL}/guilds/100/prune?days=14&include_roles=402%2C401`,
+  }, {
+    body: {
+      compute_prune_count: true,
+      days: 14,
+      include_roles: ["402", "401"],
+    },
+    method: "POST",
+    reason: "Safety%20review%20%2F%20case%2042",
+    url: `${API_BASE_URL}/guilds/100/prune`,
+  }])
+})
+
+test("Discord client omits an empty guild prune include-role field", async () => {
+  let body: unknown
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      body = JSON.parse(String(init?.body))
+      return jsonResponse({ pruned: 0 })
+    },
+    token: TOKEN,
+  })
+
+  await client.beginGuildPrune("100", 7, [], "reviewed")
+
+  assert.deepEqual(body, { compute_prune_count: true, days: 7 })
+})
+
+test("Discord client rejects malformed guild prune input and response evidence", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ pruned: 1 })
+    },
+    token: TOKEN,
+  })
+  const tooManyRoleIds = Array.from(
+    { length: 101 },
+    (_, index) => String(1_000 + index),
+  )
+  const invalid = [
+    () => client.getGuildPruneCount("0", 14, []),
+    () => client.getGuildPruneCount("100", 0, []),
+    () => client.getGuildPruneCount("100", 31, []),
+    () => client.getGuildPruneCount("100", 14, ["401", "401"]),
+    () => client.getGuildPruneCount("100", 14, tooManyRoleIds),
+    () => client.beginGuildPrune("100", 14, [], " "),
+  ]
+  for (const operation of invalid) await assert.rejects(operation())
+  assert.equal(requests, 0)
+
+  for (const response of [
+    null,
+    {},
+    { pruned: -1 },
+    { pruned: 1.5 },
+    { pruned: 1, future: true },
+  ]) {
+    const malformedClient = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(response),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => malformedClient.getGuildPruneCount("100", 14, []),
+      /invalid guild prune evidence/,
+    )
+  }
+})
+
+test("Discord client never retries guild prune writes and redacts sensitive failures", async () => {
+  let rateLimitRequests = 0
+  let sleeps = 0
+  const rateLimitedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      rateLimitRequests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => rateLimitedClient.beginGuildPrune("100", 14, ["401"], "reviewed"),
+    (error: DiscordApiError) => {
+      assert.equal(error.route, "/guilds/{guild.id}/prune")
+      assert.equal(error.status, 429)
+      return true
+    },
+  )
+  assert.equal(rateLimitRequests, 1)
+  assert.equal(sleeps, 0)
+
+  const secret = "private-guild-prune-transport-cause"
+  const transportClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(secret)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => transportClient.beginGuildPrune("100", 14, ["401"], "reviewed"),
+    (error: Error) => {
+      assert.doesNotMatch(error.message, new RegExp(secret))
+      assert.doesNotMatch(error.message, /100|401|reviewed/)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+})
+
 test("Discord client projects exact member voice state and sends one-field PATCH bodies", async () => {
   const requests: Array<{
     body: unknown

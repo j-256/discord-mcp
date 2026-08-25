@@ -74,6 +74,11 @@ export interface PolicyDescription {
   guildProfileAuditEnabled: boolean
   guildProfileChangesEnabled: boolean
   guildProfileGuildIds: string[]
+  guildPruneAuditEnabled: boolean
+  guildPruneGuildIds: string[]
+  guildPruneIncludeRoleIds: string[]
+  guildPruneMaxMembers: number
+  guildPrunesEnabled: boolean
   guildSettingsAuditEnabled: boolean
   guildSettingsChangesEnabled: boolean
   guildSettingsGuildIds: string[]
@@ -251,6 +256,8 @@ export class ScopePolicy {
   readonly #allowGuildIncidentChanges: boolean
   readonly #allowGuildProfileAudit: boolean
   readonly #allowGuildProfileChanges: boolean
+  readonly #allowGuildPruneAudit: boolean
+  readonly #allowGuildPrunes: boolean
   readonly #allowGuildScaffolds: boolean
   readonly #allowGuildSettingsAudit: boolean
   readonly #allowGuildSettingsChanges: boolean
@@ -317,6 +324,9 @@ export class ScopePolicy {
   readonly #guildExpressionRoots: readonly string[]
   readonly #guildIncidentGuildIds: ReadonlySet<string>
   readonly #guildProfileGuildIds: ReadonlySet<string>
+  readonly #guildPruneGuildIds: ReadonlySet<string>
+  readonly #guildPruneIncludeRoleIds: ReadonlySet<string>
+  readonly #guildPruneMaxMembers: number
   readonly #guildSettingsGuildIds: ReadonlySet<string>
   readonly #guildTemplateGuildIds: ReadonlySet<string>
   readonly #integrationGuildIds: ReadonlySet<string>
@@ -443,6 +453,8 @@ export class ScopePolicy {
     | "allowRoleOrderingChanges"
     | "allowGuildProfileAudit"
     | "allowGuildProfileChanges"
+    | "allowGuildPruneAudit"
+    | "allowGuildPrunes"
     | "allowGuildSettingsAudit"
     | "allowGuildSettingsChanges"
     | "allowScheduledEventAudit"
@@ -488,6 +500,9 @@ export class ScopePolicy {
     | "guildExpressionRoots"
     | "guildIncidentGuildIds"
     | "guildProfileGuildIds"
+    | "guildPruneGuildIds"
+    | "guildPruneIncludeRoleIds"
+    | "guildPruneMaxMembers"
     | "guildSettingsGuildIds"
     | "guildTemplateGuildIds"
     | "integrationGuildIds"
@@ -594,6 +609,8 @@ export class ScopePolicy {
     this.#allowGuildIncidentChanges = config.allowGuildIncidentChanges ?? false
     this.#allowGuildProfileAudit = config.allowGuildProfileAudit ?? false
     this.#allowGuildProfileChanges = config.allowGuildProfileChanges ?? false
+    this.#allowGuildPruneAudit = config.allowGuildPruneAudit ?? false
+    this.#allowGuildPrunes = config.allowGuildPrunes ?? false
     this.#allowGuildScaffolds = config.allowGuildScaffolds ?? false
     this.#allowGuildSettingsAudit = config.allowGuildSettingsAudit ?? false
     this.#allowGuildSettingsChanges = config.allowGuildSettingsChanges ?? false
@@ -663,6 +680,9 @@ export class ScopePolicy {
     this.#guildExpressionRoots = config.guildExpressionRoots ?? []
     this.#guildIncidentGuildIds = config.guildIncidentGuildIds ?? new Set()
     this.#guildProfileGuildIds = config.guildProfileGuildIds ?? new Set()
+    this.#guildPruneGuildIds = config.guildPruneGuildIds ?? new Set()
+    this.#guildPruneIncludeRoleIds = config.guildPruneIncludeRoleIds ?? new Set()
+    this.#guildPruneMaxMembers = config.guildPruneMaxMembers ?? 0
     this.#guildSettingsGuildIds = config.guildSettingsGuildIds ?? new Set()
     this.#guildTemplateGuildIds = config.guildTemplateGuildIds ?? new Set()
     this.#integrationGuildIds = config.integrationGuildIds ?? new Set()
@@ -815,6 +835,14 @@ export class ScopePolicy {
         && this.#allowGuildProfileChanges
         && this.#guildProfileGuildIds.size > 0,
       guildProfileGuildIds: [...this.#guildProfileGuildIds].sort(),
+      guildPruneAuditEnabled: this.#allowGuildPruneAudit
+        && this.#guildPruneGuildIds.size > 0,
+      guildPruneGuildIds: [...this.#guildPruneGuildIds].sort(),
+      guildPruneIncludeRoleIds: [...this.#guildPruneIncludeRoleIds].sort(),
+      guildPruneMaxMembers: this.#guildPruneMaxMembers,
+      guildPrunesEnabled: this.#allowGuildPruneAudit
+        && this.#allowGuildPrunes
+        && this.#guildPruneGuildIds.size > 0,
       guildSettingsAuditEnabled: this.#allowGuildSettingsAudit
         && this.#guildSettingsGuildIds.size > 0,
       guildSettingsChangesEnabled: this.#allowGuildSettingsAudit
@@ -1141,6 +1169,39 @@ export class ScopePolicy {
     this.assertBulkBanAuditAllowed(guildId)
     if (!this.#allowBulkBans) {
       throw new PolicyError("Discord bulk bans are disabled by connector configuration")
+    }
+  }
+
+  assertGuildPruneAuditAllowed(
+    guildId: string,
+    includeRoleIds: readonly string[],
+  ): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowGuildPruneAudit) {
+      throw new PolicyError("Discord guild prune audit is disabled by connector configuration")
+    }
+    if (this.#guildPruneGuildIds.size === 0) {
+      throw new PolicyError("Discord guild prune audit requires an explicit guild allowlist")
+    }
+    if (!this.#guildPruneGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the guild prune scope`)
+    }
+    for (const roleId of includeRoleIds) {
+      if (!this.#guildPruneIncludeRoleIds.has(roleId)) {
+        throw new PolicyError(
+          `Discord role ${roleId} is outside the guild prune include-role scope`,
+        )
+      }
+    }
+  }
+
+  assertGuildPruneExecutionAllowed(
+    guildId: string,
+    includeRoleIds: readonly string[],
+  ): void {
+    this.assertGuildPruneAuditAllowed(guildId, includeRoleIds)
+    if (!this.#allowGuildPrunes) {
+      throw new PolicyError("Discord guild prunes are disabled by connector configuration")
     }
   }
 

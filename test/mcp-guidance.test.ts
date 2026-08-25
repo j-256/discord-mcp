@@ -2001,6 +2001,11 @@ function guidanceService(options: {
         guildProfileAuditEnabled: false,
         guildProfileChangesEnabled: false,
         guildProfileGuildIds: [],
+        guildPruneAuditEnabled: false,
+        guildPruneGuildIds: [],
+        guildPruneIncludeRoleIds: [],
+        guildPruneMaxMembers: 0,
+        guildPrunesEnabled: false,
         guildSettingsAuditEnabled: false,
         guildSettingsChangesEnabled: false,
         guildSettingsGuildIds: [],
@@ -2125,6 +2130,7 @@ function guidanceService(options: {
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
     executeBulkGuildBan: unexpected,
+    executeGuildPrune: unexpected,
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
@@ -2640,6 +2646,7 @@ function guidanceService(options: {
     planChannelPermissionOverwrite: unexpected,
     planMemberModeration: unexpected,
     planBulkGuildBan: unexpected,
+    planGuildPrune: unexpected,
     planMessageDeletion: unexpected,
     planMessagePin: unexpected,
     planPollCreation: unexpected,
@@ -5372,6 +5379,33 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(bulkGuildBan, /partial-success risks/)
   assert.match(bulkGuildBan, /failed subsets are never retried/)
 
+  const guildPrune = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgeNonExactMemberSet: "true",
+      auditReason: "Reviewed guild prune",
+      days: "14",
+      guildId: GUILD_ID,
+      includeRoleIds: ROLE_ID,
+      maximumEstimatedMemberCount: "10",
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewGuildPrune,
+  }))
+  assert.deepEqual(JSON.parse(guildPrune.split("\n")[1] || ""), {
+    acknowledgeNonExactMemberSet: true,
+    auditReason: "Reviewed guild prune",
+    days: 14,
+    guildId: GUILD_ID,
+    includeRoleIds: [ROLE_ID],
+    maximumEstimatedMemberCount: 10,
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(guildPrune, /Call only plan_guild_prune/)
+  assert.match(guildPrune, /Do not call execute_guild_prune/)
+  assert.match(guildPrune, /never exposes exact candidate or removed member IDs/)
+  assert.match(guildPrune, /does not enforce either count ceiling/)
+  assert.match(guildPrune, /guild member collection and exact roles/)
+
   const ban = promptText(await client.getPrompt({
     arguments: {
       action: "ban",
@@ -5398,6 +5432,30 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        acknowledgeNonExactMemberSet: "false",
+        auditReason: "Reviewed guild prune",
+        days: "14",
+        guildId: GUILD_ID,
+        includeRoleIds: "",
+        maximumEstimatedMemberCount: "10",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildPrune,
+    },
+    {
+      arguments: {
+        acknowledgeNonExactMemberSet: "true",
+        auditReason: "Reviewed guild prune",
+        days: "14",
+        guildId: GUILD_ID,
+        includeRoleIds: `${ROLE_ID},${ROLE_ID}`,
+        maximumEstimatedMemberCount: "10",
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewGuildPrune,
+    },
     {
       arguments: {
         auditReason: "Reviewed bulk ban",

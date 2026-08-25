@@ -33,6 +33,7 @@ import {
   type GuildExpressionActivity,
   type GuildIncidentActivity,
   type GuildProfileActivity,
+  type GuildPruneActivity,
   type GuildSettingsActivity,
   type GuildTemplateActivity,
   type IntegrationDeletionActivity,
@@ -238,6 +239,34 @@ function bulkGuildBan(
       : status === "completed-with-drift" || status === "partial-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function guildPrune(
+  id: string,
+  status: GuildPruneActivity["status"],
+): GuildPruneActivity {
+  const completed = status === "completed"
+  const drift = status === "completed-with-drift"
+  return {
+    actualPrunedCount: completed ? 3 : drift ? 2 : null,
+    days: 14,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    includeRoleIds: ["400", "401"],
+    kind: "guild-prune",
+    maximumEstimatedMemberCount: 10,
+    operationKeyHash: `sha256:${"c".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
+    policyMaximumMemberCount: 25,
+    reviewedEstimatedMemberCount: 3,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: completed ? "match" : drift ? "drift" : null,
   }
 }
 
@@ -1669,6 +1698,56 @@ test("JSONL activity log keeps exact bulk guild ban evidence content-free", asyn
     /private reason|private username|private operation key|private role/,
   )
   assert.equal(result.entries[0]?.kind, "bulk-guild-ban")
+})
+
+test("JSONL activity log keeps non-exact guild prune evidence content-free and count-bound", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const statuses: GuildPruneActivity["status"][] = [
+    "pending",
+    "completed",
+    "completed-with-drift",
+    "failed",
+    "uncertain",
+  ]
+  for (const [index, status] of statuses.entries()) {
+    await store.append(guildPrune(String(index + 1), status))
+  }
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildPrune("6", "completed"),
+      auditReason: "private reason",
+      candidateMemberIds: ["private member"],
+      profiles: [{ username: "private username" }],
+      rawOperationKey: "private operation key",
+    })}\n${JSON.stringify({
+      ...guildPrune("7", "completed"),
+      actualPrunedCount: 2,
+    })}\n${JSON.stringify({
+      ...guildPrune("8", "completed-with-drift"),
+      actualPrunedCount: 3,
+    })}\n${JSON.stringify({
+      ...guildPrune("9", "pending"),
+      actualPrunedCount: 0,
+    })}\n${JSON.stringify({
+      ...guildPrune("10", "completed"),
+      includeRoleIds: ["401", "400"],
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["5", "4", "3", "2", "1"])
+  assert.equal(result.skippedLines, 5)
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private reason|private member|private username|private operation key/,
+  )
+  assert.equal(result.entries[0]?.kind, "guild-prune")
 })
 
 test("JSONL activity log strips channel content and raw operation keys from creation records", async (context) => {

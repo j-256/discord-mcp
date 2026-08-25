@@ -59,6 +59,7 @@ type McpToolWorkflow =
   | "guild-expression-change"
   | "guild-incident-action-change"
   | "guild-profile-change"
+  | "guild-prune"
   | "guild-soundboard-change"
   | "guild-settings-change"
   | "guild-template-change"
@@ -341,6 +342,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "batch", "bulk", "execute", "guild", "moderate", "users"],
     toolset: "bulk-bans",
     workflow: "bulk-guild-ban",
+  },
+  execute_guild_prune: {
+    keywords: ["cohort", "execute", "guild", "inactive", "members", "prune"],
+    toolset: "guild-prunes",
+    workflow: "guild-prune",
   },
   execute_member_nickname_change: {
     keywords: ["change", "clear", "execute", "member", "nick", "nickname", "profile"],
@@ -668,6 +674,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "batch", "bulk", "guild", "plan", "review", "users"],
     toolset: "bulk-bans",
     workflow: "bulk-guild-ban",
+  },
+  plan_guild_prune: {
+    keywords: ["cohort", "estimate", "guild", "inactive", "members", "plan", "prune", "review"],
+    toolset: "guild-prunes",
+    workflow: "guild-prune",
   },
   plan_member_nickname_change: {
     keywords: ["change", "clear", "member", "nick", "nickname", "plan", "profile", "review"],

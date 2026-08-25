@@ -39,6 +39,11 @@ import {
   type BulkGuildBanPlan,
   type BulkGuildBanRequest,
 } from "../src/bulk-guild-ban-service.js"
+import {
+  normalizeGuildPruneRequest,
+  type GuildPrunePlan,
+  type GuildPruneRequest,
+} from "../src/guild-prune-service.js"
 import { createConnectorConfigDocument } from "../src/config-document.js"
 import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
 import type {
@@ -284,6 +289,8 @@ import {
   AdministrationOperationConflictError,
   BulkGuildBanExecutionError,
   BulkGuildBanOperationConflictError,
+  GuildPruneExecutionError,
+  GuildPruneOperationConflictError,
   AnnouncementCrosspostExecutionError,
   AnnouncementCrosspostOperationConflictError,
   AnnouncementSubscriptionExecutionError,
@@ -549,6 +556,7 @@ const MEMBER_NICKNAME_OPERATION_KEY = "member-nickname-attempt-0001"
 const MEMBER_NICKNAME = "Reviewed nickname"
 const MEMBER_MODERATION_OPERATION_KEY = "member-moderation-attempt-0001"
 const BULK_GUILD_BAN_OPERATION_KEY = "bulk-guild-ban-attempt-0001"
+const GUILD_PRUNE_OPERATION_KEY = "guild-prune-attempt-0001"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
@@ -4493,6 +4501,101 @@ function bulkGuildBanPlan(
   }
 }
 
+function guildPrunePlan(
+  request: GuildPruneRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): GuildPrunePlan {
+  const normalized = normalizeGuildPruneRequest(request)
+  const estimatedMemberCount = writeRequired ? 3 : 0
+  const effectivePermissions = (
+    DISCORD_PERMISSIONS.KICK_MEMBERS
+    | DISCORD_PERMISSIONS.MANAGE_GUILD
+  ).toString()
+  return {
+    acknowledgeNonExactMemberSet: true,
+    applicationId: APPLICATION_ID,
+    auditReason: normalized.auditReason,
+    botId: BOT_ID,
+    cohort: {
+      exactMemberIdsAvailable: false,
+      inactivity: "discord-defined",
+      inactivityDays: normalized.days,
+      includedRoleRule: "every-assigned-role-is-included",
+      rolelessMembersAlwaysIncluded: true,
+    },
+    createdAt: "2026-08-25T00:00:00.000Z",
+    digest,
+    estimatedMemberCount,
+    estimatedRequests: {
+      destructive: 1,
+      planningEvidence: 4,
+      readback: 0,
+    },
+    guildId: normalized.guildId,
+    includeRoleIds: normalized.includeRoleIds,
+    includeRoles: normalized.includeRoleIds.map((id, index) => ({
+      id,
+      managed: false,
+      permissionNames: [],
+      permissions: "0",
+      position: index + 1,
+      unknownPermissionBits: "0",
+    })),
+    maximumEstimatedMemberCount: normalized.maximumEstimatedMemberCount,
+    operationKeyHash: normalized.operationKeyHash,
+    permission: {
+      appliedRoleIds: [GUILD_ID, ROLE_ID],
+      botAdministrator: false,
+      botGuildOwner: false,
+      botHighestRoleIds: [ROLE_ID],
+      botHighestRolePosition: 2,
+      effectivePermissionNames: ["KICK_MEMBERS", "MANAGE_GUILD"],
+      effectivePermissions,
+      required: ["KICK_MEMBERS", "MANAGE_GUILD"],
+      unknownPermissionBits: "0",
+    },
+    policyMaximumMemberCount: 25,
+    privacy: {
+      exactCandidateMemberIds: "unavailable-from-discord",
+      persistence: "content-free-counts-and-ids-only",
+      profiles: "omitted",
+      rawPayloadExposed: false,
+    },
+    protections: [{
+      membership: "present",
+      outsideCohortRoleIds: [ROLE_ID],
+      protection: "role-shield",
+      sources: ["connector"],
+      userId: BOT_ID,
+    }, {
+      membership: "present",
+      outsideCohortRoleIds: [],
+      protection: "guild-owner",
+      sources: ["guild-owner"],
+      userId: GUILD_OWNER_ID,
+    }],
+    risks: [
+      "Discord identifies the estimated cohort without exposing any member IDs",
+      "Discord does not enforce either reviewed count ceiling during the mutation",
+    ],
+    schemaVersion: 1,
+    status: "planned",
+    verificationBoundary: {
+      automaticRetry: false,
+      countCeilingEnforcement: "pre-dispatch-only",
+      destructiveRequests: 1,
+      exactMemberReadback: false,
+      outcomeEvidence: "strict-discord-response-count",
+      rollback: "not-automatic",
+    },
+    warnings: [
+      "The response count is the only settled mutation evidence; exact removed-member identities remain unavailable",
+    ],
+    writeRequired,
+  }
+}
+
 function attachmentPlan(
   request: AttachmentMessageRequest,
   digest = DIGEST,
@@ -6891,6 +6994,11 @@ function fixturePolicy(): PolicyDescription {
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
+    guildPruneAuditEnabled: false,
+    guildPruneGuildIds: [],
+    guildPruneIncludeRoleIds: [],
+    guildPruneMaxMembers: 0,
+    guildPrunesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -7028,6 +7136,10 @@ function serviceFixture(overrides: {
   bulkGuildBanDrift?: boolean
   bulkGuildBanError?: Error
   bulkGuildBanPlanDigest?: string
+  guildPruneDrift?: boolean
+  guildPruneError?: Error
+  guildPrunePlanDigest?: string
+  guildPruneWriteRequired?: boolean
   activityError?: Error
   announcementCrosspostAction?: "crosspost" | "none"
   announcementCrosspostError?: Error
@@ -7223,6 +7335,8 @@ function serviceFixture(overrides: {
     administrationPlan: 0,
     bulkGuildBanExecute: 0,
     bulkGuildBanPlan: 0,
+    guildPruneExecute: 0,
+    guildPrunePlan: 0,
     attachmentExecute: 0,
     attachmentPlan: 0,
     announcementCrosspostExecute: 0,
@@ -9352,6 +9466,33 @@ function serviceFixture(overrides: {
         verification,
       }
     },
+    async executeGuildPrune(request, planDigest) {
+      if (overrides.guildPruneError) throw overrides.guildPruneError
+      calls.guildPruneExecute += 1
+      const normalized = normalizeGuildPruneRequest(request)
+      const writeRequired = overrides.guildPruneWriteRequired ?? true
+      const drift = overrides.guildPruneDrift ?? false
+      return {
+        activityId: writeRequired ? "activity-guild-prune" : null,
+        actualPrunedCount: writeRequired ? drift ? 2 : 3 : 0,
+        guildId: normalized.guildId,
+        includeRoleIds: normalized.includeRoleIds,
+        operationKeyHash: normalized.operationKeyHash,
+        planDigest,
+        reviewedEstimatedMemberCount: writeRequired ? 3 : 0,
+        schemaVersion: 1,
+        status: writeRequired
+          ? drift
+            ? "completed-with-drift" as const
+            : "completed" as const
+          : "noop" as const,
+        verification: writeRequired
+          ? drift
+            ? "drift" as const
+            : "match" as const
+          : "not-required" as const,
+      }
+    },
     async executeMessagePin(request, planDigest) {
       if (overrides.messagePinError) throw overrides.messagePinError
       calls.messagePinExecute += 1
@@ -10474,6 +10615,14 @@ function serviceFixture(overrides: {
         overrides.bulkGuildBanPlanDigest || DIGEST,
       )
     },
+    async planGuildPrune(request) {
+      calls.guildPrunePlan += 1
+      return guildPrunePlan(
+        request,
+        overrides.guildPrunePlanDigest || DIGEST,
+        overrides.guildPruneWriteRequired ?? true,
+      )
+    },
     async planMemberRoleChange(request) {
       calls.memberRolePlan += 1
       return memberRolePlan(
@@ -11061,6 +11210,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_member_moderation",
       "plan_bulk_guild_ban",
       "execute_bulk_guild_ban",
+      "plan_guild_prune",
+      "execute_guild_prune",
       "list_activity",
       "discover_discord_tools",
     ],
@@ -11140,6 +11291,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const bulkGuildBan = result.tools.find((tool) => (
     tool.name === "execute_bulk_guild_ban"
   ))
+  const guildPrune = result.tools.find((tool) => (
+    tool.name === "execute_guild_prune"
+  ))
   const memberRole = result.tools.find((tool) => (
     tool.name === "execute_member_role_change"
   ))
@@ -11196,6 +11350,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     voiceChannelStatus,
     permissionOverwrite,
     administration,
+    guildPrune,
     memberNickname,
     memberRole,
     memberVoice,
@@ -11308,6 +11463,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   })
   assert.deepEqual(
     listedTool(result.tools, "plan_bulk_guild_ban").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    },
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "plan_guild_prune").annotations,
     {
       destructiveHint: false,
       idempotentHint: true,
@@ -13004,6 +13168,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     administrationPlan: 0,
     bulkGuildBanExecute: 0,
     bulkGuildBanPlan: 0,
+    guildPruneExecute: 0,
+    guildPrunePlan: 0,
     announcementCrosspostExecute: 0,
     announcementCrosspostPlan: 0,
     announcementSubscriptionExecute: 0,
@@ -13503,7 +13669,7 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.ok(content && "text" in content)
   if (!content || !("text" in content)) throw new Error("Expected safety text")
   assert.match(content.text, /durable exact target claims/)
-  assert.match(content.text, /member moderation claims its exact member/)
+  assert.match(content.text, /member moderation claims its exact member and the guild member collection/iu)
   assert.match(content.text, /Resumable guild scaffolds claim both guild role and channel collections/)
   assert.match(content.text, /interruption with pending evidence leaves them quarantined/)
   assert.match(content.text, /complete obfuscation-safe Gateway layout/)
@@ -28496,6 +28662,288 @@ test("MCP bulk guild bans expose typed partial, uncertain, rate-limit, and recei
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(BULK_GUILD_BAN_OPERATION_KEY),
+  )
+})
+
+test("MCP guild prune planning requires an acknowledged bounded non-exact cohort", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      acknowledgeNonExactMemberSet: true,
+      auditReason: AUDIT_REASON,
+      days: 14,
+      guildId: GUILD_ID,
+      includeRoleIds: [ROLE_ID],
+      maximumEstimatedMemberCount: 10,
+      operationKey: GUILD_PRUNE_OPERATION_KEY,
+    },
+    name: "plan_guild_prune",
+  })
+  const unacknowledged = await client.callTool({
+    arguments: {
+      acknowledgeNonExactMemberSet: false,
+      auditReason: AUDIT_REASON,
+      days: 14,
+      guildId: GUILD_ID,
+      maximumEstimatedMemberCount: 10,
+      operationKey: GUILD_PRUNE_OPERATION_KEY,
+    },
+    name: "plan_guild_prune",
+  })
+  const duplicateRole = await client.callTool({
+    arguments: {
+      acknowledgeNonExactMemberSet: true,
+      auditReason: AUDIT_REASON,
+      days: 14,
+      guildId: GUILD_ID,
+      includeRoleIds: [ROLE_ID, ROLE_ID],
+      maximumEstimatedMemberCount: 10,
+      operationKey: GUILD_PRUNE_OPERATION_KEY,
+    },
+    name: "plan_guild_prune",
+  })
+  const invalidDays = await client.callTool({
+    arguments: {
+      acknowledgeNonExactMemberSet: true,
+      auditReason: AUDIT_REASON,
+      days: 31,
+      guildId: GUILD_ID,
+      maximumEstimatedMemberCount: 10,
+      operationKey: GUILD_PRUNE_OPERATION_KEY,
+    },
+    name: "plan_guild_prune",
+  })
+
+  const structured = structuredContent(planned)
+  assert.equal(structured.status, "planned")
+  assert.equal(structured.estimatedMemberCount, 3)
+  assert.deepEqual(structured.includeRoleIds, [ROLE_ID])
+  assert.equal(
+    (structured.cohort as Record<string, unknown>).exactMemberIdsAvailable,
+    false,
+  )
+  assert.equal(calls.guildPrunePlan, 1)
+  for (const rejected of [unacknowledged, duplicateRole, invalidDays]) {
+    assert.equal(rejected.isError, true)
+  }
+})
+
+test("MCP guild prune binds signed approval to the estimate, ceilings, roles, and acknowledgement", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeNonExactMemberSet: true,
+      auditReason: AUDIT_REASON,
+      days: 14,
+      guildId: GUILD_ID,
+      includeRoleIds: [ROLE_ID],
+      maximumEstimatedMemberCount: 10,
+      operationKey: GUILD_PRUNE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_guild_prune",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.guildPrunePlan, 1)
+  assert.equal(calls.guildPruneExecute, 1)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(ROLE_ID))
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, /estimated 3 non-exact guild members/)
+  assert.match(confirmationMessage, /Request pre-dispatch ceiling: 10/)
+  assert.match(confirmationMessage, /Policy pre-dispatch ceiling: 25/)
+  assert.match(confirmationMessage, /KICK_MEMBERS, MANAGE_GUILD/)
+  assert.match(confirmationMessage, /never reveals the candidate or removed member IDs/)
+  assert.match(confirmationMessage, /Neither ceiling is enforced by Discord/)
+  assert.match(
+    confirmationMessage,
+    new RegExp(operationKeyHash(GUILD_PRUNE_OPERATION_KEY)),
+  )
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_PRUNE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_PRUNE_OPERATION_KEY),
+  )
+})
+
+test("MCP guild prune signed state rejects changed intent and accepts canonical role ordering", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const secondRoleId = "350000000000000002"
+  const request = {
+    acknowledgeNonExactMemberSet: true,
+    auditReason: AUDIT_REASON,
+    days: 14,
+    guildId: GUILD_ID,
+    includeRoleIds: [secondRoleId, ROLE_ID],
+    maximumEstimatedMemberCount: 10,
+    operationKey: GUILD_PRUNE_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_guild_prune",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, days: 15 },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, includeRoleIds: [ROLE_ID] },
+    { ...request, maximumEstimatedMemberCount: 11 },
+    { ...request, operationKey: "guild-prune-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_guild_prune: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_guild_prune",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  const reordered = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, includeRoleIds: [ROLE_ID, secondRoleId] },
+      inputResponses: {
+        confirm_guild_prune: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_prune",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(reordered).status, "completed")
+  assert.equal(fixture.calls.guildPruneExecute, 1)
+})
+
+test("MCP guild prune skips confirmation for zero estimate and stops before changed plans", async (context) => {
+  let confirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildPruneWriteRequired: false },
+  })
+  const request = {
+    acknowledgeNonExactMemberSet: true,
+    auditReason: AUDIT_REASON,
+    days: 14,
+    guildId: GUILD_ID,
+    maximumEstimatedMemberCount: 10,
+    operationKey: GUILD_PRUNE_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const noOpResult = await noOp.client.callTool({
+    arguments: request,
+    name: "execute_guild_prune",
+  })
+  assert.equal(structuredContent(noOpResult).status, "noop")
+  assert.equal(confirmations, 0)
+  assert.equal(noOp.calls.guildPruneExecute, 1)
+
+  const changed = await connectedFixture(context, {
+    serviceOverrides: { guildPrunePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: request,
+    name: "execute_guild_prune",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changed.calls.guildPruneExecute, 0)
+})
+
+test("MCP guild prune exposes typed uncertainty and content-free receipt conflicts", async (context) => {
+  const request = {
+    acknowledgeNonExactMemberSet: true,
+    auditReason: AUDIT_REASON,
+    days: 14,
+    guildId: GUILD_ID,
+    maximumEstimatedMemberCount: 10,
+    operationKey: GUILD_PRUNE_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildPruneError: new GuildPruneExecutionError(
+        "Discord guild prune outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: request,
+    name: "execute_guild_prune",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "guild-prune-operation",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(GUILD_PRUNE_OPERATION_KEY),
+    status: "completed" as const,
+    timestamp: "2026-08-25T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildPruneError: new GuildPruneOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: request,
+    name: "execute_guild_prune",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(GUILD_PRUNE_OPERATION_KEY),
   )
 })
 

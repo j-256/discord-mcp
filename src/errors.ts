@@ -70,6 +70,42 @@ export class BulkGuildBanExecutionError extends Error {
   }
 }
 
+export class GuildPruneEvidenceError extends Error {
+  override name = "GuildPruneEvidenceError"
+}
+
+export class GuildPrunePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild prune evidence does not match the reviewed plan")
+    this.name = "GuildPrunePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildPruneOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild prune operation key has already been reserved")
+    this.name = "GuildPruneOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildPruneExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildPruneExecutionError"
+    this.result = result
+  }
+}
+
 export class InviteEvidenceError extends Error {
   override name = "InviteEvidenceError"
 }

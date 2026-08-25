@@ -260,6 +260,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
+    guildPruneAuditEnabled: false,
+    guildPruneGuildIds: [],
+    guildPruneIncludeRoleIds: [],
+    guildPruneMaxMembers: 25,
+    guildPrunesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -935,6 +940,11 @@ test("configuration and policy require an exact administration guild and protect
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
+    guildPruneAuditEnabled: false,
+    guildPruneGuildIds: [],
+    guildPruneIncludeRoleIds: [],
+    guildPruneMaxMembers: 25,
+    guildPrunesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -1251,6 +1261,120 @@ test("configuration and policy isolate reviewed bulk guild bans", () => {
       },
     }, { homeDirectory: "/test/home" }),
     /expected boolean/,
+  )
+})
+
+test("configuration and policy isolate bounded reviewed guild prunes", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      guildPruneAudit: true,
+      guildPrunes: true,
+    },
+    limits: {
+      guildPruneMaxMembers: 12,
+    },
+    readScope: {
+      guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    },
+    scopes: {
+      guildPruneGuildIds: [GUILD_ID],
+      guildPruneIncludeRoleIds: [ROLE_ID],
+      protectedUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowGuildPruneAudit, true)
+  assert.equal(config.allowGuildPrunes, true)
+  assert.deepEqual([...config.guildPruneGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.guildPruneIncludeRoleIds], [ROLE_ID])
+  assert.equal(config.guildPruneMaxMembers, 12)
+  assert.equal(policy.describe().guildPruneAuditEnabled, true)
+  assert.equal(policy.describe().guildPrunesEnabled, true)
+  assert.deepEqual(policy.describe().guildPruneGuildIds, [GUILD_ID])
+  assert.deepEqual(policy.describe().guildPruneIncludeRoleIds, [ROLE_ID])
+  assert.equal(policy.describe().guildPruneMaxMembers, 12)
+  assert.doesNotThrow(() => policy.assertGuildPruneAuditAllowed(GUILD_ID, [ROLE_ID]))
+  assert.doesNotThrow(() => policy.assertGuildPruneExecutionAllowed(GUILD_ID, [ROLE_ID]))
+  assert.throws(
+    () => policy.assertGuildPruneAuditAllowed(OTHER_GUILD_ID, [ROLE_ID]),
+    /outside the guild prune scope/,
+  )
+  assert.throws(
+    () => policy.assertGuildPruneAuditAllowed(GUILD_ID, [OTHER_ROLE_ID]),
+    /outside the guild prune include-role scope/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      guildPruneAudit: true,
+    },
+    scopes: {
+      guildPruneGuildIds: [GUILD_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildPruneAuditAllowed(GUILD_ID, []))
+  assert.throws(
+    () => auditOnly.assertGuildPruneExecutionAllowed(GUILD_ID, []),
+    /guild prunes are disabled/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        guildPrunes: true,
+      },
+      scopes: {
+        guildPruneGuildIds: [GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.capabilities\.guildPrunes requires \$\.capabilities\.guildPruneAudit/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        guildPruneAudit: true,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.capabilities\.guildPruneAudit requires \$\.scopes\.guildPruneGuildIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildPruneGuildIds: [OTHER_GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.guildPruneGuildIds must be a subset/,
+  )
+  for (const guildPruneMaxMembers of [0, 251]) {
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        limits: { guildPruneMaxMembers },
+      }, { homeDirectory: "/test/home" }),
+      /\$\.limits\.guildPruneMaxMembers/,
+    )
+  }
+  const excessiveRoleIds = Array.from(
+    { length: CONNECTOR_LIMITS.guildPruneRoleAllowlist + 1 },
+    (_, index) => (300_000_000_000_001_000n + BigInt(index)).toString(),
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      scopes: {
+        guildPruneIncludeRoleIds: excessiveRoleIds,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.guildPruneIncludeRoleIds/,
   )
 })
 
@@ -4336,6 +4460,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildProfileAuditEnabled: false,
     guildProfileChangesEnabled: false,
     guildProfileGuildIds: [],
+    guildPruneAuditEnabled: false,
+    guildPruneGuildIds: [],
+    guildPruneIncludeRoleIds: [],
+    guildPruneMaxMembers: 25,
+    guildPrunesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],

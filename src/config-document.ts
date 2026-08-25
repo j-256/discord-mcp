@@ -157,6 +157,8 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "guildIncidentChanges",
   "guildProfileAudit",
   "guildProfileChanges",
+  "guildPruneAudit",
+  "guildPrunes",
   "guildScaffolds",
   "guildSettingsAudit",
   "guildSettingsChanges",
@@ -239,6 +241,8 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "guildExpressionGuildIds",
   "guildIncidentGuildIds",
   "guildProfileGuildIds",
+  "guildPruneGuildIds",
+  "guildPruneIncludeRoleIds",
   "guildSettingsGuildIds",
   "guildTemplateGuildIds",
   "integrationGuildIds",
@@ -282,6 +286,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
 
 export const CONFIG_LIMIT_NAMES = Object.freeze([
   "attachmentMaxBytes",
+  "guildPruneMaxMembers",
   "interactionMaxWritesPerMinute",
   "interactionMinWriteIntervalMs",
   "nativeInteractionMaxPending",
@@ -395,6 +400,10 @@ const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed addit
 const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
 const BULK_BANS_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban execution"
 const BULK_BAN_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
+const GUILD_PRUNE_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed non-exact guild prune planning"
+const GUILD_PRUNES_CAPABILITY_DESCRIPTION = "Enable reviewed non-exact guild prune execution"
+const GUILD_PRUNE_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed guild prune planning and execution"
+const GUILD_PRUNE_ROLE_SCOPE_DESCRIPTION = "Exact role ID allowlist for optional reviewed guild prune cohort widening"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "applicationIntentChanges") {
@@ -412,6 +421,12 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "inviteCreation") {
     return INVITE_CREATION_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "guildPruneAudit") {
+    return GUILD_PRUNE_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "guildPrunes") {
+    return GUILD_PRUNES_CAPABILITY_DESCRIPTION
+  }
   return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
@@ -424,6 +439,12 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "bulkBanGuildIds") {
     return BULK_BAN_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "guildPruneGuildIds") {
+    return GUILD_PRUNE_GUILD_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "guildPruneIncludeRoleIds") {
+    return GUILD_PRUNE_ROLE_SCOPE_DESCRIPTION
   }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }

@@ -128,6 +128,16 @@ import {
   normalizeBulkGuildBanRequest,
 } from "./bulk-guild-ban-service.js"
 import type {
+  GuildPrunePlan,
+  GuildPruneRequest,
+  GuildPruneResult,
+  GuildPruneServiceOptions,
+} from "./guild-prune-service.js"
+import {
+  GuildPruneService,
+  normalizeGuildPruneRequest,
+} from "./guild-prune-service.js"
+import type {
   ChannelAdministrationServiceOptions,
   ChannelCreationPlan,
   ChannelCreationRequest,
@@ -223,6 +233,7 @@ import {
   ConfigurationError,
   ComponentMessagePlanChangedError,
   DeletionPlanChangedError,
+  GuildPrunePlanChangedError,
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
   ReactionModerationPlanChangedError,
@@ -681,6 +692,7 @@ export interface DiscordServiceClient {
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   bulkGuildBan: DiscordClient["bulkGuildBan"]
+  beginGuildPrune: DiscordClient["beginGuildPrune"]
   createApplicationEmoji: DiscordClient["createApplicationEmoji"]
   crosspostMessage: DiscordClient["crosspostMessage"]
   createGuildBan: DiscordClient["createGuildBan"]
@@ -739,6 +751,7 @@ export interface DiscordServiceClient {
   getGuild: DiscordClient["getGuild"]
   getGuildIncidentActions: DiscordClient["getGuildIncidentActions"]
   getGuildProfile: DiscordClient["getGuildProfile"]
+  getGuildPruneCount: DiscordClient["getGuildPruneCount"]
   getGuildAutoModerationRule: DiscordClient["getGuildAutoModerationRule"]
   getGuildAuditLog: DiscordClient["getGuildAuditLog"]
   getGuildBan: DiscordClient["getGuildBan"]
@@ -878,6 +891,10 @@ export interface ConnectorServiceOptions {
   >
   bulkGuildBanOptions?: Pick<
     BulkGuildBanServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildPruneOptions?: Pick<
+    GuildPruneServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   channelAdministrationOptions?: Pick<
@@ -1181,6 +1198,7 @@ export class ConnectorService {
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
   readonly #bulkGuildBanService: BulkGuildBanService
+  readonly #guildPruneService: GuildPruneService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #channelCloneService: ChannelCloneService
   readonly #channelDeletionService: ChannelDeletionService
@@ -1309,6 +1327,15 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.bulkGuildBanOptions,
+    })
+    this.#guildPruneService = new GuildPruneService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      maximumMemberCount: options.config.guildPruneMaxMembers,
+      operationStore,
+      policy: this.#policy,
+      protectedUserIds: options.config.protectedUserIds,
+      ...options.guildPruneOptions,
     })
     this.#channelAdministrationService = new ChannelAdministrationService({
       activityStore: this.#activityStore,
@@ -3298,6 +3325,20 @@ export class ConnectorService {
     )
   }
 
+  async planGuildPrune(
+    request: GuildPruneRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildPrunePlan> {
+    normalizeGuildPruneRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildPruneService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberRoleChange(
     request: MemberRoleChangeRequest,
     options: RequestOptions = {},
@@ -3853,6 +3894,7 @@ export class ConnectorService {
         writeGuildCollectionTarget("automod", request.guildId),
         writeGuildCollectionTarget("integrations", request.guildId),
         writeGuildCollectionTarget("application-commands", request.guildId),
+        writeGuildCollectionTarget("members", request.guildId),
       ],
       () => this.#roleDeletionService.execute(
         identity.application.id,
@@ -4061,6 +4103,7 @@ export class ConnectorService {
       [
         writeResourceTarget("member", request.userId),
         writeResourceTarget("role", request.roleId),
+        writeGuildCollectionTarget("members", request.guildId),
       ],
       () => this.#memberRoleService.execute(
         identity.application.id,
@@ -4086,7 +4129,10 @@ export class ConnectorService {
       "member-nickname-change",
       normalized.operationKey,
       planDigest,
-      [writeResourceTarget("member", userId)],
+      [
+        writeResourceTarget("member", userId),
+        writeGuildCollectionTarget("members", normalized.guildId),
+      ],
       () => this.#memberNicknameService.execute(
         identity.application.id,
         identity.bot.id,
@@ -4111,7 +4157,10 @@ export class ConnectorService {
       "member-voice-change",
       request.operationKey,
       planDigest,
-      [writeResourceTarget("member", request.userId)],
+      [
+        writeResourceTarget("member", request.userId),
+        writeGuildCollectionTarget("members", request.guildId),
+      ],
       () => this.#memberVoiceService.execute(
         identity.application.id,
         identity.bot.id,
@@ -4139,12 +4188,15 @@ export class ConnectorService {
       [
         writeResourceTarget("channel", request.threadId),
         ...(["add-member", "remove-member"].includes(request.action)
-          ? [writeResourceTarget(
-            "member",
-            (request as Extract<ThreadChangeRequest, {
-              action: "add-member" | "remove-member"
-            }>).userId,
-          )]
+          ? [
+              writeResourceTarget(
+                "member",
+                (request as Extract<ThreadChangeRequest, {
+                  action: "add-member" | "remove-member"
+                }>).userId,
+              ),
+              writeGuildCollectionTarget("members", request.guildId),
+            ]
           : []),
       ],
       () => this.#threadGovernanceService.execute(
@@ -4444,7 +4496,10 @@ export class ConnectorService {
       "member-moderation",
       normalized.operationKey,
       planDigest,
-      [writeResourceTarget("member", normalized.userId)],
+      [
+        writeResourceTarget("member", normalized.userId),
+        writeGuildCollectionTarget("members", normalized.guildId),
+      ],
       () => this.#administrationService.execute(
         identity.application.id,
         identity.bot.id,
@@ -4469,7 +4524,10 @@ export class ConnectorService {
       "bulk-guild-ban",
       normalized.operationKey,
       planDigest,
-      normalized.userIds.map((userId) => writeResourceTarget("member", userId)),
+      [
+        writeGuildCollectionTarget("members", normalized.guildId),
+        ...normalized.userIds.map((userId) => writeResourceTarget("member", userId)),
+      ],
       () => this.#bulkGuildBanService.execute(
         identity.application.id,
         identity.bot.id,
@@ -4477,6 +4535,46 @@ export class ConnectorService {
         planDigest,
         options,
       ),
+    )
+  }
+
+  async executeGuildPrune(
+    request: GuildPruneRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildPruneResult> {
+    const normalized = normalizeGuildPruneRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild prune plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const execute = () => this.#guildPruneService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+    const coordinationPlan = await this.#guildPruneService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new GuildPrunePlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    if (!coordinationPlan.writeRequired) return execute()
+    return this.#coordinateWrite(
+      "guild-prune",
+      normalized.operationKey,
+      planDigest,
+      [
+        writeGuildCollectionTarget("members", normalized.guildId),
+        writeResourceTarget("role", normalized.guildId),
+        ...normalized.includeRoleIds.map((roleId) => writeResourceTarget("role", roleId)),
+      ],
+      execute,
     )
   }
 
@@ -4931,6 +5029,7 @@ export class ConnectorService {
     const targets: WriteCoordinationTarget[] = [
       writeResourceTarget("integration", request.integrationId),
       writeGuildCollectionTarget("integrations", request.guildId),
+      writeGuildCollectionTarget("members", request.guildId),
       writeGuildCollectionTarget("webhooks", request.guildId),
     ]
     if (coordinationPlan.target.associatedBotUserId !== null) {

@@ -15,6 +15,7 @@ import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DISCORD_LIMITS,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
+  GUILD_PRUNE_DEFAULTS,
   INTERACTION_DEFAULTS,
   NATIVE_INTERACTION_COMMAND_NAME_PATTERN,
   NATIVE_INTERACTION_DEFAULTS,
@@ -77,6 +78,8 @@ export interface ConnectorConfig {
   allowGuildIncidentChanges: boolean
   allowGuildProfileAudit: boolean
   allowGuildProfileChanges: boolean
+  allowGuildPruneAudit: boolean
+  allowGuildPrunes: boolean
   allowGuildScaffolds: boolean
   allowGuildSettingsAudit: boolean
   allowGuildSettingsChanges: boolean
@@ -160,6 +163,9 @@ export interface ConnectorConfig {
   guildExpressionRoots: readonly string[]
   guildIncidentGuildIds: ReadonlySet<string>
   guildProfileGuildIds: ReadonlySet<string>
+  guildPruneGuildIds: ReadonlySet<string>
+  guildPruneIncludeRoleIds: ReadonlySet<string>
+  guildPruneMaxMembers: number
   guildSettingsGuildIds: ReadonlySet<string>
   guildTemplateGuildIds: ReadonlySet<string>
   integrationGuildIds: ReadonlySet<string>
@@ -405,6 +411,12 @@ export function loadConnectorConfigDocument(
   const automodGuildIds = configScope(document, "automodGuildIds")
   const banAuditGuildIds = configScope(document, "banAuditGuildIds")
   const bulkBanGuildIds = configScope(document, "bulkBanGuildIds")
+  const guildPruneGuildIds = configScope(document, "guildPruneGuildIds")
+  const guildPruneIncludeRoleIds = configScope(
+    document,
+    "guildPruneIncludeRoleIds",
+    CONNECTOR_LIMITS.guildPruneRoleAllowlist,
+  )
   const adminGuildIds = configScope(document, "adminGuildIds")
   const channelCreationGuildIds = configScope(document, "channelCreationGuildIds")
   const channelCloneGuildIds = configScope(
@@ -537,6 +549,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("automodGuildIds"), automodGuildIds],
     [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
     [configPolicyPath("bulkBanGuildIds"), bulkBanGuildIds],
+    [configPolicyPath("guildPruneGuildIds"), guildPruneGuildIds],
     [configPolicyPath("channelCreationGuildIds"), channelCreationGuildIds],
     [configPolicyPath("channelCloneGuildIds"), channelCloneGuildIds],
     [configPolicyPath("channelOrderingGuildIds"), channelOrderingGuildIds],
@@ -630,6 +643,18 @@ export function loadConnectorConfigDocument(
   if (allowBulkBanAudit && bulkBanGuildIds.size === 0) {
     throw new ConfigurationError(
       `${configPolicyPath("allowBulkBanAudit")} requires ${configPolicyPath("bulkBanGuildIds")}`,
+    )
+  }
+  const allowGuildPruneAudit = configCapability(document, "guildPruneAudit")
+  const allowGuildPrunes = configCapability(document, "guildPrunes")
+  if (allowGuildPrunes && !allowGuildPruneAudit) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildPrunes")} requires ${configPolicyPath("allowGuildPruneAudit")}`,
+    )
+  }
+  if (allowGuildPruneAudit && guildPruneGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildPruneAudit")} requires ${configPolicyPath("guildPruneGuildIds")}`,
     )
   }
   if (
@@ -1000,6 +1025,8 @@ export function loadConnectorConfigDocument(
     allowGuildIncidentChanges,
     allowGuildProfileAudit,
     allowGuildProfileChanges,
+    allowGuildPruneAudit,
+    allowGuildPrunes,
     allowGuildScaffolds: configCapability(document, "guildScaffolds"),
     allowGuildSettingsAudit,
     allowGuildSettingsChanges,
@@ -1100,6 +1127,15 @@ export function loadConnectorConfigDocument(
     ),
     guildIncidentGuildIds,
     guildProfileGuildIds,
+    guildPruneGuildIds,
+    guildPruneIncludeRoleIds,
+    guildPruneMaxMembers: configLimit(
+      document,
+      "guildPruneMaxMembers",
+      GUILD_PRUNE_DEFAULTS.maximumMemberCount,
+      1,
+      CONNECTOR_LIMITS.guildPruneMaximumMembers,
+    ),
     guildSettingsGuildIds,
     guildTemplateGuildIds,
     integrationGuildIds,

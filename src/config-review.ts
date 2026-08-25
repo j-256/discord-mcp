@@ -20,6 +20,7 @@ import {
 } from "./config-operator.js"
 import {
   DISCORD_LIMITS,
+  GUILD_PRUNE_DEFAULTS,
   INTERACTION_DEFAULTS,
   NATIVE_INTERACTION_DEFAULTS,
 } from "./constants.js"
@@ -143,6 +144,7 @@ interface RawValue {
 
 const LIMIT_DEFAULTS = Object.freeze({
   attachmentMaxBytes: DISCORD_LIMITS.attachmentBytes,
+  guildPruneMaxMembers: GUILD_PRUNE_DEFAULTS.maximumMemberCount,
   interactionMaxWritesPerMinute: INTERACTION_DEFAULTS.maxWritesPerMinute,
   interactionMinWriteIntervalMs: INTERACTION_DEFAULTS.minWriteIntervalMs,
   nativeInteractionMaxPending: NATIVE_INTERACTION_DEFAULTS.maximumPending,
