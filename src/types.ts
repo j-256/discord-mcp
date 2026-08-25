@@ -57,6 +57,15 @@ export interface DiscordApplicationCommand {
   version: string
 }
 
+export interface DiscordApplicationRoleConnectionMetadata {
+  description: string
+  description_localizations?: Record<string, string> | null
+  key: string
+  name: string
+  name_localizations?: Record<string, string> | null
+  type: number
+}
+
 export interface DiscordBan {
   reason?: string | null
   user: DiscordUser

@@ -1816,6 +1816,83 @@ test("Discord client bounds and protects application-command inventories", async
   )
 })
 
+test("Discord client bounds and protects linked-role metadata inventories", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const record = {
+    description: "Minimum review level",
+    key: "review_level",
+    name: "Review level",
+    type: 2,
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse([record])
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.listApplicationRoleConnectionMetadata("100"),
+    [record],
+  )
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/role-connections/metadata`,
+  }])
+
+  const privateMarker = "private-linked-role-description"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateMarker }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    refused.listApplicationRoleConnectionMetadata("100"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.message.includes("request failed")
+      && !error.message.includes(privateMarker)
+      && error.cause === undefined
+    ),
+  )
+
+  const transport = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateMarker)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transport.listApplicationRoleConnectionMetadata("100"),
+    (error: unknown) => (
+      error instanceof Error
+      && !error.message.includes(privateMarker)
+    ),
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(
+        DISCORD_LIMITS.applicationRoleConnectionMetadataResponseBytes + 1,
+      ),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.listApplicationRoleConnectionMetadata("100"),
+    /exceeded its local response bound/u,
+  )
+  assert.throws(
+    () => client.listApplicationRoleConnectionMetadata("invalid"),
+    /role-connection metadata application ID/u,
+  )
+})
+
 test("Discord client never retries or reveals an Interaction token after callback failure", async () => {
   const interactionToken = "private.interaction-token"
   let requests = 0

@@ -418,6 +418,7 @@ function toolService(): DiscordToolService {
   return {
     addReaction: unexpected,
     auditApplicationCommands: unexpected,
+    auditApplicationRoleConnectionMetadata: unexpected,
     captureGuildBlueprint: unexpected,
     executeDirectMessageChange: unexpected,
     getDirectMessage: unexpected,
@@ -5368,6 +5369,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_application_commands",
     "review_application_emoji_change",
     "review_application_intent_enablement",
+    "review_application_role_connection_metadata",
     "review_attachment_message",
     "review_automod_change",
     "review_bulk_guild_ban",
@@ -5422,6 +5424,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.resourceUris, [
     "discord://application/emojis",
     "discord://application/posture",
+    "discord://application/role-connection-metadata",
     "discord://connector/activity",
     "discord://connector/observability",
     "discord://connector/policy",

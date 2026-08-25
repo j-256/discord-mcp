@@ -11,6 +11,7 @@ export * from "./mcp-guidance-catalog.js"
 export type DiscordGuidanceService = Pick<
   ConnectorService,
   | "auditApplicationCommands"
+  | "auditApplicationRoleConnectionMetadata"
   | "auditForumTags"
   | "auditChannelDeletion"
   | "auditRoleDeletion"

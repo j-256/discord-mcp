@@ -411,6 +411,14 @@ Command descriptions, option descriptions, choice names and values, localization
 
 The audit covers only commands owned by the connector's pinned application. Discord's permission objects do not prove effective access for any individual member, and bot authentication cannot inspect or mutate another application's command policy. The prompt performs one read-only audit, treats every returned name as untrusted data, calls no mutation endpoint, and stops after explaining those limits.
 
+## Application linked-role metadata audit
+
+`audit_application_role_connection_metadata`, `discord://application/role-connection-metadata`, and `review_application_role_connection_metadata` belong to the `connector` toolset and inspect only the verified current application's complete [role-connection metadata schema](https://docs.discord.com/developers/resources/application-role-connection-metadata). The caller supplies no application ID. Each read re-verifies the pinned application and bot, validates verification-endpoint presence without returning its URL, and fetches Discord's complete inventory of at most five metadata records. The audit adds no bearer token, configuration field, write authority, Gateway connection, activity record, cache, or persistent file.
+
+The strict projection returns exact metadata keys, transient untrusted names and descriptions with character counts, normalized value families and comparison semantics for all eight documented types, localization counts without localized strings, record and aggregate unknown-field counts, unknown future type counts, projection completeness, and fixed findings. It rejects malformed known evidence, duplicate keys, oversized payloads, excess records, invalid Unicode or controls, unsupported bounds, and malformed identity or endpoint evidence. Unknown future fields and types are preserved only as bounded structural counts and never guessed.
+
+The audit omits the verification URL, localization values, user role-connection values, raw Discord payloads, and unknown field values. Metadata definitions do not reveal which guild roles use them, prove whether any user satisfies them, or predict whether Discord will grant a linked role. No tool in this workflow reads user values or mutates the schema. The guided prompt calls the audit exactly once, treats all returned text as untrusted data, explains incomplete future evidence and these limits, and stops without a write.
+
 ## Install
 
 After a release is published, run an exact version from npm:
@@ -697,6 +705,7 @@ Guild jump links receive a bounded projection of the configured exact guild and 
 | `parse_discord_reference` | Local read | Convert one complete canonical jump link or official typed mention into exact typed IDs plus bounded local read-policy eligibility without contacting Discord or granting downstream authority |
 | `audit_application_posture` | Discord read | Audit the verified current application's installation, privileged-intent, delivery, webhook, and connector-fit posture through a strict privacy-minimized projection |
 | `audit_application_commands` | Discord read | Audit the pinned application's complete global and exact-guild command inventories plus guild permission decisions through a strict privacy-safe structural projection |
+| `audit_application_role_connection_metadata` | Discord read | Audit the pinned application's complete bounded linked-role metadata schema through a strict privacy-safe structural projection |
 | `get_observability_status` | Local read | Report bounded operation aggregates, exporter health, and explicit telemetry privacy guarantees |
 | `get_gateway_status` | Local read | Report optional Gateway health, intent privacy, reconnect and continuity-gap counters, bounded-buffer state, and aggregate privacy-safe channel-layout readiness |
 | `get_gateway_events` | Local read | Page through retained content-free events after an optional process-bound cursor |
@@ -918,6 +927,7 @@ MCP resource discovery lists only stable metadata. Listing resources or template
 | `discord://connector/policy` | Local | Report effective scope and write policy without credentials or Discord access |
 | `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
 | `discord://application/posture` | Discord | Return the verified current application's strict privacy-minimized security posture without profiles, URL values, raw bitfields, webhook event names, or persistence |
+| `discord://application/role-connection-metadata` | Discord | Return the verified current application's complete bounded linked-role metadata schema without verification URL, localized strings, user values, raw payloads, or persistence |
 | `discord://application/emojis` | Discord | Read the verified current application's complete bounded privacy-safe emoji inventory without caller-selected application scope |
 | `discord://connector/observability` | Local | Return process-local operation aggregates, exporter health, and telemetry privacy guarantees |
 | `discord://gateway/status` | Local | Report Gateway state, privacy guarantees, and content-free counters |
@@ -1053,6 +1063,7 @@ The voice-channel-status prompt accepts one strict request JSON object containin
 | `find_guild_members` | Run one bounded prefix search, present exact user IDs and minimized fields, and stop before any member-targeting action |
 | `inspect_guild_ban` | Read one exact privacy-minimized ban, optionally include its bounded reason, and stop before listing or moderation |
 | `review_application_commands` | Audit one exact permitted guild's complete current-application command exposure and permission objects, explain privacy and effective-access limits, and make no write call |
+| `review_application_role_connection_metadata` | Audit the current application's complete bounded linked-role metadata schema, treat labels as untrusted, explain privacy and eligibility limits, and make no write call |
 | `review_pending_native_interactions` | Read one bounded status and pending snapshot, draft clearly unsent responses to untrusted request data, and stop before the response tool |
 | `review_direct_message_change` | Validate one strict exact-recipient text, static Components V2, or independently gated owned-file send or reply, same-format connector-message edit, or irreversible supported-message deletion request, build its private-message plan, and stop before execution |
 | `review_attachment_message` | Build and review one exact byte-bound local-file attachment plan, then stop before execution |

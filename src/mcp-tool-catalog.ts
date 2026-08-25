@@ -120,6 +120,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "audit", "bot", "install", "intent", "security", "setup"],
     toolset: "connector",
   },
+  audit_application_role_connection_metadata: {
+    keywords: ["application", "audit", "comparison", "linked", "metadata", "role", "schema", "security", "verification"],
+    toolset: "connector",
+  },
   audit_forum_tags: {
     keywords: ["audit", "forum", "tag"],
     toolset: "forum-tags",

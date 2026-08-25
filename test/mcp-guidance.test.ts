@@ -36,6 +36,7 @@ import type {
 } from "../src/types.js"
 import { loadFixtureConfig } from "./config-fixture.js"
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
+import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "500000000000000001"
@@ -166,6 +167,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 interface GuidanceCalls {
   activity: number
   applicationCommands: number
+  applicationRoleConnectionMetadata: number
   announcementSubscriptions: number
   applicationEmojis: number
   applicationPosture: number
@@ -225,6 +227,7 @@ function guidanceService(options: {
   const calls: GuidanceCalls = {
     activity: 0,
     applicationCommands: 0,
+    applicationRoleConnectionMetadata: 0,
     announcementSubscriptions: 0,
     applicationEmojis: 0,
     applicationPosture: 0,
@@ -286,6 +289,13 @@ function guidanceService(options: {
         applicationId: APPLICATION_ID,
         botId: BOT_ID,
         guildId,
+      })
+    },
+    async auditApplicationRoleConnectionMetadata() {
+      calls.applicationRoleConnectionMetadata += 1
+      return fixtureApplicationRoleConnectionMetadataAudit({
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
       })
     },
     captureGuildBlueprint: unexpected,
@@ -2746,6 +2756,7 @@ async function connectedFixture(
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
     + calls.applicationCommands
+    + calls.applicationRoleConnectionMetadata
     + calls.announcementSubscriptions
     + calls.applicationEmojis
     + calls.applicationPosture
@@ -2837,6 +2848,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_NAMES.applicationPosture,
         uri: MCP_RESOURCE_URIS.applicationPosture,
+      },
+      {
+        name: MCP_RESOURCE_NAMES.applicationRoleConnectionMetadata,
+        uri: MCP_RESOURCE_URIS.applicationRoleConnectionMetadata,
       },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
@@ -3154,6 +3169,40 @@ test("MCP application-command guidance completes scope and performs one private 
   assert.equal(calls.applicationCommands, 1)
 })
 
+test("MCP linked-role metadata guidance performs one private pinned audit", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const resource = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.applicationRoleConnectionMetadata,
+  )
+
+  const data = resource.value.data as Record<string, unknown>
+  assert.deepEqual(data.inventory, {
+    completeness: "complete-current-application",
+    count: 1,
+    documentedLimit: 5,
+    projectionComplete: true,
+  })
+  assert.equal(
+    (resource.value.trust as Record<string, unknown>).classification,
+    "untrusted-external-data",
+  )
+  assert.doesNotMatch(resource.text, new RegExp(TOKEN, "u"))
+  assert.equal(calls.applicationRoleConnectionMetadata, 1)
+
+  const prompt = await client.getPrompt({
+    arguments: {},
+    name: MCP_PROMPT_NAMES.reviewApplicationRoleConnectionMetadata,
+  })
+  const text = promptText(prompt)
+  assert.match(text, /Call audit_application_role_connection_metadata exactly once/u)
+  assert.match(text, /untrusted Discord data/u)
+  assert.match(text, /do not prove which guild roles use them/u)
+  assert.match(text, /Stop after the audit/u)
+  assert.equal(calls.applicationRoleConnectionMetadata, 1)
+})
+
 test("MCP local resources expose safety, policy, and content-free activity without secrets", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -3167,6 +3216,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /request-bound schema-v2 content-free receipt/)
   assert.match(safety.text, /Current-application command audit re-verifies pinned identity/)
   assert.match(safety.text, /omitted global contexts remain explicitly incomplete/iu)
+  assert.match(safety.text, /Current-application linked-role metadata audit re-verifies pinned identity/u)
+  assert.match(safety.text, /cannot select another application, prove guild role usage or user eligibility/u)
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Channel deletion requires separate audit and change toggles/)
   assert.match(safety.text, /never fetches message content, treats an absent target as success/)

@@ -797,6 +797,9 @@ function serviceFixture(overrides: {
     async listApplicationEmojis() {
       throw new Error("Unexpected application emoji inventory")
     },
+    async listApplicationRoleConnectionMetadata() {
+      return []
+    },
     async listGuildStickers() {
       return []
     },
@@ -1316,6 +1319,66 @@ test("service rejects application-command scope before identity access", async (
   )
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
+})
+
+test("service pins linked-role metadata audits to verified current application identity", async () => {
+  const controller = new AbortController()
+  const reads: Array<{
+    applicationId?: string
+    operation: string
+    signal: AbortSignal | undefined
+  }> = []
+  const { calls, service } = serviceFixture({
+    client: {
+      async getCurrentApplication(options) {
+        calls.application += 1
+        reads.push({ operation: "application", signal: options?.signal })
+        return {
+          ...application(),
+          role_connections_verification_url: "https://private.example.test/linked-role",
+        }
+      },
+      async getCurrentUser(options) {
+        calls.user += 1
+        reads.push({ operation: "bot", signal: options?.signal })
+        return bot()
+      },
+      async listApplicationRoleConnectionMetadata(applicationId, options) {
+        reads.push({
+          applicationId,
+          operation: "metadata",
+          signal: options?.signal,
+        })
+        return [{
+          description: "Minimum review level",
+          key: "review_level",
+          name: "Review level",
+          type: 2,
+        }]
+      },
+    },
+  })
+
+  const result = await service.auditApplicationRoleConnectionMetadata({
+    signal: controller.signal,
+  })
+
+  assert.deepEqual(result.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+    verificationEndpointConfigured: true,
+  })
+  assert.equal(result.inventory.count, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(reads.map((read) => read.operation), [
+    "application",
+    "bot",
+    "metadata",
+  ])
+  assert.ok(reads.every(({ signal }) => signal === controller.signal))
+  assert.equal(reads[2]?.applicationId, APPLICATION_ID)
+  assert.doesNotMatch(JSON.stringify(result), /private\.example/u)
 })
 
 test("service rejects forum-tag scope before identity or channel access", async () => {

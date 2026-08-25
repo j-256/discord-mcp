@@ -529,6 +529,10 @@ export class ApplicationCommandAuditEvidenceError extends Error {
   override name = "ApplicationCommandAuditEvidenceError"
 }
 
+export class ApplicationRoleConnectionMetadataEvidenceError extends Error {
+  override name = "ApplicationRoleConnectionMetadataEvidenceError"
+}
+
 export class ChannelDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

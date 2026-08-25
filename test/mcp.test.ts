@@ -461,6 +461,7 @@ import {
   type FixtureConfigOverrides,
 } from "./config-fixture.js"
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
+import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
 import type {
   ThreadChangePlan,
   ThreadChangeRequest,
@@ -7443,6 +7444,8 @@ function serviceFixture(overrides: {
   applicationIntentEffect?: "change" | "none"
   applicationIntentError?: Error
   applicationIntentPlanDigest?: string
+  applicationRoleConnectionMetadataError?: Error
+  applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -8075,6 +8078,16 @@ function serviceFixture(overrides: {
         botId: BOT_ID,
         guildId,
       })
+    },
+    async auditApplicationRoleConnectionMetadata() {
+      if (overrides.applicationRoleConnectionMetadataError) {
+        throw overrides.applicationRoleConnectionMetadataError
+      }
+      return overrides.applicationRoleConnectionMetadataResult
+        || fixtureApplicationRoleConnectionMetadataAudit({
+          applicationId: APPLICATION_ID,
+          botId: BOT_ID,
+        })
     },
     async executeDirectMessageChange(request, planDigest) {
       if (overrides.directMessageError) throw overrides.directMessageError
@@ -11717,6 +11730,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     [
       "audit_application_posture",
       "audit_application_commands",
+      "audit_application_role_connection_metadata",
       "get_connector_status",
       "parse_discord_reference",
       "get_observability_status",
@@ -13964,6 +13978,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     [
       "audit_application_posture",
       "audit_application_commands",
+      "audit_application_role_connection_metadata",
       "get_connector_status",
       "parse_discord_reference",
       "read_messages",
@@ -13976,6 +13991,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     (await client.listPrompts()).prompts.map(({ name }) => name),
     [
       "review_application_commands",
+      "review_application_role_connection_metadata",
       "summarize_channel",
       "search_guild_messages",
     ],
@@ -14633,6 +14649,30 @@ test("progressive discovery reveals exact Discord reference parsing independentl
   )
 })
 
+test("progressive discovery reveals the pinned linked-role metadata audit independently", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["connector"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "audit_application_role_connection_metadata" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "audit_application_role_connection_metadata",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["audit_application_role_connection_metadata", "discover_discord_tools"],
+  )
+})
+
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
@@ -14643,6 +14683,10 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   const posture = structuredContent(await client.callTool({
     arguments: {},
     name: "audit_application_posture",
+  }))
+  const linkedRoles = structuredContent(await client.callTool({
+    arguments: {},
+    name: "audit_application_role_connection_metadata",
   }))
   const status = structuredContent(await client.callTool({
     arguments: {},
@@ -14681,6 +14725,18 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     "gateway",
   )
   assert.doesNotMatch(JSON.stringify(posture), /https:\/\//u)
+  assert.deepEqual(linkedRoles.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+    verificationEndpointConfigured: true,
+  })
+  assert.deepEqual(linkedRoles.inventory, {
+    completeness: "complete-current-application",
+    count: 1,
+    documentedLimit: 5,
+    projectionComplete: true,
+  })
+  assert.doesNotMatch(JSON.stringify(linkedRoles), new RegExp(TOKEN, "u"))
 
   const resource = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
   const content = resource.contents[0]
@@ -14695,6 +14751,32 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /newer complete matching Gateway layout/)
   assert.match(content.text, /Exact-reference parsing accepts one complete canonical Discord/)
   assert.match(content.text, /never scans prose, resolves a name, contacts Discord/)
+  assert.match(content.text, /Current-application linked-role metadata audit re-verifies pinned identity/u)
+})
+
+test("MCP linked-role metadata audit redacts configured secrets from transient labels", async (context) => {
+  const result = fixtureApplicationRoleConnectionMetadataAudit({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+  })
+  const record = result.records[0]
+  assert.ok(record)
+  record.name = TOKEN
+  record.description = `Description ${TOKEN}`
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      applicationRoleConnectionMetadataResult: result,
+    },
+  })
+
+  const response = await client.callTool({
+    arguments: {},
+    name: "audit_application_role_connection_metadata",
+  })
+
+  assert.notEqual(response.isError, true)
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(TOKEN, "u"))
+  assert.match(JSON.stringify(response), /\[redacted\]/u)
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {

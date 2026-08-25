@@ -100,6 +100,7 @@ import type {
   DiscordApplication,
   DiscordApplicationCommand,
   DiscordApplicationCommandOption,
+  DiscordApplicationRoleConnectionMetadata,
   DiscordBan,
   DiscordChannel,
   DiscordCreatedForumPost,
@@ -1537,6 +1538,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_invites",
   "list_guild_integrations",
   "list_application_emojis",
+  "list_application_role_connection_metadata",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_global_application_commands",
@@ -8569,6 +8571,26 @@ export class DiscordClient {
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {
     return this.#request("get_current_user", "/users/@me", options)
+  }
+
+  listApplicationRoleConnectionMetadata(
+    applicationId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationRoleConnectionMetadata[]> {
+    assertSearchSnowflake(
+      applicationId,
+      "Discord application role-connection metadata application ID",
+    )
+    return this.#request(
+      "list_application_role_connection_metadata",
+      `/applications/${applicationId}/role-connections/metadata`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/role-connections/metadata",
+        maxResponseBytes: DISCORD_LIMITS.applicationRoleConnectionMetadataResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   listGlobalApplicationCommands(

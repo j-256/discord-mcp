@@ -7,6 +7,10 @@ import {
   ApplicationCommandAuditService,
   type ApplicationCommandAuditResult,
 } from "./application-command-audit-service.js"
+import {
+  ApplicationRoleConnectionMetadataAuditService,
+  type ApplicationRoleConnectionMetadataAuditResult,
+} from "./application-role-connection-metadata-audit-service.js"
 import type {
   ApplicationEmojiChangeRequest,
   ApplicationEmojiInventoryResult,
@@ -830,6 +834,7 @@ export interface DiscordServiceClient {
   getUser: DiscordClient["getUser"]
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listApplicationEmojis: DiscordClient["listApplicationEmojis"]
+  listApplicationRoleConnectionMetadata: DiscordClient["listApplicationRoleConnectionMetadata"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
@@ -1303,6 +1308,7 @@ export class ConnectorService {
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #applicationEmojiService: ApplicationEmojiService
   readonly #applicationCommandAuditService: ApplicationCommandAuditService
+  readonly #applicationRoleConnectionMetadataAuditService: ApplicationRoleConnectionMetadataAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
@@ -1433,6 +1439,9 @@ export class ConnectorService {
     this.#applicationCommandAuditService = new ApplicationCommandAuditService({
       client: this.#client,
       policy: this.#policy,
+    })
+    this.#applicationRoleConnectionMetadataAuditService = new ApplicationRoleConnectionMetadataAuditService({
+      client: this.#client,
     })
     this.#applicationIntentService = new ApplicationIntentService({
       activityStore: this.#activityStore,
@@ -2013,6 +2022,17 @@ export class ConnectorService {
         },
       },
       guildId,
+      options,
+    )
+  }
+
+  async auditApplicationRoleConnectionMetadata(
+    options: RequestOptions = {},
+  ): Promise<ApplicationRoleConnectionMetadataAuditResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationRoleConnectionMetadataAuditService.audit(
+      identity.application,
+      identity.bot.id,
       options,
     )
   }
