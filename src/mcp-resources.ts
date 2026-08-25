@@ -318,7 +318,7 @@ export function registerDiscordResources(
           "",
           "Channel permission-overwrite inventory is read-only, bounded, thread-inheritance aware, and persists nothing. Changes require a separate exact direct-channel allowlist and accept one exact role or member target with named allow, deny, or inherit deltas, or an explicit whole-overwrite delete. Planning preserves unspecified known channel bits, blocks unknown-bit or non-channel-bit updates, verifies the connector holds every outgoing permission, prevents loss of VIEW_CHANNEL or MANAGE_ROLES, and reports target effective-access plus parent synchronization impact. Execution requires a fresh keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried PUT or DELETE, and complete overwrite-set readback. Raw bitfields, bulk reset, copy, sync, thread mutation, retry, and rollback are unsupported.",
           "",
-          "Webhook inventory requires a separate exact direct-channel allowlist and complete VIEW_CHANNEL plus MANAGE_WEBHOOKS evidence. Incoming webhook credentials, complete execution URLs, avatars, creator profiles, source guild and channel objects, unknown raw fields, and unrelated channel metadata are projected out before any result is built; no credential or private path enters MCP data, activity, operation receipts, or observability. Creation, rename or same-guild move, and deletion each require an independent action gate, a fresh keyed plan over complete source and destination evidence, signed approval for an actual write, durable one-shot reservation, pending content-free activity, one non-retried mutation, strict response validation, and exact complete-inventory readback. Creation validates the returned credential inside the REST boundary and deposits it only into the configured private exact-ID credential store. A verified no-op change skips confirmation and every durable write record, while a move preserves the existing credential and redirects future deliveries. Independently gated credential-authenticated message lookup, bounded plain-text delivery, and exact editing use a separate direct-channel allowlist, exact private credential lookup, mention containment, anti-spam limits, one-shot write coordination, strict projections, and no content persistence. Exact message deletion additionally requires a transient content-bound plan, signed approval, one non-retried mutation, and absence readback while confirming that the webhook credential remains valid. Token, credential-path, or execution-URL inputs, identity overrides, threads, forum posts, embeds, files, components, polls, and guild-wide inventory remain intentionally absent. Discord's webhook-ID-only administration and token-authenticated message routes leave non-atomic external races that every applicable plan exposes. The production facade acquires durable exact targets across connector processes sharing the activity-state root, and an uncertain outcome permanently spends the key and retains those claims for operator review.",
+          "Channel webhook inventory requires a separate exact direct-channel allowlist and complete VIEW_CHANNEL plus MANAGE_WEBHOOKS evidence. Incoming webhook credentials, complete execution URLs, avatars, creator profiles, source guild and channel objects, unknown raw fields, and unrelated channel metadata are projected out before any result is built; no credential or private path enters MCP data, activity, operation receipts, or observability. A separate exact-guild audit requires complete guild-level MANAGE_WEBHOOKS evidence and returns bounded credential-redacted exposure, aggregate, and fixed-finding evidence without granting channel or mutation authority. Creation, rename or same-guild move, and deletion each require an independent action gate, a fresh keyed plan over complete source and destination evidence, signed approval for an actual write, durable one-shot reservation, pending content-free activity, one non-retried mutation, strict response validation, and exact complete-inventory readback. Creation validates the returned credential inside the REST boundary and deposits it only into the configured private exact-ID credential store. A verified no-op change skips confirmation and every durable write record, while a move preserves the existing credential and redirects future deliveries. Independently gated credential-authenticated message lookup, bounded plain-text delivery, and exact editing use a separate direct-channel allowlist, exact private credential lookup, mention containment, anti-spam limits, one-shot write coordination, strict projections, and no content persistence. Exact message deletion additionally requires a transient content-bound plan, signed approval, one non-retried mutation, and absence readback while confirming that the webhook credential remains valid. Token, credential-path, or execution-URL inputs, identity overrides, threads, forum posts, embeds, files, components, and polls remain intentionally absent from channel administration. Discord's webhook-ID-only administration and token-authenticated message routes leave non-atomic external races that every applicable plan exposes. The production facade acquires durable exact targets across connector processes sharing the activity-state root, and an uncertain outcome permanently spends the key and retains those claims for operator review.",
           "",
           "Guild emoji and sticker inventory requires a separate exact guild allowlist and returns bounded stable metadata plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. CDN URLs, image bytes, uploader profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local files from dedicated roots, detects the actual container format and animation state, records dimensions where encoded, enforces byte limits plus sticker dimensions and duration, requires fresh VERIFIED or PARTNERED feature evidence for Lottie, and binds the file snapshot into the digest. Every create, update, or delete requires a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Name collisions, missing role references, managed emoji mutation, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, retries, rolls back, or persists expression content.",
           "",
@@ -1476,6 +1476,34 @@ export function registerDiscordResources(
       secrets,
       () => service.listChannelWebhooks(
         templateSnowflake(variables, "channelId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildWebhooks,
+    new ResourceTemplate(
+      MCP_RESOURCE_TEMPLATE_URIS.guildWebhooks,
+      resourceTemplateCompletionCallbacks(
+        MCP_RESOURCE_TEMPLATE_URIS.guildWebhooks,
+        completionPolicy,
+      ),
+    ),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete guild-wide Discord webhook exposure evidence for one exact separately allowlisted guild. Webhook credentials, execution URLs, avatars, creator profiles and usernames, source objects, guild and channel names, channel topics, unknown values, and raw payloads are omitted. Webhook names are transient untrusted data and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Credential-redacted Discord guild webhooks",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditGuildWebhooks(
+        templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),
     ),

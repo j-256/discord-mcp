@@ -6070,6 +6070,169 @@ test("Discord client rejects invalid webhook inventory without exposing response
   assert.equal(requests, 3)
 })
 
+test("Discord client projects a bounded guild webhook inventory before returning it", async () => {
+  const privateToken = "guild-webhook-secret"
+  const privateUrl = `https://discord.test/api/webhooks/300/${privateToken}`
+  const privateProfile = "private-guild-webhook-creator"
+  const records: RecordedObservation[] = []
+  const requests: Array<{ method: string; url: string }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse([{
+        application_id: "500",
+        avatar: "private-guild-webhook-avatar",
+        channel_id: "200",
+        guild_id: "100",
+        id: "300",
+        name: "reviewed-hook",
+        token: privateToken,
+        type: 1,
+        unknown_private_value: "private-guild-webhook-unknown",
+        url: privateUrl,
+        user: {
+          avatar: "private-guild-webhook-user-avatar",
+          global_name: privateProfile,
+          id: "400",
+          username: privateProfile,
+        },
+      }, {
+        application_id: null,
+        channel_id: "201",
+        guild_id: "100",
+        id: "301",
+        name: "Follower",
+        source_channel: { id: "202", name: "private-source-channel-name" },
+        source_guild: { id: "101", name: "private-source-guild-name" },
+        type: 2,
+      }])
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const inventory = await client.listGuildWebhooks("100")
+
+  assert.deepEqual(inventory, [{
+    applicationId: "500",
+    channelId: "200",
+    creatorUserId: "400",
+    guildId: "100",
+    id: "300",
+    name: "reviewed-hook",
+    sourceChannelId: null,
+    sourceGuildId: null,
+    type: 1,
+  }, {
+    applicationId: null,
+    channelId: "201",
+    creatorUserId: null,
+    guildId: "100",
+    id: "301",
+    name: "Follower",
+    sourceChannelId: "202",
+    sourceGuildId: "101",
+    type: 2,
+  }])
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: `${API_BASE_URL}/guilds/100/webhooks`,
+  }])
+  const serialized = JSON.stringify(inventory)
+  for (const secret of [
+    privateToken,
+    privateUrl,
+    privateProfile,
+    "private-guild-webhook-avatar",
+    "private-guild-webhook-user-avatar",
+    "private-guild-webhook-unknown",
+    "private-source-channel-name",
+    "private-source-guild-name",
+  ]) {
+    assert.equal(serialized.includes(secret), false)
+  }
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "list_guild_webhooks",
+    retries: 0,
+    runs: 1,
+  }])
+})
+
+test("Discord client fails guild webhook inventory closed without leaking evidence", async () => {
+  const privateMarker = "private-guild-webhook-failure"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateMarker }, 403),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    refused.listGuildWebhooks("100"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.message.includes("request failed")
+      && !error.message.includes(privateMarker)
+      && error.cause === undefined
+    ),
+  )
+
+  const transport = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateMarker)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transport.listGuildWebhooks("100"),
+    (error: unknown) => error instanceof Error
+      && !error.message.includes(privateMarker)
+      && error.cause === undefined,
+  )
+
+  const tooMany = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse(Array.from(
+      { length: DISCORD_LIMITS.guildWebhooks + 1 },
+      (_, index) => ({
+        application_id: null,
+        channel_id: "200",
+        guild_id: "100",
+        id: String(1_000_000 + index),
+        name: null,
+        type: 1,
+      }),
+    )),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    tooMany.listGuildWebhooks("100"),
+    /invalid guild webhook inventory/u,
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(DISCORD_LIMITS.guildWebhookResponseBytes + 1),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.listGuildWebhooks("100"),
+    /exceeded its local response bound/u,
+  )
+  await assert.rejects(
+    refused.listGuildWebhooks("invalid"),
+    /webhook guild ID/u,
+  )
+  await assert.rejects(
+    refused.listGuildWebhooks("0"),
+    /positive Discord snowflake/u,
+  )
+})
+
 test("Discord client creates an Incoming webhook while projecting its credential out", async () => {
   const privateToken = "incoming-webhook-credential-canary"
   const privateUrl = `https://discord.test/api/webhooks/300/${privateToken}`

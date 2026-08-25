@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/client"
 
 import {
+  DISCORD_LIMITS,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
   WELCOME_SCREEN_LIMITS,
@@ -34,10 +35,14 @@ import type {
   DiscordMessage,
   DiscordRole,
 } from "../src/types.js"
-import { loadFixtureConfig } from "./config-fixture.js"
+import {
+  loadFixtureConfig,
+  type FixtureConfigOverrides,
+} from "./config-fixture.js"
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
 import { fixtureApplicationSkuAudit } from "./application-sku-audit-fixture.js"
+import { fixtureGuildWebhookAudit } from "./guild-webhook-audit-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "500000000000000001"
@@ -170,6 +175,7 @@ interface GuidanceCalls {
   applicationCommands: number
   applicationRoleConnectionMetadata: number
   applicationSkus: number
+  guildWebhookAudits: number
   announcementSubscriptions: number
   applicationEmojis: number
   applicationPosture: number
@@ -222,6 +228,7 @@ interface GuidanceCalls {
 function guidanceService(options: {
   messageContent?: string
   messageError?: Error
+  webhookGuildIds?: readonly string[]
 } = {}): {
   calls: GuidanceCalls
   service: DiscordToolService
@@ -231,6 +238,7 @@ function guidanceService(options: {
     applicationCommands: 0,
     applicationRoleConnectionMetadata: 0,
     applicationSkus: 0,
+    guildWebhookAudits: 0,
     announcementSubscriptions: 0,
     applicationEmojis: 0,
     applicationPosture: 0,
@@ -306,6 +314,15 @@ function guidanceService(options: {
       return fixtureApplicationSkuAudit({
         applicationId: APPLICATION_ID,
         botId: BOT_ID,
+      })
+    },
+    async auditGuildWebhooks(guildId) {
+      calls.guildWebhookAudits += 1
+      calls.lastGuildId = guildId
+      return fixtureGuildWebhookAudit({
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId,
       })
     },
     captureGuildBlueprint: unexpected,
@@ -2151,8 +2168,9 @@ function guidanceService(options: {
         threadIds: [],
         threadMemberUserIds: [],
         threadParentIds: [],
-        webhookAuditEnabled: false,
+        webhookAuditEnabled: (options.webhookGuildIds?.length ?? 0) > 0,
         webhookChannelIds: [],
+        webhookGuildIds: [...(options.webhookGuildIds ?? [])],
         webhookChangesEnabled: false,
         webhookCreationEnabled: false,
         webhookDeletionsEnabled: false,
@@ -2732,9 +2750,16 @@ function guidanceService(options: {
 
 async function connectedFixture(
   context: TestContext,
-  options: Parameters<typeof guidanceService>[0] = {},
+  options: Parameters<typeof guidanceService>[0] & {
+    configOverrides?: FixtureConfigOverrides
+  } = {},
 ) {
-  const fixture = guidanceService(options)
+  const fixture = guidanceService({
+    ...options,
+    ...(options.configOverrides?.scopes?.webhookGuildIds === undefined
+      ? {}
+      : { webhookGuildIds: options.configOverrides.scopes.webhookGuildIds }),
+  })
   const environment = {
     DISCORD_BOT_TOKEN: TOKEN,
   }
@@ -2745,6 +2770,7 @@ async function connectedFixture(
         guildIds: [GUILD_ID],
       },
       token: TOKEN,
+      ...options.configOverrides,
     }),
     environment,
     service: fixture.service,
@@ -2768,6 +2794,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.applicationCommands
     + calls.applicationRoleConnectionMetadata
     + calls.applicationSkus
+    + calls.guildWebhookAudits
     + calls.announcementSubscriptions
     + calls.applicationEmojis
     + calls.applicationPosture
@@ -2983,6 +3010,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildIntegrations,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildIntegrations,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildWebhooks,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildWebhooks,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildOnboarding,
@@ -3254,6 +3285,64 @@ test("MCP application SKU guidance performs one private pinned audit", async (co
   assert.equal(calls.applicationSkus, 1)
 })
 
+test("MCP guild webhook guidance completes scope and performs one private audit", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      capabilities: { webhookAudit: true },
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { webhookGuildIds: [GUILD_ID] },
+    },
+  })
+  const uri = MCP_RESOURCE_TEMPLATE_URIS.guildWebhooks.replace(
+    "{guildId}",
+    GUILD_ID,
+  )
+
+  const [resourceCompletion, promptCompletion] = await Promise.all([
+    client.complete({
+      argument: { name: "guildId", value: GUILD_ID.slice(0, 6) },
+      ref: { type: "ref/resource", uri: MCP_RESOURCE_TEMPLATE_URIS.guildWebhooks },
+    }),
+    client.complete({
+      argument: { name: "guildId", value: GUILD_ID.slice(0, 6) },
+      ref: { name: MCP_PROMPT_NAMES.reviewGuildWebhooks, type: "ref/prompt" },
+    }),
+  ])
+  assert.deepEqual(resourceCompletion.completion.values, [GUILD_ID])
+  assert.deepEqual(promptCompletion.completion.values, [GUILD_ID])
+  assert.equal(totalCalls(calls), 0)
+
+  const resource = await readJsonResource(client, uri)
+  const data = resource.value.data as Record<string, unknown>
+  assert.equal(data.guildId, GUILD_ID)
+  assert.deepEqual(data.inventory, {
+    channelCount: 1,
+    completeness: "complete-guild",
+    count: 1,
+    localRecordLimit: DISCORD_LIMITS.guildWebhooks,
+    projectionComplete: true,
+    unknownChannelTypes: 0,
+    unknownWebhookTypes: 0,
+  })
+  assert.equal(
+    (resource.value.trust as Record<string, unknown>).classification,
+    "untrusted-external-data",
+  )
+  assert.doesNotMatch(resource.text, new RegExp(TOKEN, "u"))
+  assert.equal(calls.guildWebhookAudits, 1)
+
+  const prompt = await client.getPrompt({
+    arguments: { guildId: GUILD_ID },
+    name: MCP_PROMPT_NAMES.reviewGuildWebhooks,
+  })
+  const text = promptText(prompt)
+  assert.match(text, /Call audit_guild_webhooks exactly once/u)
+  assert.match(text, /bearer-capable/u)
+  assert.match(text, /cannot prove credential custody/u)
+  assert.match(text, /Stop after the audit/u)
+  assert.equal(calls.guildWebhookAudits, 1)
+})
+
 test("MCP local resources expose safety, policy, and content-free activity without secrets", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -3312,7 +3401,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Only capabilities\.roleDeletionAudit, capabilities\.roleDeletions/)
   assert.match(safety.text, /every discovered dependency blocks/)
   assert.match(safety.text, /Historical message mentions, Guild Template snapshot internals/)
-  assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
+  assert.match(safety.text, /Channel webhook inventory requires a separate exact direct-channel allowlist/)
+  assert.match(safety.text, /separate exact-guild audit requires complete guild-level MANAGE_WEBHOOKS/)
   assert.match(safety.text, /Creation, rename or same-guild move, and deletion each require/)
   assert.match(safety.text, /configured private exact-ID credential store/)
   assert.match(safety.text, /credential-authenticated message lookup/)

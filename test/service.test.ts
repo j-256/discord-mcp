@@ -848,6 +848,9 @@ function serviceFixture(overrides: {
     async listChannelWebhooks() {
       return []
     },
+    async listGuildWebhooks() {
+      return []
+    },
     async listMessages() {
       calls.listMessages += 1
       return [message()]
@@ -1441,6 +1444,83 @@ test("service pins SKU audits to verified current application identity", async (
   assert.equal(reads[2]?.applicationId, APPLICATION_ID)
 })
 
+test("service pins guild webhook audits to verified connector identity and exact scope", async () => {
+  const controller = new AbortController()
+  const reads: Array<{
+    operation: string
+    signal: AbortSignal | undefined
+  }> = []
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild(guildId, options) {
+        assert.equal(guildId, GUILD_ID)
+        reads.push({ operation: "guild", signal: options?.signal })
+        return { ...guild(), owner_id: MEMBER_USER_ID }
+      },
+      async getGuildChannels(guildId, options) {
+        assert.equal(guildId, GUILD_ID)
+        reads.push({ operation: "channels", signal: options?.signal })
+        return [channel({
+          name: "private-channel-name",
+          topic: "private-channel-topic",
+        })]
+      },
+      async getGuildMember(guildId, userId, options) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(userId, BOT_ID)
+        reads.push({ operation: "member", signal: options?.signal })
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles(guildId, options) {
+        assert.equal(guildId, GUILD_ID)
+        reads.push({ operation: "roles", signal: options?.signal })
+        return [role(GUILD_ID, DISCORD_PERMISSIONS.MANAGE_WEBHOOKS, "@everyone")]
+      },
+      async listGuildWebhooks(guildId, options) {
+        assert.equal(guildId, GUILD_ID)
+        reads.push({ operation: "webhooks", signal: options?.signal })
+        return [{
+          applicationId: APPLICATION_ID,
+          channelId: CHANNEL_ID,
+          creatorUserId: BOT_ID,
+          guildId: GUILD_ID,
+          id: WEBHOOK_ID,
+          name: "private-webhook-name",
+          sourceChannelId: null,
+          sourceGuildId: null,
+          type: 1,
+        }]
+      },
+    },
+    configOverrides: {
+      capabilities: { webhookAudit: true },
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { webhookGuildIds: [GUILD_ID] },
+    },
+  })
+
+  const result = await service.auditGuildWebhooks(GUILD_ID, {
+    signal: controller.signal,
+  })
+
+  assert.equal(result.application.id, APPLICATION_ID)
+  assert.equal(result.application.botId, BOT_ID)
+  assert.equal(result.guildId, GUILD_ID)
+  assert.equal(result.inventory.count, 1)
+  assert.equal(result.access.manageWebhooks, true)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(new Set(reads.map(({ operation }) => operation)), new Set([
+    "channels",
+    "guild",
+    "member",
+    "roles",
+    "webhooks",
+  ]))
+  assert.equal(reads.every(({ signal }) => signal === controller.signal), true)
+  assert.doesNotMatch(JSON.stringify(result), /private-channel/u)
+})
+
 test("service rejects forum-tag scope before identity or channel access", async () => {
   const { calls, service } = serviceFixture()
 
@@ -1609,6 +1689,10 @@ test("service rejects integration and webhook scope before identity access", asy
   )
   await assert.rejects(
     () => service.listChannelWebhooks(CHANNEL_ID),
+    /webhook audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.auditGuildWebhooks(GUILD_ID),
     /webhook audit is disabled/,
   )
   await assert.rejects(

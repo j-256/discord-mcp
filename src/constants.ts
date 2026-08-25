@@ -255,6 +255,8 @@ export const DISCORD_LIMITS = Object.freeze({
   guildFeatureCharacters: 100,
   guildFeatures: 256,
   guildIntegrations: 50,
+  guildWebhookResponseBytes: 8 * 1_024 * 1_024,
+  guildWebhooks: 7_500,
   guildStickers: 100,
   guildChannels: 500,
   voiceChannelStatusCharacters: 500,

@@ -112,6 +112,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.channelForumTags, "channelId", "forumTagChannelIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildTemplates, "guildId", "guildTemplateGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildIntegrations, "guildId", "integrationGuildIds"),
+  resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildWebhooks, "guildId", "webhookGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.channelAccess, "channelId", "allowedChannelIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.channelStageInstance, "guildId", "allowedGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.channelStageInstance, "channelId", "stageChannelIds"),
@@ -182,6 +183,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   promptBinding(MCP_PROMPT_NAMES.reviewWebhookChange, "channelId", "webhookChannelIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewWebhookChange, "destinationChannelId", "webhookChannelIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewWebhookDeletion, "channelId", "webhookChannelIds"),
+  promptBinding(MCP_PROMPT_NAMES.reviewGuildWebhooks, "guildId", "webhookGuildIds"),
   promptBinding(
     MCP_PROMPT_NAMES.reviewGuildIntegrationDeletion,
     "guildId",

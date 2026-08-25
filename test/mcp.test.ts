@@ -463,6 +463,7 @@ import {
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
 import { fixtureApplicationSkuAudit } from "./application-sku-audit-fixture.js"
+import { fixtureGuildWebhookAudit } from "./guild-webhook-audit-fixture.js"
 import type {
   ThreadChangePlan,
   ThreadChangeRequest,
@@ -7385,6 +7386,7 @@ function fixturePolicy(): PolicyDescription {
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookGuildIds: [],
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
@@ -7449,6 +7451,8 @@ function serviceFixture(overrides: {
   applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
   applicationSkuError?: Error
   applicationSkuResult?: ReturnType<typeof fixtureApplicationSkuAudit>
+  guildWebhookError?: Error
+  guildWebhookResult?: ReturnType<typeof fixtureGuildWebhookAudit>
   attachmentError?: Error
   attachmentPlanDigest?: string
   autoModerationEffect?: "change" | "none"
@@ -7699,6 +7703,7 @@ function serviceFixture(overrides: {
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     guildScaffoldVerify: 0,
+    guildWebhookAudit: 0,
     guildTemplateExecute: 0,
     guildTemplateList: 0,
     guildTemplatePlan: 0,
@@ -8097,6 +8102,15 @@ function serviceFixture(overrides: {
       return overrides.applicationSkuResult || fixtureApplicationSkuAudit({
         applicationId: APPLICATION_ID,
         botId: BOT_ID,
+      })
+    },
+    async auditGuildWebhooks(guildId) {
+      calls.guildWebhookAudit += 1
+      if (overrides.guildWebhookError) throw overrides.guildWebhookError
+      return overrides.guildWebhookResult || fixtureGuildWebhookAudit({
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId,
       })
     },
     async executeDirectMessageChange(request, planDigest) {
@@ -11798,6 +11812,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_poll_answer_voters",
       "list_message_pins",
       "list_channel_webhooks",
+      "audit_guild_webhooks",
       "list_guild_integrations",
       "get_channel_webhook",
       "list_guild_emojis",
@@ -14160,6 +14175,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     guildScaffoldExecute: 0,
     guildScaffoldPlan: 0,
     guildScaffoldVerify: 0,
+    guildWebhookAudit: 0,
     guildTemplateExecute: 0,
     guildTemplateList: 0,
     guildTemplatePlan: 0,
@@ -14708,6 +14724,70 @@ test("progressive discovery reveals the pinned application SKU audit independent
     (await client.listTools()).tools.map(({ name }) => name),
     ["audit_application_skus", "discover_discord_tools"],
   )
+})
+
+test("progressive discovery reveals guild webhook exposure audit independently", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["webhooks"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "audit_guild_webhooks" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, ["audit_guild_webhooks"])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["audit_guild_webhooks", "discover_discord_tools"],
+  )
+})
+
+test("MCP guild webhook audit is exact-guild, read-only, and credential-redacted", async (context) => {
+  const result = fixtureGuildWebhookAudit({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    guildId: GUILD_ID,
+  })
+  const record = result.records[0]
+  assert.ok(record)
+  record.name = `Webhook ${TOKEN}`
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      capabilities: { webhookAudit: true },
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { webhookGuildIds: [GUILD_ID] },
+    },
+    serviceOverrides: { guildWebhookResult: result },
+  })
+
+  const response = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "audit_guild_webhooks",
+  })
+  const data = structuredContent(response)
+
+  assert.notEqual(response.isError, true)
+  assert.equal(calls.guildWebhookAudit, 1)
+  assert.equal(data.guildId, GUILD_ID)
+  assert.deepEqual(data.inventory, result.inventory)
+  assert.deepEqual(data.exposure, result.exposure)
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(TOKEN, "u"))
+  assert.match(JSON.stringify(response), /\[redacted\]/u)
+  const tool = listedTool((await client.listTools()).tools, "audit_guild_webhooks")
+  assert.deepEqual(tool.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  assert.match(tool.description || "", /MANAGE_WEBHOOKS/u)
+  assert.match(tool.description || "", /Persists nothing/u)
 })
 
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {

@@ -374,6 +374,7 @@ function status(
       threadParentIds: [],
       webhookAuditEnabled: false,
       webhookChannelIds: [],
+      webhookGuildIds: [],
       webhookChangesEnabled: false,
       webhookCreationEnabled: false,
       webhookDeletionsEnabled: false,
@@ -420,6 +421,7 @@ function toolService(): DiscordToolService {
     auditApplicationCommands: unexpected,
     auditApplicationRoleConnectionMetadata: unexpected,
     auditApplicationSkus: unexpected,
+    auditGuildWebhooks: unexpected,
     captureGuildBlueprint: unexpected,
     executeDirectMessageChange: unexpected,
     getDirectMessage: unexpected,
@@ -2159,6 +2161,22 @@ test("doctor and setup explain credential-safe webhook administration and messag
     configOverrides: warningPolicy,
     nodeVersion: "22.14.0",
   })
+  const guildAuditPolicy = fixturePolicy({
+    capabilities: {
+      webhookAudit: true,
+    },
+    scopes: {
+      webhookGuildIds: [GUILD_ID],
+    },
+  })
+  const guildAudit = await diagnoseConnector({
+    configOverrides: guildAuditPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const guildAuditSetup = await prepareSetup({
+    configOverrides: guildAuditPolicy,
+    service: statusProvider(),
+  })
   const setup = await prepareSetup({
     configOverrides: warningPolicy,
     service: statusProvider(),
@@ -2188,6 +2206,12 @@ test("doctor and setup explain credential-safe webhook administration and messag
   assert.equal(audit?.status, "pass")
   assert.match(audit?.summary || "", /credential-redacted webhook inventory/i)
   assert.match(audit?.summary || "", /1 exact channels/)
+  const guildAuditCheck = guildAudit.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.webhookAuditPolicy,
+  )
+  assert.equal(guildAuditCheck?.status, "pass")
+  assert.match(guildAuditCheck?.summary || "", /0 exact channels and 1 exact guilds/)
+  assert.doesNotMatch(guildAuditSetup.warnings.join("\n"), /webhook-audit toggle/)
   assert.equal(deletion?.status, "pass")
   assert.match(deletion?.summary || "", /Incoming-webhook deletion/)
   assert.match(deletion?.summary || "", /one-shot execution and absence readback/)
@@ -5393,6 +5417,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_scaffold",
     "review_guild_settings_change",
     "review_guild_template_change",
+    "review_guild_webhooks",
     "review_invite_creation",
     "review_invite_deletion",
     "review_member_moderation",
@@ -5479,6 +5504,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/threads/{threadId}",
     "discord://guilds/{guildId}/threads/{threadId}/members/{userId}",
     "discord://guilds/{guildId}/voice-regions",
+    "discord://guilds/{guildId}/webhooks",
     "discord://guilds/{guildId}/welcome-screen",
     "discord://guilds/{guildId}/widget-settings",
   ])

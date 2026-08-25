@@ -1538,6 +1538,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_webhook_message",
   "list_guild_invites",
   "list_guild_integrations",
+  "list_guild_webhooks",
   "list_application_emojis",
   "list_application_role_connection_metadata",
   "list_application_skus",
@@ -11483,6 +11484,27 @@ export class DiscordClient {
     }
     if (response.length > DISCORD_LIMITS.webhooksPerChannel) {
       throw new WebhookEvidenceError("Discord returned an invalid channel webhook inventory")
+    }
+    return response.map(projectWebhook)
+  }
+
+  async listGuildWebhooks(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordWebhookSummary[]> {
+    assertPositiveSnowflake(guildId, "Discord webhook guild ID")
+    const response = await this.#request<unknown>(
+      "list_guild_webhooks",
+      `/guilds/${guildId}/webhooks`,
+      {
+        ...options,
+        diagnosticRoute: "/guilds/{guild.id}/webhooks",
+        maxResponseBytes: DISCORD_LIMITS.guildWebhookResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    if (!Array.isArray(response) || response.length > DISCORD_LIMITS.guildWebhooks) {
+      throw new WebhookEvidenceError("Discord returned an invalid guild webhook inventory")
     }
     return response.map(projectWebhook)
   }

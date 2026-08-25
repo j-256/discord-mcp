@@ -728,8 +728,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowAutomodChanges && config.automodGuildIds.size === 0) {
     warnings.push("The AutoMod change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
   }
-  if (config.allowWebhookAudit && config.webhookChannelIds.size === 0) {
-    warnings.push("The webhook-audit toggle is enabled but inventory remains blocked because an exact channel allowlist is required")
+  if (
+    config.allowWebhookAudit
+    && config.webhookChannelIds.size === 0
+    && config.webhookGuildIds.size === 0
+  ) {
+    warnings.push("The webhook-audit toggle is enabled but inventory remains blocked because an exact channel or guild allowlist is required")
   }
   if (config.allowWebhookChanges && config.webhookChannelIds.size === 0) {
     warnings.push("The webhook-change toggle is enabled but changes remain blocked because an exact channel allowlist is required")
@@ -2723,17 +2727,20 @@ export async function diagnoseConnector(
         "pass",
         "Credential-redacted webhook inventory is disabled",
       ))
-    } else if (config.webhookChannelIds.size === 0) {
+    } else if (
+      config.webhookChannelIds.size === 0
+      && config.webhookGuildIds.size === 0
+    ) {
       checks.push(check(
         DOCTOR_CHECK_IDS.webhookAuditPolicy,
         "warn",
-        "Webhook-audit toggle is enabled, but the required exact channel allowlist is empty",
+        "Webhook-audit toggle is enabled, but the required exact channel and guild allowlists are empty",
       ))
     } else {
       checks.push(check(
         DOCTOR_CHECK_IDS.webhookAuditPolicy,
         "pass",
-        `Credential-redacted webhook inventory is constrained to ${config.webhookChannelIds.size} exact channels`,
+        `Credential-redacted webhook inventory is constrained to ${config.webhookChannelIds.size} exact channels and ${config.webhookGuildIds.size} exact guilds`,
       ))
     }
     if (!config.allowWebhookDeletions) {

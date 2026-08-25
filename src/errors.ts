@@ -1083,6 +1083,10 @@ export class WebhookEvidenceError extends Error {
   override name = "WebhookEvidenceError"
 }
 
+export class GuildWebhookAuditEvidenceError extends Error {
+  override name = "GuildWebhookAuditEvidenceError"
+}
+
 export class WebhookMessageEvidenceError extends Error {
   override name = "WebhookMessageEvidenceError"
 }

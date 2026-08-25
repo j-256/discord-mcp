@@ -372,6 +372,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookGuildIds: [],
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
@@ -732,6 +733,7 @@ test("configuration and policy isolate webhook audit and administration authorit
     },
     scopes: {
       webhookChannelIds: [CHANNEL_ID],
+      webhookGuildIds: [GUILD_ID],
     },
     storage: {
       webhookCredentialRoot: root,
@@ -744,7 +746,9 @@ test("configuration and policy isolate webhook audit and administration authorit
   assert.equal(config.allowWebhookCreation, true)
   assert.equal(config.allowWebhookDeletions, true)
   assert.deepEqual([...config.webhookChannelIds], [CHANNEL_ID])
+  assert.deepEqual([...config.webhookGuildIds], [GUILD_ID])
   assert.equal(enabled.assertChannelWebhookAuditable(channel()), GUILD_ID)
+  assert.doesNotThrow(() => enabled.assertGuildWebhookAuditable(GUILD_ID))
   assert.equal(enabled.assertChannelWebhookChangeable(channel()), GUILD_ID)
   assert.equal(enabled.assertChannelWebhookCreatable(channel()), GUILD_ID)
   assert.equal(enabled.assertChannelWebhookDeletable(channel()), GUILD_ID)
@@ -752,6 +756,7 @@ test("configuration and policy isolate webhook audit and administration authorit
     {
       webhookAuditEnabled: enabled.describe().webhookAuditEnabled,
       webhookChannelIds: enabled.describe().webhookChannelIds,
+      webhookGuildIds: enabled.describe().webhookGuildIds,
       webhookChangesEnabled: enabled.describe().webhookChangesEnabled,
       webhookCreationEnabled: enabled.describe().webhookCreationEnabled,
       webhookDeletionsEnabled: enabled.describe().webhookDeletionsEnabled,
@@ -759,6 +764,7 @@ test("configuration and policy isolate webhook audit and administration authorit
     {
       webhookAuditEnabled: true,
       webhookChannelIds: [CHANNEL_ID],
+      webhookGuildIds: [GUILD_ID],
       webhookChangesEnabled: true,
       webhookCreationEnabled: true,
       webhookDeletionsEnabled: true,
@@ -769,10 +775,15 @@ test("configuration and policy isolate webhook audit and administration authorit
     token: TOKEN,
     scopes: {
       webhookChannelIds: [CHANNEL_ID],
+      webhookGuildIds: [GUILD_ID],
     },
   }, { homeDirectory: "/test/home" }))
   assert.throws(
     () => disabled.assertChannelWebhookAuditable(channel()),
+    /webhook audit is disabled/,
+  )
+  assert.throws(
+    () => disabled.assertGuildWebhookAuditable(GUILD_ID),
     /webhook audit is disabled/,
   )
 
@@ -811,6 +822,10 @@ test("configuration and policy isolate webhook audit and administration authorit
   assert.throws(
     () => enabled.assertChannelWebhookAuditable(channel({ id: OTHER_CHANNEL_ID })),
     /outside the webhook scope/,
+  )
+  assert.throws(
+    () => enabled.assertGuildWebhookAuditable(OTHER_GUILD_ID),
+    /configured read scope|guild webhook scope/,
   )
   assert.throws(
     () => enabled.assertChannelWebhookAuditable(channel({
@@ -876,6 +891,69 @@ test("configuration and policy isolate webhook audit and administration authorit
       },
     }, { homeDirectory: "/test/home" }),
     /\$\.scopes\.webhookChannelIds must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        webhookGuildIds: [OTHER_GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.webhookGuildIds must be a subset/,
+  )
+
+  const guildOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      webhookAudit: true,
+      webhookChanges: true,
+      webhookCreation: true,
+      webhookDeletions: true,
+    },
+    readScope: {
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      webhookGuildIds: [GUILD_ID],
+    },
+    storage: {
+      webhookCredentialRoot: root,
+    },
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => guildOnly.assertGuildWebhookAuditable(GUILD_ID))
+  assert.throws(
+    () => guildOnly.assertChannelWebhookAuditable(channel()),
+    /explicit channel allowlist/,
+  )
+  assert.throws(
+    () => guildOnly.assertChannelWebhookChangeable(channel()),
+    /explicit channel allowlist/,
+  )
+  assert.equal(guildOnly.describe().webhookAuditEnabled, true)
+  assert.equal(guildOnly.describe().webhookChangesEnabled, false)
+  assert.equal(guildOnly.describe().webhookCreationEnabled, false)
+  assert.equal(guildOnly.describe().webhookDeletionsEnabled, false)
+
+  const channelOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      webhookAudit: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      webhookChannelIds: [CHANNEL_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  assert.equal(channelOnly.assertChannelWebhookAuditable(channel()), GUILD_ID)
+  assert.throws(
+    () => channelOnly.assertGuildWebhookAuditable(GUILD_ID),
+    /explicit guild allowlist/,
   )
   assert.throws(
     () => loadConnectorConfig({
@@ -1364,6 +1442,7 @@ test("configuration and policy require an exact administration guild and protect
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookGuildIds: [],
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
@@ -4896,6 +4975,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     threadParentIds: [],
     webhookAuditEnabled: false,
     webhookChannelIds: [],
+    webhookGuildIds: [],
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,

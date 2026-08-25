@@ -128,6 +128,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "audit", "availability", "catalog", "monetization", "offering", "product", "sku", "subscription"],
     toolset: "connector",
   },
+  audit_guild_webhooks: {
+    keywords: ["application", "audit", "bearer", "credential", "exposure", "guild", "security", "webhook"],
+    toolset: "webhooks",
+  },
   audit_forum_tags: {
     keywords: ["audit", "forum", "tag"],
     toolset: "forum-tags",

@@ -293,6 +293,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "threadMemberUserIds",
   "welcomeScreenGuildIds",
   "webhookChannelIds",
+  "webhookGuildIds",
   "webhookMessageChannelIds",
   "widgetSettingsGuildIds",
 ] as const)

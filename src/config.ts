@@ -230,6 +230,7 @@ export interface ConnectorConfig {
   welcomeScreenGuildIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
   webhookCredentialRoot: string | null
+  webhookGuildIds: ReadonlySet<string>
   webhookMessageChannelIds: ReadonlySet<string>
   widgetSettingsGuildIds: ReadonlySet<string>
 }
@@ -579,6 +580,7 @@ export function loadConnectorConfigDocument(
     CONNECTOR_LIMITS.widgetSettingsGuildAllowlist,
   )
   const webhookChannelIds = configScope(document, "webhookChannelIds")
+  const webhookGuildIds = configScope(document, "webhookGuildIds")
   const webhookMessageChannelIds = configScope(document, "webhookMessageChannelIds")
   const inviteGuildIds = configScope(document, "inviteGuildIds")
   const onboardingGuildIds = configScope(document, "onboardingGuildIds")
@@ -613,6 +615,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("soundboardGuildIds"), soundboardGuildIds],
     [configPolicyPath("welcomeScreenGuildIds"), welcomeScreenGuildIds],
     [configPolicyPath("widgetSettingsGuildIds"), widgetSettingsGuildIds],
+    [configPolicyPath("webhookGuildIds"), webhookGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
       if (allowedGuildIds.has(guildId)) continue
@@ -1349,6 +1352,7 @@ export function loadConnectorConfigDocument(
     welcomeScreenGuildIds,
     webhookChannelIds,
     webhookCredentialRoot,
+    webhookGuildIds,
     webhookMessageChannelIds,
     widgetSettingsGuildIds,
   }

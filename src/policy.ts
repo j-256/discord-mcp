@@ -189,6 +189,7 @@ export interface PolicyDescription {
   welcomeScreenGuildIds: string[]
   webhookAuditEnabled: boolean
   webhookChannelIds: string[]
+  webhookGuildIds: string[]
   webhookChangesEnabled: boolean
   webhookCreationEnabled: boolean
   webhookDeletionsEnabled: boolean
@@ -400,6 +401,7 @@ export class ScopePolicy {
   readonly #threadMemberUserIds: ReadonlySet<string>
   readonly #welcomeScreenGuildIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
+  readonly #webhookGuildIds: ReadonlySet<string>
   readonly #webhookMessageChannelIds: ReadonlySet<string>
   readonly #widgetSettingsGuildIds: ReadonlySet<string>
 
@@ -589,6 +591,7 @@ export class ScopePolicy {
     | "threadMemberUserIds"
     | "welcomeScreenGuildIds"
     | "webhookChannelIds"
+    | "webhookGuildIds"
     | "webhookMessageChannelIds"
     | "widgetSettingsGuildIds"
   >>) {
@@ -781,6 +784,7 @@ export class ScopePolicy {
     this.#threadMemberUserIds = config.threadMemberUserIds ?? new Set()
     this.#welcomeScreenGuildIds = config.welcomeScreenGuildIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
+    this.#webhookGuildIds = config.webhookGuildIds ?? new Set()
     this.#webhookMessageChannelIds = config.webhookMessageChannelIds ?? new Set()
     this.#widgetSettingsGuildIds = config.widgetSettingsGuildIds ?? new Set()
   }
@@ -1103,8 +1107,9 @@ export class ScopePolicy {
         && this.#welcomeScreenGuildIds.size > 0,
       welcomeScreenGuildIds: [...this.#welcomeScreenGuildIds].sort(),
       webhookAuditEnabled: this.#allowWebhookAudit
-        && this.#webhookChannelIds.size > 0,
+        && (this.#webhookChannelIds.size > 0 || this.#webhookGuildIds.size > 0),
       webhookChannelIds: [...this.#webhookChannelIds].sort(),
+      webhookGuildIds: [...this.#webhookGuildIds].sort(),
       webhookChangesEnabled: this.#allowWebhookAudit
         && this.#allowWebhookChanges
         && this.#webhookChannelIds.size > 0,
@@ -2376,6 +2381,19 @@ export class ScopePolicy {
       throw new PolicyError("Discord channel type does not support webhook inventory")
     }
     return guildId
+  }
+
+  assertGuildWebhookAuditable(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowWebhookAudit) {
+      throw new PolicyError("Discord webhook audit is disabled by connector configuration")
+    }
+    if (this.#webhookGuildIds.size === 0) {
+      throw new PolicyError("Discord guild webhook audit requires an explicit guild allowlist")
+    }
+    if (!this.#webhookGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the guild webhook scope`)
+    }
   }
 
   assertChannelWebhookIdAuditable(channelId: string): void {

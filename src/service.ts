@@ -153,6 +153,10 @@ import {
   GuildPruneService,
   normalizeGuildPruneRequest,
 } from "./guild-prune-service.js"
+import {
+  GuildWebhookAuditService,
+  type GuildWebhookAuditResult,
+} from "./guild-webhook-audit-service.js"
 import type {
   ChannelAdministrationServiceOptions,
   ChannelCreationPlan,
@@ -848,6 +852,7 @@ export interface DiscordServiceClient {
   listGuildBans: DiscordClient["listGuildBans"]
   listGuildInvites: DiscordClient["listGuildInvites"]
   listGuildIntegrations: DiscordClient["listGuildIntegrations"]
+  listGuildWebhooks: DiscordClient["listGuildWebhooks"]
   listJoinedPrivateArchivedThreads: DiscordClient["listJoinedPrivateArchivedThreads"]
   listGuildMembers: DiscordClient["listGuildMembers"]
   listGuildScheduledEvents: DiscordClient["listGuildScheduledEvents"]
@@ -1353,6 +1358,7 @@ export class ConnectorService {
   readonly #guildProfileService: GuildProfileService
   readonly #guildSettingsService: GuildSettingsService
   readonly #guildTemplateService: GuildTemplateService
+  readonly #guildWebhookAuditService: GuildWebhookAuditService
   readonly #integrationService: IntegrationService
   readonly #permissionService: PermissionService
   readonly #policy: ScopePolicy
@@ -1451,6 +1457,10 @@ export class ConnectorService {
     })
     this.#applicationSkuAuditService = new ApplicationSkuAuditService({
       client: this.#client,
+    })
+    this.#guildWebhookAuditService = new GuildWebhookAuditService({
+      client: this.#client,
+      policy: this.#policy,
     })
     this.#applicationIntentService = new ApplicationIntentService({
       activityStore: this.#activityStore,
@@ -3017,6 +3027,20 @@ export class ConnectorService {
     this.#policy.assertChannelWebhookIdAuditable(channelId)
     const identity = await this.#verifyIdentity(options)
     return this.#webhookService.list(identity.bot.id, channelId, options)
+  }
+
+  async auditGuildWebhooks(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildWebhookAuditResult> {
+    this.#policy.assertGuildWebhookAuditable(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildWebhookAuditService.audit(
+      identity.application,
+      identity.bot.id,
+      guildId,
+      options,
+    )
   }
 
   async listGuildIntegrations(
