@@ -184,6 +184,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   plan_webhook_message_deletion: "discord-read",
   plan_webhook_change: "discord-read",
   plan_webhook_creation: "discord-read",
+  parse_discord_reference: "local-read",
   preview_component_layout: "local-read",
   read_messages: "discord-read",
   list_message_pins: "discord-read",

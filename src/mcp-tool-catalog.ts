@@ -989,6 +989,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "webhooks",
     workflow: "webhook-creation",
   },
+  parse_discord_reference: {
+    keywords: ["copy", "exact id", "jump link", "link", "mention", "parse", "reference", "resolve", "target"],
+    toolset: "connector",
+  },
   preview_component_layout: {
     keywords: ["component", "layout", "local", "message", "preview", "validate", "v2"],
     toolset: "interactions",

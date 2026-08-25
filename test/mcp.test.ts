@@ -7549,6 +7549,7 @@ function serviceFixture(overrides: {
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
   planDigest?: string
+  policy?: PolicyDescription
   pollCreationError?: Error
   pollCreationPlanDigest?: string
   pollEndError?: Error
@@ -9799,7 +9800,7 @@ function serviceFixture(overrides: {
         verifiedAbsent: true,
       }
     },
-    describePolicy: fixturePolicy,
+    describePolicy: () => overrides.policy || fixturePolicy(),
     async executeAttachmentMessage(request, planDigest) {
       if (overrides.attachmentError) throw overrides.attachmentError
       calls.attachmentExecute += 1
@@ -11717,6 +11718,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_application_posture",
       "audit_application_commands",
       "get_connector_status",
+      "parse_discord_reference",
       "get_observability_status",
       "get_gateway_status",
       "get_gateway_events",
@@ -12473,6 +12475,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_gateway_status",
     "get_gateway_events",
     "get_observability_status",
+    "parse_discord_reference",
   ]) {
     const gatewayTool = result.tools.find((tool) => tool.name === name)
     assert.deepEqual(gatewayTool?.annotations, {
@@ -13962,6 +13965,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "audit_application_posture",
       "audit_application_commands",
       "get_connector_status",
+      "parse_discord_reference",
       "read_messages",
       "search_messages",
       "get_message",
@@ -14546,6 +14550,89 @@ test("progressive audit-log discovery reveals only the requested exact read", as
   )
 })
 
+test("MCP parses exact Discord references locally without granting downstream authority", async (context) => {
+  const referencePolicy = {
+    ...fixturePolicy(),
+    allowedChannelIds: [PARENT_ID],
+    allowedGuildIds: [GUILD_ID],
+    readChannelScope: "allowlist" as const,
+    readGuildScope: "allowlist" as const,
+  }
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: { policy: referencePolicy },
+  })
+  const jumpReference = `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}/${MESSAGE_ID}`
+  const jumpCall = await client.callTool({
+    arguments: { reference: jumpReference },
+    name: "parse_discord_reference",
+  })
+  const jump = structuredContent(jumpCall)
+
+  assert.deepEqual(jump.ids, {
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+  })
+  assert.equal(jump.kind, "guild-message")
+  assert.deepEqual(jump.policy, {
+    channelRead: "unknown",
+    guildRead: "allowed",
+    status: "incomplete",
+  })
+  assert.deepEqual(jump.privacy, {
+    discordAccessVerified: false,
+    downstreamAuthorizationRequired: true,
+    namesReturned: false,
+    networkContacted: false,
+    persisted: false,
+  })
+  assert.equal(JSON.stringify(jumpCall).includes(jumpReference), false)
+
+  const privateCommandName = "private-command"
+  const commandCall = await client.callTool({
+    arguments: {
+      reference: `</${privateCommandName}:${MESSAGE_ID}>`,
+    },
+    name: "parse_discord_reference",
+  })
+  const command = structuredContent(commandCall)
+  assert.equal(command.kind, "application-command-mention")
+  assert.deepEqual(command.ids, { commandId: MESSAGE_ID })
+  assert.equal(JSON.stringify(commandCall).includes(privateCommandName), false)
+
+  const privateCapability = "private-capability-value"
+  const rejected = await client.callTool({
+    arguments: {
+      reference: `https://discord.com/api/webhooks/${CHANNEL_ID}/${privateCapability}`,
+    },
+    name: "parse_discord_reference",
+  })
+  assert.equal(rejected.isError, true)
+  assert.equal(JSON.stringify(rejected).includes(privateCapability), false)
+})
+
+test("progressive discovery reveals exact Discord reference parsing independently", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["connector"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "parse_discord_reference" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, ["parse_discord_reference"])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["parse_discord_reference", "discover_discord_tools"],
+  )
+})
+
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
@@ -14606,6 +14693,8 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /complete obfuscation-safe Gateway layout/)
   assert.match(content.text, /full normalized family payload/)
   assert.match(content.text, /newer complete matching Gateway layout/)
+  assert.match(content.text, /Exact-reference parsing accepts one complete canonical Discord/)
+  assert.match(content.text, /never scans prose, resolves a name, contacts Discord/)
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {

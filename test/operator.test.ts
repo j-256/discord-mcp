@@ -977,7 +977,14 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
     toolSurface?.summary || "",
     new RegExp(`2 of ${MCP_TOOLSET_NAMES.length}`),
   )
-  assert.match(toolSurface?.summary || "", /6 canonical tools/)
+  const configuredToolsets = new Set<string>(["connector", "messages"])
+  const configuredToolCount = Object.values(MCP_TOOL_CATALOG)
+    .filter(({ toolset }) => configuredToolsets.has(toolset))
+    .length
+  assert.match(
+    toolSurface?.summary || "",
+    new RegExp(`${configuredToolCount} canonical tools`),
+  )
   const readResponseBudget = doctor.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.readResponseBudget,
   )
@@ -5523,6 +5530,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "remove_own_reaction",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)
+  assert.equal(report.readOnlyTools.includes("parse_discord_reference"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
