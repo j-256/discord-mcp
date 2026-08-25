@@ -13,6 +13,7 @@ import {
   DISCORD_FORUM_SORT_ORDERS,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
+  GATEWAY_DEFAULTS,
   GUILD_TEMPLATE_LIMITS,
   INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
@@ -58,6 +59,10 @@ import {
   WidgetSettingsEvidenceError,
   VoiceRegionEvidenceError,
 } from "./errors.js"
+import {
+  projectGatewayBotDiscovery,
+  type GatewayBotDiscovery,
+} from "./gateway-discovery.js"
 import type {
   EmojiFileFormat,
   StickerFileFormat,
@@ -8574,6 +8579,19 @@ export class DiscordClient {
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {
     return this.#request("get_current_user", "/users/@me", options)
+  }
+
+  async getGatewayBot(options: RequestOptions = {}): Promise<GatewayBotDiscovery> {
+    const response = await this.#request<unknown>(
+      "get_gateway_bot",
+      "/gateway/bot",
+      {
+        ...options,
+        maxResponseBytes: GATEWAY_DEFAULTS.discoveryResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGatewayBotDiscovery(response)
   }
 
   listApplicationRoleConnectionMetadata(

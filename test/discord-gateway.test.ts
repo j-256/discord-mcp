@@ -6,7 +6,6 @@ import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_GATEWAY_INTENT_MASK,
   DISCORD_GATEWAY_INTENTS,
-  DISCORD_GATEWAY_URL,
 } from "../src/constants.js"
 import {
   DiscordGateway,
@@ -14,6 +13,7 @@ import {
   type GatewayScheduler,
   type GatewaySocket,
 } from "../src/discord-gateway.js"
+import type { GatewayBotDiscovery } from "../src/gateway-discovery.js"
 import { GatewayEventStore } from "../src/gateway-events.js"
 
 const APPLICATION_ID = "100000000000000001"
@@ -27,6 +27,21 @@ const CHANNEL_ID = "300000000000000001"
 const SECOND_CHANNEL_ID = "300000000000000002"
 const MESSAGE_ID = "400000000000000001"
 const TOKEN = "test-discord-token"
+const DISCOVERED_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
+const GATEWAY_DISCOVERY = Object.freeze({
+  sessionStartLimit: {
+    maxConcurrency: 1,
+    remaining: 999,
+    resetAfterMs: 14_400_000,
+    total: 1_000,
+  },
+  shards: 1,
+  url: DISCOVERED_GATEWAY_URL,
+})
+
+async function discoverGateway() {
+  return GATEWAY_DISCOVERY
+}
 
 class FakeScheduler implements GatewayScheduler {
   #nextId = 1
@@ -101,7 +116,10 @@ function payloads(socket: FakeSocket): Array<Record<string, unknown>> {
   return socket.sent.map((value) => JSON.parse(value) as Record<string, unknown>)
 }
 
-function fixture(options: { random?: number } = {}) {
+function fixture(options: {
+  discovery?: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
+  random?: number
+} = {}) {
   const scheduler = new FakeScheduler()
   const sockets: FakeSocket[] = []
   const urls: string[] = []
@@ -125,6 +143,7 @@ function fixture(options: { random?: number } = {}) {
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
+    discoverGateway: options.discovery || discoverGateway,
     eventStore,
     logger(message) {
       logs.push(message)
@@ -178,6 +197,7 @@ test("Gateway construction independently enforces scope and enabled-state invari
         gatewayEventBufferSize: 10,
         token: TOKEN,
       },
+      discoverGateway,
     }),
     /bot ID must be a Discord snowflake/,
   )
@@ -192,6 +212,7 @@ test("Gateway construction independently enforces scope and enabled-state invari
         gatewayEventBufferSize: 10,
         token: TOKEN,
       },
+      discoverGateway,
     }),
     /exact guild or channel scope/,
   )
@@ -212,6 +233,7 @@ test("Gateway construction independently enforces scope and enabled-state invari
         gatewayEventBufferSize: 10,
         token: TOKEN,
       },
+      discoverGateway,
       eventStore: disabledStore,
     }),
     /enabled states must match/,
@@ -227,22 +249,142 @@ test("Gateway construction independently enforces scope and enabled-state invari
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
+    discoverGateway,
   })
   assert.equal(channelOnlyGateway.enabled, true)
   assert.equal(channelOnlyGateway.getStatus().feedEnabled, true)
   assert.equal(channelOnlyGateway.layoutEnabled, false)
 })
 
+test("Gateway startup awaits authenticated discovery and exposes only safe limit metadata", async () => {
+  let resolveDiscovery: ((value: GatewayBotDiscovery) => void) | undefined
+  const pending = new Promise<GatewayBotDiscovery>((resolve) => {
+    resolveDiscovery = resolve
+  })
+  const discovered = {
+    ...GATEWAY_DISCOVERY,
+    url: "wss://gateway-eu-west.discord.gg/?v=10&encoding=json",
+  }
+  const { gateway, sockets, urls } = fixture({
+    discovery: async () => pending,
+  })
+
+  const starting = gateway.start()
+  assert.equal(gateway.getStatus().connection.state, "discovering")
+  assert.deepEqual(gateway.getStatus().discovery, {
+    checkedAt: null,
+    recommendedShards: null,
+    sessionStartLimit: null,
+  })
+  assert.deepEqual(sockets, [])
+
+  resolveDiscovery?.(discovered)
+  await starting
+
+  assert.deepEqual(urls, [discovered.url])
+  assert.deepEqual(gateway.getStatus().discovery, {
+    checkedAt: "1970-01-01T00:00:00.000Z",
+    recommendedShards: 1,
+    sessionStartLimit: {
+      localStartsSinceCheck: 0,
+      maxConcurrency: 1,
+      remainingAtCheck: 999,
+      resetAfterMs: 14_400_000,
+      total: 1_000,
+    },
+  })
+  const rendered = JSON.stringify(gateway.getStatus())
+  assert.doesNotMatch(rendered, /gateway-eu-west|discord\.gg|wss:/)
+  assert.doesNotMatch(rendered, new RegExp(TOKEN))
+  await gateway.stop()
+})
+
+test("Gateway discovery failures, exhausted sessions, and unsupported sharding fail closed", async () => {
+  const cases: Array<{
+    category: string
+    discovery: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
+  }> = [
+    {
+      category: "gateway-discovery-failed",
+      discovery: async () => {
+        throw new Error(`private ${TOKEN}`)
+      },
+    },
+    {
+      category: "invalid-gateway-discovery",
+      discovery: async () => ({
+        ...GATEWAY_DISCOVERY,
+        url: `wss://${TOKEN}@gateway.discord.gg/`,
+      }),
+    },
+    {
+      category: "session-start-limit-exhausted",
+      discovery: async () => ({
+        ...GATEWAY_DISCOVERY,
+        sessionStartLimit: {
+          ...GATEWAY_DISCOVERY.sessionStartLimit,
+          remaining: 0,
+        },
+      }),
+    },
+    {
+      category: "sharding-required",
+      discovery: async () => ({
+        ...GATEWAY_DISCOVERY,
+        shards: 2,
+      }),
+    },
+  ]
+
+  for (const item of cases) {
+    const { gateway, logs, sockets } = fixture({ discovery: item.discovery })
+    await gateway.start()
+    assert.equal(gateway.getStatus().connection.state, "failed")
+    assert.equal(gateway.getStatus().connection.lastError?.category, item.category)
+    assert.deepEqual(logs, [`[gateway] stopped: ${item.category}`])
+    assert.deepEqual(sockets, [])
+    assert.doesNotMatch(JSON.stringify({ logs, status: gateway.getStatus() }), new RegExp(TOKEN))
+    await gateway.stop()
+  }
+})
+
+test("Gateway stop aborts pending discovery and ignores its late completion", async () => {
+  let discoverySignal: AbortSignal | undefined
+  let resolveDiscovery: ((value: GatewayBotDiscovery) => void) | undefined
+  const pending = new Promise<GatewayBotDiscovery>((resolve) => {
+    resolveDiscovery = resolve
+  })
+  const { gateway, sockets } = fixture({
+    discovery: async (signal) => {
+      discoverySignal = signal
+      return pending
+    },
+  })
+
+  const starting = gateway.start()
+  await gateway.stop()
+  assert.equal(discoverySignal?.aborted, true)
+  resolveDiscovery?.(GATEWAY_DISCOVERY)
+  await starting
+
+  assert.deepEqual(sockets, [])
+  assert.equal(gateway.getStatus().connection.state, "stopped")
+})
+
 test("Gateway identifies with fixed nonprivileged intents and exposes no session material", async () => {
   const { gateway, logs, sockets, urls } = fixture()
-  gateway.start()
-  assert.deepEqual(urls, [DISCORD_GATEWAY_URL])
+  await gateway.start()
+  assert.deepEqual(urls, [DISCOVERED_GATEWAY_URL])
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
 
   const identify = payloads(socket)[0]
   assert.equal(identify?.op, 2)
+  assert.equal(
+    gateway.getStatus().discovery.sessionStartLimit?.localStartsSinceCheck,
+    1,
+  )
   const data = identify?.d as Record<string, unknown>
   assert.equal(data.intents, DISCORD_GATEWAY_INTENT_MASK)
   assert.equal((Number(data.intents) & (1 << 24)) !== 0, true)
@@ -293,6 +435,7 @@ test("Interaction-only Gateway uses zero intents and routes payloads outside the
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
+    discoverGateway,
     eventStore,
     interactionHandler: {
       async ingestInteraction(payload) {
@@ -308,7 +451,7 @@ test("Interaction-only Gateway uses zero intents and routes payloads outside the
     },
   })
 
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -369,6 +512,7 @@ test("Layout-only Gateway requests only GUILDS and ingests a content-free seed",
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
+    discoverGateway,
     eventStore,
     random: () => 0,
     scheduler,
@@ -379,7 +523,7 @@ test("Layout-only Gateway requests only GUILDS and ingests a content-free seed",
     },
   })
 
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -439,6 +583,7 @@ test("Voice-status-only Gateway serializes exact guild queries and discards non-
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
+    discoverGateway,
     eventStore,
     random: () => 0,
     scheduler,
@@ -449,7 +594,7 @@ test("Voice-status-only Gateway serializes exact guild queries and discards non-
     },
   })
 
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -547,6 +692,7 @@ test("Gateway voice status evidence rejects cancellation, timeout, and continuit
       gatewayEventBufferSize: 10,
       token: TOKEN,
     },
+    discoverGateway,
     eventStore,
     random: () => 0,
     scheduler,
@@ -556,7 +702,7 @@ test("Gateway voice status evidence rejects cancellation, timeout, and continuit
       return socket
     },
   })
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -603,6 +749,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", (
       onboardingGuildIds: new Set([ONBOARDING_GUILD_ID]),
       token: TOKEN,
     },
+    discoverGateway,
   })
 
   assert.equal(gateway.getChannelLayoutStatus().guilds.scoped, 5)
@@ -615,7 +762,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", (
 
 test("Gateway accepts events only after READY identity validation and drops content", async () => {
   const { gateway, sockets } = fixture()
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -659,7 +806,7 @@ test("Gateway accepts events only after READY identity validation and drops cont
 
 test("Gateway heartbeats with the latest sequence and reconnects on a missing ACK", async () => {
   const { gateway, scheduler, sockets } = fixture()
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -677,7 +824,7 @@ test("Gateway heartbeats with the latest sequence and reconnects on a missing AC
 
 test("Gateway heartbeat ACKs keep the connection alive", async () => {
   const { gateway, scheduler, sockets } = fixture()
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -692,17 +839,23 @@ test("Gateway heartbeat ACKs keep the connection alive", async () => {
 })
 
 test("Gateway reconnects after bounded connection and authentication deadlines", async () => {
-  const connecting = fixture()
-  connecting.gateway.start()
+  const discoveredUrl = "wss://gateway-eu-west.discord.gg/?v=10&encoding=json"
+  const connecting = fixture({
+    discovery: async () => ({ ...GATEWAY_DISCOVERY, url: discoveredUrl }),
+  })
+  await connecting.gateway.start()
+  assert.deepEqual(connecting.urls, [discoveredUrl])
   assert.equal(connecting.scheduler.runNext(), 30_000)
   assert.equal(connecting.gateway.getStatus().connection.state, "reconnecting")
   assert.equal(
     connecting.gateway.getStatus().connection.lastError?.category,
     "connection-timeout",
   )
+  assert.equal(connecting.scheduler.runNext(), 30_800)
+  assert.deepEqual(connecting.urls, [discoveredUrl, discoveredUrl])
 
   const authenticating = fixture({ random: 1 })
-  authenticating.gateway.start()
+  await authenticating.gateway.start()
   const socket = authenticating.sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -719,7 +872,7 @@ test("Gateway reconnects after bounded connection and authentication deadlines",
 
 test("Gateway resumes with only vetted Discord origins", async () => {
   const { gateway, scheduler, sockets, urls } = fixture()
-  gateway.start()
+  await gateway.start()
   const first = sockets[0]
   assert.ok(first)
   hello(first)
@@ -799,7 +952,7 @@ test("Gateway resumes with only vetted Discord origins", async () => {
 
 test("Gateway rejects READY during Resume instead of hiding a continuity gap", async () => {
   const { gateway, scheduler, sockets } = fixture()
-  gateway.start()
+  await gateway.start()
   const first = sockets[0]
   assert.ok(first)
   hello(first)
@@ -820,7 +973,7 @@ test("Gateway rejects READY during Resume instead of hiding a continuity gap", a
 
 test("Gateway invalid sessions re-identify only after Discord's delay and local spacing", async () => {
   const { gateway, scheduler, sockets, urls } = fixture()
-  gateway.start()
+  await gateway.start()
   const first = sockets[0]
   assert.ok(first)
   hello(first)
@@ -847,7 +1000,7 @@ test("Gateway invalid sessions re-identify only after Discord's delay and local 
   assert.equal(scheduler.runNext(), 1_000)
   const second = sockets[1]
   assert.ok(second)
-  assert.equal(urls[1], DISCORD_GATEWAY_URL)
+  assert.equal(urls[1], DISCOVERED_GATEWAY_URL)
   hello(second)
   assert.equal(scheduler.runNext(), 1_000)
   assert.deepEqual(payloads(second)[0], { d: null, op: 1 })
@@ -855,6 +1008,42 @@ test("Gateway invalid sessions re-identify only after Discord's delay and local 
   assert.equal(scheduler.runNext(), 5_000)
   assert.equal(payloads(second)[1]?.op, 2)
   assert.equal(gateway.getStatus().connection.identifies, 2)
+  await gateway.stop()
+})
+
+test("Gateway never exceeds the discovered remaining fresh-session budget", async () => {
+  const { gateway, scheduler, sockets } = fixture({
+    discovery: async () => ({
+      ...GATEWAY_DISCOVERY,
+      sessionStartLimit: {
+        ...GATEWAY_DISCOVERY.sessionStartLimit,
+        remaining: 1,
+      },
+    }),
+    random: 1,
+  })
+  await gateway.start()
+  const first = sockets[0]
+  assert.ok(first)
+  hello(first)
+  assert.equal(gateway.getStatus().connection.identifies, 1)
+
+  first.message({ d: false, op: 9, s: null, t: null })
+  assert.equal(scheduler.runNext(), 5_000)
+  const second = sockets[1]
+  assert.ok(second)
+  hello(second)
+
+  assert.equal(gateway.getStatus().connection.identifies, 1)
+  assert.equal(
+    gateway.getStatus().discovery.sessionStartLimit?.localStartsSinceCheck,
+    1,
+  )
+  assert.equal(gateway.getStatus().connection.state, "failed")
+  assert.equal(
+    gateway.getStatus().connection.lastError?.category,
+    "session-start-limit-exhausted",
+  )
   await gateway.stop()
 })
 
@@ -867,7 +1056,7 @@ test("Gateway rejects wrong READY identities and untrusted resume origins", asyn
     [{ resume_gateway_url: "wss://gateway.discord.gg.evil.example" }, "invalid-resume-origin"],
   ] as const) {
     const { gateway, logs, scheduler, sockets } = fixture()
-    gateway.start()
+    await gateway.start()
     const socket = sockets[0]
     assert.ok(socket)
     hello(socket)
@@ -883,7 +1072,7 @@ test("Gateway rejects wrong READY identities and untrusted resume origins", asyn
 
 test("Gateway fatal close codes stop reconnect loops while recoverable codes back off", async () => {
   const fatal = fixture()
-  fatal.gateway.start()
+  await fatal.gateway.start()
   const fatalSocket = fatal.sockets[0]
   assert.ok(fatalSocket)
   fatalSocket.serverClose(4_014)
@@ -892,7 +1081,7 @@ test("Gateway fatal close codes stop reconnect loops while recoverable codes bac
   assert.equal(fatal.scheduler.jobs.size, 0)
 
   const recoverable = fixture()
-  recoverable.gateway.start()
+  await recoverable.gateway.start()
   const recoverableSocket = recoverable.sockets[0]
   assert.ok(recoverableSocket)
   recoverableSocket.serverClose(4_008)
@@ -907,7 +1096,7 @@ test("Gateway fatal close codes stop reconnect loops while recoverable codes bac
 
 test("Gateway Identify budget terminates repeated invalid-session loops", async () => {
   const { gateway, scheduler, sockets } = fixture({ random: 1 })
-  gateway.start()
+  await gateway.start()
   let socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -933,7 +1122,7 @@ test("Gateway Identify budget terminates repeated invalid-session loops", async 
 test("Gateway rejects malformed or oversized payloads without reflecting them", async () => {
   for (const value of ["not-json", "x".repeat(1_048_577)]) {
     const { gateway, logs, scheduler, sockets } = fixture()
-    gateway.start()
+    await gateway.start()
     const socket = sockets[0]
     assert.ok(socket)
     socket.open()
@@ -948,7 +1137,7 @@ test("Gateway rejects malformed or oversized payloads without reflecting them", 
 
 test("Gateway stop closes the socket, cancels timers, and prevents reconnection", async () => {
   const { gateway, scheduler, sockets } = fixture()
-  gateway.start()
+  await gateway.start()
   const socket = sockets[0]
   assert.ok(socket)
   hello(socket)
@@ -959,7 +1148,7 @@ test("Gateway stop closes the socket, cancels timers, and prevents reconnection"
   assert.equal(scheduler.jobs.size, 0)
   assert.equal(sockets.length, 1)
 
-  gateway.start()
+  await gateway.start()
   const restarted = sockets[1]
   assert.ok(restarted)
   hello(restarted)

@@ -26329,9 +26329,16 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
         "Enabled Gateway configuration requires application and bot IDs",
       )
     }
+    const discoveryClient = sharedClient || new DiscordClient({
+      observer: observability,
+      token: config.token,
+    })
     runtime = new DiscordGateway({
       applicationId,
       config,
+      discoverGateway(signal) {
+        return discoveryClient.getGatewayBot({ signal })
+      },
       ...(nativeInteractionRuntime
         ? { interactionHandler: nativeInteractionRuntime }
         : {}),
@@ -26443,10 +26450,12 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
       .then(async () => {
         if (closing) return
         try {
-          runtime?.start()
+          await runtime?.start()
         } catch (error) {
           await nativeInteractionRuntime.stop().catch(() => undefined)
-          throw error
+          stderr.write(
+            `[mcp] Gateway runtime unavailable: ${redactText(errorMessage(error), secrets)}\n`,
+          )
         }
       })
       .catch((error: unknown) => {
@@ -26455,12 +26464,11 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
         )
       })
   } else {
-    try {
-      runtime?.start()
-    } catch (error) {
-      void close().catch(() => undefined)
-      throw error
-    }
+    void runtime?.start().catch((error: unknown) => {
+      stderr.write(
+        `[mcp] Gateway runtime unavailable: ${redactText(errorMessage(error), secrets)}\n`,
+      )
+    })
   }
   stderr.write("[mcp] Discord connector stdio server ready\n")
   return {

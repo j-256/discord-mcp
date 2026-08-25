@@ -56,6 +56,7 @@ export type GatewayConnectionState =
   | "authenticating"
   | "connecting"
   | "disabled"
+  | "discovering"
   | "failed"
   | "ready"
   | "reconnecting"
@@ -66,10 +67,12 @@ export type GatewayErrorCategory =
   | "authentication-timeout"
   | "connection-timeout"
   | "disallowed-intents"
+  | "gateway-discovery-failed"
   | "heartbeat-timeout"
   | "identify-budget-exhausted"
   | "invalid-api-version"
   | "invalid-gateway-payload"
+  | "invalid-gateway-discovery"
   | "invalid-intents"
   | "invalid-ready-identity"
   | "invalid-resume-origin"
@@ -77,6 +80,7 @@ export type GatewayErrorCategory =
   | "network-error"
   | "protocol-error"
   | "rate-limited"
+  | "session-start-limit-exhausted"
   | "sharding-required"
   | "unknown-fatal-close"
 
@@ -140,6 +144,17 @@ export interface GatewayStatusSnapshot {
     resumes: number
     state: GatewayConnectionState
   }
+  discovery: {
+    checkedAt: string | null
+    recommendedShards: number | null
+    sessionStartLimit: {
+      localStartsSinceCheck: number
+      maxConcurrency: number
+      remainingAtCheck: number
+      resetAfterMs: number
+      total: number
+    } | null
+  }
   enabled: boolean
   feedEnabled: boolean
   intents: readonly (
@@ -184,6 +199,16 @@ export interface GatewayEventStoreOptions {
   eventFeedEnabled?: boolean
   layoutGuildIds?: ReadonlySet<string>
   voiceChannelStatusChannelCount?: number
+}
+
+export interface GatewayDiscoveryStatusInput {
+  recommendedShards: number
+  sessionStartLimit: {
+    maxConcurrency: number
+    remaining: number
+    resetAfterMs: number
+    total: number
+  }
 }
 
 interface StoredGatewayEvent extends ContentFreeGatewayEvent {
@@ -290,6 +315,11 @@ export class GatewayEventStore implements GatewayEventSource {
   #continuityGaps = 0
   readonly #cursorNamespace: string
   #dropped = 0
+  #discovery: GatewayStatusSnapshot["discovery"] = {
+    checkedAt: null,
+    recommendedShards: null,
+    sessionStartLimit: null,
+  }
   readonly #events: StoredGatewayEvent[] = []
   #generation = 0
   #identifies = 0
@@ -736,10 +766,44 @@ export class GatewayEventStore implements GatewayEventSource {
     if (changed) this.#emit("status")
   }
 
+  recordDiscovery(value: GatewayDiscoveryStatusInput): void {
+    if (!this.enabled) return
+    if (
+      !Number.isSafeInteger(value.recommendedShards)
+      || value.recommendedShards < 1
+      || !Number.isSafeInteger(value.sessionStartLimit.maxConcurrency)
+      || value.sessionStartLimit.maxConcurrency < 1
+      || !Number.isSafeInteger(value.sessionStartLimit.remaining)
+      || value.sessionStartLimit.remaining < 0
+      || !Number.isSafeInteger(value.sessionStartLimit.resetAfterMs)
+      || value.sessionStartLimit.resetAfterMs < 0
+      || !Number.isSafeInteger(value.sessionStartLimit.total)
+      || value.sessionStartLimit.total < 1
+      || value.sessionStartLimit.remaining > value.sessionStartLimit.total
+    ) {
+      throw new RangeError("Gateway discovery status evidence is invalid")
+    }
+    this.#discovery = {
+      checkedAt: this.#timestamp(),
+      recommendedShards: value.recommendedShards,
+      sessionStartLimit: {
+        localStartsSinceCheck: 0,
+        maxConcurrency: value.sessionStartLimit.maxConcurrency,
+        remainingAtCheck: value.sessionStartLimit.remaining,
+        resetAfterMs: value.sessionStartLimit.resetAfterMs,
+        total: value.sessionStartLimit.total,
+      },
+    }
+    this.#emit("status")
+  }
+
   recordIdentify(): void {
     if (!this.enabled) return
     if (this.#channelLayouts.invalidateForIdentify()) {
       this.#emit("layout")
+    }
+    if (this.#discovery.sessionStartLimit) {
+      this.#discovery.sessionStartLimit.localStartsSinceCheck += 1
     }
     this.#identifies += 1
     this.#emit("status")
@@ -792,6 +856,13 @@ export class GatewayEventStore implements GatewayEventSource {
         reconnects: this.#reconnects,
         resumes: this.#resumes,
         state: this.#state,
+      },
+      discovery: {
+        checkedAt: this.#discovery.checkedAt,
+        recommendedShards: this.#discovery.recommendedShards,
+        sessionStartLimit: this.#discovery.sessionStartLimit
+          ? { ...this.#discovery.sessionStartLimit }
+          : null,
       },
       enabled: this.enabled,
       feedEnabled: this.eventFeedEnabled,

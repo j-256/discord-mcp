@@ -3,7 +3,6 @@ export const CONNECTOR_VERSION = "0.1.0"
 export const SCHEMA_VERSION = 1
 
 export const DISCORD_API_BASE_URL = "https://discord.com/api/v10"
-export const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 export const DISCORD_WEB_BASE_URL = "https://discord.com"
 export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION})`
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
@@ -537,6 +536,7 @@ export const GATEWAY_DEFAULTS = Object.freeze({
   authenticationTimeoutMs: 30_000,
   channelInfoTimeoutMs: 10_000,
   connectionTimeoutMs: 30_000,
+  discoveryResponseBytes: 16_384,
   eventBufferSize: 100,
   eventPage: 50,
   heartbeatMaximumMs: 120_000,

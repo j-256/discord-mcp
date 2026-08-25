@@ -5,7 +5,6 @@ import {
   CONNECTOR_NAME,
   DISCORD_GATEWAY_INTENT_MASK,
   DISCORD_GATEWAY_INTENTS,
-  DISCORD_GATEWAY_URL,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GATEWAY_DEFAULTS,
@@ -15,6 +14,12 @@ import type {
   GatewayChannelLayoutSnapshot,
   GatewayChannelLayoutStatus,
 } from "./gateway-channel-layout.js"
+import {
+  GatewayDiscoveryEvidenceError,
+  normalizeDiscordGatewayUrl,
+  validateGatewayBotDiscovery,
+  type GatewayBotDiscovery,
+} from "./gateway-discovery.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 import { GatewayVoiceChannelStatusError } from "./errors.js"
 import {
@@ -38,7 +43,7 @@ import {
 } from "./gateway-voice-channel-status.js"
 
 export interface GatewayRuntime extends GatewayEventSource, GatewayVoiceChannelStatusSource {
-  start(): void
+  start(): Promise<void>
   stop(): Promise<void>
 }
 
@@ -87,6 +92,7 @@ export interface DiscordGatewayOptions {
     | "onboardingGuildIds"
   >>
   eventStore?: GatewayEventStore
+  discoverGateway: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
   interactionHandler?: GatewayInteractionHandler
   logger?: (message: string) => void
   random?: () => number
@@ -147,7 +153,6 @@ const RECONNECT_CLOSE_CODE = 4_000
 const STOP_CLOSE_CODE = 1_000
 const STATIC_RECONNECT_REASON = "discord-mcp reconnect"
 const STATIC_STOP_REASON = "discord-mcp stop"
-const DISCORD_GATEWAY_HOST_PATTERN = /^gateway(?:-[a-z0-9-]+)?\.discord\.gg$/
 
 const FATAL_CLOSE_CATEGORIES: ReadonlyMap<number, GatewayErrorCategory> = new Map([
   [4_004, "authentication-failed"],
@@ -207,24 +212,7 @@ function voiceChannelStatusTargetKey(guildId: string, channelId: string): string
 }
 
 export function normalizeGatewayResumeUrl(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length > 2_048) return undefined
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    return undefined
-  }
-  const hostname = url.hostname.toLowerCase()
-  if (
-    url.protocol !== "wss:"
-    || url.username
-    || url.password
-    || url.port
-    || !DISCORD_GATEWAY_HOST_PATTERN.test(hostname)
-  ) {
-    return undefined
-  }
-  return `${url.origin}/?v=10&encoding=json`
+  return normalizeDiscordGatewayUrl(value)
 }
 
 function parsePayload(data: unknown): GatewayPayload | undefined {
@@ -268,7 +256,10 @@ export class DiscordGateway implements GatewayRuntime {
   #awaitingHeartbeatAck = false
   readonly #botId: string
   readonly #clock: () => number
+  #discoveryAbort: AbortController | undefined
+  readonly #discoverGateway: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
   readonly #eventStore: GatewayEventStore
+  #gatewayUrl: string | undefined
   #heartbeatIntervalMs: number | undefined
   #heartbeatTimer: unknown
   readonly #identifyTimes: number[] = []
@@ -281,6 +272,7 @@ export class DiscordGateway implements GatewayRuntime {
   readonly #random: () => number
   #reconnectAttempt = 0
   #reconnectTimer: unknown
+  #remainingSessionStarts: number | undefined
   #resumeUrl: string | undefined
   #resuming = false
   #running = false
@@ -288,6 +280,7 @@ export class DiscordGateway implements GatewayRuntime {
   #sequence: number | null = null
   #sessionId: string | undefined
   #socket: GatewaySocket | undefined
+  #startupGeneration = 0
   #terminal = false
   readonly #token: string
   readonly #voiceChannelStatusIds: ReadonlySet<string>
@@ -333,6 +326,7 @@ export class DiscordGateway implements GatewayRuntime {
     this.#applicationId = options.applicationId
     this.#botId = botId
     this.#clock = options.clock || Date.now
+    this.#discoverGateway = options.discoverGateway
     this.#eventStore = options.eventStore || new GatewayEventStore({
       allowedChannelIds: options.config.allowedChannelIds,
       allowedGuildIds: options.config.allowedGuildIds,
@@ -475,16 +469,55 @@ export class DiscordGateway implements GatewayRuntime {
     })
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (!this.enabled || this.#running) return
     this.#running = true
     this.#terminal = false
-    this.#connect(DISCORD_GATEWAY_URL)
+    const generation = this.#startupGeneration + 1
+    this.#startupGeneration = generation
+    const controller = new AbortController()
+    this.#discoveryAbort = controller
+    this.#eventStore.transition("discovering")
+    let discovery: GatewayBotDiscovery
+    try {
+      const response = await this.#discoverGateway(controller.signal)
+      if (!this.#startupActive(generation)) return
+      discovery = validateGatewayBotDiscovery(response)
+    } catch (error) {
+      if (!this.#startupActive(generation)) return
+      this.#discoveryAbort = undefined
+      this.#fail(error instanceof GatewayDiscoveryEvidenceError
+        ? "invalid-gateway-discovery"
+        : "gateway-discovery-failed")
+      return
+    }
+    if (!this.#startupActive(generation)) return
+    this.#discoveryAbort = undefined
+    this.#eventStore.recordDiscovery({
+      recommendedShards: discovery.shards,
+      sessionStartLimit: discovery.sessionStartLimit,
+    })
+    this.#remainingSessionStarts = discovery.sessionStartLimit.remaining
+    if (discovery.sessionStartLimit.remaining === 0) {
+      this.#fail("session-start-limit-exhausted")
+      return
+    }
+    if (discovery.shards !== 1) {
+      this.#fail("sharding-required")
+      return
+    }
+    this.#gatewayUrl = discovery.url
+    this.#connect(discovery.url)
   }
 
   async stop(): Promise<void> {
     this.#running = false
     this.#terminal = false
+    this.#startupGeneration += 1
+    this.#discoveryAbort?.abort()
+    this.#discoveryAbort = undefined
+    this.#gatewayUrl = undefined
+    this.#remainingSessionStarts = undefined
     this.#pendingReconnect = undefined
     this.#rejectPendingVoiceEvidence("Discord Gateway voice channel status evidence stopped")
     this.#clearTimer("heartbeat")
@@ -508,6 +541,12 @@ export class DiscordGateway implements GatewayRuntime {
       } catch {}
     }
     if (this.enabled) this.#eventStore.transition("stopped")
+  }
+
+  #startupActive(generation: number): boolean {
+    return this.#running
+      && !this.#terminal
+      && this.#startupGeneration === generation
   }
 
   #assertVoiceChannelStatusTarget(guildId: string, channelId: string): void {
@@ -799,6 +838,13 @@ export class DiscordGateway implements GatewayRuntime {
   }
 
   #scheduleIdentify(): void {
+    if (
+      this.#remainingSessionStarts === undefined
+      || this.#remainingSessionStarts < 1
+    ) {
+      this.#fail("session-start-limit-exhausted")
+      return
+    }
     const now = this.#clock()
     const cutoff = now - GATEWAY_DEFAULTS.identifyBudgetWindowMs
     while (this.#identifyTimes[0] !== undefined && this.#identifyTimes[0] < cutoff) {
@@ -819,6 +865,7 @@ export class DiscordGateway implements GatewayRuntime {
       }, wait)
       return
     }
+    this.#remainingSessionStarts -= 1
     this.#identifyTimes.push(now)
     this.#eventStore.recordIdentify()
     this.#send({
@@ -1095,7 +1142,11 @@ export class DiscordGateway implements GatewayRuntime {
       this.#reconnectTimer = undefined
       const target = this.#sessionId && this.#sequence !== null && this.#resumeUrl
         ? this.#resumeUrl
-        : DISCORD_GATEWAY_URL
+        : this.#gatewayUrl
+      if (!target) {
+        this.#fail("invalid-gateway-discovery")
+        return
+      }
       this.#connect(target)
     }, delayMs)
   }

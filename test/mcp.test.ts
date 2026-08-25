@@ -31571,7 +31571,7 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     async getVoiceChannelStatus() {
       throw new Error("Voice channel status evidence is disabled")
     },
-    start() {
+    async start() {
       lifecycle.push("gateway-start")
     },
     async stop() {
@@ -31653,7 +31653,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
     async getVoiceChannelStatus() {
       throw new Error("Voice channel status evidence is disabled")
     },
-    start() {
+    async start() {
       starts += 1
     },
     async stop() {

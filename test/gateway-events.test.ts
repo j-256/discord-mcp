@@ -77,6 +77,11 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
       resumes: 0,
       state: "disabled",
     },
+    discovery: {
+      checkedAt: null,
+      recommendedShards: null,
+      sessionStartLimit: null,
+    },
     enabled: false,
     feedEnabled: false,
     intents: [],
@@ -558,4 +563,41 @@ test("Gateway change listener failures cannot interrupt event ingestion", () => 
   }), true)
   assert.equal(observed, 2)
   assert.equal(feed.listEvents().events.length, 1)
+})
+
+test("Gateway discovery status is independently validated and content-free", () => {
+  const feed = store()
+  feed.recordDiscovery({
+    recommendedShards: 1,
+    sessionStartLimit: {
+      maxConcurrency: 2,
+      remaining: 8,
+      resetAfterMs: 4_000,
+      total: 10,
+    },
+  })
+
+  assert.deepEqual(feed.getStatus().discovery, {
+    checkedAt: "2026-08-19T00:00:00.000Z",
+    recommendedShards: 1,
+    sessionStartLimit: {
+      localStartsSinceCheck: 0,
+      maxConcurrency: 2,
+      remainingAtCheck: 8,
+      resetAfterMs: 4_000,
+      total: 10,
+    },
+  })
+  assert.throws(
+    () => feed.recordDiscovery({
+      recommendedShards: 1,
+      sessionStartLimit: {
+        maxConcurrency: 1,
+        remaining: 2,
+        resetAfterMs: 1,
+        total: 1,
+      },
+    }),
+    /discovery status evidence is invalid/,
+  )
 })

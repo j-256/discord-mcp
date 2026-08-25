@@ -42,6 +42,7 @@ import {
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
+import { DiscordClient } from "./discord-client.js"
 import { DiscordGateway, type GatewayRuntime } from "./discord-gateway.js"
 import {
   ConfigurationError,
@@ -3246,13 +3247,13 @@ export async function diagnoseConnector(
       ? check(
           DOCTOR_CHECK_IDS.gatewayPolicy,
           "pass",
-          `Discord Gateway events are enabled with a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, ${voiceChannelStatusCount} exact voice-status candidates, and only nonprivileged intents`,
+          `Discord Gateway events are enabled with authenticated shard and session-start preflight, a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, ${voiceChannelStatusCount} exact voice-status candidates, and only nonprivileged intents`,
         )
       : layoutGuildCount > 0 || voiceChannelStatusCount > 0
         ? check(
             DOCTOR_CHECK_IDS.gatewayPolicy,
             "pass",
-            `Discord Gateway events are disabled; a GUILDS-only evidence connection covers ${layoutGuildCount} exact layout guilds and ${voiceChannelStatusCount} exact voice-status candidates`,
+            `Discord Gateway events are disabled; an authenticated-preflight GUILDS-only evidence connection covers ${layoutGuildCount} exact layout guilds and ${voiceChannelStatusCount} exact voice-status candidates`,
           )
         : check(
             DOCTOR_CHECK_IDS.gatewayPolicy,
@@ -3274,7 +3275,7 @@ export async function diagnoseConnector(
       ? check(
         DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
         "pass",
-        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with startup endpoint and command verification`,
+        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with application endpoint and command verification plus authenticated shard and session-start preflight`,
       )
       : check(
         DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
@@ -3911,9 +3912,13 @@ function smokeGateway(config: ConnectorConfig): GatewayRuntime | undefined {
       "Voice-channel status smoke validation requires pinned application and bot IDs",
     )
   }
+  const client = new DiscordClient({ token: config.token })
   return new DiscordGateway({
     applicationId: config.expectedApplicationId,
     config,
+    discoverGateway(signal) {
+      return client.getGatewayBot({ signal })
+    },
     interactionHandler: { ingestInteraction() {} },
   })
 }

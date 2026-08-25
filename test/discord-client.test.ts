@@ -187,6 +187,75 @@ test("Discord client sends bot authentication only to its configured API origin"
   assert.equal(redirect, "error")
 })
 
+test("Discord client discovers the authenticated Gateway endpoint with bounded projection", async () => {
+  let requestUrl = ""
+  let authorization = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requestUrl = String(input)
+      authorization = new Headers(init?.headers).get("Authorization") || ""
+      return jsonResponse({
+        future_field: `private ${TOKEN}`,
+        session_start_limit: {
+          future_limit_field: `private ${TOKEN}`,
+          max_concurrency: 2,
+          remaining: 8,
+          reset_after: 4_000,
+          total: 10,
+        },
+        shards: 1,
+        url: "wss://gateway.discord.gg/",
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.getGatewayBot()
+
+  assert.equal(requestUrl, `${API_BASE_URL}/gateway/bot`)
+  assert.equal(authorization, `Bot ${TOKEN}`)
+  assert.deepEqual(result, {
+    sessionStartLimit: {
+      maxConcurrency: 2,
+      remaining: 8,
+      resetAfterMs: 4_000,
+      total: 10,
+    },
+    shards: 1,
+    url: "wss://gateway.discord.gg/?v=10&encoding=json",
+  })
+  assert.deepEqual(records.map((record) => record.operation), ["get_gateway_bot"])
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("Discord client rejects malformed and oversized Gateway discovery without raw evidence", async () => {
+  for (const payload of [
+    { private: TOKEN, url: `wss://${TOKEN}@gateway.discord.gg/` },
+    { future: "x".repeat(20_000) },
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(payload),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => client.getGatewayBot(),
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.doesNotMatch(error.message, new RegExp(TOKEN))
+        assert.match(
+          error.message,
+          /Gateway Bot discovery response is invalid|exceeded its local response bound/,
+        )
+        return true
+      },
+    )
+  }
+})
+
 test("Discord client sends one exact non-retried current-application flag PATCH", async () => {
   const requests: Array<{
     authorization: string | null
