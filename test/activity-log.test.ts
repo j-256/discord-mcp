@@ -1573,6 +1573,11 @@ test("JSONL activity log accepts only exact content-free private-message lifecyc
 
   await store.append(pending)
   await store.append(completed)
+  await store.append({
+    ...pending,
+    id: "direct-message-attachment",
+    messageFormat: "attachment",
+  })
   await assert.rejects(
     store.append({
       ...completed,
@@ -1611,7 +1616,7 @@ test("JSONL activity log accepts only exact content-free private-message lifecyc
 
   assert.deepEqual(
     result.entries.map((entry) => entry.id),
-    ["direct-message-2", "direct-message-1"],
+    ["direct-message-attachment", "direct-message-2", "direct-message-1"],
   )
   assert.equal(result.skippedLines, 1)
   assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [

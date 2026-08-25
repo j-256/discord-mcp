@@ -234,6 +234,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    directMessageAttachmentsEnabled: false,
     directMessageAuditEnabled: false,
     directMessageDeletionEnabled: false,
     directMessageDeliveryEnabled: false,
@@ -508,6 +509,69 @@ test("configuration and policy isolate exact-user private-message authority", ()
       },
     }, { homeDirectory: "/test/home" }),
     new RegExp(`<=${CONNECTOR_LIMITS.directMessageUserAllowlist} items|at most ${CONNECTOR_LIMITS.directMessageUserAllowlist} unique IDs`),
+  )
+})
+
+test("configuration and policy independently gate exact-user private attachments", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-private-attachment-policy-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      directMessageAttachments: true,
+      directMessageDelivery: true,
+    },
+    limits: { attachmentMaxBytes: 512 },
+    scopes: { directMessageUserIds: [USER_ID] },
+    storage: { attachmentRoots: [root] },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowDirectMessageAttachments, true)
+  assert.equal(config.allowDirectMessageDelivery, true)
+  assert.equal(config.attachmentMaxBytes, 512)
+  assert.deepEqual(config.attachmentRoots, [root])
+  assert.equal(policy.describe().directMessageAttachmentsEnabled, true)
+  assert.doesNotThrow(
+    () => policy.assertDirectMessageAttachmentAllowed(USER_ID),
+  )
+  assert.throws(
+    () => policy.assertDirectMessageAttachmentAllowed("400000000000000002"),
+    /outside the direct-message scope/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { directMessageAttachments: true },
+      scopes: { directMessageUserIds: [USER_ID] },
+      storage: { attachmentRoots: [root] },
+    }, { homeDirectory: "/test/home" }),
+    /requires.*directMessageDelivery/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        directMessageAttachments: true,
+        directMessageDelivery: true,
+      },
+      scopes: { directMessageUserIds: [USER_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires.*storage\.attachmentRoots/,
+  )
+
+  const guildOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { attachments: true },
+    readScope: { channelIds: [CHANNEL_ID], guildIds: [GUILD_ID] },
+    scopes: { attachmentChannelIds: [CHANNEL_ID] },
+    storage: { attachmentRoots: [root] },
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => guildOnly.assertDirectMessageAttachmentAllowed(USER_ID),
+    /delivery is disabled/,
   )
 })
 
@@ -1162,6 +1226,7 @@ test("configuration and policy require an exact administration guild and protect
     channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    directMessageAttachmentsEnabled: false,
     directMessageAuditEnabled: false,
     directMessageDeletionEnabled: false,
     directMessageDeliveryEnabled: false,
@@ -4693,6 +4758,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     channelOrderingGuildIds: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
+    directMessageAttachmentsEnabled: false,
     directMessageAuditEnabled: false,
     directMessageDeletionEnabled: false,
     directMessageDeliveryEnabled: false,

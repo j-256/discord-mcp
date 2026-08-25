@@ -85,18 +85,20 @@ function directMessageReceipt(
   status: DirectMessageOperationReceipt["status"] = stage === "terminal"
     ? "completed"
     : "pending",
+  messageFormat: DirectMessageOperationReceipt["messageFormat"] = "text",
 ): DirectMessageOperationReceipt {
   const dispatched = stage === "message-dispatched" || stage === "terminal"
   const channelReady = stage !== "reserved"
   return {
     action: "send",
     activityId: "activity-direct-message-0001",
+    attachmentSizeBytes: messageFormat === "attachment" ? 22 : null,
     channelId: channelReady ? CHANNEL_ID : null,
     error: status === "failed" || status === "uncertain"
       ? "DiscordApiError.500.unknown"
       : null,
     kind: "direct-message-change",
-    messageFormat: "text",
+    messageFormat,
     messageId: dispatched ? "300000000000000001" : null,
     operationKeyHash: operationKeyHash(DIRECT_MESSAGE_OPERATION_KEY),
     planDigest: PLAN_DIGEST,
@@ -371,6 +373,28 @@ test("direct-message receipts reject legacy shapes and unsafe stage transitions"
     } as unknown as DirectMessageOperationReceipt),
     /invalid shape/,
   )
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      attachmentSizeBytes: 22,
+    }),
+    /invalid message format/,
+  )
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      messageFormat: "attachment",
+    }),
+    /invalid message format/,
+  )
+  await assert.rejects(
+    malformedStore.reserveDirectMessage({
+      ...reserved,
+      attachmentSizeBytes: 10_485_761,
+      messageFormat: "attachment",
+    }),
+    /invalid shape/,
+  )
   const { requestDigest: _requestDigest, ...missingDigest } = reserved
   await assert.rejects(
     malformedStore.reserveDirectMessage(
@@ -424,6 +448,20 @@ test("direct-message receipts reject legacy shapes and unsafe stage transitions"
       timestamp: "2026-08-25T00:00:09.000Z",
     }),
     /already has different evidence/,
+  )
+
+  const attachmentStore = new FileOperationStore(join(root, "attachment"))
+  const attachment = directMessageReceipt("reserved", "pending", "attachment")
+  assert.deepEqual(await attachmentStore.reserveDirectMessage(attachment), {
+    created: true,
+    receipt: attachment,
+  })
+  await assert.rejects(
+    attachmentStore.checkpointDirectMessage({
+      ...directMessageReceipt("channel-ready", "pending", "attachment"),
+      attachmentSizeBytes: 23,
+    }),
+    /changed reserved identity/,
   )
 })
 

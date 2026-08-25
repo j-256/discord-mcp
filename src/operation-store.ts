@@ -15,6 +15,7 @@ import {
   CONNECTOR_LIMITS,
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
+  DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
@@ -159,6 +160,7 @@ export const DIRECT_MESSAGE_ACTIONS = [
 
 export type DirectMessageAction = typeof DIRECT_MESSAGE_ACTIONS[number]
 export const DIRECT_MESSAGE_FORMATS = [
+  "attachment",
   "components-v2",
   "text",
 ] as const
@@ -172,6 +174,7 @@ export type DirectMessageReceiptStage =
 export interface DirectMessageOperationReceipt {
   action: DirectMessageAction
   activityId: string
+  attachmentSizeBytes: number | null
   channelId: string | null
   error: string | null
   kind: DirectMessageOperationKind
@@ -310,6 +313,7 @@ const APPLICATION_RECEIPT_KEYS = [
 const DIRECT_MESSAGE_RECEIPT_KEYS = [
   "action",
   "activityId",
+  "attachmentSizeBytes",
   "channelId",
   "error",
   "kind",
@@ -588,6 +592,12 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
     || ![null, ...DIRECT_MESSAGE_FORMATS].includes(
       record.messageFormat as DirectMessageFormat | null,
     )
+    || !(
+      record.attachmentSizeBytes === null
+      || Number.isSafeInteger(record.attachmentSizeBytes)
+        && (record.attachmentSizeBytes as number) >= 1
+        && (record.attachmentSizeBytes as number) <= DISCORD_LIMITS.attachmentBytes
+    )
     || !nullableSnowflake(record.messageId)
     || !nullableSnowflake(record.replyToMessageId)
     || typeof record.operationKeyHash !== "string"
@@ -613,6 +623,7 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
   const channelId = record.channelId as string | null
   const messageId = record.messageId as string | null
   const messageFormat = record.messageFormat as DirectMessageFormat | null
+  const attachmentSizeBytes = record.attachmentSizeBytes as number | null
   const replyToMessageId = record.replyToMessageId as string | null
   if (
     (action === "reply" && replyToMessageId === null)
@@ -635,6 +646,7 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
   if (
     (action === "delete" && messageFormat !== null)
     || (action !== "delete" && messageFormat === null)
+    || (messageFormat === "attachment") !== (attachmentSizeBytes !== null)
   ) {
     throw new OperationStoreError(
       "Discord direct-message operation receipt has invalid message format",
@@ -699,6 +711,7 @@ function parseDirectMessageReceipt(value: unknown): DirectMessageOperationReceip
   return {
     action,
     activityId: record.activityId,
+    attachmentSizeBytes,
     channelId,
     error: record.error as string | null,
     kind: "direct-message-change",
@@ -810,6 +823,7 @@ function assertDirectMessageIdentity(
 ): void {
   if (
     reserved.action !== next.action
+    || reserved.attachmentSizeBytes !== next.attachmentSizeBytes
     || reserved.activityId !== next.activityId
     || reserved.kind !== next.kind
     || reserved.messageFormat !== next.messageFormat
@@ -858,6 +872,7 @@ function sameDirectMessageReceipt(
 ): boolean {
   return left.action === right.action
     && left.activityId === right.activityId
+    && left.attachmentSizeBytes === right.attachmentSizeBytes
     && left.channelId === right.channelId
     && left.error === right.error
     && left.kind === right.kind

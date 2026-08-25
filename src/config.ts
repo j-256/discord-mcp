@@ -71,6 +71,7 @@ export interface ConnectorConfig {
   allowChannelOrderingChanges: boolean
   allowDeletions: boolean
   allowDirectMessageAudit: boolean
+  allowDirectMessageAttachments: boolean
   allowDirectMessageDeletion: boolean
   allowDirectMessageDelivery: boolean
   allowDirectMessageEditing: boolean
@@ -666,12 +667,17 @@ export function loadConnectorConfigDocument(
   const expectedApplicationId = document.identity.applicationId
   const expectedBotId = document.identity.botId
   const allowDirectMessageAudit = configCapability(document, "directMessageAudit")
+  const allowDirectMessageAttachments = configCapability(
+    document,
+    "directMessageAttachments",
+  )
   const allowDirectMessageDeletion = configCapability(document, "directMessageDeletion")
   const allowDirectMessageDelivery = configCapability(document, "directMessageDelivery")
   const allowDirectMessageEditing = configCapability(document, "directMessageEditing")
   if (
     (
       allowDirectMessageAudit
+      || allowDirectMessageAttachments
       || allowDirectMessageDeletion
       || allowDirectMessageDelivery
       || allowDirectMessageEditing
@@ -680,6 +686,19 @@ export function loadConnectorConfigDocument(
   ) {
     throw new ConfigurationError(
       "Direct-message capabilities require an exact direct-message user allowlist",
+    )
+  }
+  if (allowDirectMessageAttachments && !allowDirectMessageDelivery) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowDirectMessageAttachments")} requires ${configPolicyPath("allowDirectMessageDelivery")}`,
+    )
+  }
+  if (
+    allowDirectMessageAttachments
+    && (document.storage.attachmentRoots?.length ?? 0) === 0
+  ) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowDirectMessageAttachments")} requires $.storage.attachmentRoots`,
     )
   }
   const allowMessageForwarding = configCapability(document, "messageForwarding")
@@ -1107,6 +1126,7 @@ export function loadConnectorConfigDocument(
     allowChannelOrderingChanges,
     allowDeletions: configCapability(document, "deletions"),
     allowDirectMessageAudit,
+    allowDirectMessageAttachments,
     allowDirectMessageDeletion,
     allowDirectMessageDelivery,
     allowDirectMessageEditing,

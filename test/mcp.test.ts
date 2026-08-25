@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import process from "node:process"
 import { PassThrough } from "node:stream"
 import test, { type TestContext } from "node:test"
@@ -506,6 +506,7 @@ const OTHER_USER_ID = "400000000000000002"
 const DIRECT_MESSAGE_OPERATION_KEY = "direct-message-operation-0001"
 const DIRECT_MESSAGE_CONTENT = "Private reviewed message"
 const DIRECT_MESSAGE_COMPONENT_TEXT = "Private reviewed component"
+const DIRECT_MESSAGE_ATTACHMENT_PATH = join(tmpdir(), "private-report.txt")
 
 function directMessageSendToolInput(planDigest?: string) {
   return {
@@ -552,6 +553,24 @@ function directMessageComponentSendToolInput(planDigest?: string) {
     ...(planDigest === undefined ? {} : { planDigest }),
     recipientId: USER_ID,
     reviewReason: "Expected static private contact reviewed",
+  }
+}
+
+function directMessageAttachmentSendToolInput(planDigest?: string) {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "send" as const,
+    message: {
+      content: "Requested private report attached",
+      description: "Reviewed private report",
+      filePath: DIRECT_MESSAGE_ATTACHMENT_PATH,
+      filename: "private-report.txt",
+      kind: "attachment" as const,
+    },
+    operationKey: `${DIRECT_MESSAGE_OPERATION_KEY}-attachment`,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    recipientId: USER_ID,
+    reviewReason: "Expected private file delivery reviewed",
   }
 }
 
@@ -7232,6 +7251,7 @@ function fixturePolicy(): PolicyDescription {
     channelOrderingGuildIds: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
+    directMessageAttachmentsEnabled: false,
     directMessageAuditEnabled: false,
     directMessageDeletionEnabled: false,
     directMessageDeliveryEnabled: false,
@@ -7789,6 +7809,7 @@ function serviceFixture(overrides: {
       ? request.replyToMessageId
       : request.messageId
     return {
+      attachment: null,
       attachmentCount: 0,
       author: connectorAuthored ? "connector" : "recipient",
       authorId: connectorAuthored ? BOT_ID : request.recipientId,
@@ -7822,6 +7843,22 @@ function serviceFixture(overrides: {
       && request.message.kind === "components-v2"
       ? reviewComponentLayout(request.message.components, undefined)
       : null
+    const desiredMessage = request.action === "delete"
+      ? null
+      : request.message.kind === "attachment"
+        ? {
+            content: request.message.content ?? null,
+            description: request.message.description ?? null,
+            filePath: request.message.filePath,
+            filename: request.message.filename ?? basename(request.message.filePath),
+            kind: "attachment" as const,
+          }
+        : request.message.kind === "text"
+          ? request.message
+          : {
+              components: (desiredReview as NonNullable<typeof desiredReview>).layout,
+              kind: "components-v2" as const,
+            }
     return {
       action: request.action,
       applicationId: APPLICATION_ID,
@@ -7836,14 +7873,7 @@ function serviceFixture(overrides: {
       createdAt: "2026-08-25T00:00:01.000Z",
       current,
       desired: {
-        message: request.action === "delete"
-          ? null
-          : request.message.kind === "text"
-            ? request.message
-            : {
-                components: (desiredReview as NonNullable<typeof desiredReview>).layout,
-                kind: "components-v2",
-              },
+        message: desiredMessage,
         preview: desiredReview?.preview ?? null,
         replyToMessageId: request.action === "reply"
           ? request.replyToMessageId
@@ -7851,6 +7881,20 @@ function serviceFixture(overrides: {
       },
       digest: overrides.directMessagePlanDigest ?? DIGEST,
       effect: writeRequired ? "change" : "none",
+      file: desiredMessage?.kind === "attachment"
+        ? {
+            canonicalPath: desiredMessage.filePath,
+            containedByConfiguredRoot: true,
+            description: desiredMessage.description,
+            filename: desiredMessage.filename,
+            maxBytes: 10_485_760,
+            ownerMatchesProcess: true,
+            regularFile: true,
+            singleLink: true,
+            sizeBytes: 23,
+            stableRead: true,
+          }
+        : null,
       mentionPolicy: {
         parse: [],
         repliedUser: false,
@@ -7860,9 +7904,11 @@ function serviceFixture(overrides: {
       operationKeyHash: operationKeyHash(request.operationKey),
       privacy: {
         omittedFields: [
+          "attachment-bytes",
           "attachment-urls",
           "avatars",
           "generated-component-ids",
+          "local-file-paths",
           "profile-names",
           "raw-discord-objects",
           "raw-operation-key",
@@ -7889,6 +7935,9 @@ function serviceFixture(overrides: {
         ...(desiredReview === null
           ? []
           : ["Components V2 is irreversible for each created private message"]),
+        ...(desiredMessage?.kind === "attachment"
+          ? ["Attachment bytes are disclosed to Discord and the exact recipient"]
+          : []),
       ],
       writeRequired,
     }
@@ -7898,6 +7947,7 @@ function serviceFixture(overrides: {
     channelId: string,
     messageId: string,
   ): DirectMessageView => ({
+    attachment: null,
     attachmentCount: 0,
     author: "recipient",
     authorId: recipientId,
@@ -13064,7 +13114,7 @@ test("progressive discovery enables the complete exact-recipient private-message
   })
 
   const discovery = structuredContent(await client.callTool({
-    arguments: { query: "list_direct_messages" },
+    arguments: { query: "direct message attachment" },
     name: "discover_discord_tools",
   }))
 
@@ -15191,6 +15241,93 @@ test("MCP private-message Components V2 binds static layout approval and signed 
   assert.equal(stdio.calls.directMessageExecute, 0)
 })
 
+test("MCP private-file delivery binds owned-file review and signed state", async (context) => {
+  let confirmationMessage = ""
+  const connected = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const executed = await connected.client.callTool({
+    arguments: directMessageAttachmentSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+
+  assert.equal(structuredContent(executed).status, "completed")
+  assert.equal(connected.calls.directMessageExecute, 1)
+  assert.match(confirmationMessage, /attachment/)
+  assert.match(confirmationMessage, new RegExp(DIRECT_MESSAGE_ATTACHMENT_PATH))
+  assert.match(confirmationMessage, /private-report\.txt/)
+  assert.match(confirmationMessage, /Reviewed private report/)
+  assert.match(confirmationMessage, /"sizeBytes":23/)
+  assert.match(confirmationMessage, /discloses the reviewed bytes/)
+  assert.match(confirmationMessage, /no remote content digest/)
+  assert.doesNotMatch(confirmationMessage, /contentDigest|inode|device/)
+
+  const invalidEdit = await connected.client.callTool({
+    arguments: {
+      ...directMessageEditToolInput(),
+      message: {
+        filePath: DIRECT_MESSAGE_ATTACHMENT_PATH,
+        kind: "attachment",
+      },
+    },
+    name: "plan_direct_message_change",
+  })
+  const remoteUrl = await connected.client.callTool({
+    arguments: {
+      ...directMessageAttachmentSendToolInput(),
+      message: {
+        ...directMessageAttachmentSendToolInput().message,
+        url: "https://cdn.discord.test/private-file",
+      },
+    },
+    name: "plan_direct_message_change",
+  })
+  assert.equal(invalidEdit.isError, true)
+  assert.equal(remoteUrl.isError, true)
+
+  const stdio = await connectedModernStdioFixture(context)
+  const request = directMessageAttachmentSendToolInput(DIGEST)
+  const initial = await stdio.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_direct_message_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+
+  for (const changedMessage of [
+    { ...request.message, content: "Changed private attachment text" },
+    { ...request.message, description: "Changed attachment description" },
+    { ...request.message, filePath: join(tmpdir(), "other-private-report.txt") },
+    { ...request.message, filename: "other-private-report.txt" },
+  ]) {
+    const changed = await stdio.client.request({
+      method: "tools/call",
+      params: {
+        arguments: { ...request, message: changedMessage },
+        inputResponses: {
+          confirm_direct_message_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_direct_message_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(changed).status, "confirmation-invalid")
+    assert.equal(changed.isError, true)
+  }
+  assert.equal(stdio.calls.directMessageExecute, 0)
+})
+
 test("MCP private-message signed state rejects changed private intent", async (context) => {
   const fixture = await connectedModernStdioFixture(context)
   const request = directMessageSendToolInput(DIGEST)
@@ -15295,6 +15432,7 @@ test("MCP private-message errors expose only strict content-free lifecycle evide
   const receipt = {
     action: "send",
     activityId: "activity-direct-message",
+    attachmentSizeBytes: null,
     channelId: CHANNEL_ID,
     error: null,
     messageFormat: "text" as const,
@@ -15322,6 +15460,35 @@ test("MCP private-message errors expose only strict content-free lifecycle evide
   assert.deepEqual(
     (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
     receipt,
+  )
+
+  const attachmentReceipt = {
+    ...receipt,
+    attachmentSizeBytes: 23,
+    messageFormat: "attachment" as const,
+    operationKeyHash: operationKeyHash(
+      `${DIRECT_MESSAGE_OPERATION_KEY}-attachment`,
+    ),
+  }
+  const attachmentConflict = await connectedFixture(context, {
+    elicitationHandler: approveDirectMessage,
+    serviceOverrides: {
+      directMessageError: new DirectMessageOperationConflictError(
+        attachmentReceipt,
+      ),
+    },
+  })
+  const attachmentConflictResult = await attachmentConflict.client.callTool({
+    arguments: directMessageAttachmentSendToolInput(DIGEST),
+    name: "execute_direct_message_change",
+  })
+  assert.deepEqual(
+    (structuredContent(attachmentConflictResult).error as Record<string, unknown>).receipt,
+    attachmentReceipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(structuredContent(attachmentConflictResult)),
+    /private-report|Reviewed private|filePath|filename|description/,
   )
 
   const uncertainEvidence = {

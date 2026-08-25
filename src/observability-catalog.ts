@@ -228,6 +228,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   create_guild_scheduled_event: "POST",
   create_attachment_message: "POST",
   create_component_message: "POST",
+  create_direct_attachment_message: "POST",
   create_message: "POST",
   create_direct_message: "POST",
   create_direct_message_channel: "POST",

@@ -1101,6 +1101,15 @@ export interface CreateDirectComponentMessageInput {
   replyToMessageId?: string
 }
 
+export interface CreateDirectAttachmentMessageInput {
+  bytes: Uint8Array
+  content?: string
+  description?: string
+  filename: string
+  nonce: string
+  replyToMessageId?: string
+}
+
 export interface DiscordDirectMessageUserEvidence {
   bot: boolean
   id: string
@@ -1473,6 +1482,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "crosspost_message",
   "create_application_emoji",
   "create_component_message",
+  "create_direct_attachment_message",
   "create_guild_auto_moderation_rule",
   "create_guild_ban",
   "create_interaction_response",
@@ -12143,6 +12153,88 @@ export class DiscordClient {
           nonce: input.nonce,
         },
         diagnosticRoute: "/channels/{channel.id}/messages",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  createDirectAttachmentMessage(
+    channelId: string,
+    input: CreateDirectAttachmentMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(channelId, "Discord direct-message channel ID")
+    if (input.content !== undefined) assertMessageContent(input.content)
+    if (
+      !(input.bytes instanceof Uint8Array)
+      || input.bytes.byteLength < 1
+      || input.bytes.byteLength > DISCORD_LIMITS.attachmentBytes
+    ) {
+      throw new RangeError(
+        `Discord direct-message attachment bytes must contain between 1 and ${DISCORD_LIMITS.attachmentBytes} bytes`,
+      )
+    }
+    assertAttachmentFilename(input.filename)
+    if (
+      input.description !== undefined
+      && (
+        !input.description.trim()
+        || input.description.length > DISCORD_LIMITS.attachmentDescriptionCharacters
+      )
+    ) {
+      throw new RangeError(
+        `Discord direct-message attachment description must contain 1-${DISCORD_LIMITS.attachmentDescriptionCharacters} characters`,
+      )
+    }
+    if (input.description !== undefined) {
+      assertValidUnicode(input.description, "Discord direct-message attachment description")
+    }
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord direct-message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertSearchSnowflake(
+      input.replyToMessageId,
+      "Discord direct-message reply target ID",
+    )
+    const payload = {
+      allowed_mentions: {
+        parse: [],
+        replied_user: false,
+      },
+      attachments: [{
+        ...(input.description === undefined
+          ? {}
+          : { description: input.description }),
+        filename: input.filename,
+        id: "0",
+      }],
+      ...(input.content === undefined ? {} : { content: input.content }),
+      enforce_nonce: true,
+      ...(input.replyToMessageId === undefined
+        ? {}
+        : {
+            message_reference: {
+              channel_id: channelId,
+              fail_if_not_exists: true,
+              message_id: input.replyToMessageId,
+              type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+            },
+          }),
+      nonce: input.nonce,
+    }
+    const form = new FormData()
+    form.set("payload_json", JSON.stringify(payload))
+    form.set("files[0]", new Blob([Uint8Array.from(input.bytes)]), input.filename)
+    return this.#request(
+      "create_direct_attachment_message",
+      `/channels/${channelId}/messages`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/messages",
+        multipartBody: form,
         suppressFailureCause: true,
       },
     )

@@ -748,6 +748,8 @@ export interface DiscordServiceClient {
   createComponentMessage: DiscordClient["createComponentMessage"]
   createMessage: DiscordClient["createMessage"]
   createMessageForward: DiscordClient["createMessageForward"]
+  createDirectAttachmentMessage?: DiscordClient["createDirectAttachmentMessage"]
+  createDirectComponentMessage?: DiscordClient["createDirectComponentMessage"]
   createDirectMessage?: DiscordClient["createDirectMessage"]
   createDirectMessageChannel?: DiscordClient["createDirectMessageChannel"]
   createPoll: DiscordClient["createPoll"]
@@ -779,6 +781,7 @@ export interface DiscordServiceClient {
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editComponentMessage: DiscordClient["editComponentMessage"]
   editMessage: DiscordClient["editMessage"]
+  editDirectComponentMessage?: DiscordClient["editDirectComponentMessage"]
   editDirectMessage?: DiscordClient["editDirectMessage"]
   executeWebhookMessage: DiscordClient["executeWebhookMessage"]
   getChannel: DiscordClient["getChannel"]
@@ -1219,9 +1222,11 @@ function voiceChannelStatusSource(
 }
 
 const DIRECT_MESSAGE_CLIENT_METHODS = [
+  "createDirectComponentMessage",
   "createDirectMessage",
   "createDirectMessageChannel",
   "deleteDirectMessage",
+  "editDirectComponentMessage",
   "editDirectMessage",
   "getDirectMessage",
   "getDirectMessageChannel",
@@ -1231,12 +1236,19 @@ const DIRECT_MESSAGE_CLIENT_METHODS = [
 
 function configuredDirectMessageServiceClient(
   client: DiscordServiceClient,
+  config: ConnectorConfig,
 ): DirectMessageServiceClient | undefined {
   const candidate = client as DiscordServiceClient
     & Partial<DirectMessageServiceClient>
-  if (DIRECT_MESSAGE_CLIENT_METHODS.every((name) => (
-    typeof candidate[name] === "function"
-  ))) {
+  if (
+    DIRECT_MESSAGE_CLIENT_METHODS.every((name) => (
+      typeof candidate[name] === "function"
+    ))
+    && (
+      !config.allowDirectMessageAttachments
+      || typeof candidate.createDirectAttachmentMessage === "function"
+    )
+  ) {
     return candidate as DirectMessageServiceClient
   }
   return undefined
@@ -1244,6 +1256,7 @@ function configuredDirectMessageServiceClient(
 
 function directMessagesConfigured(config: ConnectorConfig): boolean {
   return config.allowDirectMessageAudit
+    || config.allowDirectMessageAttachments
     || config.allowDirectMessageDeletion
     || config.allowDirectMessageDelivery
     || config.allowDirectMessageEditing
@@ -1365,7 +1378,10 @@ export class ConnectorService {
       writeCoordinationDirectory(options.config.auditFile),
       operationStore,
     )
-    const directMessageClient = configuredDirectMessageServiceClient(this.#client)
+    const directMessageClient = configuredDirectMessageServiceClient(
+      this.#client,
+      options.config,
+    )
     if (!directMessageClient && directMessagesConfigured(options.config)) {
       throw new ConfigurationError(
         "Configured direct-message capabilities require complete direct-message client support",
@@ -1374,6 +1390,8 @@ export class ConnectorService {
     this.#directMessageService = directMessageClient
       ? new DirectMessageService({
           activityStore: this.#activityStore,
+          attachmentMaxBytes: options.config.attachmentMaxBytes,
+          attachmentRoots: options.config.attachmentRoots,
           client: directMessageClient,
           operationStore,
           policy: this.#policy,

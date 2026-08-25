@@ -165,7 +165,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "component-message",
   },
   execute_direct_message_change: {
-    keywords: ["component", "components v2", "delete", "direct message", "dm", "edit", "execute", "private", "reply", "send", "static"],
+    keywords: ["attachment", "component", "components v2", "delete", "direct message", "dm", "edit", "execute", "file", "private", "reply", "send", "static", "upload"],
     toolset: "direct-messages",
     workflow: "direct-message-change",
   },
@@ -510,7 +510,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "connector",
   },
   get_direct_message: {
-    keywords: ["component", "components v2", "direct message", "dm", "exact", "get", "private", "read", "static"],
+    keywords: ["attachment", "component", "components v2", "direct message", "dm", "exact", "file", "get", "private", "read", "static"],
     toolset: "direct-messages",
     workflow: "direct-message-change",
   },
@@ -655,7 +655,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "soundboard",
   },
   list_direct_messages: {
-    keywords: ["component", "components v2", "direct message", "dm", "history", "list", "private", "read", "static"],
+    keywords: ["attachment", "component", "components v2", "direct message", "dm", "file", "history", "list", "private", "read", "static"],
     toolset: "direct-messages",
     workflow: "direct-message-change",
   },
@@ -756,7 +756,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "component-message",
   },
   plan_direct_message_change: {
-    keywords: ["component", "components v2", "delete", "direct message", "dm", "edit", "plan", "private", "reply", "review", "send", "static"],
+    keywords: ["attachment", "component", "components v2", "delete", "direct message", "dm", "edit", "file", "plan", "private", "reply", "review", "send", "static", "upload"],
     toolset: "direct-messages",
     workflow: "direct-message-change",
   },
@@ -996,7 +996,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "component-message",
   },
   verify_direct_message_change: {
-    keywords: ["component", "components v2", "direct message", "dm", "drift", "private", "receipt", "recover", "static", "verify"],
+    keywords: ["attachment", "component", "components v2", "direct message", "dm", "drift", "file", "private", "receipt", "recover", "static", "verify"],
     toolset: "direct-messages",
     workflow: "direct-message-change",
   },

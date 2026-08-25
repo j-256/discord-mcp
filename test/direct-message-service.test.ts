@@ -2,8 +2,10 @@ import assert from "node:assert/strict"
 import {
   mkdtemp,
   readFile,
+  realpath,
   readdir,
   rm,
+  writeFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -104,14 +106,16 @@ const PASSTHROUGH_COORDINATOR: WriteCoordinator = {
 }
 
 function policy(capabilities: {
+  attachments?: boolean
   audit?: boolean
   deletion?: boolean
   delivery?: boolean
   editing?: boolean
-} = {}): ScopePolicy {
+} = {}, attachmentRoots: readonly string[] = []): ScopePolicy {
   return new ScopePolicy(loadFixtureConfig({
     capabilities: {
       directMessageAudit: capabilities.audit ?? false,
+      directMessageAttachments: capabilities.attachments ?? false,
       directMessageDeletion: capabilities.deletion ?? false,
       directMessageDelivery: capabilities.delivery ?? false,
       directMessageEditing: capabilities.editing ?? false,
@@ -119,6 +123,7 @@ function policy(capabilities: {
     scopes: {
       directMessageUserIds: [RECIPIENT_ID],
     },
+    storage: { attachmentRoots },
     token: TOKEN,
   }))
 }
@@ -182,6 +187,43 @@ function rawComponentMessage(
   })
 }
 
+function rawAttachmentMessage(options: {
+  content?: string
+  description?: string
+  filename?: string
+  messageId?: string
+  replyToMessageId?: string
+  sizeBytes?: number
+} = {}, overrides: Partial<DiscordMessage> = {}): DiscordMessage {
+  const replyToMessageId = options.replyToMessageId
+  return rawMessage({
+    attachments: [{
+      content_type: "application/octet-stream",
+      ...(options.description === undefined
+        ? {}
+        : { description: options.description }),
+      filename: options.filename ?? "report.txt",
+      id: "900000000000000008",
+      proxy_url: "https://media.discord.test/private-proxy",
+      size: options.sizeBytes ?? 22,
+      url: "https://cdn.discord.test/private-file",
+    }],
+    content: options.content ?? "",
+    id: options.messageId ?? MESSAGE_ID,
+    ...(replyToMessageId === undefined
+      ? {}
+      : {
+          message_reference: {
+            channel_id: CHANNEL_ID,
+            message_id: replyToMessageId,
+            type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+          },
+          type: DISCORD_MESSAGE_TYPES.reply,
+        }),
+    ...overrides,
+  })
+}
+
 function clientFixture(options: {
   calls?: string[]
   message?: DiscordMessage
@@ -190,6 +232,10 @@ function clientFixture(options: {
   const calls = options.calls ?? []
   const message = options.message ?? rawMessage()
   return {
+    async createDirectAttachmentMessage() {
+      calls.push("create-attachment-message")
+      return message
+    },
     async createDirectComponentMessage() {
       calls.push("create-component-message")
       return message
@@ -348,6 +394,42 @@ function componentEditRequest(
   }
 }
 
+function attachmentSendRequest(filePath: string): DirectMessageChangeRequest {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "send",
+    message: {
+      content: "Requested private report attached",
+      description: "Reviewed private report",
+      filePath,
+      filename: "private-report.txt",
+      kind: "attachment",
+    },
+    operationKey: `${OPERATION_KEY}-attachment-send`,
+    recipientId: RECIPIENT_ID,
+    reviewReason: "review exact private file delivery",
+  }
+}
+
+function attachmentReplyRequest(filePath: string): DirectMessageChangeRequest {
+  return {
+    acknowledgeExpectedRecipientContact: true,
+    action: "reply",
+    channelId: CHANNEL_ID,
+    message: {
+      content: "Requested private report attached",
+      description: "Reviewed private report",
+      filePath,
+      filename: "private-report.txt",
+      kind: "attachment",
+    },
+    operationKey: `${OPERATION_KEY}-attachment-reply`,
+    recipientId: RECIPIENT_ID,
+    replyToMessageId: MESSAGE_ID,
+    reviewReason: "review exact private file reply",
+  }
+}
+
 function deleteRequest(): DirectMessageChangeRequest {
   return {
     acknowledgeIrreversibleDeletion: true,
@@ -425,6 +507,49 @@ test("direct-message requests are closed and require action-specific acknowledge
     kind: "container",
     spoiler: false,
   })
+  const attachmentPath = join(tmpdir(), "private-report.txt")
+  const attachmentNormalizationRequest: DirectMessageChangeRequest = {
+    acknowledgeExpectedRecipientContact: true,
+    action: "send",
+    message: { filePath: attachmentPath, kind: "attachment" },
+    operationKey: `${OPERATION_KEY}-attachment-normalization`,
+    recipientId: RECIPIENT_ID,
+    reviewReason: "review attachment normalization",
+  }
+  const normalizedAttachment = normalizeDirectMessageChangeRequest(
+    attachmentNormalizationRequest,
+  )
+  if (
+    normalizedAttachment.action !== "send"
+    || normalizedAttachment.message.kind !== "attachment"
+  ) {
+    assert.fail("Expected a normalized attachment body")
+  }
+  assert.deepEqual(normalizedAttachment.message, {
+    content: null,
+    description: null,
+    filePath: attachmentPath,
+    filename: "private-report.txt",
+    kind: "attachment",
+  })
+  assert.throws(
+    () => normalizeDirectMessageChangeRequest({
+      ...editRequest(),
+      message: { filePath: attachmentPath, kind: "attachment" },
+    } as unknown as DirectMessageChangeRequest),
+    /valid only for send and reply/,
+  )
+  assert.throws(
+    () => normalizeDirectMessageChangeRequest({
+      ...attachmentSendRequest(attachmentPath),
+      message: {
+        filePath: attachmentPath,
+        kind: "attachment",
+        url: "https://cdn.discord.test/private-file",
+      },
+    } as unknown as DirectMessageChangeRequest),
+    /requires one exact absolute file path/,
+  )
   assert.throws(
     () => normalizeDirectMessageChangeRequest({
       ...sendRequest(),
@@ -535,6 +660,199 @@ test("direct-message send planning remains read-only and profile-minimized", asy
   }
 })
 
+test("direct-message owned-file send and reply bind, upload, and recover without reopening the file", async (t) => {
+  for (const action of ["send", "reply"] as const) {
+    await t.test(action, async () => {
+      const temporary = await mkdtemp(join(tmpdir(), `discord-mcp-dm-attachment-${action}-`))
+      try {
+        const root = await realpath(temporary)
+        const filePath = join(root, "private-report.txt")
+        const fileBytes = Buffer.from("reviewed private bytes")
+        await writeFile(filePath, fileBytes)
+        const request = action === "send"
+          ? attachmentSendRequest(filePath)
+          : attachmentReplyRequest(filePath)
+        const replyTarget = rawMessage({
+          author: {
+            bot: false,
+            id: RECIPIENT_ID,
+            username: "Private Recipient",
+          },
+          content: "private request",
+          id: MESSAGE_ID,
+        })
+        const attachmentMessage = rawAttachmentMessage({
+          content: "Requested private report attached",
+          description: "Reviewed private report",
+          filename: "private-report.txt",
+          messageId: RESULT_MESSAGE_ID,
+          ...(action === "reply" ? { replyToMessageId: MESSAGE_ID } : {}),
+          sizeBytes: fileBytes.byteLength,
+        })
+        const calls: string[] = []
+        let uploadInput: Parameters<
+          DirectMessageServiceClient["createDirectAttachmentMessage"]
+        >[1] | null = null
+        const client: DirectMessageServiceClient = {
+          ...clientFixture({ calls, message: attachmentMessage }),
+          async createDirectAttachmentMessage(_channelId, input) {
+            calls.push("create-attachment-message")
+            uploadInput = input
+            return attachmentMessage
+          },
+          async getDirectMessage(_channelId, messageId) {
+            calls.push("get-message")
+            return messageId === MESSAGE_ID ? replyTarget : attachmentMessage
+          },
+        }
+        const store = new FileOperationStore(join(root, "receipts"))
+        const activity = new MemoryActivityStore()
+        const service = new DirectMessageService({
+          activityStore: activity,
+          attachmentMaxBytes: 1_024,
+          attachmentRoots: [root],
+          client,
+          clock: () => new Date(TIMESTAMP),
+          operationStore: store,
+          planKey: new Uint8Array(32).fill(action === "send" ? 30 : 31),
+          policy: policy({ attachments: true, delivery: true }, [root]),
+          randomId: () => `direct_message_activity_attachment_${action}`,
+          verificationKey: directMessageVerificationKey(TOKEN),
+          writeCoordinator: PASSTHROUGH_COORDINATOR,
+        })
+
+        const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+        assert.equal(plan.status, "planned")
+        assert.equal(plan.file?.canonicalPath, filePath)
+        assert.equal(plan.file?.filename, "private-report.txt")
+        assert.equal(plan.file?.description, "Reviewed private report")
+        assert.equal(plan.file?.sizeBytes, fileBytes.byteLength)
+        assert.equal(plan.file?.maxBytes, 1_024)
+        assert.equal(plan.file?.ownerMatchesProcess, true)
+        assert.equal(plan.file?.singleLink, true)
+        assert.equal(plan.file?.stableRead, true)
+        assert.equal(calls.includes("create-channel"), false)
+        assert.equal(calls.includes("create-attachment-message"), false)
+        assert.doesNotMatch(JSON.stringify(plan), /reviewed private bytes|contentDigest|inode/)
+
+        const result = await service.execute(
+          APPLICATION_ID,
+          BOT_ID,
+          request,
+          plan.digest,
+        )
+        assert.equal(result.status, "completed")
+        assert.equal(result.messageId, RESULT_MESSAGE_ID)
+        assert.equal(
+          calls.filter((call) => call === "create-attachment-message").length,
+          1,
+        )
+        assert.equal(
+          calls.filter((call) => call === "create-channel").length,
+          action === "send" ? 1 : 0,
+        )
+        assert.deepEqual(uploadInput, {
+          bytes: new Uint8Array(fileBytes),
+          content: "Requested private report attached",
+          description: "Reviewed private report",
+          filename: "private-report.txt",
+          nonce: (uploadInput as { nonce: string } | null)?.nonce,
+          ...(action === "reply" ? { replyToMessageId: MESSAGE_ID } : {}),
+        })
+        assert.match((uploadInput as { nonce: string } | null)?.nonce ?? "", /^[A-Za-z0-9_-]+$/)
+
+        const receipt = await store.getDirectMessage(
+          "direct-message-change",
+          operationKeyHash(request.operationKey),
+        )
+        assert.equal(receipt?.messageFormat, "attachment")
+        assert.equal(receipt?.attachmentSizeBytes, fileBytes.byteLength)
+        const durable = JSON.stringify({ activity: activity.entries, receipt })
+        assert.doesNotMatch(
+          durable,
+          /private-report|reviewed private|Reviewed private|canonicalPath|contentDigest|filePath/,
+        )
+
+        await rm(filePath)
+        calls.length = 0
+        const recovered = new DirectMessageService({
+          activityStore: activity,
+          attachmentMaxBytes: 1_024,
+          attachmentRoots: [root],
+          client,
+          operationStore: store,
+          policy: policy({ attachments: true, delivery: true }, [root]),
+          verificationKey: directMessageVerificationKey(TOKEN),
+          writeCoordinator: PASSTHROUGH_COORDINATOR,
+        })
+        const verification = await recovered.verify(
+          APPLICATION_ID,
+          BOT_ID,
+          action === "send"
+            ? attachmentSendRequest(join(root, "missing-private-report.txt"))
+            : attachmentReplyRequest(join(root, "missing-private-report.txt")),
+        )
+        assert.equal(verification.status, "blocked")
+        assert.equal(verification.reason, "request-mismatch")
+        assert.equal(calls.length, 0)
+
+        const matchedVerification = await recovered.verify(
+          APPLICATION_ID,
+          BOT_ID,
+          request,
+        )
+        assert.equal(matchedVerification.status, "verified")
+        assert.equal(calls.includes("create-attachment-message"), false)
+        assert.equal(calls.includes("create-channel"), false)
+      } finally {
+        await rm(temporary, { force: true, recursive: true })
+      }
+    })
+  }
+})
+
+test("direct-message owned-file execution rejects byte drift before durable or Discord writes", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-drift-"))
+  try {
+    const root = await realpath(temporary)
+    const filePath = join(root, "private-report.txt")
+    await writeFile(filePath, "first private bytes")
+    const calls: string[] = []
+    const store = new FileOperationStore(join(root, "receipts"))
+    const service = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      attachmentMaxBytes: 1_024,
+      attachmentRoots: [root],
+      client: clientFixture({ calls }),
+      operationStore: store,
+      planKey: new Uint8Array(32).fill(32),
+      policy: policy({ attachments: true, delivery: true }, [root]),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const request = attachmentSendRequest(filePath)
+    const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+    await writeFile(filePath, "other private bytes")
+    calls.length = 0
+
+    await assert.rejects(
+      service.execute(APPLICATION_ID, BOT_ID, request, plan.digest),
+      DirectMessagePlanChangedError,
+    )
+    assert.equal(calls.includes("create-channel"), false)
+    assert.equal(calls.includes("create-attachment-message"), false)
+    assert.equal(
+      await store.getDirectMessage(
+        "direct-message-change",
+        operationKeyHash(request.operationKey),
+      ),
+      undefined,
+    )
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
+})
+
 test("direct-message reads expose content and bounded counts without profiles or URLs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-read-"))
   try {
@@ -635,6 +953,80 @@ test("direct-message reads normalize static Components V2 and quarantine unsuppo
       assert.equal(view.componentLayout, null)
       assert.equal(view.componentPreview, null)
       assert.doesNotMatch(JSON.stringify(view), /private-button-id|Private action/)
+    }
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test("direct-message reads project one bounded attachment without URLs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-read-"))
+  try {
+    const message = rawAttachmentMessage({
+      content: "Requested private report attached",
+      description: "Reviewed private report",
+      filename: "private-report.txt",
+      sizeBytes: 22,
+    })
+    const service = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client: clientFixture({ message }),
+      operationStore: new FileOperationStore(directory),
+      policy: policy({ audit: true }),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+
+    const view = await service.get(
+      APPLICATION_ID,
+      BOT_ID,
+      RECIPIENT_ID,
+      CHANNEL_ID,
+      MESSAGE_ID,
+    )
+
+    assert.equal(view.presentation, "single-attachment")
+    assert.deepEqual(view.attachment, {
+      description: "Reviewed private report",
+      filename: "private-report.txt",
+      id: "900000000000000008",
+      sizeBytes: 22,
+    })
+    assert.doesNotMatch(
+      JSON.stringify(view),
+      /private-file|private-proxy|application\/octet-stream|content_type|proxy_url/,
+    )
+
+    for (const unsupportedMessage of [
+      rawAttachmentMessage({}, { pinned: true }),
+      rawAttachmentMessage({}, { mention_everyone: true }),
+      rawAttachmentMessage({}, {
+        attachments: [{
+          filename: "../unsafe.txt",
+          id: "900000000000000008",
+          size: 22,
+          url: "https://cdn.discord.test/unsafe",
+        }],
+      }),
+    ]) {
+      const unsupported = new DirectMessageService({
+        activityStore: new MemoryActivityStore(),
+        client: clientFixture({ message: unsupportedMessage }),
+        operationStore: new FileOperationStore(directory),
+        policy: policy({ audit: true }),
+        verificationKey: directMessageVerificationKey(TOKEN),
+        writeCoordinator: PASSTHROUGH_COORDINATOR,
+      })
+      const unsupportedView = await unsupported.get(
+        APPLICATION_ID,
+        BOT_ID,
+        RECIPIENT_ID,
+        CHANNEL_ID,
+        MESSAGE_ID,
+      )
+      assert.equal(unsupportedView.presentation, "unsupported-rich")
+      assert.equal(unsupportedView.attachment, null)
+      assert.doesNotMatch(JSON.stringify(unsupportedView), /unsafe/)
     }
   } finally {
     await rm(directory, { force: true, recursive: true })
@@ -1323,6 +1715,7 @@ test("direct-message verification blocks pending and failed receipts before Disc
     const receipt: DirectMessageOperationReceipt = {
       action: "send",
       activityId: "direct_message_activity_pending",
+      attachmentSizeBytes: null,
       channelId: null,
       error: null,
       kind: "direct-message-change",
@@ -1865,6 +2258,58 @@ test("direct-message deletion accepts exact static Components V2 and rejects ric
   }
 })
 
+test("direct-message deletion accepts one exact URL-free attachment projection", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-delete-"))
+  try {
+    const calls: string[] = []
+    let exists = true
+    const message = rawAttachmentMessage({
+      description: "Reviewed private report",
+      filename: "private-report.txt",
+      sizeBytes: 22,
+    })
+    const client: DirectMessageServiceClient = {
+      ...clientFixture({ calls, message }),
+      async deleteDirectMessage() {
+        calls.push("delete-message")
+        exists = false
+      },
+      async getDirectMessage() {
+        calls.push("get-message")
+        if (!exists) throw apiError(404)
+        return message
+      },
+    }
+    const service = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client,
+      clock: () => new Date(TIMESTAMP),
+      operationStore: new FileOperationStore(directory),
+      planKey: new Uint8Array(32).fill(33),
+      policy: policy({ deletion: true }),
+      randomId: () => "direct_message_activity_attachment_delete",
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const request = deleteRequest()
+    const plan = await service.plan(APPLICATION_ID, BOT_ID, request)
+    assert.equal(plan.current?.presentation, "single-attachment")
+    assert.equal(plan.current?.attachment?.filename, "private-report.txt")
+    assert.doesNotMatch(JSON.stringify(plan.current), /private-file|private-proxy/)
+
+    const result = await service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    )
+    assert.equal(result.status, "completed")
+    assert.equal(calls.filter((call) => call === "delete-message").length, 1)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
 test("direct-message edit and deletion reject messages not owned by the connector", async () => {
   const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-owner-"))
   try {
@@ -1907,5 +2352,9 @@ test("direct-message policy never infers recipient scope from another user", () 
   assert.throws(
     () => scoped.assertDirectMessageAuditAllowed(OTHER_RECIPIENT_ID),
     PolicyError,
+  )
+  assert.throws(
+    () => scoped.assertDirectMessageAttachmentAllowed(RECIPIENT_ID),
+    /delivery is disabled/,
   )
 })

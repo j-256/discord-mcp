@@ -506,6 +506,11 @@ test("Discord client suppresses private-message mentions and never retries mutat
       components: [{ content: "One shot component", type: 10 }],
       nonce: "component-nonce",
     }),
+    () => rateLimited.createDirectAttachmentMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+      bytes: new Uint8Array([1]),
+      filename: "private.bin",
+      nonce: "attachment-nonce",
+    }),
     () => rateLimited.editDirectMessage(
       DIRECT_MESSAGE_CHANNEL_ID,
       DIRECT_MESSAGE_ID,
@@ -526,7 +531,7 @@ test("Discord client suppresses private-message mentions and never retries mutat
   ]) {
     await assert.rejects(mutation, DiscordApiError)
   }
-  assert.equal(attempts, 6)
+  assert.equal(attempts, 7)
 })
 
 test("Discord client sends exact private static Components V2 contracts", async () => {
@@ -597,6 +602,137 @@ test("Discord client sends exact private static Components V2 contracts", async 
     /preserve the exact IS_COMPONENTS_V2 flag/,
   )
   assert.equal(requests.length, 2)
+})
+
+test("Discord client sends one exact private attachment without retry or URL fields", async () => {
+  let capturedBody: FormData | null = null
+  let capturedMethod: string | undefined
+  let capturedUrl = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      capturedBody = init?.body as FormData
+      capturedMethod = init?.method
+      capturedUrl = String(input)
+      return jsonResponse({ id: DIRECT_MESSAGE_ID })
+    },
+    token: TOKEN,
+  })
+
+  await client.createDirectAttachmentMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+    bytes: new Uint8Array([1, 2, 3, 4]),
+    content: "Requested report attached",
+    description: "Reviewed report",
+    filename: "private-report.bin",
+    nonce: "private-attachment-nonce",
+    replyToMessageId: DIRECT_MESSAGE_REPLY_ID,
+  })
+
+  assert.equal(capturedMethod, "POST")
+  assert.equal(
+    capturedUrl,
+    `${API_BASE_URL}/channels/${DIRECT_MESSAGE_CHANNEL_ID}/messages`,
+  )
+  const body = capturedBody as unknown as FormData
+  assert.ok(body instanceof FormData)
+  const payloadValue = body.get("payload_json")
+  assert.equal(typeof payloadValue, "string")
+  assert.deepEqual(JSON.parse(payloadValue as string), {
+    allowed_mentions: { parse: [], replied_user: false },
+    attachments: [{
+      description: "Reviewed report",
+      filename: "private-report.bin",
+      id: "0",
+    }],
+    content: "Requested report attached",
+    enforce_nonce: true,
+    message_reference: {
+      channel_id: DIRECT_MESSAGE_CHANNEL_ID,
+      fail_if_not_exists: true,
+      message_id: DIRECT_MESSAGE_REPLY_ID,
+      type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+    },
+    nonce: "private-attachment-nonce",
+  })
+  const file = body.get("files[0]")
+  assert.ok(file instanceof Blob)
+  assert.equal(file.size, 4)
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), new Uint8Array([1, 2, 3, 4]))
+  assert.doesNotMatch(
+    JSON.stringify(JSON.parse(payloadValue as string)),
+    /guild_id|https?:|url|base64/i,
+  )
+
+  let attempts = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      attempts += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.createDirectAttachmentMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+      bytes: new Uint8Array([1]),
+      filename: "private.bin",
+      nonce: "attachment-nonce",
+    }),
+    DiscordApiError,
+  )
+  assert.equal(attempts, 1)
+
+  const privateMarker = "private-filename-must-not-escape"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateMarker }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    refused.createDirectAttachmentMessage(DIRECT_MESSAGE_CHANNEL_ID, {
+      bytes: new Uint8Array([1]),
+      filename: "private.bin",
+      nonce: "attachment-nonce",
+    }),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && !error.message.includes(privateMarker)
+      && /request failed/.test(error.message)
+    ),
+  )
+
+  for (const input of [
+    {
+      bytes: new Uint8Array(),
+      filename: "private.bin",
+      nonce: "attachment-nonce",
+    },
+    {
+      bytes: new Uint8Array([1]),
+      filename: "../private.bin",
+      nonce: "attachment-nonce",
+    },
+    {
+      bytes: new Uint8Array([1]),
+      description: " ",
+      filename: "private.bin",
+      nonce: "attachment-nonce",
+    },
+    {
+      bytes: new Uint8Array([1]),
+      filename: "private.bin",
+      nonce: "",
+    },
+  ]) {
+    assert.throws(
+      () => client.createDirectAttachmentMessage(
+        DIRECT_MESSAGE_CHANNEL_ID,
+        input,
+      ),
+      RangeError,
+    )
+  }
 })
 
 test("Discord client uses the current paginated message pin route", async () => {

@@ -103,6 +103,10 @@
           "type": "boolean",
           "description": "Enable exact-recipient one-to-one direct-message reads without content persistence"
         },
+        "directMessageAttachments": {
+          "type": "boolean",
+          "description": "Enable reviewed owned local-file attachments in exact-recipient direct messages"
+        },
         "directMessageDeletion": {
           "type": "boolean",
           "description": "Enable reviewed deletion of exact connector-authored direct messages"

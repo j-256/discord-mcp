@@ -1232,6 +1232,79 @@ test("service rejects application intent policy before identity access", async (
   assert.equal(unjustified.calls.user, 0)
 })
 
+test("service requires private attachment client support only when its gate is enabled", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-private-attachment-client-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const directClient: Partial<DiscordServiceClient> = {
+    async createDirectAttachmentMessage() {
+      throw new Error("Unexpected direct-message attachment creation")
+    },
+    async createDirectComponentMessage() {
+      throw new Error("Unexpected direct-message component creation")
+    },
+    async createDirectMessage() {
+      throw new Error("Unexpected direct-message creation")
+    },
+    async createDirectMessageChannel() {
+      throw new Error("Unexpected direct-message channel creation")
+    },
+    async deleteDirectMessage() {
+      throw new Error("Unexpected direct-message deletion")
+    },
+    async editDirectComponentMessage() {
+      throw new Error("Unexpected direct-message component edit")
+    },
+    async editDirectMessage() {
+      throw new Error("Unexpected direct-message edit")
+    },
+    async getDirectMessage() {
+      throw new Error("Unexpected direct-message read")
+    },
+    async getDirectMessageChannel() {
+      throw new Error("Unexpected direct-message channel read")
+    },
+    async getDirectMessageUser() {
+      throw new Error("Unexpected direct-message user read")
+    },
+    async listDirectMessages() {
+      throw new Error("Unexpected direct-message listing")
+    },
+  }
+  const {
+    createDirectAttachmentMessage: _createDirectAttachmentMessage,
+    ...withoutAttachment
+  } = directClient
+  const deliveryConfig = {
+    capabilities: { directMessageDelivery: true },
+    scopes: { directMessageUserIds: [MEMBER_USER_ID] },
+  }
+  assert.doesNotThrow(() => serviceFixture({
+    client: withoutAttachment,
+    configOverrides: deliveryConfig,
+  }))
+
+  const attachmentConfig = {
+    capabilities: {
+      directMessageAttachments: true,
+      directMessageDelivery: true,
+    },
+    scopes: { directMessageUserIds: [MEMBER_USER_ID] },
+    storage: { attachmentRoots: [root] },
+  }
+  assert.throws(
+    () => serviceFixture({
+      client: withoutAttachment,
+      configOverrides: attachmentConfig,
+    }),
+    ConfigurationError,
+  )
+  assert.doesNotThrow(() => serviceFixture({
+    client: directClient,
+    configOverrides: attachmentConfig,
+  }))
+})
+
 test("service rejects integration and webhook scope before identity access", async () => {
   const { calls, service } = serviceFixture()
   const integrationRequest = {

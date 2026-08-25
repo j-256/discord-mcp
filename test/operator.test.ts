@@ -243,6 +243,7 @@ function status(
       channelOrderingGuildIds: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
+      directMessageAttachmentsEnabled: false,
       directMessageAuditEnabled: false,
       directMessageDeletionEnabled: false,
       directMessageDeliveryEnabled: false,
@@ -1112,6 +1113,9 @@ test("doctor and setup explain exact-user private-message boundaries without con
   const audit = report.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageAuditPolicy,
   )
+  const attachment = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageAttachmentPolicy,
+  )
   const delivery = report.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageDeliveryPolicy,
   )
@@ -1126,6 +1130,8 @@ test("doctor and setup explain exact-user private-message boundaries without con
   assert.match(audit?.summary || "", /normalized static Components V2/)
   assert.match(audit?.summary || "", /no DM discovery/)
   assert.match(audit?.summary || "", /no persistence/)
+  assert.equal(attachment?.status, "pass")
+  assert.match(attachment?.summary || "", /owned-file delivery is disabled/)
   assert.equal(delivery?.status, "pass")
   assert.match(delivery?.summary || "", /plain-text or static Components V2/)
   assert.match(delivery?.summary || "", /forced empty mentions/)
@@ -1133,10 +1139,40 @@ test("doctor and setup explain exact-user private-message boundaries without con
   assert.equal(editing?.status, "pass")
   assert.match(editing?.summary || "", /same-format connector-authored/)
   assert.equal(deletion?.status, "pass")
-  assert.match(deletion?.summary || "", /static Components V2 messages/)
+  assert.match(deletion?.summary || "", /static Components V2/)
+  assert.match(deletion?.summary || "", /single-attachment messages/)
   assert.match(deletion?.summary || "", /irreversible acknowledgement/)
   assert.equal(setup.warnings.some((warning) => warning.includes("direct-messages toolset")), false)
   assert.match(omitted.warnings.join("\n"), /direct-messages toolset/)
+})
+
+test("doctor explains independently gated private-file delivery without reading files", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-private-attachment-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const report = await diagnoseConnector({
+    configOverrides: fixturePolicy({
+      capabilities: {
+        directMessageAttachments: true,
+        directMessageDelivery: true,
+      },
+      limits: { attachmentMaxBytes: 4_096 },
+      scopes: { directMessageUserIds: [USER_ID] },
+      storage: { attachmentRoots: [root] },
+    }),
+    nodeVersion: "22.14.0",
+  })
+  const attachment = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.directMessageAttachmentPolicy,
+  )
+
+  assert.equal(attachment?.status, "pass")
+  assert.match(attachment?.summary || "", /1 exact users/)
+  assert.match(attachment?.summary || "", /1 canonical roots/)
+  assert.match(attachment?.summary || "", /4096-byte ceiling/)
+  assert.match(attachment?.summary || "", /non-retried multipart upload/)
+  assert.match(attachment?.summary || "", /URL-free readback/)
+  assert.doesNotMatch(attachment?.summary || "", new RegExp(root))
 })
 
 test("doctor and setup explain reviewed attachment scope without reading files or writing to Discord", async (context) => {

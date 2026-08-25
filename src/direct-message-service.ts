@@ -4,12 +4,19 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto"
+import { basename, isAbsolute } from "node:path"
 
 import type {
   ActivityStore,
   DirectMessageActivity,
   DirectMessageActivityStatus,
 } from "./activity-log.js"
+import {
+  AttachmentFileError,
+  readDirectAttachmentFileSnapshot,
+  type AttachmentFileReview,
+  type AttachmentFileSnapshot,
+} from "./attachment-file.js"
 import {
   compileComponentLayout,
   componentLayoutsEqual,
@@ -91,7 +98,20 @@ export interface DirectMessageComponentBody {
   kind: "components-v2"
 }
 
+export interface DirectMessageAttachmentBody {
+  content?: string
+  description?: string
+  filePath: string
+  filename?: string
+  kind: "attachment"
+}
+
 export type DirectMessageBody =
+  | DirectMessageAttachmentBody
+  | DirectMessageComponentBody
+  | DirectMessageTextBody
+
+export type DirectMessageEditableBody =
   | DirectMessageComponentBody
   | DirectMessageTextBody
 
@@ -112,7 +132,7 @@ export interface DirectMessageReplyRequest extends DirectMessageRequestBase {
 export interface DirectMessageEditRequest extends DirectMessageRequestBase {
   action: "edit"
   channelId: string
-  message: DirectMessageBody
+  message: DirectMessageEditableBody
   messageId: string
 }
 
@@ -146,7 +166,20 @@ export interface NormalizedDirectMessageComponentBody {
   kind: "components-v2"
 }
 
+export interface NormalizedDirectMessageAttachmentBody {
+  content: string | null
+  description: string | null
+  filePath: string
+  filename: string
+  kind: "attachment"
+}
+
 export type NormalizedDirectMessageBody =
+  | NormalizedDirectMessageAttachmentBody
+  | NormalizedDirectMessageComponentBody
+  | NormalizedDirectMessageTextBody
+
+export type NormalizedDirectMessageEditableBody =
   | NormalizedDirectMessageComponentBody
   | NormalizedDirectMessageTextBody
 
@@ -170,7 +203,7 @@ export interface NormalizedDirectMessageEditRequest
   extends NormalizedDirectMessageRequestBase {
   action: "edit"
   channelId: string
-  message: NormalizedDirectMessageBody
+  message: NormalizedDirectMessageEditableBody
   messageId: string
 }
 
@@ -189,11 +222,18 @@ export type DirectMessageType =
   | "reply"
 
 export type DirectMessagePresentation =
+  | "single-attachment"
   | "static-components-v2"
   | "text"
   | "unsupported-rich"
 
 export interface DirectMessageView {
+  attachment: {
+    description: string | null
+    filename: string
+    id: string
+    sizeBytes: number
+  } | null
   attachmentCount: number
   author: "connector" | "recipient"
   authorId: string
@@ -244,6 +284,11 @@ export interface DirectMessagePlan {
   }
   digest: string
   effect: "change" | "none"
+  file: (AttachmentFileReview & {
+    description: string | null
+    filename: string
+    maxBytes: number
+  }) | null
   mentionPolicy: {
     parse: readonly []
     repliedUser: false
@@ -253,9 +298,11 @@ export interface DirectMessagePlan {
   operationKeyHash: string
   privacy: {
     omittedFields: readonly [
+      "attachment-bytes",
       "attachment-urls",
       "avatars",
       "generated-component-ids",
+      "local-file-paths",
       "profile-names",
       "raw-discord-objects",
       "raw-operation-key",
@@ -323,6 +370,7 @@ export interface DirectMessageChangeResult {
 }
 
 export interface DirectMessageServiceClient {
+  createDirectAttachmentMessage: DiscordClient["createDirectAttachmentMessage"]
   createDirectMessage: DiscordClient["createDirectMessage"]
   createDirectComponentMessage: DiscordClient["createDirectComponentMessage"]
   createDirectMessageChannel: DiscordClient["createDirectMessageChannel"]
@@ -339,6 +387,8 @@ export interface DirectMessageServiceClient {
 
 export interface DirectMessageServiceOptions {
   activityStore: ActivityStore
+  attachmentMaxBytes?: number
+  attachmentRoots?: readonly string[]
   client: DirectMessageServiceClient
   clock?: () => Date
   limiter?: InteractionLimiter
@@ -353,11 +403,14 @@ export interface DirectMessageServiceOptions {
 interface PlanEvidence {
   channel: DiscordDirectMessageChannelEvidence | null
   current: DirectMessageView | null
+  file: AttachmentFileSnapshot | null
   recipient: DiscordDirectMessageUserEvidence
 }
 
 const REVIEW_REASON_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const MESSAGE_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const ATTACHMENT_DESCRIPTION_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
+const ATTACHMENT_FILENAME_CONTROL_OR_SEPARATOR_PATTERN = /[\\/\u0000-\u001F\u007F]/u
 const DISCORD_MESSAGE_FLAGS_MAX = 0xFFFF_FFFF
 const SUPPORTED_MESSAGE_TYPES: Readonly<Record<number, DirectMessageType>> = Object.freeze({
   [DISCORD_MESSAGE_TYPES.chatInputCommand]: "chat-input-command",
@@ -367,9 +420,11 @@ const SUPPORTED_MESSAGE_TYPES: Readonly<Record<number, DirectMessageType>> = Obj
 })
 const PRIVACY = Object.freeze({
   omittedFields: Object.freeze([
+    "attachment-bytes",
     "attachment-urls",
     "avatars",
     "generated-component-ids",
+    "local-file-paths",
     "profile-names",
     "raw-discord-objects",
     "raw-operation-key",
@@ -393,6 +448,16 @@ function exactKeys(
   const normalized = [...expected].sort()
   return actual.length === normalized.length
     && actual.every((key, index) => key === normalized[index])
+}
+
+function exactOptionalKeys(
+  record: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  const allowed = new Set([...required, ...optional])
+  return required.every((key) => Object.hasOwn(record, key))
+    && Object.keys(record).every((key) => allowed.has(key))
 }
 
 function assertSnowflake(value: unknown, name: string): asserts value is string {
@@ -444,6 +509,79 @@ function normalizeBase(record: Record<string, unknown>) {
   }
 }
 
+function normalizedAttachmentFilename(
+  filePath: string,
+  value: unknown,
+): string {
+  const filename = value === undefined ? basename(filePath) : value
+  if (
+    typeof filename !== "string"
+    || filename.length < 1
+    || filename.length > DISCORD_LIMITS.attachmentFilenameCharacters
+    || filename.trim() !== filename
+    || filename === "."
+    || filename === ".."
+    || ATTACHMENT_FILENAME_CONTROL_OR_SEPARATOR_PATTERN.test(filename)
+  ) {
+    throw new RangeError("Discord direct-message attachment filename is invalid")
+  }
+  assertValidUnicode(filename, "Discord direct-message attachment filename")
+  return filename
+}
+
+function normalizedAttachmentDescription(value: unknown): string | null {
+  if (value === undefined) return null
+  if (
+    typeof value !== "string"
+    || !value.trim()
+    || value.length > DISCORD_LIMITS.attachmentDescriptionCharacters
+    || ATTACHMENT_DESCRIPTION_CONTROL_PATTERN.test(value)
+  ) {
+    throw new RangeError(
+      `Discord direct-message attachment description must contain 1-${DISCORD_LIMITS.attachmentDescriptionCharacters} characters without unsupported controls`,
+    )
+  }
+  assertValidUnicode(value, "Discord direct-message attachment description")
+  return value
+}
+
+function normalizeDirectMessageAttachmentBody(
+  record: Record<string, unknown>,
+): NormalizedDirectMessageAttachmentBody {
+  if (
+    !exactOptionalKeys(
+      record,
+      ["filePath", "kind"],
+      ["content", "description", "filename"],
+    )
+    || typeof record.filePath !== "string"
+    || record.filePath.length < 1
+    || record.filePath.length > CONNECTOR_LIMITS.attachmentPathCharacters
+    || record.filePath.trim() !== record.filePath
+    || record.filePath.includes("\0")
+    || !isAbsolute(record.filePath)
+  ) {
+    throw new RangeError(
+      "Discord direct-message attachment body requires one exact absolute file path and optional content metadata",
+    )
+  }
+  assertValidUnicode(record.filePath, "Discord direct-message attachment path")
+  const content = record.content ?? null
+  if (content !== null) {
+    if (typeof content !== "string") {
+      throw new RangeError("Discord direct-message attachment content must be text")
+    }
+    assertDiscordMessageContent(content)
+  }
+  return {
+    content,
+    description: normalizedAttachmentDescription(record.description),
+    filePath: record.filePath,
+    filename: normalizedAttachmentFilename(record.filePath, record.filename),
+    kind: "attachment",
+  }
+}
+
 function normalizeDirectMessageBody(
   value: unknown,
 ): NormalizedDirectMessageBody {
@@ -451,6 +589,9 @@ function normalizeDirectMessageBody(
     throw new RangeError("Discord direct-message body must be an exact object")
   }
   const record = value as Record<string, unknown>
+  if (record.kind === "attachment") {
+    return normalizeDirectMessageAttachmentBody(record)
+  }
   if (record.kind === "text") {
     if (
       !exactKeys(record, ["content", "kind"])
@@ -475,7 +616,7 @@ function normalizeDirectMessageBody(
     }
   }
   throw new RangeError(
-    "Discord direct-message body kind must be text or components-v2",
+    "Discord direct-message body kind must be attachment, text, or components-v2",
   )
 }
 
@@ -556,11 +697,17 @@ export function normalizeDirectMessageChangeRequest(
     }
     assertSnowflake(record.channelId, "Discord direct-message channel ID")
     assertSnowflake(record.messageId, "Discord direct-message message ID")
+    const message = normalizeDirectMessageBody(record.message)
+    if (message.kind === "attachment") {
+      throw new RangeError(
+        "Discord direct-message attachment bodies are valid only for send and reply",
+      )
+    }
     return {
       ...normalizeBase(record),
       action: "edit",
       channelId: record.channelId,
-      message: normalizeDirectMessageBody(record.message),
+      message,
       messageId: record.messageId,
     }
   }
@@ -618,7 +765,7 @@ export function directMessageRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-direct-message-request.v2",
+    domain: "discord-mcp-direct-message-request.v3",
     request,
   })
 }
@@ -639,6 +786,71 @@ function collectionCount(value: unknown, name: string): number {
     )
   }
   return value.length
+}
+
+function projectSingleAttachment(
+  value: unknown,
+): NonNullable<DirectMessageView["attachment"]> {
+  if (!Array.isArray(value) || value.length !== 1) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message attachment evidence is not singular",
+    )
+  }
+  const attachment = value[0]
+  if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message attachment evidence is invalid",
+    )
+  }
+  const record = attachment as Record<string, unknown>
+  try {
+    assertSnowflake(record.id, "Discord direct-message attachment ID")
+  } catch {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message attachment identity is invalid",
+    )
+  }
+  if (
+    typeof record.filename !== "string"
+    || record.filename.length < 1
+    || record.filename.length > DISCORD_LIMITS.attachmentFilenameCharacters
+    || record.filename.trim() !== record.filename
+    || record.filename === "."
+    || record.filename === ".."
+    || ATTACHMENT_FILENAME_CONTROL_OR_SEPARATOR_PATTERN.test(record.filename)
+    || !Number.isSafeInteger(record.size)
+    || (record.size as number) < 1
+    || (record.size as number) > DISCORD_LIMITS.attachmentBytes
+    || !(
+      record.description === undefined
+      || record.description === null
+      || typeof record.description === "string"
+        && record.description.length > 0
+        && record.description.length <= DISCORD_LIMITS.attachmentDescriptionCharacters
+        && Boolean(record.description.trim())
+        && !ATTACHMENT_DESCRIPTION_CONTROL_PATTERN.test(record.description)
+    )
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message attachment metadata is invalid",
+    )
+  }
+  try {
+    assertValidUnicode(record.filename, "Discord direct-message attachment filename")
+    if (typeof record.description === "string") {
+      assertValidUnicode(record.description, "Discord direct-message attachment description")
+    }
+  } catch {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message attachment metadata is invalid",
+    )
+  }
+  return {
+    description: typeof record.description === "string" ? record.description : null,
+    filename: record.filename,
+    id: record.id as string,
+    sizeBytes: record.size as number,
+  }
 }
 
 function projectedMessageType(value: unknown): DirectMessageType {
@@ -778,8 +990,14 @@ function projectDirectMessage(
     collectionCount(message.sticker_items, "sticker item"),
     collectionCount(message.stickers, "legacy sticker"),
   )
+  const mentionEveryone = message.mention_everyone === true
+  const mentionedRoleCount = collectionCount(message.mention_roles, "role mention")
+  const mentionedUserCount = collectionCount(message.mentions, "user mention")
+  const pinned = message.pinned ?? false
+  const reactionCount = collectionCount(message.reactions, "reaction")
   let componentLayout: NormalizedComponentLayout | null = null
   let componentPreview: string | null = null
+  let attachment: DirectMessageView["attachment"] = null
   let presentation: DirectMessagePresentation = "unsupported-rich"
   if (
     flags === DISCORD_MESSAGE_FLAGS.isComponentsV2
@@ -799,6 +1017,25 @@ function projectDirectMessage(
       componentPreview = null
     }
   } else if (
+    flags === 0
+    && attachmentCount === 1
+    && componentCount === 0
+    && embedCount === 0
+    && !mentionEveryone
+    && mentionedRoleCount === 0
+    && mentionedUserCount === 0
+    && !pinned
+    && reactionCount === 0
+    && stickerCount === 0
+    && message.tts !== true
+  ) {
+    try {
+      attachment = projectSingleAttachment(message.attachments)
+      presentation = "single-attachment"
+    } catch {
+      attachment = null
+    }
+  } else if (
     (flags & DISCORD_MESSAGE_FLAGS.isComponentsV2) === 0
     && message.content.trim().length > 0
     && attachmentCount === 0
@@ -810,6 +1047,7 @@ function projectDirectMessage(
     presentation = "text"
   }
   return {
+    attachment,
     attachmentCount,
     author,
     authorId,
@@ -822,12 +1060,12 @@ function projectDirectMessage(
     embedCount,
     flags,
     id: message.id,
-    mentionEveryone: message.mention_everyone === true,
-    mentionedRoleCount: collectionCount(message.mention_roles, "role mention"),
-    mentionedUserCount: collectionCount(message.mentions, "user mention"),
-    pinned: message.pinned ?? false,
+    mentionEveryone,
+    mentionedRoleCount,
+    mentionedUserCount,
+    pinned,
     presentation,
-    reactionCount: collectionCount(message.reactions, "reaction"),
+    reactionCount,
     replyToMessageId: projectedReplyTarget(message, channelId, type),
     stickerCount,
     timestamp: message.timestamp,
@@ -839,21 +1077,31 @@ function messageMatchesBody(
   message: DirectMessageView,
   body: NormalizedDirectMessageBody,
   replyToMessageId: string | null,
+  attachmentSizeBytes: number | null = null,
 ): boolean {
   const bodyMatches = body.kind === "text"
     ? message.presentation === "text"
       && message.flags === 0
       && message.content === body.content
       && message.componentLayout === null
-    : message.presentation === "static-components-v2"
-      && message.flags === DISCORD_MESSAGE_FLAGS.isComponentsV2
-      && message.content === ""
-      && message.componentLayout !== null
-      && componentLayoutsEqual(message.componentLayout, body.components)
+    : body.kind === "components-v2"
+      ? message.presentation === "static-components-v2"
+        && message.flags === DISCORD_MESSAGE_FLAGS.isComponentsV2
+        && message.content === ""
+        && message.componentLayout !== null
+        && componentLayoutsEqual(message.componentLayout, body.components)
+      : message.presentation === "single-attachment"
+        && message.flags === 0
+        && message.content === (body.content ?? "")
+        && message.componentLayout === null
+        && message.attachment !== null
+        && message.attachment.filename === body.filename
+        && message.attachment.description === body.description
+        && message.attachment.sizeBytes === attachmentSizeBytes
   return bodyMatches
     && message.author === "connector"
     && message.replyToMessageId === replyToMessageId
-    && message.attachmentCount === 0
+    && message.attachmentCount === (body.kind === "attachment" ? 1 : 0)
     && message.embedCount === 0
     && !message.mentionEveryone
     && message.mentionedRoleCount === 0
@@ -867,12 +1115,16 @@ function messageMatchesBody(
 function presentationForBody(
   body: NormalizedDirectMessageBody,
 ): DirectMessagePresentation {
-  return body.kind === "text" ? "text" : "static-components-v2"
+  return body.kind === "text"
+    ? "text"
+    : body.kind === "components-v2"
+      ? "static-components-v2"
+      : "single-attachment"
 }
 
 function assertEditableBotMessage(
   message: DirectMessageView,
-  body: NormalizedDirectMessageBody,
+  body: NormalizedDirectMessageEditableBody,
 ): void {
   if (
     message.author !== "connector"
@@ -897,15 +1149,21 @@ function assertEditableBotMessage(
 }
 
 function assertDeletableBotMessage(message: DirectMessageView): void {
+  const attachment = message.presentation === "single-attachment"
   if (
     message.author !== "connector"
     || !["default", "reply"].includes(message.type)
-    || !["static-components-v2", "text"].includes(message.presentation)
-    || message.attachmentCount !== 0
+    || !["single-attachment", "static-components-v2", "text"].includes(
+      message.presentation,
+    )
+    || message.attachmentCount !== (attachment ? 1 : 0)
+    || attachment !== (message.attachment !== null)
     || message.embedCount !== 0
     || message.flags !== (message.presentation === "text"
       ? 0
-      : DISCORD_MESSAGE_FLAGS.isComponentsV2)
+      : message.presentation === "static-components-v2"
+        ? DISCORD_MESSAGE_FLAGS.isComponentsV2
+        : 0)
     || message.mentionEveryone
     || message.mentionedRoleCount !== 0
     || message.mentionedUserCount !== 0
@@ -978,7 +1236,7 @@ function directMessageNonce(
   channelId: string,
 ): string {
   return createHash("sha256")
-    .update("discord-mcp-direct-message-nonce.v2\0")
+    .update("discord-mcp-direct-message-nonce.v3\0")
     .update(request.action)
     .update("\0")
     .update(request.recipientId)
@@ -1003,6 +1261,7 @@ function receiptView(receipt: DirectMessageOperationReceipt) {
   return {
     action: receipt.action,
     activityId: receipt.activityId,
+    attachmentSizeBytes: receipt.attachmentSizeBytes,
     channelId: receipt.channelId,
     error: receipt.error,
     messageFormat: receipt.messageFormat,
@@ -1027,7 +1286,7 @@ function requestMessageFormat(
 function directMessageBodyPreview(
   body: NormalizedDirectMessageBody,
 ): string | null {
-  return body.kind === "text"
+  return body.kind !== "components-v2"
     ? null
     : reviewComponentLayout(body.components, []).preview
 }
@@ -1059,9 +1318,23 @@ function operationReceipt(options: {
   timestamp: string
   verification?: "match" | null
 }): DirectMessageOperationReceipt {
+  const attachmentSizeBytes = options.request.action !== "delete"
+    && options.request.message.kind === "attachment"
+      ? options.plan.file?.sizeBytes ?? null
+      : null
+  if (
+    options.request.action !== "delete"
+    && options.request.message.kind === "attachment"
+    && attachmentSizeBytes === null
+  ) {
+    throw new DirectMessageEvidenceError(
+      "Discord direct-message receipt lacks reviewed attachment size evidence",
+    )
+  }
   return {
     action: options.request.action,
     activityId: options.activityId,
+    attachmentSizeBytes,
     channelId: options.channelId === undefined
       ? requestChannelId(options.request)
       : options.channelId,
@@ -1121,6 +1394,8 @@ function knownFailure(error: unknown): boolean {
 
 export class DirectMessageService {
   readonly #activityStore: ActivityStore
+  readonly #attachmentMaxBytes: number
+  readonly #attachmentRoots: readonly string[]
   readonly #client: DirectMessageServiceClient
   readonly #clock: () => Date
   readonly #limiter: InteractionLimiter
@@ -1133,6 +1408,18 @@ export class DirectMessageService {
 
   constructor(options: DirectMessageServiceOptions) {
     this.#activityStore = options.activityStore
+    this.#attachmentMaxBytes = options.attachmentMaxBytes
+      ?? DISCORD_LIMITS.attachmentBytes
+    this.#attachmentRoots = options.attachmentRoots ?? []
+    if (
+      !Number.isSafeInteger(this.#attachmentMaxBytes)
+      || this.#attachmentMaxBytes < 1
+      || this.#attachmentMaxBytes > DISCORD_LIMITS.attachmentBytes
+    ) {
+      throw new RangeError(
+        "Discord direct-message attachment byte limit is invalid",
+      )
+    }
     this.#client = options.client
     this.#clock = options.clock ?? (() => new Date())
     this.#limiter = options.limiter ?? new InteractionLimiter({
@@ -1149,12 +1436,31 @@ export class DirectMessageService {
 
   #assertActionPolicy(request: NormalizedDirectMessageChangeRequest): void {
     if (request.action === "send" || request.action === "reply") {
-      this.#policy.assertDirectMessageDeliveryAllowed(request.recipientId)
+      if (request.message.kind === "attachment") {
+        this.#policy.assertDirectMessageAttachmentAllowed(request.recipientId)
+      } else {
+        this.#policy.assertDirectMessageDeliveryAllowed(request.recipientId)
+      }
     } else if (request.action === "edit") {
       this.#policy.assertDirectMessageEditingAllowed(request.recipientId)
     } else {
       this.#policy.assertDirectMessageDeletionAllowed(request.recipientId)
     }
+  }
+
+  #file(
+    request: NormalizedDirectMessageChangeRequest,
+  ): Promise<AttachmentFileSnapshot | null> {
+    if (
+      request.action === "delete"
+      || request.message.kind !== "attachment"
+    ) return Promise.resolve(null)
+    return readDirectAttachmentFileSnapshot({
+      filePath: request.message.filePath,
+      maxBytes: this.#attachmentMaxBytes,
+      planKey: this.#planKey,
+      roots: this.#attachmentRoots,
+    })
   }
 
   async #identity(
@@ -1193,12 +1499,18 @@ export class DirectMessageService {
     await this.#identity(applicationId, botId, options)
     let channel: DiscordDirectMessageChannelEvidence | null = null
     let current: DirectMessageView | null = null
+    let file: AttachmentFileSnapshot | null = null
     let recipient: DiscordDirectMessageUserEvidence
     if (request.action === "send") {
-      recipient = await this.#client.getDirectMessageUser(
-        request.recipientId,
-        options,
-      )
+      const evidence = await Promise.all([
+        this.#client.getDirectMessageUser(
+          request.recipientId,
+          options,
+        ),
+        this.#file(request),
+      ])
+      recipient = evidence[0]
+      file = evidence[1]
       assertEligibleRecipient(recipient, request.recipientId)
     } else {
       channel = await this.#channel(
@@ -1210,11 +1522,15 @@ export class DirectMessageService {
       const targetId = request.action === "reply"
         ? request.replyToMessageId
         : request.messageId
-      const message = await this.#client.getDirectMessage(
-        request.channelId,
-        targetId,
-        options,
-      )
+      const [message, fileSnapshot] = await Promise.all([
+        this.#client.getDirectMessage(
+          request.channelId,
+          targetId,
+          options,
+        ),
+        this.#file(request),
+      ])
+      file = fileSnapshot
       current = projectDirectMessage(
         message,
         request.channelId,
@@ -1255,7 +1571,7 @@ export class DirectMessageService {
       risks.push("Deletion is irreversible and the connector performs no rollback")
     }
     const warnings = [
-      "Message text, component layouts, previews, and review text are transient and never enter durable records",
+      "Message text, component layouts, file paths, attachment metadata, previews, and review text are transient and never enter durable records",
       "All mentions are suppressed, including reply-author notifications",
       "A 429 or ambiguous transport outcome quarantines the exact operation for review",
     ]
@@ -1273,6 +1589,35 @@ export class DirectMessageService {
         "The static layout registers no button, select, modal, media, file, or callback authority",
       )
     }
+    if (
+      request.action !== "delete"
+      && request.message.kind === "attachment"
+    ) {
+      risks.push(
+        "The operation discloses the exact reviewed local file bytes, filename, and optional description to Discord and one private recipient",
+      )
+      warnings.push(
+        "Execution uploads one fresh in-memory file snapshot and never retries or rolls back the multipart request",
+        "Discord exposes no remote attachment content digest, so restart verification compares receipt-bound metadata without downloading the file",
+      )
+    }
+    let plannedFile: DirectMessagePlan["file"] = null
+    if (file !== null) {
+      if (
+        request.action === "delete"
+        || request.message.kind !== "attachment"
+      ) {
+        throw new DirectMessageEvidenceError(
+          "Discord direct-message file evidence does not match the requested body",
+        )
+      }
+      plannedFile = {
+        ...file.review,
+        description: request.message.description,
+        filename: request.message.filename,
+        maxBytes: this.#attachmentMaxBytes,
+      }
+    }
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       botId,
@@ -1283,8 +1628,15 @@ export class DirectMessageService {
         preview: desiredPreview,
         replyToMessageId: desiredReply,
       },
-      domain: "discord-mcp-direct-message-plan.v2",
+      domain: "discord-mcp-direct-message-plan.v3",
       effect,
+      file: file === null
+        ? null
+        : {
+            binding: file.binding,
+            contentDigest: file.contentDigest,
+            review: file.review,
+          },
       mentionPolicy: MENTION_POLICY,
       rateLimit: {
         globalWritesPerMinute: CONNECTOR_LIMITS.directMessageMaxWritesPerMinute,
@@ -1315,6 +1667,7 @@ export class DirectMessageService {
       },
       digest,
       effect,
+      file: plannedFile,
       mentionPolicy: MENTION_POLICY,
       operationKeyHash: request.operationKeyHash,
       privacy: PRIVACY,
@@ -1336,7 +1689,7 @@ export class DirectMessageService {
       warnings,
       writeRequired: effect === "change",
     }
-    return { evidence: { channel, current, recipient }, plan }
+    return { evidence: { channel, current, file, recipient }, plan }
   }
 
   async list(
@@ -1535,6 +1888,7 @@ export class DirectMessageService {
             : request.action === "edit"
               ? receipt.replyToMessageId
               : null,
+          receipt.attachmentSizeBytes,
         )
       } catch (error) {
         if (!(error instanceof DiscordApiError && error.status === 404)) throw error
@@ -1671,6 +2025,7 @@ export class DirectMessageService {
     } catch (error) {
       if (
         error instanceof DirectMessageEvidenceError
+        || error instanceof AttachmentFileError
         || error instanceof DiscordApiError && error.status === 404
       ) {
         throw new DirectMessagePlanChangedError(
@@ -1680,7 +2035,7 @@ export class DirectMessageService {
       }
       throw error
     }
-    const { plan } = built
+    const { evidence, plan } = built
     if (plan.digest !== expectedDigest) {
       throw new DirectMessagePlanChangedError(expectedDigest, plan.digest)
     }
@@ -1718,6 +2073,7 @@ export class DirectMessageService {
         request,
         requestDigest,
         plan,
+        evidence.file,
         options,
       ),
     )
@@ -1728,6 +2084,7 @@ export class DirectMessageService {
     request: NormalizedDirectMessageChangeRequest,
     requestDigest: string,
     plan: DirectMessagePlan,
+    file: AttachmentFileSnapshot | null,
     options: RequestOptions,
   ): Promise<DirectMessageChangeResult> {
     const raced = await this.#operationStore.getDirectMessage(
@@ -1818,25 +2175,50 @@ export class DirectMessageService {
         const replyToMessageId = request.action === "reply"
           ? request.replyToMessageId
           : undefined
-        const response = request.message.kind === "text"
-          ? await this.#client.createDirectMessage(
-              channelId,
-              {
-                content: request.message.content,
-                nonce,
-                ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
-              },
-              options,
+        let response: DiscordMessage
+        if (request.message.kind === "text") {
+          response = await this.#client.createDirectMessage(
+            channelId,
+            {
+              content: request.message.content,
+              nonce,
+              ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+            },
+            options,
+          )
+        } else if (request.message.kind === "components-v2") {
+          response = await this.#client.createDirectComponentMessage(
+            channelId,
+            {
+              components: compileComponentLayout(request.message.components),
+              nonce,
+              ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+            },
+            options,
+          )
+        } else {
+          if (file === null) {
+            throw new DirectMessageEvidenceError(
+              "Discord direct-message execution lacks reviewed attachment bytes",
             )
-          : await this.#client.createDirectComponentMessage(
-              channelId,
-              {
-                components: compileComponentLayout(request.message.components),
-                nonce,
-                ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
-              },
-              options,
-            )
+          }
+          response = await this.#client.createDirectAttachmentMessage(
+            channelId,
+            {
+              bytes: file.bytes,
+              ...(request.message.content === null
+                ? {}
+                : { content: request.message.content }),
+              ...(request.message.description === null
+                ? {}
+                : { description: request.message.description }),
+              filename: request.message.filename,
+              nonce,
+              ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+            },
+            options,
+          )
+        }
         const projected = projectDirectMessage(
           response,
           channelId,
@@ -1848,6 +2230,7 @@ export class DirectMessageService {
             projected,
             request.message,
             request.action === "reply" ? request.replyToMessageId : null,
+            file?.review.sizeBytes ?? null,
           )
           || response.nonce !== undefined
             && response.nonce !== null
@@ -1950,6 +2333,7 @@ export class DirectMessageService {
           observed,
           request.message,
           expectedReply,
+          file?.review.sizeBytes ?? null,
         )) {
           throw new DirectMessageEvidenceError(
             "Discord direct-message readback does not match the requested state",

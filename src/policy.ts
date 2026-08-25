@@ -56,6 +56,7 @@ export interface PolicyDescription {
   deleteChannelIds: string[]
   deletionsEnabled: boolean
   directMessageAuditEnabled: boolean
+  directMessageAttachmentsEnabled: boolean
   directMessageDeletionEnabled: boolean
   directMessageDeliveryEnabled: boolean
   directMessageEditingEnabled: boolean
@@ -243,6 +244,7 @@ export class ScopePolicy {
   readonly #allowChannelOrderingChanges: boolean
   readonly #allowDeletions: boolean
   readonly #allowDirectMessageAudit: boolean
+  readonly #allowDirectMessageAttachments: boolean
   readonly #allowDirectMessageDeletion: boolean
   readonly #allowDirectMessageDelivery: boolean
   readonly #allowDirectMessageEditing: boolean
@@ -419,6 +421,7 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowAnnouncementCrossposts"
     | "allowDirectMessageAudit"
+    | "allowDirectMessageAttachments"
     | "allowDirectMessageDeletion"
     | "allowDirectMessageDelivery"
     | "allowDirectMessageEditing"
@@ -617,6 +620,7 @@ export class ScopePolicy {
     this.#allowChannelMetadataChanges = config.allowChannelMetadataChanges ?? false
     this.#allowDeletions = config.allowDeletions
     this.#allowDirectMessageAudit = config.allowDirectMessageAudit ?? false
+    this.#allowDirectMessageAttachments = config.allowDirectMessageAttachments ?? false
     this.#allowDirectMessageDeletion = config.allowDirectMessageDeletion ?? false
     this.#allowDirectMessageDelivery = config.allowDirectMessageDelivery ?? false
     this.#allowDirectMessageEditing = config.allowDirectMessageEditing ?? false
@@ -860,6 +864,10 @@ export class ScopePolicy {
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       directMessageAuditEnabled: this.#allowDirectMessageAudit
         && this.#directMessageUserIds.size > 0,
+      directMessageAttachmentsEnabled: this.#allowDirectMessageDelivery
+        && this.#allowDirectMessageAttachments
+        && this.#directMessageUserIds.size > 0
+        && this.#attachmentRoots.length > 0,
       directMessageDeletionEnabled: this.#allowDirectMessageDeletion
         && this.#directMessageUserIds.size > 0,
       directMessageDeliveryEnabled: this.#allowDirectMessageDelivery
@@ -1161,6 +1169,20 @@ export class ScopePolicy {
       )
     }
     this.#assertDirectMessageUserAllowed(userId)
+  }
+
+  assertDirectMessageAttachmentAllowed(userId: string): void {
+    this.assertDirectMessageDeliveryAllowed(userId)
+    if (!this.#allowDirectMessageAttachments) {
+      throw new PolicyError(
+        "Discord direct-message attachments are disabled by connector configuration",
+      )
+    }
+    if (this.#attachmentRoots.length === 0) {
+      throw new PolicyError(
+        "Discord direct-message attachments require configured owned file roots",
+      )
+    }
   }
 
   assertDirectMessageDeletionAllowed(userId: string): void {

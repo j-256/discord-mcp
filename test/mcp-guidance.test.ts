@@ -1990,6 +1990,7 @@ function guidanceService(options: {
         channelOrderingGuildIds: [],
         deleteChannelIds: [],
         deletionsEnabled: false,
+        directMessageAttachmentsEnabled: false,
         directMessageAuditEnabled: false,
         directMessageDeletionEnabled: false,
         directMessageDeliveryEnabled: false,
@@ -3076,7 +3077,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(safety.content.mimeType, "text/markdown")
   assert.match(safety.text, /Resource discovery never enumerates messages/)
   assert.match(safety.text, /One-to-one private messages are an explicit exact-user exception/)
-  assert.match(safety.text, /Send planning reads only the exact user and never opens a DM channel/)
+  assert.match(safety.text, /Send planning reads only the exact user and one explicitly requested owned local file/)
+  assert.match(safety.text, /Private-file send and reply require an independent capability/)
+  assert.match(safety.text, /without reopening or downloading the attachment/)
   assert.match(safety.text, /request-bound schema-v2 content-free receipt/)
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Channel deletion requires separate audit and change toggles/)
@@ -4184,6 +4187,9 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(directMessage, /Call only plan_direct_message_change/)
   assert.match(directMessage, /Do not call execute_direct_message_change/)
   assert.match(directMessage, /Planning a send must not open a DM channel/)
+  assert.match(directMessage, /canonical owned-file review/)
+  assert.match(directMessage, /file outside a configured root/)
+  assert.match(directMessage, /attachment edit/)
 
   const messagePin = promptText(await client.getPrompt({
     arguments: {

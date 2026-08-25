@@ -131,6 +131,12 @@ test("configuration workbench renders a deterministic complete offline editor", 
   assert.equal(payload.fields.find((field) => field.path === "$.schemaVersion")?.editable, false)
   assert.equal(payload.fields.find((field) => field.path === "$.identity.applicationId")?.editable, false)
   assert.equal(payload.fields.find((field) => field.path === "$.identity.botId")?.editable, false)
+  assert.match(
+    payload.fields.find((field) => (
+      field.path === "$.capabilities.directMessageAttachments"
+    ))?.description ?? "",
+    /owned local-file attachments/,
+  )
   assert.deepEqual(
     payload.fields.find((field) => field.path === "$.credential")?.constraints.referenceProviders?.map((entry) => entry.provider),
     ["environment", "file"],

@@ -22,11 +22,33 @@ export class AttachmentFileError extends Error {
 export async function readAttachmentFileSnapshot(
   options: ReadAttachmentFileOptions,
 ): Promise<AttachmentFileSnapshot> {
+  return readSnapshot(
+    options,
+    "Discord attachment",
+    "discord-mcp-attachment-file.v1",
+  )
+}
+
+export async function readDirectAttachmentFileSnapshot(
+  options: ReadAttachmentFileOptions,
+): Promise<AttachmentFileSnapshot> {
+  return readSnapshot(
+    options,
+    "Discord direct-message attachment",
+    "discord-mcp-direct-attachment-file.v1",
+  )
+}
+
+async function readSnapshot(
+  options: ReadAttachmentFileOptions,
+  description: string,
+  digestDomain: string,
+): Promise<AttachmentFileSnapshot> {
   try {
     return await readOwnedLocalFileSnapshot({
       ...options,
-      description: "Discord attachment",
-      digestDomain: "discord-mcp-attachment-file.v1",
+      description,
+      digestDomain,
     })
   } catch (error) {
     if (error instanceof OwnedLocalFileError) {

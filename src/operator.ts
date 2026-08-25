@@ -122,6 +122,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   channelScope: "channel-scope",
   configuration: "configuration",
   deletionPolicy: "deletion-policy",
+  directMessageAttachmentPolicy: "direct-message-attachment-policy",
   directMessageAuditPolicy: "direct-message-audit-policy",
   directMessageDeletionPolicy: "direct-message-deletion-policy",
   directMessageDeliveryPolicy: "direct-message-delivery-policy",
@@ -846,6 +847,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowDeletions, "deletion", "Message deletion"],
     [
       config.allowDirectMessageAudit
+        || config.allowDirectMessageAttachments
         || config.allowDirectMessageDeletion
         || config.allowDirectMessageDelivery
         || config.allowDirectMessageEditing,
@@ -1335,7 +1337,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.directMessageAuditPolicy,
         "pass",
-        `Private-message reads are constrained to ${config.directMessageUserIds.size} exact users and caller-known one-to-one channel IDs with transient plain-text or normalized static Components V2 results, generated-ID omission, no DM discovery, and no persistence`,
+        `Private-message reads are constrained to ${config.directMessageUserIds.size} exact users and caller-known one-to-one channel IDs with transient plain-text, normalized static Components V2, or bounded URL-free single-attachment metadata, generated-ID omission, no DM discovery, and no persistence`,
       ))
     }
     if (!config.allowDirectMessageDelivery) {
@@ -1355,6 +1357,29 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.directMessageDeliveryPolicy,
         "pass",
         `Private-message plain-text or static Components V2 sends and replies are constrained to ${config.directMessageUserIds.size} exact users with contact acknowledgement, complete-body-bound review, forced empty mentions, fixed anti-spam limits, request-bound schema-v2 receipts, no automatic mutation retry, and exact readback`,
+      ))
+    }
+    if (!config.allowDirectMessageAttachments) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageAttachmentPolicy,
+        "pass",
+        "Reviewed private-message owned-file delivery is disabled",
+      ))
+    } else if (
+      !config.allowDirectMessageDelivery
+      || config.directMessageUserIds.size === 0
+      || config.attachmentRoots.length === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageAttachmentPolicy,
+        "warn",
+        "Private-message owned-file delivery requires the delivery gate, an exact user allowlist, and at least one canonical attachment root",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.directMessageAttachmentPolicy,
+        "pass",
+        `Private-message owned-file delivery is constrained to ${config.directMessageUserIds.size} exact users and ${config.attachmentRoots.length} canonical roots with a ${config.attachmentMaxBytes}-byte ceiling, fresh byte-bound review, one non-retried multipart upload, URL-free readback, and content-free recovery`,
       ))
     }
     if (!config.allowDirectMessageEditing) {
@@ -1392,7 +1417,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.directMessageDeletionPolicy,
         "pass",
-        `Private-message deletion is constrained to exact supported connector-authored plain-text or static Components V2 messages involving ${config.directMessageUserIds.size} configured users with irreversible acknowledgement, signed approval, one non-retried deletion, and exact absence readback`,
+        `Private-message deletion is constrained to exact supported connector-authored plain-text, static Components V2, or single-attachment messages involving ${config.directMessageUserIds.size} configured users with irreversible acknowledgement, signed approval, one non-retried deletion, and exact absence readback`,
       ))
     }
     if (!config.allowAttachments) {

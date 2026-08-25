@@ -14,7 +14,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { readAttachmentFileSnapshot } from "../src/attachment-file.js"
+import {
+  readAttachmentFileSnapshot,
+  readDirectAttachmentFileSnapshot,
+} from "../src/attachment-file.js"
 import { readOwnedLocalFileSnapshot } from "../src/local-file.js"
 
 async function fixture() {
@@ -54,6 +57,15 @@ test("attachment snapshot binds stable owned bytes inside one canonical root", a
     assert.equal(first.review.stableRead, true)
     assert.equal(first.contentDigest, second.contentDigest)
     assert.deepEqual(first.bytes, new Uint8Array(await readFile(filePath)))
+    const direct = await readDirectAttachmentFileSnapshot({
+      filePath,
+      maxBytes: 1_024,
+      planKey,
+      roots: [root],
+    })
+    assert.notEqual(first.contentDigest, direct.contentDigest)
+    assert.deepEqual(first.binding, direct.binding)
+    assert.deepEqual(first.review, direct.review)
 
     await writeFile(filePath, "different bytes")
     const changed = await readAttachmentFileSnapshot({

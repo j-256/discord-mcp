@@ -151,6 +151,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "channelOrderingChanges",
   "deletions",
   "directMessageAudit",
+  "directMessageAttachments",
   "directMessageDeletion",
   "directMessageDelivery",
   "directMessageEditing",
@@ -425,6 +426,7 @@ const WEBHOOK_MESSAGE_DELETION_CAPABILITY_DESCRIPTION = "Enable reviewed exact I
 const WEBHOOK_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION = "Enable bounded plain-text Incoming-webhook message delivery with mention containment and one-shot coordination"
 const WEBHOOK_MESSAGE_SCOPE_DESCRIPTION = "Exact direct text or announcement channel ID allowlist for privately credentialed Incoming-webhook message access"
 const DIRECT_MESSAGE_AUDIT_CAPABILITY_DESCRIPTION = "Enable exact-recipient one-to-one direct-message reads without content persistence"
+const DIRECT_MESSAGE_ATTACHMENTS_CAPABILITY_DESCRIPTION = "Enable reviewed owned local-file attachments in exact-recipient direct messages"
 const DIRECT_MESSAGE_DELETION_CAPABILITY_DESCRIPTION = "Enable reviewed deletion of exact connector-authored direct messages"
 const DIRECT_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION = "Enable reviewed plain-text direct-message sends and replies"
 const DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION = "Enable reviewed edits of exact connector-authored direct messages"
@@ -466,6 +468,9 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "directMessageAudit") {
     return DIRECT_MESSAGE_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "directMessageAttachments") {
+    return DIRECT_MESSAGE_ATTACHMENTS_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "directMessageDeletion") {
     return DIRECT_MESSAGE_DELETION_CAPABILITY_DESCRIPTION
