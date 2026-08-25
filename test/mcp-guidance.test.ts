@@ -5323,6 +5323,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       auditReason,
       durationMinutes: "60",
       guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
       userId: USER_ID,
     },
     name: MCP_PROMPT_NAMES.reviewMemberModeration,
@@ -5332,11 +5333,13 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     auditReason,
     durationMinutes: 60,
     guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
     userId: USER_ID,
   })
   assert.equal(moderation.includes(auditReason), false)
   assert.match(moderation, /Call only plan_member_moderation/)
   assert.match(moderation, /Do not call execute_member_moderation/)
+  assert.match(moderation, /one-shot operation-key hash/)
 
   const ban = promptText(await client.getPrompt({
     arguments: {
@@ -5344,6 +5347,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       auditReason: "Reviewed ban",
       deleteMessageSeconds: "120",
       guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
       userId: USER_ID,
     },
     name: MCP_PROMPT_NAMES.reviewMemberModeration,
@@ -5353,6 +5357,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     auditReason: "Reviewed ban",
     deleteMessageSeconds: 120,
     guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
     userId: USER_ID,
   })
   assert.equal(totalCalls(calls), 0)

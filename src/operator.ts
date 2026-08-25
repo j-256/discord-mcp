@@ -1297,7 +1297,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.administrationPolicy,
         "pass",
-        `Member administration is constrained to ${config.adminGuildIds.size} guilds with ${config.protectedUserIds.size} protected users`,
+        `Member administration is constrained to ${config.adminGuildIds.size} guilds with ${config.protectedUserIds.size} protected users, durable exact-member coordination, one-shot receipt reservation, and exact fresh readback`,
       ))
     }
     if (!config.allowChannelCreation) {

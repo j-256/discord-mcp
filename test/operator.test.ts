@@ -372,10 +372,7 @@ function status(
     status: "ok",
     writeCoordination: {
       coverage: "receipt-backed-reviewed-writes",
-      excludedWorkflows: [
-        "legacy-member-moderation",
-        "ordinary-message-interactions",
-      ],
+      excludedWorkflows: ["ordinary-message-interactions"],
       localFilesystemRequired: true,
       mode: "durable-exact-target",
       resumableWorkflows: ["guild-scaffold"],
@@ -1118,6 +1115,8 @@ test("doctor and setup explain exact administration scope without Discord writes
   )
   assert.equal(administration?.status, "pass")
   assert.match(administration?.summary || "", /1 guilds with 1 protected users/)
+  assert.match(administration?.summary || "", /durable exact-member coordination/)
+  assert.match(administration?.summary || "", /exact fresh readback/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.administrationPolicy,

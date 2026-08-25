@@ -7,6 +7,7 @@ import {
 import { dirname } from "node:path"
 
 import {
+  ADMINISTRATION_LIMITS,
   CHANNEL_CREATION_KINDS,
   CONNECTOR_LIMITS,
   CONTENT_FREE_ERROR_PATTERN,
@@ -105,6 +106,23 @@ const GUILD_INCIDENT_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "timestamp",
   "verification",
 ])
+const MEMBER_MODERATION_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "action",
+  "deleteMessageSeconds",
+  "durationMinutes",
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "schemaVersion",
+  "status",
+  "timeoutUntil",
+  "timestamp",
+  "userId",
+  "verification",
+])
 
 export type DeletionActivityStatus =
   | "completed"
@@ -158,6 +176,7 @@ export interface InteractionActivity {
 export type MemberModerationActivityAction = MemberModerationAction
 export type MemberModerationActivityStatus =
   | "completed"
+  | "completed-with-drift"
   | "failed"
   | "pending"
   | "uncertain"
@@ -170,12 +189,14 @@ export interface MemberModerationActivity {
   guildId: string
   id: string
   kind: "member-moderation"
+  operationKeyHash: string
   planDigest: string
   schemaVersion: number
   status: MemberModerationActivityStatus
   timeoutUntil: string | null
   timestamp: string
   userId: string
+  verification: "drift" | "match" | null
 }
 
 export type ChannelCreationActivityStatus =
@@ -1549,37 +1570,87 @@ function parseMemberModerationActivity(
 ): MemberModerationActivity | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
+  const status = String(record.status)
+  const validActionParameters = record.action === "ban"
+    ? Number.isInteger(record.deleteMessageSeconds)
+      && (record.deleteMessageSeconds as number) >= 0
+      && (record.deleteMessageSeconds as number) <= DISCORD_LIMITS.banDeleteMessageSeconds
+      && record.durationMinutes === null
+    : record.action === "timeout"
+      ? record.deleteMessageSeconds === null
+        && Number.isInteger(record.durationMinutes)
+        && (record.durationMinutes as number) >= 1
+        && (record.durationMinutes as number) <= ADMINISTRATION_LIMITS.timeoutMinutes
+      : record.deleteMessageSeconds === null && record.durationMinutes === null
+  const validTimeoutUntil = record.action === "timeout"
+    ? status === "pending"
+      ? record.timeoutUntil === null
+      : typeof record.timeoutUntil === "string"
+        && !Number.isNaN(Date.parse(record.timeoutUntil))
+    : record.timeoutUntil === null
   if (
-    record.schemaVersion !== SCHEMA_VERSION
+    Object.keys(record).length !== MEMBER_MODERATION_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !MEMBER_MODERATION_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
     || record.kind !== "member-moderation"
     || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
     || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
     || !MEMBER_MODERATION_ACTIONS.includes(record.action as MemberModerationAction)
-    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(status)
     || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
     || typeof record.userId !== "string"
+    || !positiveActivitySnowflake(record.userId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
     || typeof record.planDigest !== "string"
-    || !(record.deleteMessageSeconds === null || typeof record.deleteMessageSeconds === "number")
-    || !(record.durationMinutes === null || typeof record.durationMinutes === "number")
-    || !(record.timeoutUntil === null || typeof record.timeoutUntil === "string")
-    || !(record.error === null || typeof record.error === "string")
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !validActionParameters
+    || !validTimeoutUntil
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (status === "completed-with-drift" && (
+      record.error !== null || record.verification !== "drift"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null || record.verification !== null
+    ))
   ) {
     return undefined
   }
   return {
     action: record.action as MemberModerationActivityAction,
-    deleteMessageSeconds: record.deleteMessageSeconds,
-    durationMinutes: record.durationMinutes,
+    deleteMessageSeconds: record.deleteMessageSeconds as number | null,
+    durationMinutes: record.durationMinutes as number | null,
     error: record.error,
     guildId: record.guildId,
     id: record.id,
     kind: "member-moderation",
+    operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as MemberModerationActivityStatus,
-    timeoutUntil: record.timeoutUntil,
+    timeoutUntil: record.timeoutUntil as string | null,
     timestamp: record.timestamp,
     userId: record.userId,
+    verification: record.verification as "drift" | "match" | null,
   }
 }
 

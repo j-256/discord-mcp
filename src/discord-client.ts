@@ -1420,6 +1420,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_application_emoji",
   "create_component_message",
   "create_guild_auto_moderation_rule",
+  "create_guild_ban",
   "create_interaction_response",
   "create_immediate_interaction_response",
   "create_guild_emoji",
@@ -1486,6 +1487,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_template",
   "modify_current_member_nickname",
   "modify_guild_member_nickname",
+  "modify_guild_member_timeout",
   "modify_guild_member_voice",
   "modify_thread_state",
   "modify_webhook",
@@ -1503,6 +1505,8 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "set_voice_channel_status",
   "sync_guild_template",
   "remove_thread_member",
+  "remove_guild_ban",
+  "remove_guild_member",
 ])
 
 const THREAD_METADATA_RESPONSE_KEYS = [
@@ -10644,18 +10648,24 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<DiscordGuildMember> {
+    assertPositiveSnowflake(guildId, "Discord member-moderation guild ID")
+    assertPositiveSnowflake(userId, "Discord member-moderation user ID")
     if (input.communicationDisabledUntil !== null) {
       assertIsoTimestamp(
         input.communicationDisabledUntil,
         "Discord member timeout expiration",
       )
     }
+    encodeDiscordAuditReason(auditReason)
     return this.#request("modify_guild_member_timeout", `/guilds/${guildId}/members/${userId}`, {
       ...options,
       auditReason,
+      automaticRateLimitRetry: false,
       body: {
         communication_disabled_until: input.communicationDisabledUntil,
       },
+      diagnosticRoute: "/guilds/{guild.id}/members/{user.id}",
+      suppressFailureCause: true,
     })
   }
 
@@ -10742,9 +10752,15 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord member-moderation guild ID")
+    assertPositiveSnowflake(userId, "Discord member-moderation user ID")
+    encodeDiscordAuditReason(auditReason)
     await this.#request<void>("remove_guild_member", `/guilds/${guildId}/members/${userId}`, {
       ...options,
       auditReason,
+      automaticRateLimitRetry: false,
+      diagnosticRoute: "/guilds/{guild.id}/members/{user.id}",
+      suppressFailureCause: true,
     })
   }
 
@@ -10755,16 +10771,22 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord member-moderation guild ID")
+    assertPositiveSnowflake(userId, "Discord member-moderation user ID")
     assertIntegerRange(
       deleteMessageSeconds,
       0,
       DISCORD_LIMITS.banDeleteMessageSeconds,
       "Discord ban message-history deletion seconds",
     )
+    encodeDiscordAuditReason(auditReason)
     await this.#request<void>("create_guild_ban", `/guilds/${guildId}/bans/${userId}`, {
       ...options,
       auditReason,
+      automaticRateLimitRetry: false,
       body: { delete_message_seconds: deleteMessageSeconds },
+      diagnosticRoute: "/guilds/{guild.id}/bans/{user.id}",
+      suppressFailureCause: true,
     })
   }
 
@@ -10774,9 +10796,15 @@ export class DiscordClient {
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord member-moderation guild ID")
+    assertPositiveSnowflake(userId, "Discord member-moderation user ID")
+    encodeDiscordAuditReason(auditReason)
     await this.#request<void>("remove_guild_ban", `/guilds/${guildId}/bans/${userId}`, {
       ...options,
       auditReason,
+      automaticRateLimitRetry: false,
+      diagnosticRoute: "/guilds/{guild.id}/bans/{user.id}",
+      suppressFailureCause: true,
     })
   }
 

@@ -51,6 +51,7 @@ export const OPERATION_KINDS = [
   "invite-creation",
   "invite-deletion",
   "member-nickname-change",
+  "member-moderation",
   "member-role-change",
   "member-voice-change",
   "message-deletion",

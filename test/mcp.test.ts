@@ -275,6 +275,7 @@ import type {
 } from "../src/soundboard-service.js"
 import {
   AdministrationExecutionError,
+  AdministrationOperationConflictError,
   AnnouncementCrosspostExecutionError,
   AnnouncementCrosspostOperationConflictError,
   AnnouncementSubscriptionExecutionError,
@@ -537,6 +538,7 @@ const POLL_ANSWER_ONE = "Reliability"
 const POLL_ANSWER_TWO = "Usability"
 const MEMBER_NICKNAME_OPERATION_KEY = "member-nickname-attempt-0001"
 const MEMBER_NICKNAME = "Reviewed nickname"
+const MEMBER_MODERATION_OPERATION_KEY = "member-moderation-attempt-0001"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
@@ -4356,10 +4358,13 @@ function permissionOverwritePlan(
 function moderationPlan(digest = DIGEST) {
   return {
     action: "kick" as const,
+    applicationId: APPLICATION_ID,
     auditReason: AUDIT_REASON,
+    botId: BOT_ID,
     createdAt: "2026-08-14T00:00:00.000Z",
     digest,
     guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(MEMBER_MODERATION_OPERATION_KEY),
     parameters: {
       deleteMessageSeconds: null,
       durationMinutes: null,
@@ -4368,10 +4373,23 @@ function moderationPlan(digest = DIGEST) {
     permission: {
       botAdministrator: false,
       botHighestRolePosition: 2,
+      effectivePermissionNames: ["KICK_MEMBERS" as const],
+      effectivePermissions: DISCORD_PERMISSIONS.KICK_MEMBERS.toString(),
       required: "KICK_MEMBERS" as const,
       targetAdministrator: false,
       targetHighestRolePosition: 1,
+      unknownPermissionBits: "0",
     },
+    privacy: {
+      persistence: "content-free-outcomes-only" as const,
+      rawPayloadExposed: false as const,
+      transientUntrustedFields: [
+        "globalName",
+        "nickname",
+        "username",
+      ] as const,
+    },
+    risks: ["The exact member will be removed"],
     schemaVersion: 1,
     status: "planned" as const,
     target: {
@@ -4384,6 +4402,13 @@ function moderationPlan(digest = DIGEST) {
       nickname: null,
       username: "member",
     },
+    verificationBoundary: {
+      automaticRetry: false as const,
+      freshApiReadback: true as const,
+      mutationResponse: "action-dependent" as const,
+      rollback: "not-automatic" as const,
+    },
+    warnings: ["The operation key is one-shot"],
   }
 }
 
@@ -6914,6 +6939,7 @@ function fixtureApplicationPosture(
 }
 
 function serviceFixture(overrides: {
+  administrationDrift?: boolean
   administrationError?: Error
   activityError?: Error
   announcementCrosspostAction?: "crosspost" | "none"
@@ -9190,15 +9216,26 @@ function serviceFixture(overrides: {
     async executeMemberModeration(request, planDigest) {
       if (overrides.administrationError) throw overrides.administrationError
       calls.administrationExecute += 1
+      const verification = overrides.administrationDrift
+        ? "drift" as const
+        : "match" as const
       return {
         action: request.action,
         activityId: "activity-moderation",
         guildId: request.guildId,
+        observedState: {
+          kind: "membership" as const,
+          state: "non-member" as const,
+        },
+        operationKeyHash: operationKeyHash(request.operationKey),
         planDigest,
         schemaVersion: 1,
-        status: "completed",
+        status: overrides.administrationDrift
+          ? "completed-with-drift" as const
+          : "completed" as const,
         timeoutUntil: null,
         userId: request.userId,
+        verification,
       }
     },
     async executeMessagePin(request, planDigest) {
@@ -9804,10 +9841,7 @@ function serviceFixture(overrides: {
         status: "ok",
         writeCoordination: {
           coverage: "receipt-backed-reviewed-writes",
-          excludedWorkflows: [
-            "legacy-member-moderation",
-            "ordinary-message-interactions",
-          ],
+          excludedWorkflows: ["ordinary-message-interactions"],
           localFilesystemRequired: true,
           mode: "durable-exact-target",
           resumableWorkflows: ["guild-scaffold"],
@@ -13307,10 +13341,7 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   }))
   assert.deepEqual(status.writeCoordination, {
     coverage: "receipt-backed-reviewed-writes",
-    excludedWorkflows: [
-      "legacy-member-moderation",
-      "ordinary-message-interactions",
-    ],
+    excludedWorkflows: ["ordinary-message-interactions"],
     localFilesystemRequired: true,
     mode: "durable-exact-target",
     resumableWorkflows: ["guild-scaffold"],
@@ -13329,6 +13360,7 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.ok(content && "text" in content)
   if (!content || !("text" in content)) throw new Error("Expected safety text")
   assert.match(content.text, /durable exact target claims/)
+  assert.match(content.text, /member moderation claims its exact member/)
   assert.match(content.text, /Resumable guild scaffolds claim both guild role and channel collections/)
   assert.match(content.text, /interruption with pending evidence leaves them quarantined/)
   assert.match(content.text, /complete obfuscation-safe Gateway layout/)
@@ -27662,6 +27694,7 @@ test("MCP member moderation plans exact targets and enforces action-specific sch
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       userId: USER_ID,
     },
     name: "plan_member_moderation",
@@ -27672,6 +27705,7 @@ test("MCP member moderation plans exact targets and enforces action-specific sch
       auditReason: AUDIT_REASON,
       deleteMessageSeconds: 0,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       userId: USER_ID,
     },
     name: "plan_member_moderation",
@@ -27681,6 +27715,7 @@ test("MCP member moderation plans exact targets and enforces action-specific sch
       action: "kick",
       auditReason: "é".repeat(200),
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       userId: USER_ID,
     },
     name: "plan_member_moderation",
@@ -27695,6 +27730,7 @@ test("MCP member moderation plans exact targets and enforces action-specific sch
 
 test("MCP member moderation binds signed confirmation to target, action, reason, and digest", async (context) => {
   let confirmationMessage = ""
+  const serverMessages: unknown[] = []
   const { calls, client } = await connectedFixture(context, {
     elicitationHandler: async (request) => {
       confirmationMessage = request.params.message
@@ -27703,6 +27739,7 @@ test("MCP member moderation binds signed confirmation to target, action, reason,
         content: { approve: true },
       }
     },
+    serverMessages,
   })
 
   const result = await client.callTool({
@@ -27710,6 +27747,7 @@ test("MCP member moderation binds signed confirmation to target, action, reason,
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       planDigest: DIGEST,
       userId: USER_ID,
     },
@@ -27717,14 +27755,111 @@ test("MCP member moderation binds signed confirmation to target, action, reason,
   })
 
   assert.equal(structuredContent(result).status, "completed")
+  assert.match(
+    (result.content?.[0] as { text?: string } | undefined)?.text || "",
+    /completed with exact fresh readback/,
+  )
   assert.equal(calls.administrationPlan, 1)
   assert.equal(calls.administrationExecute, 1)
   assert.match(confirmationMessage, /Action: kick/)
   assert.match(confirmationMessage, new RegExp(GUILD_ID))
   assert.match(confirmationMessage, new RegExp(USER_ID))
   assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(
+    confirmationMessage,
+    new RegExp(operationKeyHash(MEMBER_MODERATION_OPERATION_KEY)),
+  )
   assert.match(confirmationMessage, new RegExp(DIGEST))
   assert.match(confirmationMessage, /untrusted data/)
+  assert.match(confirmationMessage, /fresh readback/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(MEMBER_MODERATION_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MEMBER_MODERATION_OPERATION_KEY),
+  )
+})
+
+test("MCP member moderation distinguishes fresh readback drift", async (context) => {
+  const { client } = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: { administrationDrift: true },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+
+  assert.equal(structuredContent(result).status, "completed-with-drift")
+  assert.equal(structuredContent(result).verification, "drift")
+  assert.match(
+    (result.content?.[0] as { text?: string } | undefined)?.text || "",
+    /completed with fresh readback drift/,
+  )
+})
+
+test("MCP member moderation signed state rejects every changed intent field", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    action: "kick" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_MODERATION_OPERATION_KEY,
+    planDigest: DIGEST,
+    userId: USER_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_member_moderation",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, action: "unban" as const },
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, operationKey: "member-moderation-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, userId: GUILD_OWNER_ID },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_member_moderation: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_member_moderation",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.administrationExecute, 0)
 })
 
 test("MCP member moderation declines or rejects approval without invoking execution", async (context) => {
@@ -27736,6 +27871,7 @@ test("MCP member moderation declines or rejects approval without invoking execut
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       planDigest: DIGEST,
       userId: USER_ID,
     },
@@ -27755,6 +27891,7 @@ test("MCP member moderation declines or rejects approval without invoking execut
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       planDigest: DIGEST,
       userId: USER_ID,
     },
@@ -27780,6 +27917,7 @@ test("MCP member moderation refuses a changed plan before eliciting confirmation
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       planDigest: DIGEST,
       userId: USER_ID,
     },
@@ -27810,6 +27948,7 @@ test("MCP member moderation reports uncertain and rate-limited execution outcome
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       planDigest: DIGEST,
       userId: USER_ID,
     },
@@ -27842,6 +27981,7 @@ test("MCP member moderation reports uncertain and rate-limited execution outcome
       action: "kick",
       auditReason: AUDIT_REASON,
       guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
       planDigest: DIGEST,
       userId: USER_ID,
     },
@@ -27852,6 +27992,49 @@ test("MCP member moderation reports uncertain and rate-limited execution outcome
   assert.equal(
     (limitedStructured.error as Record<string, unknown>).retryAfterMs,
     2_500,
+  )
+
+  const receipt = {
+    activityId: "member-moderation-operation",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(MEMBER_MODERATION_OPERATION_KEY),
+    status: "completed" as const,
+    timestamp: "2026-08-20T00:00:00.000Z",
+    userId: USER_ID,
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      administrationError: new AdministrationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      action: "kick",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_MODERATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_moderation",
+  })
+  assert.equal(
+    structuredContent(conflictResult).status,
+    "operation-key-conflict",
+  )
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(MEMBER_MODERATION_OPERATION_KEY),
   )
 })
 

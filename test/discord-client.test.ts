@@ -1476,6 +1476,45 @@ test("Discord client rejects invalid moderation parameters and audit reasons bef
   assert.equal(requests, 0)
 })
 
+test("Discord client never retries member moderation or leaks transport causes", async () => {
+  let requests = 0
+  let sleeps = 0
+  const secret = "private-member-moderation-transport-cause"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      throw new Error(secret)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  const operations = [
+    () => client.removeGuildMember("100", "400", "reviewed"),
+    () => client.createGuildBan("100", "400", 0, "reviewed"),
+    () => client.removeGuildBan("100", "400", "reviewed"),
+    () => client.modifyGuildMemberTimeout(
+      "100",
+      "400",
+      { communicationDisabledUntil: null },
+      "reviewed",
+    ),
+  ]
+
+  for (const operation of operations) {
+    await assert.rejects(operation(), (error: Error) => {
+      assert.doesNotMatch(error.message, new RegExp(secret))
+      assert.equal(error.cause, undefined)
+      return true
+    })
+  }
+  assert.equal(requests, operations.length)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client projects exact member voice state and sends one-field PATCH bodies", async () => {
   const requests: Array<{
     body: unknown

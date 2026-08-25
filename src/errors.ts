@@ -1791,6 +1791,16 @@ export class AdministrationPlanChangedError extends Error {
   }
 }
 
+export class AdministrationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord member-moderation operation key has already been reserved")
+    this.name = "AdministrationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
 export class AdministrationExecutionError extends Error {
   readonly result: unknown
 

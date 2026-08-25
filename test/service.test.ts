@@ -5239,7 +5239,7 @@ test("service coordinates component edits only when the exact message changes", 
   assert.equal(calls.editComponentMessage, 0)
 })
 
-test("service verifies identity before planning and executing exact member moderation", async () => {
+test("service coordinates exact member moderation after verifying identity", async () => {
   const targetId = "700000000000000002"
   const botRoleId = "800000000000000001"
   const targetRoleId = "800000000000000002"
@@ -5285,18 +5285,26 @@ test("service verifies identity before planning and executing exact member moder
     action: "kick" as const,
     auditReason: "Reviewed safety incident 42",
     guildId: GUILD_ID,
+    operationKey: "member-moderation-attempt-0001",
     userId: targetId,
   }
 
   const plan = await service.planMemberModeration(request)
-  const result = await service.executeMemberModeration(request, plan.digest)
+  await assert.rejects(
+    () => service.executeMemberModeration(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
 
   assert.equal(plan.target.id, targetId)
-  assert.equal(result.status, "completed")
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
-  assert.equal(calls.removeMember, 1)
-  assert.deepEqual(writeCoordinator.intents, [])
+  assert.equal(calls.removeMember, 0)
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "member-moderation",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [{ id: targetId, kind: "member" }],
+  }])
 })
 
 test("service pins identity through the narrow reviewed current-bot nickname route", async () => {
@@ -7627,10 +7635,7 @@ test("service verifies identity once and reports scope without message reads", a
   assert.equal(status.guildPage.accessible, 1)
   assert.deepEqual(status.writeCoordination, {
     coverage: "receipt-backed-reviewed-writes",
-    excludedWorkflows: [
-      "legacy-member-moderation",
-      "ordinary-message-interactions",
-    ],
+    excludedWorkflows: ["ordinary-message-interactions"],
     localFilesystemRequired: true,
     mode: "durable-exact-target",
     resumableWorkflows: ["guild-scaffold"],

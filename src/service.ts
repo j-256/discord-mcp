@@ -113,7 +113,10 @@ import type {
   MemberModerationRequest,
   MemberModerationResult,
 } from "./administration-service.js"
-import { AdministrationService } from "./administration-service.js"
+import {
+  AdministrationService,
+  normalizeMemberModerationRequest,
+} from "./administration-service.js"
 import type {
   ChannelAdministrationServiceOptions,
   ChannelCreationPlan,
@@ -1280,6 +1283,7 @@ export class ConnectorService {
     this.#administrationService = new AdministrationService({
       activityStore: this.#activityStore,
       client: this.#client,
+      operationStore,
       policy: this.#policy,
       ...options.administrationOptions,
     })
@@ -1740,7 +1744,6 @@ export class ConnectorService {
       writeCoordination: {
         coverage: "receipt-backed-reviewed-writes",
         excludedWorkflows: [
-          "legacy-member-moderation",
           "ordinary-message-interactions",
         ],
         localFilesystemRequired: true,
@@ -3250,7 +3253,12 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<MemberModerationPlan> {
     const identity = await this.#verifyIdentity(options)
-    return this.#administrationService.plan(identity.bot.id, request, options)
+    return this.#administrationService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
   }
 
   async planMemberRoleChange(
@@ -4390,12 +4398,23 @@ export class ConnectorService {
     planDigest: string,
     options: RequestOptions = {},
   ): Promise<MemberModerationResult> {
+    const normalized = normalizeMemberModerationRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord administration plan digest is invalid")
+    }
     const identity = await this.#verifyIdentity(options)
-    return this.#administrationService.execute(
-      identity.bot.id,
-      request,
+    return this.#coordinateWrite(
+      "member-moderation",
+      normalized.operationKey,
       planDigest,
-      options,
+      [writeResourceTarget("member", normalized.userId)],
+      () => this.#administrationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 

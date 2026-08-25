@@ -181,12 +181,14 @@ function moderation(
     guildId: "100",
     id,
     kind: "member-moderation",
-    planDigest: "hmac-sha256:test",
+    operationKeyHash: `sha256:${"a".repeat(64)}`,
+    planDigest: `hmac-sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
     status,
     timeoutUntil: status === "pending" ? null : "2026-08-14T01:00:00.000Z",
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     userId: "400",
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -1530,11 +1532,14 @@ test("JSONL activity log retains only content-free reaction moderation evidence"
   assert.equal(result.entries[0]?.kind, "reaction-moderation")
 })
 
-test("JSONL activity log strips profile data and reasons from member moderation records", async (context) => {
+test("JSONL activity log rejects member moderation records with private fields", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
+  const oldShape = { ...moderation("3", "completed") } as Record<string, unknown>
+  delete oldShape.operationKeyHash
+  delete oldShape.verification
 
   await store.append(moderation("1", "pending"))
   await appendFile(
@@ -1545,12 +1550,22 @@ test("JSONL activity log strips profile data and reasons from member moderation 
       nickname: "private nickname",
       roleNames: ["private role"],
       username: "private username",
+    })}\n${JSON.stringify(oldShape)}\n${JSON.stringify({
+      ...moderation("4", "completed"),
+      durationMinutes: 0,
+    })}\n${JSON.stringify({
+      ...moderation("5", "completed"),
+      deleteMessageSeconds: 60,
+    })}\n${JSON.stringify({
+      ...moderation("6", "completed"),
+      timeoutUntil: null,
     })}\n`,
     "utf8",
   )
   const result = await store.list()
 
-  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["1"])
+  assert.equal(result.skippedLines, 5)
   assert.doesNotMatch(
     JSON.stringify(result),
     /private reason|private nickname|private role|private username/,
