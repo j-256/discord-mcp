@@ -83,6 +83,7 @@ export type GatewayErrorCategory =
   | "invalid-shard-routing"
   | "invalid-shard"
   | "network-error"
+  | "outbound-budget-exhausted"
   | "protocol-error"
   | "rate-limited"
   | "session-start-limit-exhausted"

@@ -27,6 +27,7 @@ import {
   type GatewayStatusSnapshot,
 } from "./gateway-events.js"
 import { GatewayIdentifyCoordinator } from "./gateway-identify-coordinator.js"
+import type { GatewayCommandSendOutcome } from "./gateway-outbound-budget.js"
 import {
   GatewayShardSession,
   type GatewayScheduler,
@@ -114,10 +115,10 @@ interface PendingChannelInfo {
   channelId: string
   guildId: string
   reject: (error: Error) => void
-  requestedAt: string
+  requestedAt?: string
   resolve: (snapshot: GatewayVoiceChannelStatusSnapshot) => void
   signal?: AbortSignal
-  timeoutHandle: unknown
+  timeoutHandle?: unknown
 }
 
 interface PendingVoiceChannelStatusUpdate {
@@ -133,6 +134,13 @@ interface PendingVoiceChannelStatusUpdate {
 const GATEWAY_OPCODES = Object.freeze({
   requestChannelInfo: 43,
 })
+
+const CHANNEL_INFO_COMMAND_ERRORS = Object.freeze({
+  cancelled: "Discord Gateway voice channel status evidence was cancelled",
+  "queue-full": "Discord Gateway outbound command queue is full; retry after in-flight evidence completes",
+  "queue-timeout": "Discord Gateway outbound command budget did not become available before the local queue deadline",
+  unavailable: "Discord Gateway could not request voice channel status evidence",
+} satisfies Record<Exclude<GatewayCommandSendOutcome, "sent">, string>)
 
 const EVENT_FEED_DISPATCH_NAMES: ReadonlySet<string> = new Set([
   "CHANNEL_CREATE",
@@ -572,6 +580,7 @@ export class DiscordGateway implements GatewayRuntime {
         const session = new GatewayShardSession({
           applicationId: this.#applicationId,
           botId: this.#botId,
+          clock: this.#clock,
           gatewayUrl: discovery.url,
           identifyCoordinator,
           intents,
@@ -821,25 +830,14 @@ export class DiscordGateway implements GatewayRuntime {
         "Discord Gateway already has pending channel-info evidence for this guild",
       ))
     }
-    const requestedAt = new Date(this.#clock()).toISOString()
     return new Promise<GatewayVoiceChannelStatusSnapshot>((resolve, reject) => {
       let pending: PendingChannelInfo
-      const timeoutHandle = this.#scheduler.setTimeout(() => {
-        this.#finishChannelInfo(
-          pending,
-          new GatewayVoiceChannelStatusError(
-            "Discord Gateway voice channel status evidence timed out",
-          ),
-        )
-      }, GATEWAY_DEFAULTS.channelInfoTimeoutMs)
       pending = {
         channelId,
         guildId,
         reject,
-        requestedAt,
         resolve,
         ...(options.signal ? { signal: options.signal } : {}),
-        timeoutHandle,
       }
       if (options.signal) {
         pending.abortListener = () => this.#finishChannelInfo(
@@ -851,20 +849,38 @@ export class DiscordGateway implements GatewayRuntime {
         options.signal.addEventListener("abort", pending.abortListener, { once: true })
       }
       this.#pendingChannelInfo.set(guildId, pending)
-      if (!session.send({
+      void session.sendCommand({
         d: {
           fields: ["status"],
           guild_id: guildId,
         },
         op: GATEWAY_OPCODES.requestChannelInfo,
-      })) {
+      }, options).then((outcome) => {
+        if (this.#pendingChannelInfo.get(guildId) !== pending) return
+        if (outcome !== "sent") {
+          this.#finishChannelInfo(
+            pending,
+            new GatewayVoiceChannelStatusError(CHANNEL_INFO_COMMAND_ERRORS[outcome]),
+          )
+          return
+        }
+        pending.requestedAt = new Date(this.#clock()).toISOString()
+        pending.timeoutHandle = this.#scheduler.setTimeout(() => {
+          this.#finishChannelInfo(
+            pending,
+            new GatewayVoiceChannelStatusError(
+              "Discord Gateway voice channel status evidence timed out",
+            ),
+          )
+        }, GATEWAY_DEFAULTS.channelInfoTimeoutMs)
+      }).catch(() => {
         this.#finishChannelInfo(
           pending,
           new GatewayVoiceChannelStatusError(
             "Discord Gateway could not request voice channel status evidence",
           ),
         )
-      }
+      })
     })
   }
 
@@ -874,7 +890,9 @@ export class DiscordGateway implements GatewayRuntime {
   ): void {
     if (this.#pendingChannelInfo.get(pending.guildId) !== pending) return
     this.#pendingChannelInfo.delete(pending.guildId)
-    this.#scheduler.clearTimeout(pending.timeoutHandle)
+    if (pending.timeoutHandle !== undefined) {
+      this.#scheduler.clearTimeout(pending.timeoutHandle)
+    }
     if (pending.abortListener && pending.signal) {
       pending.signal.removeEventListener("abort", pending.abortListener)
     }
@@ -919,7 +937,7 @@ export class DiscordGateway implements GatewayRuntime {
       return
     }
     const pending = this.#pendingChannelInfo.get(guildId)
-    if (!pending) return
+    if (!pending?.requestedAt) return
     try {
       this.#finishChannelInfo(pending, projectGatewayVoiceChannelStatus({
         channelId: pending.channelId,

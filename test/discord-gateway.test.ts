@@ -6,6 +6,7 @@ import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_GATEWAY_INTENT_MASK,
   DISCORD_GATEWAY_INTENTS,
+  GATEWAY_DEFAULTS,
 } from "../src/constants.js"
 import {
   DiscordGateway,
@@ -57,6 +58,11 @@ class FakeScheduler implements GatewayScheduler {
   #nextId = 1
   readonly jobs = new Map<number, { at: number; handler: () => void }>()
   now = 0
+
+  advanceTo(now: number): void {
+    assert.ok(now >= this.now)
+    this.now = now
+  }
 
   clearTimeout(handle: unknown): void {
     if (typeof handle === "number") this.jobs.delete(handle)
@@ -1175,6 +1181,123 @@ test("Gateway voice status evidence rejects cancellation, timeout, and continuit
   await new Promise<void>((resolve) => setImmediate(resolve))
   socket.serverClose(1_006)
   await assert.rejects(disconnected, /continuity changed/)
+  await gateway.stop()
+})
+
+test("Gateway applies per-shard backpressure before starting Discord evidence timeouts", async () => {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "voicestatus3",
+    enabled: true,
+    eventFeedEnabled: false,
+    voiceChannelStatusChannelCount: 1,
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowChannelMetadataChanges: true,
+      allowGateway: false,
+      channelMetadataIds: new Set([CHANNEL_ID]),
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      token: TOKEN,
+    },
+    discoverGateway,
+    discoverGatewayChannel,
+    eventStore,
+    random: () => 1,
+    scheduler,
+    webSocketFactory() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+  await gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket, GATEWAY_DEFAULTS.heartbeatMaximumMs)
+  ready(socket)
+  for (let index = 1; index < GATEWAY_DEFAULTS.outboundCommandAdmissionLimit; index += 1) {
+    socket.message({ d: null, op: 1 })
+    socket.message({ d: null, op: 11 })
+  }
+
+  scheduler.advanceTo(
+    GATEWAY_DEFAULTS.outboundWindowMs
+      - Math.floor(GATEWAY_DEFAULTS.outboundCommandQueueTimeoutMs / 2),
+  )
+  const evidence = gateway.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.deepEqual(payloads(socket).filter(({ op }) => op === 43), [])
+  assert.deepEqual(
+    [...scheduler.jobs.values()].map(({ at }) => at).sort((left, right) => left - right),
+    [GATEWAY_DEFAULTS.outboundWindowMs, GATEWAY_DEFAULTS.heartbeatMaximumMs],
+  )
+
+  assert.equal(scheduler.runNext(), GATEWAY_DEFAULTS.outboundWindowMs)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.deepEqual(payloads(socket).filter(({ op }) => op === 43), [{
+    d: { fields: ["status"], guild_id: GUILD_ID },
+    op: 43,
+  }])
+  assert.deepEqual(
+    [...scheduler.jobs.values()].map(({ at }) => at).sort((left, right) => left - right),
+    [
+      GATEWAY_DEFAULTS.outboundWindowMs + GATEWAY_DEFAULTS.channelInfoTimeoutMs,
+      GATEWAY_DEFAULTS.heartbeatMaximumMs,
+    ],
+  )
+  socket.message({
+    d: {
+      channels: [{ id: CHANNEL_ID, status: "Planning" }],
+      guild_id: GUILD_ID,
+    },
+    op: 0,
+    s: 2,
+    t: "CHANNEL_INFO",
+  })
+  const result = await evidence
+  assert.equal(
+    result.freshness.requestedAt,
+    new Date(GATEWAY_DEFAULTS.outboundWindowMs).toISOString(),
+  )
+  assert.equal(result.status, "Planning")
+
+  for (let index = 0; index < GATEWAY_DEFAULTS.outboundCommandAdmissionLimit; index += 1) {
+    socket.message({ d: null, op: 1 })
+    socket.message({ d: null, op: 11 })
+  }
+  const pressured = gateway.getVoiceChannelStatus(GUILD_ID, CHANNEL_ID)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(
+    scheduler.runNext(),
+    GATEWAY_DEFAULTS.outboundWindowMs + GATEWAY_DEFAULTS.outboundCommandQueueTimeoutMs,
+  )
+  await assert.rejects(pressured, /local queue deadline/)
+  assert.equal(payloads(socket).filter(({ op }) => op === 43).length, 1)
+
+  for (
+    let index = GATEWAY_DEFAULTS.outboundCommandAdmissionLimit + 1;
+    index < GATEWAY_DEFAULTS.outboundEventLimit;
+    index += 1
+  ) {
+    socket.message({ d: null, op: 1 })
+    socket.message({ d: null, op: 11 })
+  }
+  socket.message({ d: null, op: 1 })
+  assert.equal(gateway.getStatus().connection.state, "reconnecting")
+  assert.equal(
+    gateway.getStatus().connection.lastError?.category,
+    "outbound-budget-exhausted",
+  )
   await gateway.stop()
 })
 

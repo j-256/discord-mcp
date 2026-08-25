@@ -95,6 +95,7 @@ function fixture(options: {
   shardCount?: number
   shardId?: number
   shardIds?: readonly number[]
+  token?: string
 } = {}) {
   const actorScheduler = new FakeScheduler()
   const identifyScheduler = new FakeScheduler()
@@ -126,6 +127,7 @@ function fixture(options: {
   const session = new GatewayShardSession({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
+    clock: () => actorScheduler.now,
     gatewayUrl: GATEWAY_URL,
     identifyCoordinator: coordinator,
     intents: 1,
@@ -151,7 +153,7 @@ function fixture(options: {
     scheduler: actorScheduler,
     shardCount,
     shardId,
-    token: TOKEN,
+    token: options.token ?? TOKEN,
     webSocketFactory(url) {
       urls.push(url)
       const socket = new FakeSocket()
@@ -270,6 +272,7 @@ test("Gateway shards keep independent sessions, sequences, and resume URLs", () 
   const create = (shardId: number) => new GatewayShardSession({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
+    clock: () => actorScheduler.now,
     gatewayUrl: GATEWAY_URL,
     identifyCoordinator: coordinator,
     intents: 1,
@@ -382,6 +385,101 @@ test("Gateway shard heartbeats, reconnects on a missing ACK, and stops cleanly",
   const socketCount = sockets.length
   first.serverClose(1_006)
   assert.equal(sockets.length, socketCount)
+})
+
+test("Gateway shard reserves caller pressure for control traffic and times out its FIFO", async () => {
+  const { actorScheduler, session, sockets } = fixture()
+  session.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  ready(socket)
+
+  for (let index = 1; index < GATEWAY_DEFAULTS.outboundCommandAdmissionLimit; index += 1) {
+    assert.equal(await session.sendCommand({ d: { index }, op: 43 }), "sent")
+  }
+  const queued = session.sendCommand({ d: { marker: "queued" }, op: 43 })
+  assert.equal(
+    payloads(socket).filter(({ op }) => op === 43).length,
+    GATEWAY_DEFAULTS.outboundCommandAdmissionLimit - 1,
+  )
+
+  socket.message({ d: null, op: 1 })
+  assert.equal(payloads(socket).at(-1)?.op, 1)
+  socket.message({ d: null, op: 11 })
+  assert.equal(actorScheduler.runNext(), GATEWAY_DEFAULTS.outboundCommandQueueTimeoutMs)
+  assert.equal(await queued, "queue-timeout")
+  assert.equal(
+    payloads(socket).filter(({ op }) => op === 43).length,
+    GATEWAY_DEFAULTS.outboundCommandAdmissionLimit - 1,
+  )
+})
+
+test("Gateway shard cancels queued commands on disconnect and stop", async () => {
+  for (const action of ["disconnect", "stop"] as const) {
+    const { session, sockets } = fixture()
+    session.start()
+    const socket = sockets[0]
+    assert.ok(socket)
+    hello(socket)
+    ready(socket)
+    for (let index = 1; index < GATEWAY_DEFAULTS.outboundCommandAdmissionLimit; index += 1) {
+      assert.equal(await session.sendCommand({ d: { index }, op: 43 }), "sent")
+    }
+    const queued = session.sendCommand({ d: { marker: action }, op: 43 })
+    if (action === "disconnect") socket.serverClose(1_006)
+    else session.stop()
+    assert.equal(await queued, "unavailable")
+  }
+})
+
+test("Gateway shard reconnects before control traffic crosses the absolute budget", () => {
+  const { reconnects, session, sockets, states } = fixture()
+  session.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  ready(socket)
+
+  for (let index = 1; index < GATEWAY_DEFAULTS.outboundEventLimit; index += 1) {
+    socket.message({ d: null, op: 1 })
+    socket.message({ d: null, op: 11 })
+  }
+  assert.equal(payloads(socket).length, GATEWAY_DEFAULTS.outboundEventLimit)
+  socket.message({ d: null, op: 1 })
+
+  assert.equal(payloads(socket).length, GATEWAY_DEFAULTS.outboundEventLimit)
+  assert.deepEqual(reconnects, [0])
+  assert.deepEqual(states.at(-1), {
+    category: "outbound-budget-exhausted",
+    state: "reconnecting",
+  })
+  assert.deepEqual(socket.closed.at(-1), {
+    code: 4_000,
+    reason: "discord-mcp reconnect",
+  })
+})
+
+test("Gateway shard rejects oversized caller and control payloads without reflection", async () => {
+  const caller = fixture()
+  caller.session.start()
+  const callerSocket = caller.sockets[0]
+  assert.ok(callerSocket)
+  hello(callerSocket)
+  ready(callerSocket)
+  const oversized = "x".repeat(GATEWAY_DEFAULTS.outboundPayloadBytes)
+  assert.equal(await caller.session.sendCommand({ oversized }, undefined), "unavailable")
+  assert.equal(payloads(callerSocket).length, 1)
+  assert.doesNotMatch(JSON.stringify(caller.states), /x{32}/)
+
+  const control = fixture({ token: oversized })
+  control.session.start()
+  const controlSocket = control.sockets[0]
+  assert.ok(controlSocket)
+  hello(controlSocket)
+  assert.deepEqual(control.failures, ["protocol-error"])
+  assert.deepEqual(payloads(controlSocket), [])
+  assert.doesNotMatch(JSON.stringify(control.states), /x{32}/)
 })
 
 test("Gateway shard classifies malformed payloads and fatal close codes", () => {

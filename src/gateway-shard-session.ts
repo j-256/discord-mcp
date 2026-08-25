@@ -7,6 +7,10 @@ import {
 import { normalizeDiscordGatewayUrl } from "./gateway-discovery.js"
 import type { GatewayIdentifyCoordinator } from "./gateway-identify-coordinator.js"
 import type { GatewayErrorCategory } from "./gateway-events.js"
+import {
+  GatewayOutboundBudget,
+  type GatewayCommandSendOutcome,
+} from "./gateway-outbound-budget.js"
 
 export interface GatewaySocket {
   readonly readyState: number
@@ -41,6 +45,7 @@ export interface GatewayShardDispatch {
 export interface GatewayShardSessionOptions {
   applicationId: string
   botId: string
+  clock?: () => number
   gatewayUrl: string
   identifyCoordinator: GatewayIdentifyCoordinator
   intents: number
@@ -205,6 +210,7 @@ export class GatewayShardSession {
   readonly #onReconnect: GatewayShardSessionOptions["onReconnect"]
   readonly #onResume: GatewayShardSessionOptions["onResume"]
   readonly #onState: GatewayShardSessionOptions["onState"]
+  readonly #outboundBudget: GatewayOutboundBudget
   #pendingReconnect: PendingReconnect | undefined
   #phaseTimer: unknown
   readonly #random: () => number
@@ -237,6 +243,7 @@ export class GatewayShardSession {
       || !positiveSnowflake(options.applicationId)
       || !positiveSnowflake(options.botId)
       || !options.token.trim()
+      || (options.clock !== undefined && typeof options.clock !== "function")
     ) {
       throw new RangeError("Gateway shard session options are invalid")
     }
@@ -256,6 +263,11 @@ export class GatewayShardSession {
     this.#onState = options.onState
     this.#random = options.random || Math.random
     this.#scheduler = options.scheduler || defaultScheduler()
+    this.#outboundBudget = new GatewayOutboundBudget({
+      ...(options.clock ? { clock: options.clock } : {}),
+      scheduler: this.#scheduler,
+      write: (serialized) => this.#write(serialized),
+    })
     this.#shardCount = options.shardCount
     this.#shardId = options.shardId
     this.#token = options.token
@@ -286,6 +298,7 @@ export class GatewayShardSession {
     this.#clearTimer("heartbeat")
     this.#clearTimer("phase")
     this.#clearTimer("reconnect")
+    this.#outboundBudget.reset()
     const socket = this.#socket
     this.#socket = undefined
     this.#reconnectAttempt = 0
@@ -305,9 +318,16 @@ export class GatewayShardSession {
     this.#setState("stopped")
   }
 
-  send(payload: object): boolean {
-    if (!this.#running || this.#terminal || this.#state !== "ready") return false
-    return this.#send(payload)
+  sendCommand(
+    payload: object,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<GatewayCommandSendOutcome> {
+    if (!this.#running || this.#terminal || this.#state !== "ready") {
+      return Promise.resolve("unavailable")
+    }
+    const serialized = this.#serialize(payload)
+    if (!serialized) return Promise.resolve("unavailable")
+    return this.#outboundBudget.sendCommand(serialized, options.signal)
   }
 
   #setState(state: GatewayShardState, errorCategory?: GatewayErrorCategory): void {
@@ -365,6 +385,7 @@ export class GatewayShardSession {
 
   #connect(url: string): void {
     if (!this.#running || this.#terminal) return
+    this.#outboundBudget.reset()
     this.#cancelPendingIdentify()
     this.#clearTimer("heartbeat")
     this.#clearTimer("phase")
@@ -394,6 +415,7 @@ export class GatewayShardSession {
     socket.onclose = (event) => {
       if (this.#socket !== socket) return
       this.#socket = undefined
+      this.#outboundBudget.reset()
       this.#cancelPendingIdentify()
       this.#clearTimer("heartbeat")
       this.#clearTimer("phase")
@@ -468,7 +490,7 @@ export class GatewayShardSession {
       try {
         this.#onResume(this.#shardId)
       } catch {}
-      this.#send({
+      this.#sendControl({
         d: {
           seq: this.#sequence,
           session_id: this.#sessionId,
@@ -490,7 +512,7 @@ export class GatewayShardSession {
       if (!this.#running || this.#terminal || this.#heartbeatIntervalMs === undefined) {
         return false
       }
-      return this.#send({
+      return this.#sendControl({
         d: {
           intents: this.#intents,
           properties: {
@@ -523,7 +545,7 @@ export class GatewayShardSession {
   }
 
   #sendHeartbeat(): void {
-    if (this.#send({ d: this.#sequence, op: GATEWAY_OPCODES.heartbeat })) {
+    if (this.#sendControl({ d: this.#sequence, op: GATEWAY_OPCODES.heartbeat })) {
       this.#awaitingHeartbeatAck = true
     }
   }
@@ -615,14 +637,45 @@ export class GatewayShardSession {
     this.#requestReconnect({ clearSession: !value, delayMs })
   }
 
-  #send(payload: object): boolean {
+  #sendControl(payload: object): boolean {
+    const serialized = this.#serialize(payload)
+    if (!serialized) {
+      this.#fail("protocol-error")
+      return false
+    }
+    const outcome = this.#outboundBudget.sendControl(serialized)
+    if (outcome === "sent") return true
+    this.#requestReconnect({
+      clearSession: false,
+      errorCategory: outcome === "exhausted"
+        ? "outbound-budget-exhausted"
+        : "network-error",
+    })
+    return false
+  }
+
+  #serialize(payload: object): string | undefined {
+    let serialized: string | undefined
+    try {
+      serialized = JSON.stringify(payload)
+    } catch {
+      return undefined
+    }
+    if (
+      !serialized
+      || Buffer.byteLength(serialized, "utf8") > GATEWAY_DEFAULTS.outboundPayloadBytes
+    ) return undefined
+    return serialized
+  }
+
+  #write(serialized: string): boolean {
     const socket = this.#socket
     if (!socket || socket.readyState !== SOCKET_STATES.open) {
       this.#requestReconnect({ clearSession: false, errorCategory: "network-error" })
       return false
     }
     try {
-      socket.send(JSON.stringify(payload))
+      socket.send(serialized)
       return true
     } catch {
       this.#requestReconnect({ clearSession: false, errorCategory: "network-error" })
@@ -633,6 +686,7 @@ export class GatewayShardSession {
   #requestReconnect(options: PendingReconnect): void {
     if (!this.#running || this.#terminal || this.#pendingReconnect) return
     this.#cancelPendingIdentify()
+    this.#outboundBudget.reset()
     this.#pendingReconnect = options
     const socket = this.#socket
     if (!socket) {
@@ -694,6 +748,7 @@ export class GatewayShardSession {
     this.#clearTimer("heartbeat")
     this.#clearTimer("phase")
     this.#clearTimer("reconnect")
+    this.#outboundBudget.reset()
     this.#clearSession(true)
     const socket = this.#socket
     this.#socket = undefined
