@@ -63,6 +63,7 @@ import {
   type WebhookChangeActivity,
   type WebhookCreationActivity,
   type WebhookDeletionActivity,
+  type WebhookMessageActivity,
   type WelcomeScreenActivity,
   type WidgetSettingsActivity,
 } from "../src/activity-log.js"
@@ -977,6 +978,36 @@ function webhookChange(
     kind: "webhook-change",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+    webhookId: "300",
+  }
+}
+
+function webhookMessage(
+  id: string,
+  status: WebhookMessageActivity["status"],
+  kind: WebhookMessageActivity["kind"] = "webhook-message-send",
+): WebhookMessageActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind,
+    messageId: kind === "webhook-message-send" && status === "pending"
+      ? null
+      : "400",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
@@ -3106,6 +3137,83 @@ test("JSONL activity log keeps webhook creation and changes credential-free", as
       "guildId",
       "id",
       "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
+      "timestamp",
+      "verification",
+      "webhookId",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps webhook message lifecycle evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-webhook-token",
+    "private-webhook-url",
+    "private-message-content",
+    "private-content-hash",
+    "private-notification-user",
+    "private-review-reason",
+    "private-operation-key",
+    "private-credential-path",
+  ]
+
+  await store.append(webhookMessage("1", "pending"))
+  await store.append({
+    ...webhookMessage("2", "completed"),
+    content: privateValues[2],
+    contentHash: privateValues[3],
+    credentialPath: privateValues[7],
+    notifyUserIds: [privateValues[4]],
+    operationKey: privateValues[6],
+    reviewReason: privateValues[5],
+    token: privateValues[0],
+    url: privateValues[1],
+  } as WebhookMessageActivity)
+  await store.append(webhookMessage(
+    "3",
+    "completed-with-drift",
+    "webhook-message-deletion",
+  ))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...webhookMessage("4", "completed", "webhook-message-edit"),
+      verification: "drift",
+    })}\n${JSON.stringify({
+      ...webhookMessage("5", "completed"),
+      error: "DiscordApiError.500.unknown",
+    })}\n${JSON.stringify({
+      ...webhookMessage("6", "pending", "webhook-message-edit"),
+      messageId: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["3", "2", "1"])
+  assert.equal(result.skippedLines, 3)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "channelId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "messageId",
       "operationKeyHash",
       "planDigest",
       "schemaVersion",

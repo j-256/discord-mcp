@@ -367,6 +367,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
+    webhookMessageAuditEnabled: false,
+    webhookMessageChannelIds: [],
+    webhookMessageChangesEnabled: false,
+    webhookMessageDeletionsEnabled: false,
+    webhookMessageDeliveryEnabled: false,
   })
 
   for (const environment of [
@@ -556,7 +561,10 @@ test("configuration rejects deletion channels outside a read channel allowlist",
   )
 })
 
-test("configuration and policy isolate webhook audit and administration authority", () => {
+test("configuration and policy isolate webhook audit and administration authority", async (context) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-webhook-root-")))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  await chmod(root, 0o700)
   const config = loadConnectorConfig({
     token: TOKEN,
     capabilities: {
@@ -571,6 +579,9 @@ test("configuration and policy isolate webhook audit and administration authorit
     },
     scopes: {
       webhookChannelIds: [CHANNEL_ID],
+    },
+    storage: {
+      webhookCredentialRoot: root,
     },
   }, { homeDirectory: "/test/home" })
   const enabled = new ScopePolicy(config)
@@ -667,6 +678,23 @@ test("configuration and policy isolate webhook audit and administration authorit
     }, { homeDirectory: "/test/home" }),
     /requires \$\.capabilities\.webhookAudit/,
   )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        webhookAudit: true,
+        webhookCreation: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        webhookChannelIds: [CHANNEL_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /require \$\.storage\.webhookCredentialRoot/,
+  )
   for (const capability of [
     "webhookChanges",
     "webhookCreation",
@@ -705,6 +733,138 @@ test("configuration and policy isolate webhook audit and administration authorit
     }, { homeDirectory: "/test/home" }),
     /expected boolean/,
   )
+})
+
+test("configuration and policy isolate credential-safe webhook messages", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-webhook-messages-")))
+  await chmod(root, 0o700)
+  try {
+    const config = loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        webhookMessageAudit: true,
+        webhookMessageChanges: true,
+        webhookMessageDeletions: true,
+        webhookMessageDelivery: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        webhookMessageChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        webhookCredentialRoot: root,
+      },
+    }, { homeDirectory: "/test/home" })
+    const enabled = new ScopePolicy(config)
+
+    assert.equal(config.webhookCredentialRoot, root)
+    assert.deepEqual([...config.webhookMessageChannelIds], [CHANNEL_ID])
+    assert.equal(enabled.assertChannelWebhookMessageAuditable(channel()), GUILD_ID)
+    assert.equal(enabled.assertChannelWebhookMessageChangeable(channel()), GUILD_ID)
+    assert.equal(enabled.assertChannelWebhookMessageDeletable(channel()), GUILD_ID)
+    assert.equal(enabled.assertChannelWebhookMessageDeliverable(channel()), GUILD_ID)
+    assert.deepEqual(
+      {
+        audit: enabled.describe().webhookMessageAuditEnabled,
+        changes: enabled.describe().webhookMessageChangesEnabled,
+        channels: enabled.describe().webhookMessageChannelIds,
+        deletions: enabled.describe().webhookMessageDeletionsEnabled,
+        delivery: enabled.describe().webhookMessageDeliveryEnabled,
+      },
+      {
+        audit: true,
+        changes: true,
+        channels: [CHANNEL_ID],
+        deletions: true,
+        delivery: true,
+      },
+    )
+    assert.throws(
+      () => enabled.assertChannelWebhookMessageDeliverable(channel({
+        type: DISCORD_CHANNEL_TYPES.forum,
+      })),
+      /does not support webhook message delivery/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        capabilities: {
+          webhookMessageDelivery: true,
+        },
+        readScope: {
+          channelIds: [CHANNEL_ID],
+          guildIds: [GUILD_ID],
+        },
+        scopes: {
+          webhookMessageChannelIds: [CHANNEL_ID],
+        },
+      }, { homeDirectory: "/test/home" }),
+      /require \$\.storage\.webhookCredentialRoot/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        capabilities: {
+          webhookMessageChanges: true,
+        },
+        readScope: {
+          channelIds: [CHANNEL_ID],
+          guildIds: [GUILD_ID],
+        },
+        scopes: {
+          webhookMessageChannelIds: [CHANNEL_ID],
+        },
+        storage: {
+          webhookCredentialRoot: root,
+        },
+      }, { homeDirectory: "/test/home" }),
+      /require \$\.capabilities\.webhookMessageAudit/,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        readScope: {
+          channelIds: [CHANNEL_ID],
+          guildIds: [GUILD_ID],
+        },
+        scopes: {
+          webhookMessageChannelIds: [OTHER_CHANNEL_ID],
+        },
+      }, { homeDirectory: "/test/home" }),
+      /webhookMessageChannelIds must be a subset/,
+    )
+    const loadConfiguredRoot = () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        webhookMessageDelivery: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        webhookMessageChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        webhookCredentialRoot: root,
+      },
+    }, { homeDirectory: "/test/home" })
+    await chmod(root, 0o750)
+    assert.throws(
+      loadConfiguredRoot,
+      /canonical 0700 directories/,
+    )
+    await chmod(root, 0o600)
+    assert.throws(
+      loadConfiguredRoot,
+      /canonical 0700 directories/,
+    )
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
 })
 
 test("configuration and policy isolate integration audit and exact-ID deletion", () => {
@@ -1047,6 +1207,11 @@ test("configuration and policy require an exact administration guild and protect
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
+    webhookMessageAuditEnabled: false,
+    webhookMessageChannelIds: [],
+    webhookMessageChangesEnabled: false,
+    webhookMessageDeletionsEnabled: false,
+    webhookMessageDeliveryEnabled: false,
   })
 })
 
@@ -4567,6 +4732,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
+    webhookMessageAuditEnabled: false,
+    webhookMessageChannelIds: [],
+    webhookMessageChangesEnabled: false,
+    webhookMessageDeletionsEnabled: false,
+    webhookMessageDeliveryEnabled: false,
   })
 })
 

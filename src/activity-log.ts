@@ -819,6 +819,29 @@ export interface WebhookChangeActivity {
   webhookId: string
 }
 
+export type WebhookMessageActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface WebhookMessageActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "webhook-message-deletion" | "webhook-message-edit" | "webhook-message-send"
+  messageId: string | null
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: WebhookMessageActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+  webhookId: string
+}
+
 export type AnnouncementSubscriptionActivityStatus = WebhookDeletionActivityStatus
 
 export interface AnnouncementSubscriptionActivity {
@@ -1409,6 +1432,7 @@ export type ActivityEntry =
   | WebhookChangeActivity
   | WebhookCreationActivity
   | WebhookDeletionActivity
+  | WebhookMessageActivity
   | WidgetSettingsActivity
   | VoiceChannelStatusActivity
 
@@ -3850,6 +3874,90 @@ function parseWebhookChangeActivity(
   }
 }
 
+function parseWebhookMessageActivity(
+  value: unknown,
+): WebhookMessageActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const kind = record.kind
+  const status = record.status
+  const send = kind === "webhook-message-send"
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || ![
+      "webhook-message-deletion",
+      "webhook-message-edit",
+      "webhook-message-send",
+    ].includes(String(kind))
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(status))
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || typeof record.webhookId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.webhookId)
+    || !(record.messageId === null || (
+      typeof record.messageId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.messageId)
+    ))
+    || (!send && typeof record.messageId !== "string")
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+      || (send ? record.messageId !== null : typeof record.messageId !== "string")
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+      || typeof record.messageId !== "string"
+    ))
+    || (status === "completed-with-drift" && (
+      kind !== "webhook-message-deletion"
+      || record.error !== null
+      || record.verification !== "drift"
+      || typeof record.messageId !== "string"
+    ))
+    || (["failed", "uncertain"].includes(String(status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: kind as WebhookMessageActivity["kind"],
+    messageId: record.messageId as string | null,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: status as WebhookMessageActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+    webhookId: record.webhookId,
+  }
+}
+
 function parseAnnouncementSubscriptionActivity(
   value: unknown,
 ): AnnouncementSubscriptionActivity | undefined {
@@ -5517,6 +5625,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseWebhookCreationActivity(value)
     || parseWebhookChangeActivity(value)
     || parseWebhookDeletionActivity(value)
+    || parseWebhookMessageActivity(value)
     || parseIntegrationDeletionActivity(value)
     || parseReactionModerationActivity(value)
     || parseInviteCreationActivity(value)

@@ -24,8 +24,9 @@ import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
-  DISCORD_LIMITS,
   DISCORD_CHANNEL_TYPES,
+  DISCORD_LIMITS,
+  DISCORD_MESSAGE_FLAGS,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
   MCP_DISCOVERY_TOOL_NAME,
@@ -385,6 +386,8 @@ import {
   WebhookCreationOperationConflictError,
   WebhookDeletionExecutionError,
   WebhookDeletionOperationConflictError,
+  WebhookMessageExecutionError,
+  WebhookMessageOperationConflictError,
   WelcomeScreenExecutionError,
   WelcomeScreenOperationConflictError,
   WidgetSettingsExecutionError,
@@ -452,6 +455,10 @@ import type {
   ThreadChangePlan,
   ThreadChangeRequest,
 } from "../src/thread-governance-service.js"
+import type {
+  WebhookMessageDeletionPlan,
+  WebhookMessageDeletionRequest,
+} from "../src/webhook-message-service.js"
 import type {
   ProjectedWebhook,
   WebhookChangePlan,
@@ -564,6 +571,9 @@ const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
 const WEBHOOK_CHANGE_OPERATION_KEY = "webhook-change-attempt-0001"
 const WEBHOOK_CREATION_OPERATION_KEY = "webhook-create-attempt-0001"
+const WEBHOOK_MESSAGE_OPERATION_KEY = "webhook-message-attempt-0001"
+const WEBHOOK_MESSAGE_REVIEW_REASON = "Remove the superseded deployment notice"
+const WEBHOOK_MESSAGE_CONTENT = "Transient webhook deployment notice"
 const WEBHOOK_ID = "370000000000000001"
 const INTEGRATION_OPERATION_KEY = "integration-delete-attempt-0001"
 const INTEGRATION_ID = "375000000000000001"
@@ -1333,6 +1343,69 @@ function webhookDeletionPlan(
     status: "planned",
     target: projectedWebhook(request.channelId),
     warnings: ["One-shot reviewed Incoming webhook deletion"],
+  }
+}
+
+function projectedWebhookMessage(content = WEBHOOK_MESSAGE_CONTENT) {
+  return {
+    attachmentCount: 0,
+    channelId: CHANNEL_ID,
+    componentCount: 0,
+    content,
+    editedAt: null,
+    embedCount: 0,
+    flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+    guildId: GUILD_ID,
+    mentionEveryone: false,
+    mentionedRoleCount: 0,
+    mentionedUserCount: 0,
+    messageId: MESSAGE_ID,
+    pinned: false,
+    pollPresent: false,
+    stickerCount: 0,
+    timestamp: "2026-08-23T00:00:00.000Z",
+    tts: false,
+    type: 0,
+    url: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}/${MESSAGE_ID}`,
+    webhookId: WEBHOOK_ID,
+  }
+}
+
+function webhookMessageDeletionPlan(
+  request: WebhookMessageDeletionRequest,
+  digest = DIGEST,
+): WebhookMessageDeletionPlan {
+  return {
+    action: "delete",
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: CHANNEL_ID,
+      type: 0,
+    },
+    createdAt: "2026-08-23T00:00:00.000Z",
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    operationKeyHash: OPERATION_KEY_HASH,
+    privacy: {
+      credentialPaths: "omitted",
+      credentials: "connector-private",
+      durableRecords: "content-free",
+      executionUrls: "omitted",
+      messageContentPersistence: "none",
+      rawPayloads: "omitted",
+    },
+    reviewReason: request.reviewReason,
+    schemaVersion: 1,
+    status: "planned",
+    target: projectedWebhookMessage(),
+    warnings: ["The message content and local review reason are not persisted"],
+    webhook: {
+      applicationId: APPLICATION_ID,
+      id: request.webhookId,
+      type: "incoming",
+    },
   }
 }
 
@@ -7101,6 +7174,11 @@ function fixturePolicy(): PolicyDescription {
     webhookChangesEnabled: false,
     webhookCreationEnabled: false,
     webhookDeletionsEnabled: false,
+    webhookMessageAuditEnabled: false,
+    webhookMessageChannelIds: [],
+    webhookMessageChangesEnabled: false,
+    webhookMessageDeletionsEnabled: false,
+    webhookMessageDeliveryEnabled: false,
     welcomeScreenAuditEnabled: false,
     welcomeScreenChangesEnabled: false,
     welcomeScreenGuildIds: [],
@@ -7293,6 +7371,8 @@ function serviceFixture(overrides: {
   webhookChangeWriteRequired?: boolean
   webhookCreationError?: Error
   webhookCreationPlanDigest?: string
+  webhookMessageError?: Error
+  webhookMessagePlanDigest?: string
 } = {}) {
   const welcomeScreenCalls = {
     execute: 0,
@@ -7482,6 +7562,11 @@ function serviceFixture(overrides: {
     webhookChangePlan: 0,
     webhookCreationExecute: 0,
     webhookCreationPlan: 0,
+    webhookMessageDeleteExecute: 0,
+    webhookMessageDeletePlan: 0,
+    webhookMessageEdit: 0,
+    webhookMessageGet: 0,
+    webhookMessageSend: 0,
   }
   const reactionModerationPlan = (
     request: Parameters<DiscordToolService["planReactionModeration"]>[0],
@@ -8960,6 +9045,7 @@ function serviceFixture(overrides: {
       return {
         activityId: "activity-webhook-creation",
         channelId: request.channelId,
+        credentialStored: true,
         created,
         guildId: GUILD_ID,
         inventoryMatched: true,
@@ -9004,12 +9090,30 @@ function serviceFixture(overrides: {
       return {
         activityId: "activity-webhook-deletion",
         channelId: request.channelId,
+        credentialCleanup: "removed",
         guildId: GUILD_ID,
         operationKeyHash: OPERATION_KEY_HASH,
         planDigest,
         schemaVersion: 1,
         status: "completed",
         verifiedAbsent: true,
+        webhookId: request.webhookId,
+      }
+    },
+    async executeWebhookMessageDeletion(request, planDigest) {
+      if (overrides.webhookMessageError) throw overrides.webhookMessageError
+      calls.webhookMessageDeleteExecute += 1
+      return {
+        activityId: "activity-webhook-message-deletion",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        messageId: request.messageId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        readbackMatched: true,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}/${request.messageId}`,
         webhookId: request.webhookId,
       }
     },
@@ -9023,6 +9127,26 @@ function serviceFixture(overrides: {
         schemaVersion: 1,
         status: "ok",
         webhook: { ...projectedWebhook(channelId), webhookId },
+      }
+    },
+    async getWebhookMessage(request) {
+      calls.webhookMessageGet += 1
+      return {
+        message: {
+          ...projectedWebhookMessage(overrides.messageContent),
+          messageId: request.messageId,
+          webhookId: request.webhookId,
+        },
+        privacy: {
+          credentialPaths: "omitted",
+          credentials: "connector-private",
+          durableRecords: "content-free",
+          executionUrls: "omitted",
+          messageContentPersistence: "none",
+          rawPayloads: "omitted",
+        },
+        schemaVersion: 1,
+        status: "found",
       }
     },
     async listChannelWebhooks(channelId) {
@@ -9059,6 +9183,13 @@ function serviceFixture(overrides: {
       return webhookDeletionPlan(
         request,
         overrides.webhookDeletionPlanDigest || DIGEST,
+      )
+    },
+    async planWebhookMessageDeletion(request) {
+      calls.webhookMessageDeletePlan += 1
+      return webhookMessageDeletionPlan(
+        request,
+        overrides.webhookMessagePlanDigest || DIGEST,
       )
     },
     async planWebhookChange(request) {
@@ -10811,6 +10942,42 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
       }
     },
+    async sendWebhookMessage(request) {
+      if (overrides.webhookMessageError) throw overrides.webhookMessageError
+      calls.webhookMessageSend += 1
+      return {
+        action: "send",
+        activityId: "activity-webhook-message-send",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        localReplay: false,
+        messageId: MESSAGE_ID,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest: DIGEST,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}/${MESSAGE_ID}`,
+        webhookId: request.webhookId,
+      }
+    },
+    async editWebhookMessage(request) {
+      if (overrides.webhookMessageError) throw overrides.webhookMessageError
+      calls.webhookMessageEdit += 1
+      return {
+        action: "edit",
+        activityId: "activity-webhook-message-edit",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        localReplay: false,
+        messageId: request.messageId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest: DIGEST,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}/${request.messageId}`,
+        webhookId: request.webhookId,
+      }
+    },
   }
   return {
     calls,
@@ -11118,6 +11285,11 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_native_interaction_command",
       "plan_guild_template_change",
       "execute_guild_template_change",
+      "get_webhook_message",
+      "send_webhook_message",
+      "edit_webhook_message",
+      "plan_webhook_message_deletion",
+      "execute_webhook_message_deletion",
       "plan_webhook_creation",
       "execute_webhook_creation",
       "plan_webhook_change",
@@ -11246,6 +11418,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const webhookChange = result.tools.find((tool) => tool.name === "execute_webhook_change")
   const webhookCreation = result.tools.find((tool) => tool.name === "execute_webhook_creation")
   const webhookDeletion = result.tools.find((tool) => tool.name === "execute_webhook_deletion")
+  const webhookMessageEdit = result.tools.find((tool) => (
+    tool.name === "edit_webhook_message"
+  ))
   const integrationDeletion = result.tools.find((tool) => (
     tool.name === "execute_guild_integration_deletion"
   ))
@@ -11335,6 +11510,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     pollEnd,
     webhookChange,
     webhookDeletion,
+    webhookMessageEdit,
     integrationDeletion,
     inviteDeletion,
     onboarding,
@@ -11416,6 +11592,24 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(
+    listedTool(result.tools, "send_webhook_message").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "execute_webhook_message_deletion").annotations,
+    {
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+  )
   assert.deepEqual(inviteCreation?.annotations, {
     destructiveHint: false,
     idempotentHint: false,
@@ -11489,6 +11683,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_channel_webhooks",
     "list_guild_integrations",
     "get_channel_webhook",
+    "get_webhook_message",
     "list_guild_invites",
     "get_guild_invite",
     "list_guild_templates",
@@ -11530,6 +11725,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_webhook_change",
     "plan_webhook_creation",
     "plan_webhook_deletion",
+    "plan_webhook_message_deletion",
     "plan_guild_integration_deletion",
     "plan_invite_deletion",
     "plan_guild_template_change",
@@ -12665,6 +12861,30 @@ test("progressive discovery enables the complete reviewed webhook-deletion workf
   )
 })
 
+test("progressive discovery enables the complete reviewed webhook-message deletion workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_webhook_message_deletion" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_webhook_message_deletion",
+    "plan_webhook_message_deletion",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_webhook_message_deletion",
+      "execute_webhook_message_deletion",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed webhook-creation workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
@@ -13314,6 +13534,11 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     webhookChangePlan: 0,
     webhookCreationExecute: 0,
     webhookCreationPlan: 0,
+    webhookMessageDeleteExecute: 0,
+    webhookMessageDeletePlan: 0,
+    webhookMessageEdit: 0,
+    webhookMessageGet: 0,
+    webhookMessageSend: 0,
   })
 })
 
@@ -16644,6 +16869,304 @@ test("MCP webhook reads expose only bounded credential-redacted evidence", async
   assert.equal(calls.webhookDeletionGet, 1)
 })
 
+test("MCP webhook message reads and writes keep credentials private and reject ambient authority", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const lookup = await client.callTool({
+    arguments: { messageId: MESSAGE_ID, webhookId: WEBHOOK_ID },
+    name: "get_webhook_message",
+  })
+  const sent = await client.callTool({
+    arguments: {
+      content: WEBHOOK_MESSAGE_CONTENT,
+      notifyUserIds: [USER_ID],
+      operationKey: WEBHOOK_MESSAGE_OPERATION_KEY,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "send_webhook_message",
+  })
+  const edited = await client.callTool({
+    arguments: {
+      content: "Replacement webhook notice",
+      messageId: MESSAGE_ID,
+      notifyUserIds: [],
+      operationKey: "webhook-message-edit-attempt-0001",
+      webhookId: WEBHOOK_ID,
+    },
+    name: "edit_webhook_message",
+  })
+  const credentialInput = await client.callTool({
+    arguments: {
+      content: WEBHOOK_MESSAGE_CONTENT,
+      notifyUserIds: [],
+      operationKey: "webhook-message-secret-attempt-0001",
+      token: "private-webhook-token",
+      webhookId: WEBHOOK_ID,
+    },
+    name: "send_webhook_message",
+  })
+  const executionUrlInput = await client.callTool({
+    arguments: {
+      executionUrl: `https://discord.com/api/webhooks/${WEBHOOK_ID}/private`,
+      messageId: MESSAGE_ID,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "get_webhook_message",
+  })
+
+  const lookupContent = structuredContent(lookup)
+  const message = lookupContent.message as Record<string, unknown>
+  assert.equal(message.content, WEBHOOK_MESSAGE_CONTENT)
+  assert.equal(message.messageId, MESSAGE_ID)
+  assert.equal(message.webhookId, WEBHOOK_ID)
+  assert.deepEqual(Object.keys(message).sort(), [
+    "attachmentCount",
+    "channelId",
+    "componentCount",
+    "content",
+    "editedAt",
+    "embedCount",
+    "flags",
+    "guildId",
+    "mentionEveryone",
+    "mentionedRoleCount",
+    "mentionedUserCount",
+    "messageId",
+    "pinned",
+    "pollPresent",
+    "stickerCount",
+    "timestamp",
+    "tts",
+    "type",
+    "url",
+    "webhookId",
+  ])
+  assert.equal(
+    (lookupContent.privacy as Record<string, unknown>).credentials,
+    "connector-private",
+  )
+  assert.equal(structuredContent(sent).status, "completed")
+  assert.equal(structuredContent(edited).status, "completed")
+  assert.doesNotMatch(JSON.stringify(sent), new RegExp(WEBHOOK_MESSAGE_CONTENT))
+  assert.doesNotMatch(JSON.stringify(edited), /Replacement webhook notice/)
+  assert.equal(credentialInput.isError, true)
+  assert.equal(executionUrlInput.isError, true)
+  assert.equal(calls.webhookMessageGet, 1)
+  assert.equal(calls.webhookMessageSend, 1)
+  assert.equal(calls.webhookMessageEdit, 1)
+})
+
+test("MCP webhook message deletion plans bind transient content without accepting credentials", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const request = {
+    messageId: MESSAGE_ID,
+    operationKey: WEBHOOK_MESSAGE_OPERATION_KEY,
+    reviewReason: WEBHOOK_MESSAGE_REVIEW_REASON,
+    webhookId: WEBHOOK_ID,
+  }
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_webhook_message_deletion",
+  })
+  const credentialInput = await client.callTool({
+    arguments: { ...request, token: "private-webhook-token" },
+    name: "plan_webhook_message_deletion",
+  })
+  const shortKey = await client.callTool({
+    arguments: { ...request, operationKey: "short" },
+    name: "plan_webhook_message_deletion",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal((content.target as Record<string, unknown>).content, WEBHOOK_MESSAGE_CONTENT)
+  assert.equal((content.target as Record<string, unknown>).messageId, MESSAGE_ID)
+  assert.equal(content.reviewReason, WEBHOOK_MESSAGE_REVIEW_REASON)
+  assert.equal(
+    (content.privacy as Record<string, unknown>).messageContentPersistence,
+    "none",
+  )
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(WEBHOOK_MESSAGE_OPERATION_KEY))
+  assert.equal(credentialInput.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.equal(calls.webhookMessageDeletePlan, 1)
+})
+
+test("MCP webhook message deletion binds signed approval to exact transient evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      messageId: MESSAGE_ID,
+      operationKey: WEBHOOK_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+      reviewReason: WEBHOOK_MESSAGE_REVIEW_REASON,
+      webhookId: WEBHOOK_ID,
+    },
+    name: "execute_webhook_message_deletion",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.webhookMessageDeletePlan, 1)
+  assert.equal(calls.webhookMessageDeleteExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    WEBHOOK_ID,
+    MESSAGE_ID,
+    OPERATION_KEY_HASH,
+    DIGEST,
+    WEBHOOK_MESSAGE_CONTENT,
+    WEBHOOK_MESSAGE_REVIEW_REASON,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /connector-private/)
+  assert.match(confirmationMessage, /not be persisted/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(WEBHOOK_MESSAGE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(WEBHOOK_MESSAGE_OPERATION_KEY),
+  )
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(WEBHOOK_MESSAGE_CONTENT))
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(WEBHOOK_MESSAGE_REVIEW_REASON))
+})
+
+test("MCP webhook message deletion signed state rejects changed intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    messageId: MESSAGE_ID,
+    operationKey: WEBHOOK_MESSAGE_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: WEBHOOK_MESSAGE_REVIEW_REASON,
+    webhookId: WEBHOOK_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_webhook_message_deletion",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  const changed = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        reviewReason: "A different deletion rationale",
+      },
+      inputResponses: {
+        confirm_webhook_message_deletion: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_webhook_message_deletion",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changed).status, "confirmation-invalid")
+  assert.equal(fixture.calls.webhookMessageDeleteExecute, 0)
+})
+
+test("MCP webhook message deletion stops on refusal, drift, uncertainty, and key reuse", async (context) => {
+  const argumentsValue = {
+    messageId: MESSAGE_ID,
+    operationKey: WEBHOOK_MESSAGE_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: WEBHOOK_MESSAGE_REVIEW_REASON,
+    webhookId: WEBHOOK_ID,
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_webhook_message_deletion",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.webhookMessageDeleteExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { webhookMessagePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_webhook_message_deletion",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.webhookMessageDeleteExecute, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      webhookMessageError: new WebhookMessageExecutionError(
+        "Discord webhook message deletion outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_webhook_message_deletion",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-webhook-message-deletion",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    planDigest: DIGEST,
+    status: "completed",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      webhookMessageError: new WebhookMessageOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_webhook_message_deletion",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(WEBHOOK_MESSAGE_OPERATION_KEY),
+  )
+})
+
 test("MCP webhook administration plans are strict and credential-free", async (context) => {
   const { calls, client } = await connectedFixture(context)
   const creation = {
@@ -16727,6 +17250,11 @@ test("MCP webhook creation binds signed approval to complete credential-free evi
   })
 
   assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).credentialStored, true)
+  assert.match(
+    (result.content?.[0] as { text?: string } | undefined)?.text || "",
+    /credential stored privately/,
+  )
   assert.equal(calls.webhookCreationPlan, 1)
   assert.equal(calls.webhookCreationExecute, 1)
   for (const value of [
@@ -17070,6 +17598,10 @@ test("MCP webhook deletion binds signed approval to exact redacted evidence", as
   })
 
   assert.equal(structuredContent(result).status, "completed")
+  assert.match(
+    (result.content?.[0] as { text?: string } | undefined)?.text || "",
+    /credential cleanup removed/,
+  )
   assert.equal(calls.webhookDeletionPlan, 1)
   assert.equal(calls.webhookDeletionExecute, 1)
   for (const value of [

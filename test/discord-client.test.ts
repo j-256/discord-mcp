@@ -5323,6 +5323,7 @@ test("Discord client rejects invalid webhook inventory without exposing response
 test("Discord client creates an Incoming webhook while projecting its credential out", async () => {
   const privateToken = "incoming-webhook-credential-canary"
   const privateUrl = `https://discord.test/api/webhooks/300/${privateToken}`
+  const credentials: Array<{ token: string; webhookId: string }> = []
   const requests: Array<{
     authorization: string | null
     body: unknown
@@ -5361,6 +5362,9 @@ test("Discord client creates an Incoming webhook while projecting its credential
   const created = await client.createWebhook(
     "200",
     { name: "Release relay" },
+    async (webhook, token) => {
+      credentials.push({ token, webhookId: webhook.id })
+    },
     "Reviewed creation / case 42",
   )
 
@@ -5383,6 +5387,7 @@ test("Discord client creates an Incoming webhook while projecting its credential
     url: `${API_BASE_URL}/channels/200/webhooks`,
   }])
   assert.equal(JSON.stringify(created).includes(privateToken), false)
+  assert.deepEqual(credentials, [{ token: privateToken, webhookId: "300" }])
   assert.equal(JSON.stringify(created).includes(privateUrl), false)
   assert.deepEqual(records, [{
     completions: [{ outcome: "ok" }],
@@ -5390,6 +5395,154 @@ test("Discord client creates an Incoming webhook while projecting its credential
     retries: 0,
     runs: 1,
   }])
+})
+
+test("Discord client uses credential-redacted exact webhook message routes", async () => {
+  const privateToken = "private/webhook+token.canary"
+  const requests: Array<{
+    authorization: string | null
+    body: unknown
+    method: string | undefined
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  let requestIndex = 0
+  const webhookMessage = (content: string) => ({
+    attachments: [],
+    author: { bot: true, id: "300", username: "Release relay" },
+    channel_id: "200",
+    components: [],
+    content,
+    embeds: [],
+    flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+    guild_id: "100",
+    id: "500",
+    mention_everyone: false,
+    mention_roles: [],
+    mentions: [],
+    pinned: false,
+    sticker_items: [],
+    timestamp: "2026-08-25T00:00:00.000Z",
+    tts: false,
+    type: 0,
+    webhook_id: "300",
+  })
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("Authorization"),
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: init?.method,
+        url: String(input),
+      })
+      requestIndex += 1
+      if (requestIndex === 1) {
+        return jsonResponse({
+          application_id: null,
+          channel_id: "200",
+          guild_id: "100",
+          id: "300",
+          name: "Release relay",
+          type: 1,
+        })
+      }
+      if (requestIndex === 2 || requestIndex === 3) {
+        return jsonResponse(webhookMessage("Deployment complete"))
+      }
+      if (requestIndex === 4) {
+        return jsonResponse(webhookMessage("Deployment corrected"))
+      }
+      return new Response(null, { status: 204 })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const projected = await client.getWebhookWithToken("300", privateToken)
+  const created = await client.executeWebhookMessage("300", privateToken, {
+    allowedMentions: { parse: [], replied_user: false },
+    content: "Deployment complete",
+  })
+  const read = await client.getWebhookMessage("300", privateToken, "500")
+  const edited = await client.modifyWebhookMessage("300", privateToken, "500", {
+    allowedMentions: { replied_user: false, users: ["700"] },
+    content: "Deployment corrected",
+  })
+  await client.deleteWebhookMessage("300", privateToken, "500")
+
+  assert.equal(projected.id, "300")
+  assert.equal(created.content, "Deployment complete")
+  assert.equal(read.webhook_id, "300")
+  assert.equal(edited.content, "Deployment corrected")
+  assert.deepEqual(requests.map((request) => request.authorization), [
+    null,
+    null,
+    null,
+    null,
+    null,
+  ])
+  const encodedToken = encodeURIComponent(privateToken)
+  assert.deepEqual(requests.map((request) => request.url), [
+    `${API_BASE_URL}/webhooks/300/${encodedToken}`,
+    `${API_BASE_URL}/webhooks/300/${encodedToken}?wait=true`,
+    `${API_BASE_URL}/webhooks/300/${encodedToken}/messages/500`,
+    `${API_BASE_URL}/webhooks/300/${encodedToken}/messages/500`,
+    `${API_BASE_URL}/webhooks/300/${encodedToken}/messages/500`,
+  ])
+  assert.deepEqual(requests[1]?.body, {
+    allowed_mentions: { parse: [], replied_user: false },
+    content: "Deployment complete",
+    flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+  })
+  assert.deepEqual(requests[3]?.body, {
+    allowed_mentions: { replied_user: false, users: ["700"] },
+    content: "Deployment corrected",
+    flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+  })
+  assert.deepEqual(records.map((record) => record.operation), [
+    "get_webhook",
+    "execute_webhook",
+    "get_webhook_message",
+    "modify_webhook_message",
+    "delete_webhook_message",
+  ])
+  assert.equal(JSON.stringify(records).includes(privateToken), false)
+})
+
+test("Discord client never retries or reveals a webhook credential on delivery failure", async () => {
+  const privateToken = "webhook-credential-failure-canary"
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        message: `failure ${privateToken}`,
+        retry_after: 0.001,
+      }, 429)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.executeWebhookMessage("300", privateToken, {
+      allowedMentions: { parse: [], replied_user: false },
+      content: "Deployment complete",
+    }),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && !error.message.includes(privateToken)
+      && !error.route.includes(privateToken)
+    ),
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
 })
 
 test("Discord client follows one announcement channel with an exact non-retried request", async () => {
@@ -5589,7 +5742,7 @@ test("Discord client webhook mutations validate locally and never retry", async 
   })
 
   await assert.rejects(
-    () => client.createWebhook("200", { name: "Release relay" }, "Reviewed"),
+    () => client.createWebhook("200", { name: "Release relay" }, async () => {}, "Reviewed"),
     (error: unknown) => (
       error instanceof DiscordApiError
       && error.status === 429
@@ -5604,7 +5757,7 @@ test("Discord client webhook mutations validate locally and never retry", async 
   assert.equal(sleeps, 0)
 
   await assert.rejects(
-    () => client.createWebhook("200", { name: " discord relay" }, "Reviewed"),
+    () => client.createWebhook("200", { name: " discord relay" }, async () => {}, "Reviewed"),
     /webhook name is invalid/,
   )
   await assert.rejects(
@@ -5619,7 +5772,7 @@ test("Discord client webhook mutations validate locally and never retry", async 
     () => client.createWebhook("200", {
       name: "Release relay",
       token: "credential-must-be-rejected",
-    } as never, "Reviewed"),
+    } as never, async () => {}, "Reviewed"),
     /exact object/,
   )
   await assert.rejects(
@@ -5630,7 +5783,7 @@ test("Discord client webhook mutations validate locally and never retry", async 
     /exact object/,
   )
   await assert.rejects(
-    () => client.createWebhook("200", null as never, "Reviewed"),
+    () => client.createWebhook("200", null as never, async () => {}, "Reviewed"),
     /exact object/,
   )
   assert.equal(requests, 2)

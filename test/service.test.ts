@@ -371,6 +371,7 @@ function serviceFixture(overrides: {
   threadCreationOptions?: ConnectorServiceOptions["threadCreationOptions"]
   threadGovernanceOptions?: ConnectorServiceOptions["threadGovernanceOptions"]
   webhookOptions?: ConnectorServiceOptions["webhookOptions"]
+  webhookMessageOptions?: ConnectorServiceOptions["webhookMessageOptions"]
   useDefaultWriteCoordinator?: boolean
   writeCoordinator?: WriteCoordinator
 } = {}) {
@@ -565,6 +566,9 @@ function serviceFixture(overrides: {
       throw new Error("Unexpected reaction moderation")
     },
     async deleteWebhook() {},
+    async deleteWebhookMessage() {
+      throw new Error("Unexpected webhook message deletion")
+    },
     async editChannelPermissionOverwrite() {},
     async editComponentMessage() {
       calls.editComponentMessage += 1
@@ -577,11 +581,20 @@ function serviceFixture(overrides: {
         content: input.content,
       })
     },
+    async executeWebhookMessage() {
+      throw new Error("Unexpected webhook message delivery")
+    },
     async endPoll() {
       throw new Error("Unexpected poll ending")
     },
     async getChannel() {
       return overrides.channel || channel()
+    },
+    async getWebhookMessage() {
+      throw new Error("Unexpected webhook message lookup")
+    },
+    async getWebhookWithToken() {
+      throw new Error("Unexpected webhook credential lookup")
     },
     async getGuildForumTags() {
       throw new Error("Unexpected forum-tag lookup")
@@ -807,6 +820,9 @@ function serviceFixture(overrides: {
     },
     async modifyWebhook() {
       throw new Error("Unexpected webhook modification")
+    },
+    async modifyWebhookMessage() {
+      throw new Error("Unexpected webhook message modification")
     },
     async listJoinedPrivateArchivedThreads() {
       return { has_more: false, threads: [] }
@@ -1106,6 +1122,9 @@ function serviceFixture(overrides: {
       ...(overrides.webhookOptions
         ? { webhookOptions: overrides.webhookOptions }
         : {}),
+      ...(overrides.webhookMessageOptions
+        ? { webhookMessageOptions: overrides.webhookMessageOptions }
+        : {}),
     }),
   }
 }
@@ -1261,6 +1280,39 @@ test("service rejects integration and webhook scope before identity access", asy
       name: "renamed-hook",
     }),
     /webhook audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.getWebhookMessage({
+      messageId: MESSAGE_ID,
+      webhookId: WEBHOOK_ID,
+    }),
+    /webhook message audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.sendWebhookMessage({
+      content: "reviewed",
+      operationKey: "webhook-message-send-preflight-0001",
+      webhookId: WEBHOOK_ID,
+    }),
+    /webhook message delivery is disabled/,
+  )
+  await assert.rejects(
+    () => service.editWebhookMessage({
+      content: "reviewed",
+      messageId: MESSAGE_ID,
+      operationKey: "webhook-message-edit-preflight-0001",
+      webhookId: WEBHOOK_ID,
+    }),
+    /webhook message audit is disabled/,
+  )
+  await assert.rejects(
+    () => service.planWebhookMessageDeletion({
+      messageId: MESSAGE_ID,
+      operationKey: "webhook-message-delete-preflight-0001",
+      reviewReason: "reviewed",
+      webhookId: WEBHOOK_ID,
+    }),
+    /webhook message audit is disabled/,
   )
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
@@ -1449,8 +1501,11 @@ test("service exposes privacy-safe reaction reads and coordinates exact-message 
   assert.equal(writeCoordinator.intents.length, 1)
 })
 
-test("service coordinates every receipt-backed single-step workflow by shared targets", async () => {
+test("service coordinates every receipt-backed single-step workflow by shared targets", async (context) => {
   const writeCoordinator = new CapturingWriteCoordinator()
+  const webhookCredentialTemporary = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-coordination-"))
+  context.after(() => rm(webhookCredentialTemporary, { force: true, recursive: true }))
+  const webhookCredentialRoot = await realpath(webhookCredentialTemporary)
   const coordinationBotRoleId = "700000000000000003"
   const orderedChannels = [
     channel({ id: CHANNEL_ID, name: "target", position: 0 }),
@@ -1611,6 +1666,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         webhookChanges: true,
         webhookCreation: true,
         webhookDeletions: true,
+        webhookMessageAudit: true,
+        webhookMessageChanges: true,
+        webhookMessageDeletions: true,
+        webhookMessageDelivery: true,
       },
       gateway: {
         enabled: true,
@@ -1635,9 +1694,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         messageForwardTargetChannelIds: [OTHER_CHANNEL_ID],
         deleteChannelIds: [CHANNEL_ID],
         webhookChannelIds: [CHANNEL_ID],
+        webhookMessageChannelIds: [CHANNEL_ID],
       },
       storage: {
         inviteCapabilityRoots: [process.cwd()],
+        webhookCredentialRoot,
       },
     },
     gateway,
@@ -2012,6 +2073,23 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     webhookChangeRequest,
     webhookChangePlan.digest,
   ))
+  await captured(() => service.sendWebhookMessage({
+    content: "reviewed webhook message",
+    operationKey,
+    webhookId: WEBHOOK_ID,
+  }))
+  await captured(() => service.editWebhookMessage({
+    content: "reviewed webhook message replacement",
+    messageId: MESSAGE_ID,
+    operationKey,
+    webhookId: WEBHOOK_ID,
+  }))
+  await captured(() => service.executeWebhookMessageDeletion({
+    messageId: MESSAGE_ID,
+    operationKey,
+    reviewReason: "reviewed",
+    webhookId: WEBHOOK_ID,
+  }, digest))
   await captured(() => service.executeWidgetSettingsChange({
     auditReason: "reviewed",
     channelId: null,
@@ -2021,7 +2099,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 43)
+  assert.equal(byKind.size, 46)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -2201,6 +2279,15 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         { id: WEBHOOK_ID, kind: "webhook" },
         { collection: "webhooks", guildId: GUILD_ID, kind: "guild-collection" },
       ],
+      "webhook-message-deletion": [
+        { id: MESSAGE_ID, kind: "message" },
+        { id: WEBHOOK_ID, kind: "webhook" },
+      ],
+      "webhook-message-edit": [
+        { id: MESSAGE_ID, kind: "message" },
+        { id: WEBHOOK_ID, kind: "webhook" },
+      ],
+      "webhook-message-send": [{ id: WEBHOOK_ID, kind: "webhook" }],
       "welcome-screen-change": [{
         collection: "welcome-screen",
         guildId: GUILD_ID,
@@ -2238,7 +2325,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
               : entry.kind === "channel-ordering"
                 ? channelOrderPlan.digest
                 : digest
-    assert.equal(entry.planDigest, expectedDigest)
+    if (["webhook-message-edit", "webhook-message-send"].includes(entry.kind)) {
+      assert.match(entry.planDigest, /^hmac-sha256:[a-f0-9]{64}$/)
+    } else {
+      assert.equal(entry.planDigest, expectedDigest)
+    }
   }
   await assert.rejects(
     () => service.executeChannelCreation({
@@ -2250,7 +2341,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 43)
+  assert.equal(writeCoordinator.intents.length, 46)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -2628,6 +2719,185 @@ test("service verifies identity through credential-safe webhook administration",
   assert.equal(calls.activityEntries.length, 2)
   assert.equal(operationStore.receipt?.kind, "webhook-deletion")
   assert.equal(operationStore.receipt?.resourceId, WEBHOOK_ID)
+})
+
+test("service keeps webhook credentials private across exact message lifecycle operations", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-message-service-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const credentialRoot = await realpath(temporary)
+  const credential = "private-webhook-token.canary"
+  await writeFile(join(credentialRoot, `${WEBHOOK_ID}.token`), `${credential}\n`, {
+    mode: 0o600,
+  })
+  const operationStore = new KeyedMemoryOperationStore()
+  let content = "Initial webhook notice"
+  let deleted = false
+  let deleteCalls = 0
+  let deliveryCalls = 0
+  let editCalls = 0
+  let messageReads = 0
+  let mentionedUserIds: readonly string[] = []
+  let webhookReads = 0
+  const webhookMessage = () => message({
+    author: {
+      bot: true,
+      id: WEBHOOK_ID,
+      username: "private-webhook-name",
+    },
+    content,
+    flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+    mentions: mentionedUserIds.map((id) => ({ id, username: "notified-user" })),
+    webhook_id: WEBHOOK_ID,
+  })
+  const { calls, service } = serviceFixture({
+    client: {
+      async deleteWebhookMessage(webhookId, token, messageId) {
+        assert.equal(webhookId, WEBHOOK_ID)
+        assert.equal(token, credential)
+        assert.equal(messageId, MESSAGE_ID)
+        deleteCalls += 1
+        deleted = true
+      },
+      async executeWebhookMessage(webhookId, token, input) {
+        assert.equal(webhookId, WEBHOOK_ID)
+        assert.equal(token, credential)
+        deliveryCalls += 1
+        content = input.content
+        mentionedUserIds = "users" in input.allowedMentions
+          ? input.allowedMentions.users
+          : []
+        deleted = false
+        return webhookMessage()
+      },
+      async getWebhookMessage(webhookId, token, messageId) {
+        assert.equal(webhookId, WEBHOOK_ID)
+        assert.equal(token, credential)
+        assert.equal(messageId, MESSAGE_ID)
+        messageReads += 1
+        if (deleted) {
+          throw new DiscordApiError({
+            message: "Discord webhook message not found",
+            method: "GET",
+            route: "/webhooks/:webhookId/:token/messages/:messageId",
+            status: 404,
+          })
+        }
+        return webhookMessage()
+      },
+      async getWebhookWithToken(webhookId, token) {
+        assert.equal(webhookId, WEBHOOK_ID)
+        assert.equal(token, credential)
+        webhookReads += 1
+        return {
+          applicationId: APPLICATION_ID,
+          channelId: CHANNEL_ID,
+          creatorUserId: MEMBER_USER_ID,
+          guildId: GUILD_ID,
+          id: WEBHOOK_ID,
+          name: "private-webhook-name",
+          sourceChannelId: null,
+          sourceGuildId: null,
+          type: 1,
+        }
+      },
+      async modifyWebhookMessage(webhookId, token, messageId, input) {
+        assert.equal(webhookId, WEBHOOK_ID)
+        assert.equal(token, credential)
+        assert.equal(messageId, MESSAGE_ID)
+        editCalls += 1
+        content = input.content
+        mentionedUserIds = "users" in input.allowedMentions
+          ? input.allowedMentions.users
+          : []
+        return webhookMessage()
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        webhookMessageAudit: true,
+        webhookMessageChanges: true,
+        webhookMessageDeletions: true,
+        webhookMessageDelivery: true,
+      },
+      limits: {
+        interactionMinWriteIntervalMs: 0,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        mentionUserIds: [MEMBER_USER_ID],
+        webhookMessageChannelIds: [CHANNEL_ID],
+      },
+      storage: {
+        webhookCredentialRoot: credentialRoot,
+      },
+    },
+    operationStore,
+    webhookMessageOptions: {
+      clock: () => new Date("2026-08-23T00:00:00.000Z"),
+      intentKey: new Uint8Array(32).fill(23),
+      planKey: new Uint8Array(32).fill(24),
+      randomId: (() => {
+        let index = 0
+        return () => `activity-webhook-message-${++index}`
+      })(),
+    },
+  })
+
+  const lookup = await service.getWebhookMessage({
+    messageId: MESSAGE_ID,
+    webhookId: WEBHOOK_ID,
+  })
+  const sent = await service.sendWebhookMessage({
+    content: `Delivered webhook notice for <@${MEMBER_USER_ID}>`,
+    notifyUserIds: [MEMBER_USER_ID],
+    operationKey: "webhook-message-send-service-0001",
+    webhookId: WEBHOOK_ID,
+  })
+  const edited = await service.editWebhookMessage({
+    content: "Edited webhook notice",
+    messageId: MESSAGE_ID,
+    operationKey: "webhook-message-edit-service-0001",
+    webhookId: WEBHOOK_ID,
+  })
+  const deletionRequest = {
+    messageId: MESSAGE_ID,
+    operationKey: "webhook-message-delete-service-0001",
+    reviewReason: "Remove the superseded webhook notice",
+    webhookId: WEBHOOK_ID,
+  }
+  const plan = await service.planWebhookMessageDeletion(deletionRequest)
+  const result = await service.executeWebhookMessageDeletion(
+    deletionRequest,
+    plan.digest,
+  )
+
+  assert.equal(lookup.message.content, "Initial webhook notice")
+  assert.equal(sent.status, "completed")
+  assert.equal(edited.status, "completed")
+  assert.equal(plan.target.content, "Edited webhook notice")
+  assert.equal(plan.reviewReason, deletionRequest.reviewReason)
+  assert.equal(result.status, "completed")
+  assert.equal(result.readbackMatched, true)
+  assert.equal(deliveryCalls, 1)
+  assert.equal(editCalls, 1)
+  assert.equal(deleteCalls, 1)
+  assert.equal(messageReads, 7)
+  assert.equal(webhookReads, 7)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 6)
+  const durableRecords = JSON.stringify({
+    activity: calls.activityEntries,
+    receipts: [...operationStore.receipts.values()],
+  })
+  assert.doesNotMatch(durableRecords, /Initial webhook notice/)
+  assert.doesNotMatch(durableRecords, /Delivered webhook notice/)
+  assert.doesNotMatch(durableRecords, /Edited webhook notice/)
+  assert.doesNotMatch(durableRecords, /Remove the superseded webhook notice/)
+  assert.doesNotMatch(durableRecords, new RegExp(credential.replace(/[.]/g, "\\.")))
 })
 
 test("service pins identity through privacy-safe integration audit and deletion", async () => {

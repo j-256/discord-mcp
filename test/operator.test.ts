@@ -368,6 +368,11 @@ function status(
       webhookChangesEnabled: false,
       webhookCreationEnabled: false,
       webhookDeletionsEnabled: false,
+      webhookMessageAuditEnabled: false,
+      webhookMessageChannelIds: [],
+      webhookMessageChangesEnabled: false,
+      webhookMessageDeletionsEnabled: false,
+      webhookMessageDeliveryEnabled: false,
       welcomeScreenAuditEnabled: false,
       welcomeScreenChangesEnabled: false,
       welcomeScreenGuildIds: [],
@@ -443,6 +448,7 @@ function toolService(): DiscordToolService {
     executeWebhookChange: unexpected,
     executeWebhookCreation: unexpected,
     executeWebhookDeletion: unexpected,
+    executeWebhookMessageDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planAnnouncementSubscription: unexpected,
     planMessageForward: unexpected,
@@ -461,6 +467,7 @@ function toolService(): DiscordToolService {
     getScheduledEvent: unexpected,
     getStageInstance: unexpected,
     getChannelWebhook: unexpected,
+    getWebhookMessage: unexpected,
     getPoll: unexpected,
     getGuildInvite: unexpected,
     getGuildOnboarding: unexpected,
@@ -484,6 +491,7 @@ function toolService(): DiscordToolService {
     planWebhookChange: unexpected,
     planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
+    planWebhookMessageDeletion: unexpected,
     previewComponentLayout() {
       throw new Error("Unexpected smoke service call")
     },
@@ -593,6 +601,8 @@ function toolService(): DiscordToolService {
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
     sendMessage: unexpected,
+    sendWebhookMessage: unexpected,
+    editWebhookMessage: unexpected,
   }
 }
 
@@ -1955,16 +1965,27 @@ test("doctor and setup explain native poll privacy and reviewed write scope", as
   assertDefaultSecretForwarding(setup)
 })
 
-test("doctor and setup explain credential-safe reviewed webhook administration", async () => {
+test("doctor and setup explain credential-safe webhook administration and messages", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-operator-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const webhookCredentialRoot = await realpath(temporary)
   const enabledPolicy = fixturePolicy({
     capabilities: {
       webhookAudit: true,
       webhookChanges: true,
       webhookCreation: true,
       webhookDeletions: true,
+      webhookMessageAudit: true,
+      webhookMessageChanges: true,
+      webhookMessageDeletions: true,
+      webhookMessageDelivery: true,
     },
     scopes: {
       webhookChannelIds: [CHANNEL_ID],
+      webhookMessageChannelIds: [CHANNEL_ID],
+    },
+    storage: {
+      webhookCredentialRoot,
     },
   })
   const enabled = await diagnoseConnector({
@@ -1977,6 +1998,13 @@ test("doctor and setup explain credential-safe reviewed webhook administration",
       webhookChanges: true,
       webhookCreation: true,
       webhookDeletions: true,
+      webhookMessageAudit: true,
+      webhookMessageChanges: true,
+      webhookMessageDeletions: true,
+      webhookMessageDelivery: true,
+    },
+    storage: {
+      webhookCredentialRoot,
     },
   })
   const warning = await diagnoseConnector({
@@ -2017,10 +2045,25 @@ test("doctor and setup explain credential-safe reviewed webhook administration",
   assert.match(deletion?.summary || "", /one-shot execution and absence readback/)
   assert.equal(creation?.status, "pass")
   assert.match(creation?.summary || "", /Incoming-webhook creation/)
-  assert.match(creation?.summary || "", /credential projection/)
+  assert.match(creation?.summary || "", /private credential custody/)
   assert.equal(change?.status, "pass")
   assert.match(change?.summary || "", /rename and same-guild move/)
   assert.match(change?.summary || "", /complete inventory readback/)
+  const messageChecks = [
+    [DOCTOR_CHECK_IDS.webhookMessageAuditPolicy, /no content persistence/],
+    [DOCTOR_CHECK_IDS.webhookMessageDeliveryPolicy, /mention containment/],
+    [DOCTOR_CHECK_IDS.webhookMessageChangePolicy, /exact readback/],
+    [DOCTOR_CHECK_IDS.webhookMessageDeletionPolicy, /signed approval/],
+  ] as const
+  for (const [id, summary] of messageChecks) {
+    const entry = enabled.checks.find((check) => check.id === id)
+    assert.equal(entry?.status, "pass")
+    assert.match(entry?.summary || "", summary)
+    assert.equal(
+      warning.checks.find((check) => check.id === id)?.status,
+      "warn",
+    )
+  }
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.webhookAuditPolicy,
@@ -2049,6 +2092,10 @@ test("doctor and setup explain credential-safe reviewed webhook administration",
   assert.match(setup.warnings.join("\n"), /webhook-change toggle/)
   assert.match(setup.warnings.join("\n"), /webhook-creation toggle/)
   assert.match(setup.warnings.join("\n"), /webhook-deletion toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-message-audit toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-message-delivery toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-message-change toggle/)
+  assert.match(setup.warnings.join("\n"), /webhook-message-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /webhooks toolset/)
   assertDefaultSecretForwarding(setup)
 })
@@ -5218,6 +5265,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_webhook_change",
     "review_webhook_creation",
     "review_webhook_deletion",
+    "review_webhook_message_deletion",
     "review_welcome_screen_change",
     "review_widget_settings_change",
     "search_guild_messages",
@@ -5282,6 +5330,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.destructiveTools, [
     "delete_messages",
     "edit_own_message",
+    "edit_webhook_message",
     "execute_announcement_crosspost",
     "execute_announcement_subscription",
     "execute_application_emoji_change",
@@ -5327,6 +5376,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_webhook_change",
     "execute_webhook_creation",
     "execute_webhook_deletion",
+    "execute_webhook_message_deletion",
     "remove_own_reaction",
   ])
   assert.equal(report.readOnlyTools.includes("get_connector_status"), true)

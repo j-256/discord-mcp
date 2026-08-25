@@ -87,6 +87,7 @@ type McpToolWorkflow =
   | "thread-creation"
   | "thread-governance-change"
   | "webhook-deletion"
+  | "webhook-message-deletion"
   | "webhook-change"
   | "webhook-creation"
   | "welcome-screen-change"
@@ -147,6 +148,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   edit_own_message: {
     keywords: ["edit", "message", "own", "update"],
     toolset: "interactions",
+  },
+  edit_webhook_message: {
+    keywords: ["credential", "edit", "incoming", "message", "update", "webhook"],
+    toolset: "webhooks",
   },
   execute_attachment_message: {
     keywords: ["attachment", "execute", "file", "message", "send", "upload"],
@@ -403,6 +408,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "webhooks",
     workflow: "webhook-deletion",
   },
+  execute_webhook_message_deletion: {
+    keywords: ["delete", "execute", "incoming", "message", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-message-deletion",
+  },
   execute_webhook_change: {
     keywords: ["channel", "execute", "move", "name", "rename", "update", "webhook"],
     toolset: "webhooks",
@@ -531,6 +541,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   },
   get_channel_webhook: {
     keywords: ["audit", "exact", "integration", "lookup", "webhook"],
+    toolset: "webhooks",
+  },
+  get_webhook_message: {
+    keywords: ["audit", "credential", "exact", "incoming", "message", "webhook"],
     toolset: "webhooks",
   },
   get_channel: {
@@ -935,6 +949,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "webhooks",
     workflow: "webhook-deletion",
   },
+  plan_webhook_message_deletion: {
+    keywords: ["delete", "incoming", "message", "plan", "review", "webhook"],
+    toolset: "webhooks",
+    workflow: "webhook-message-deletion",
+  },
   plan_webhook_change: {
     keywords: ["channel", "move", "name", "plan", "rename", "review", "update", "webhook"],
     toolset: "webhooks",
@@ -974,6 +993,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   send_message: {
     keywords: ["create", "message", "reply", "send", "write"],
     toolset: "interactions",
+  },
+  send_webhook_message: {
+    keywords: ["credential", "incoming", "message", "send", "webhook", "write"],
+    toolset: "webhooks",
   },
   respond_to_discord_interaction: {
     keywords: ["discord", "interaction", "private", "reply", "respond"],

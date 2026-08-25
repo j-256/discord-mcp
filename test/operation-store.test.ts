@@ -425,6 +425,12 @@ test("file operation store isolates every durable write operation-key domain", a
   const webhookChange = { ...receipt(), kind: "webhook-change" as const }
   const webhookCreation = { ...receipt(), kind: "webhook-creation" as const }
   const webhook = { ...receipt(), kind: "webhook-deletion" as const }
+  const webhookMessageDeletion = {
+    ...receipt(),
+    kind: "webhook-message-deletion" as const,
+  }
+  const webhookMessageEdit = { ...receipt(), kind: "webhook-message-edit" as const }
+  const webhookMessageSend = { ...receipt(), kind: "webhook-message-send" as const }
   const widgetSettings = { ...receipt(), kind: "widget-settings-change" as const }
 
   assert.equal((await store.reserve(channel)).created, true)
@@ -459,6 +465,9 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(webhookChange)).created, true)
   assert.equal((await store.reserve(webhookCreation)).created, true)
   assert.equal((await store.reserve(webhook)).created, true)
+  assert.equal((await store.reserve(webhookMessageDeletion)).created, true)
+  assert.equal((await store.reserve(webhookMessageEdit)).created, true)
+  assert.equal((await store.reserve(webhookMessageSend)).created, true)
   assert.equal((await store.reserve(widgetSettings)).created, true)
   assert.deepEqual(
     await store.get("announcement-crosspost", announcementCrosspost.operationKeyHash),
@@ -589,6 +598,21 @@ test("file operation store isolates every durable write operation-key domain", a
     webhook,
   )
   assert.deepEqual(
+    await store.get(
+      "webhook-message-deletion",
+      webhookMessageDeletion.operationKeyHash,
+    ),
+    webhookMessageDeletion,
+  )
+  assert.deepEqual(
+    await store.get("webhook-message-edit", webhookMessageEdit.operationKeyHash),
+    webhookMessageEdit,
+  )
+  assert.deepEqual(
+    await store.get("webhook-message-send", webhookMessageSend.operationKeyHash),
+    webhookMessageSend,
+  )
+  assert.deepEqual(
     await store.get("widget-settings-change", widgetSettings.operationKeyHash),
     widgetSettings,
   )
@@ -668,6 +692,29 @@ test("file operation store rejects identity changes and divergent terminal state
     }),
     /exact-message receipt cannot contain drift verification/,
   )
+  const webhookMessageEdit = {
+    ...receipt(),
+    kind: "webhook-message-edit" as const,
+  }
+  await store.reserve(webhookMessageEdit)
+  await assert.rejects(
+    () => store.finish({
+      ...receipt("completed"),
+      kind: "webhook-message-edit",
+      verification: "drift",
+    }),
+    /exact-message receipt cannot contain drift verification/,
+  )
+  const webhookMessageDeletion = {
+    ...receipt(),
+    kind: "webhook-message-deletion" as const,
+  }
+  await store.reserve(webhookMessageDeletion)
+  await store.finish({
+    ...receipt("completed"),
+    kind: "webhook-message-deletion",
+    verification: "drift",
+  })
   await store.finish(receipt("failed"))
   await assert.rejects(
     () => store.finish(receipt("completed")),

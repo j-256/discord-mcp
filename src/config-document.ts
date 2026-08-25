@@ -213,6 +213,10 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "webhookChanges",
   "webhookCreation",
   "webhookDeletions",
+  "webhookMessageAudit",
+  "webhookMessageChanges",
+  "webhookMessageDeletions",
+  "webhookMessageDelivery",
   "widgetPublicExposure",
   "widgetSettingsAudit",
   "widgetSettingsChanges",
@@ -281,6 +285,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "threadMemberUserIds",
   "welcomeScreenGuildIds",
   "webhookChannelIds",
+  "webhookMessageChannelIds",
   "widgetSettingsGuildIds",
 ] as const)
 
@@ -301,6 +306,7 @@ export const CONFIG_STORAGE_NAMES = Object.freeze([
   "inviteCapabilityRoots",
   "scheduledEventRoots",
   "soundboardRoots",
+  "webhookCredentialRoot",
 ] as const)
 
 export const CONFIG_RUNTIME_NAMES = Object.freeze([
@@ -320,6 +326,7 @@ export interface ConnectorConfigDocumentStorage {
   inviteCapabilityRoots?: readonly string[]
   scheduledEventRoots?: readonly string[]
   soundboardRoots?: readonly string[]
+  webhookCredentialRoot?: string
 }
 
 function canonicalArray<T extends string>(
@@ -404,6 +411,11 @@ const GUILD_PRUNE_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed non-exact guil
 const GUILD_PRUNES_CAPABILITY_DESCRIPTION = "Enable reviewed non-exact guild prune execution"
 const GUILD_PRUNE_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed guild prune planning and execution"
 const GUILD_PRUNE_ROLE_SCOPE_DESCRIPTION = "Exact role ID allowlist for optional reviewed guild prune cohort widening"
+const WEBHOOK_MESSAGE_AUDIT_CAPABILITY_DESCRIPTION = "Enable exact credential-safe Incoming-webhook message lookup without content persistence"
+const WEBHOOK_MESSAGE_CHANGE_CAPABILITY_DESCRIPTION = "Enable exact credential-safe Incoming-webhook message edits with one-shot coordination"
+const WEBHOOK_MESSAGE_DELETION_CAPABILITY_DESCRIPTION = "Enable reviewed exact Incoming-webhook message deletion with transient content-bound planning"
+const WEBHOOK_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION = "Enable bounded plain-text Incoming-webhook message delivery with mention containment and one-shot coordination"
+const WEBHOOK_MESSAGE_SCOPE_DESCRIPTION = "Exact direct text or announcement channel ID allowlist for privately credentialed Incoming-webhook message access"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "applicationIntentChanges") {
@@ -427,6 +439,18 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "guildPrunes") {
     return GUILD_PRUNES_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "webhookMessageAudit") {
+    return WEBHOOK_MESSAGE_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "webhookMessageChanges") {
+    return WEBHOOK_MESSAGE_CHANGE_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "webhookMessageDeletions") {
+    return WEBHOOK_MESSAGE_DELETION_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "webhookMessageDelivery") {
+    return WEBHOOK_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION
+  }
   return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
@@ -446,6 +470,9 @@ function scopeDescription(documentKey: string): string {
   if (documentKey === "guildPruneIncludeRoleIds") {
     return GUILD_PRUNE_ROLE_SCOPE_DESCRIPTION
   }
+  if (documentKey === "webhookMessageChannelIds") {
+    return WEBHOOK_MESSAGE_SCOPE_DESCRIPTION
+  }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }
 
@@ -455,6 +482,9 @@ function storageDescription(documentKey: string): string {
   }
   if (documentKey === "inviteCapabilityRoots") {
     return INVITE_CAPABILITY_ROOT_DESCRIPTION
+  }
+  if (documentKey === "webhookCredentialRoot") {
+    return "Canonical process-owned 0700 root for exact-ID webhook credential files with stable 0600 custody"
   }
   return `Owned local roots for ${humanizeConfigKey(documentKey)}`
 }
@@ -492,9 +522,11 @@ const limitShape = Object.fromEntries(
 const storageShape = Object.fromEntries(
   CONFIG_STORAGE_NAMES.map((name) => [
     name,
-    name === "auditFile"
+    name === "auditFile" || name === "webhookCredentialRoot"
       ? absolutePathSchema
-        .describe("Absolute path for the content-free activity log")
+        .describe(name === "auditFile"
+          ? "Absolute path for the content-free activity log"
+          : storageDescription(name))
         .optional()
       : rootArraySchema
         .describe(storageDescription(name))
@@ -1271,11 +1303,15 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       required: false,
     })),
     ...CONFIG_STORAGE_NAMES.map((name) => ({
-      defaultValue: name === "auditFile" ? undefined : [],
+      defaultValue: name === "auditFile" || name === "webhookCredentialRoot"
+        ? undefined
+        : [],
       description: name === "auditFile"
         ? "Absolute path for the content-free activity log"
         : storageDescription(name),
-      kind: (name === "auditFile" ? "path" : "paths") as "path" | "paths",
+      kind: (name === "auditFile" || name === "webhookCredentialRoot"
+        ? "path"
+        : "paths") as "path" | "paths",
       path: `$.storage.${name}`,
       required: false,
     })),

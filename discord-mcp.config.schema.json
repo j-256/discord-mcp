@@ -359,6 +359,22 @@
           "type": "boolean",
           "description": "Enable webhook deletions policy"
         },
+        "webhookMessageAudit": {
+          "type": "boolean",
+          "description": "Enable exact credential-safe Incoming-webhook message lookup without content persistence"
+        },
+        "webhookMessageChanges": {
+          "type": "boolean",
+          "description": "Enable exact credential-safe Incoming-webhook message edits with one-shot coordination"
+        },
+        "webhookMessageDeletions": {
+          "type": "boolean",
+          "description": "Enable reviewed exact Incoming-webhook message deletion with transient content-bound planning"
+        },
+        "webhookMessageDelivery": {
+          "type": "boolean",
+          "description": "Enable bounded plain-text Incoming-webhook message delivery with mention containment and one-shot coordination"
+        },
         "widgetPublicExposure": {
           "type": "boolean",
           "description": "Enable widget public exposure policy"
@@ -1362,6 +1378,16 @@
           },
           "description": "Exact Discord ID allowlist for webhook channel ids"
         },
+        "webhookMessageChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact direct text or announcement channel ID allowlist for privately credentialed Incoming-webhook message access"
+        },
         "widgetSettingsGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1445,6 +1471,12 @@
             "maxLength": 4096
           },
           "description": "Owned local roots for soundboard roots"
+        },
+        "webhookCredentialRoot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Canonical process-owned 0700 root for exact-ID webhook credential files with stable 0600 custody"
         }
       },
       "additionalProperties": false,

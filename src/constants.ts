@@ -281,6 +281,7 @@ export const DISCORD_LIMITS = Object.freeze({
   stickerPixels: 320,
   stickerTagCharacters: 200,
   webhookNameCharacters: 80,
+  webhookTokenCharacters: 2_048,
   webhooksPerChannel: 15,
   voiceChannelBitrateMaximum: 384_000,
   voiceChannelUserLimit: 99,

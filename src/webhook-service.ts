@@ -59,6 +59,7 @@ import type {
   DiscordRole,
   RequestOptions,
 } from "./types.js"
+import type { WebhookCredentialStore } from "./webhook-credential-store.js"
 
 export const WEBHOOK_TYPES = Object.freeze({
   application: 3,
@@ -213,6 +214,7 @@ export interface WebhookDeletionPlan {
 export interface WebhookDeletionResult {
   activityId: string
   channelId: string
+  credentialCleanup: "failed" | "not-attempted" | "not-configured" | "not-present" | "removed"
   guildId: string
   operationKeyHash: string
   planDigest: string
@@ -260,6 +262,7 @@ export interface WebhookCreationPlan {
 export interface WebhookCreationResult {
   activityId: string
   channelId: string
+  credentialStored: true
   created: ProjectedWebhook
   guildId: string
   inventoryMatched: boolean
@@ -335,6 +338,7 @@ export interface WebhookServiceOptions {
   planKey?: Uint8Array
   policy: ScopePolicy
   randomId?: () => string
+  credentialStore?: Pick<WebhookCredentialStore, "remove" | "write">
 }
 
 interface WebhookStateEvidence {
@@ -1015,6 +1019,7 @@ export class WebhookService {
   readonly #activityStore: ActivityStore
   readonly #client: WebhookServiceClient
   readonly #clock: () => Date
+  readonly #credentialStore: Pick<WebhookCredentialStore, "remove" | "write"> | undefined
   readonly #operationStore: OperationStore
   readonly #planKey: Uint8Array
   readonly #policy: ScopePolicy
@@ -1024,6 +1029,7 @@ export class WebhookService {
     this.#activityStore = options.activityStore
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#credentialStore = options.credentialStore
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
@@ -1164,6 +1170,11 @@ export class WebhookService {
     request: NormalizedWebhookCreationRequest,
     options: RequestOptions,
   ): Promise<WebhookCreationPlan> {
+    if (!this.#credentialStore) {
+      throw new WebhookEvidenceError(
+        "Discord webhook creation requires a configured private credential store",
+      )
+    }
     assertSnowflake(applicationId, "Discord connector application ID")
     assertSnowflake(botId, "Discord connector bot ID")
     this.#policy.assertChannelWebhookIdCreatable(request.channelId)
@@ -1191,10 +1202,10 @@ export class WebhookService {
       ...(state.permissions.administrator
         ? ["Discord connector bot has ADMINISTRATOR; replace it with narrowly scoped VIEW_CHANNEL and MANAGE_WEBHOOKS permissions"]
         : []),
-      "The created token and execution URL are validated and projected out inside the REST client and never enter MCP data or persistent state",
+      "The created token is deposited into the configured private credential store and never enters MCP data, activity, operation receipts, or observability",
       "Webhook names and channel names are untrusted Discord data and are never persisted by this workflow",
       "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
-      "Webhook message delivery is not supported by this tool surface and is not enabled by creation",
+      "Webhook message delivery remains independently gated by an exact delivery channel scope and action capability",
     ]
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
@@ -1340,7 +1351,7 @@ export class WebhookService {
       ...(sourceState.permissions.administrator || destinationState.permissions.administrator
         ? ["Discord connector bot has ADMINISTRATOR; replace it with narrowly scoped VIEW_CHANNEL and MANAGE_WEBHOOKS permissions"]
         : []),
-      "Webhook tokens, execution URLs, avatars, creator profiles, source objects, and raw payloads never enter MCP data or persistent state",
+      "Webhook tokens, execution URLs, avatars, creator profiles, source objects, and raw payloads are omitted from MCP data, activity, operation receipts, and observability; any private credential file remains unchanged",
       "Guild, channel, and webhook names are untrusted Discord data and are never persisted by this workflow",
       "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
     ]
@@ -1431,6 +1442,7 @@ export class WebhookService {
         : []),
       "Webhook deletion is permanent and the integration will stop working",
       "Discord deletion is keyed only by webhook ID; keep MANAGE_WEBHOOKS denied outside scope and prevent concurrent administration because another administrator can move the webhook during the final non-atomic inventory-to-delete window",
+      "After verified Discord absence, execution removes only the exact webhook ID's private credential file; cleanup failure is reported as drift",
       "Webhook tokens, URLs, avatars, creator profiles, and source objects are projected out and never enter the MCP result",
       "Guild, channel, and webhook names are untrusted Discord data and are never persisted by this workflow",
       "Execution serializes the exact webhook in process, while the production facade coordinates its channel, webhook, and guild collection across connector processes sharing the activity-state root",
@@ -1611,18 +1623,34 @@ export class WebhookService {
     }
 
     let created: ProjectedWebhook | null = null
+    let credentialStored = false
     let inventoryMatched: boolean | null = null
     let observed: ProjectedWebhook | null = null
     let readbackMatched: boolean | null = null
     try {
       const input: CreateWebhookInput = { name: request.name }
+      if (!this.#credentialStore) {
+        throw new WebhookEvidenceError(
+          "Discord webhook creation requires a configured private credential store",
+        )
+      }
       const response = await this.#client.createWebhook(
         request.channelId,
         input,
+        async (webhook, token) => {
+          created = projectedWebhook(webhook, request.channelId, plan.guild.id)
+          await this.#credentialStore?.write(webhook.id, token)
+          credentialStored = true
+        },
         request.auditReason,
         options,
       )
-      created = projectedWebhook(response, request.channelId, plan.guild.id)
+      created ??= projectedWebhook(response, request.channelId, plan.guild.id)
+      if (!credentialStored) {
+        throw new WebhookEvidenceError(
+          "Discord webhook creation did not confirm private credential custody",
+        )
+      }
       if (created.type !== "incoming" || created.name !== request.name) {
         throw new WebhookEvidenceError(
           "Discord returned webhook creation state that does not match the request",
@@ -1707,6 +1735,7 @@ export class WebhookService {
     const result: WebhookCreationResult = {
       ...baseResult,
       activityId,
+      credentialStored: true,
       created,
       inventoryMatched,
       observed,
@@ -2302,11 +2331,28 @@ export class WebhookService {
       )
     }
 
-    const verification = verifiedAbsent ? "match" : "drift"
-    const status = verifiedAbsent ? "completed" : "completed-with-drift"
+    let credentialCleanup: WebhookDeletionResult["credentialCleanup"] = "not-attempted"
+    if (verifiedAbsent) {
+      if (!this.#credentialStore) {
+        credentialCleanup = "not-configured"
+      } else {
+        try {
+          credentialCleanup = await this.#credentialStore.remove(request.webhookId)
+            ? "removed"
+            : "not-present"
+        } catch {
+          credentialCleanup = "failed"
+        }
+      }
+    }
+    const verification = verifiedAbsent && credentialCleanup !== "failed"
+      ? "match"
+      : "drift"
+    const status = verification === "match" ? "completed" : "completed-with-drift"
     const result: WebhookDeletionResult = {
       ...baseResult,
       activityId,
+      credentialCleanup,
       status,
       verifiedAbsent,
     }

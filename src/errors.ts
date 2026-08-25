@@ -1035,6 +1035,42 @@ export class WebhookEvidenceError extends Error {
   override name = "WebhookEvidenceError"
 }
 
+export class WebhookMessageEvidenceError extends Error {
+  override name = "WebhookMessageEvidenceError"
+}
+
+export class WebhookMessagePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord webhook message does not match the reviewed deletion plan")
+    this.name = "WebhookMessagePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class WebhookMessageOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord webhook message operation key has already been reserved")
+    this.name = "WebhookMessageOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class WebhookMessageExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "WebhookMessageExecutionError"
+    this.result = result
+  }
+}
+
 export class AnnouncementSubscriptionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -134,6 +134,10 @@ export interface ConnectorConfig {
   allowWebhookChanges: boolean
   allowWebhookCreation: boolean
   allowWebhookDeletions: boolean
+  allowWebhookMessageAudit: boolean
+  allowWebhookMessageChanges: boolean
+  allowWebhookMessageDeletions: boolean
+  allowWebhookMessageDelivery: boolean
   allowWidgetPublicExposure: boolean
   allowWidgetSettingsAudit: boolean
   allowWidgetSettingsChanges: boolean
@@ -216,6 +220,8 @@ export interface ConnectorConfig {
   threadMemberUserIds: ReadonlySet<string>
   welcomeScreenGuildIds: ReadonlySet<string>
   webhookChannelIds: ReadonlySet<string>
+  webhookCredentialRoot: string | null
+  webhookMessageChannelIds: ReadonlySet<string>
   widgetSettingsGuildIds: ReadonlySet<string>
 }
 
@@ -303,6 +309,7 @@ function parseOwnedRoots(
   value: readonly string[] | undefined,
   name: string,
   requirePrivate = false,
+  requireExclusive = false,
 ): readonly string[] {
   if (!value || value.length === 0) return []
   if (typeof process.getuid !== "function") {
@@ -337,11 +344,14 @@ function parseOwnedRoots(
       || root !== candidate
       || root === parse(root).root
       || metadata.uid !== processUserId
+      || (requireExclusive && (metadata.mode & 0o777) !== 0o700)
       || (requirePrivate && (metadata.mode & 0o022) !== 0)
     ) {
       throw new ConfigurationError(
-        requirePrivate
-          ? `${name} entries must be owned, canonical directories below the filesystem root and not group or world writable`
+        requireExclusive
+          ? `${name} entries must be owned, canonical 0700 directories below the filesystem root`
+          : requirePrivate
+            ? `${name} entries must be owned, canonical directories below the filesystem root and not group or world writable`
           : `${name} entries must be owned, canonical directories below the filesystem root`,
       )
     }
@@ -352,6 +362,20 @@ function parseOwnedRoots(
     throw new ConfigurationError(`${name} must not contain duplicate directories`)
   }
   return unique
+}
+
+function parseOwnedRoot(
+  value: string | undefined,
+  name: string,
+  requirePrivate = false,
+  requireExclusive = false,
+): string | null {
+  return parseOwnedRoots(
+    value === undefined ? undefined : [value],
+    name,
+    requirePrivate,
+    requireExclusive,
+  )[0] ?? null
 }
 
 function defaultAuditFile(environment: NodeJS.ProcessEnv, homeDirectory: string): string {
@@ -541,6 +565,7 @@ export function loadConnectorConfigDocument(
     CONNECTOR_LIMITS.widgetSettingsGuildAllowlist,
   )
   const webhookChannelIds = configScope(document, "webhookChannelIds")
+  const webhookMessageChannelIds = configScope(document, "webhookMessageChannelIds")
   const inviteGuildIds = configScope(document, "inviteGuildIds")
   const onboardingGuildIds = configScope(document, "onboardingGuildIds")
 
@@ -615,6 +640,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("threadParentIds"), threadParentIds],
     [configPolicyPath("threadIds"), threadIds],
     [configPolicyPath("webhookChannelIds"), webhookChannelIds],
+    [configPolicyPath("webhookMessageChannelIds"), webhookMessageChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
       if (allowedChannelIds.size === 0 || allowedChannelIds.has(channelId)) continue
@@ -768,6 +794,38 @@ export function loadConnectorConfigDocument(
   ) {
     throw new ConfigurationError(
       `Enabling webhook creation, changes, or deletion requires ${configPolicyPath("allowWebhookAudit")}`,
+    )
+  }
+  const allowWebhookMessageAudit = configCapability(document, "webhookMessageAudit")
+  const allowWebhookMessageChanges = configCapability(document, "webhookMessageChanges")
+  const allowWebhookMessageDeletions = configCapability(document, "webhookMessageDeletions")
+  const allowWebhookMessageDelivery = configCapability(document, "webhookMessageDelivery")
+  if (
+    (allowWebhookMessageChanges || allowWebhookMessageDeletions)
+    && !allowWebhookMessageAudit
+  ) {
+    throw new ConfigurationError(
+      `Webhook message changes and deletion require ${configPolicyPath("allowWebhookMessageAudit")}`,
+    )
+  }
+  const webhookCredentialRoot = parseOwnedRoot(
+    document.storage.webhookCredentialRoot,
+    "$.storage.webhookCredentialRoot",
+    true,
+    true,
+  )
+  if (
+    (
+      allowWebhookCreation
+      || allowWebhookMessageAudit
+      || allowWebhookMessageChanges
+      || allowWebhookMessageDeletions
+      || allowWebhookMessageDelivery
+    )
+    && webhookCredentialRoot === null
+  ) {
+    throw new ConfigurationError(
+      "Webhook creation and webhook message capabilities require $.storage.webhookCredentialRoot",
     )
   }
   const allowAnnouncementSubscriptionAudit = configCapability(document, "announcementSubscriptionAudit")
@@ -1083,6 +1141,10 @@ export function loadConnectorConfigDocument(
     allowWebhookChanges,
     allowWebhookCreation,
     allowWebhookDeletions,
+    allowWebhookMessageAudit,
+    allowWebhookMessageChanges,
+    allowWebhookMessageDeletions,
+    allowWebhookMessageDelivery,
     allowWidgetPublicExposure,
     allowWidgetSettingsAudit,
     allowWidgetSettingsChanges,
@@ -1224,6 +1286,8 @@ export function loadConnectorConfigDocument(
     threadMemberUserIds,
     welcomeScreenGuildIds,
     webhookChannelIds,
+    webhookCredentialRoot,
+    webhookMessageChannelIds,
     widgetSettingsGuildIds,
   }
 }

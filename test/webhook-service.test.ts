@@ -175,6 +175,7 @@ interface FixtureState {
 }
 
 function fixture(options: {
+  credentialStore?: WebhookServiceOptions["credentialStore"]
   policy?: ScopePolicy
   state?: Partial<FixtureState>
 } = {}) {
@@ -272,6 +273,7 @@ function fixture(options: {
     activityStore,
     client,
     clock: () => new Date(NOW),
+    ...(options.credentialStore ? { credentialStore: options.credentialStore } : {}),
     operationStore,
     planKey: new Uint8Array(32).fill(7),
     policy: options.policy || policy(),
@@ -529,6 +531,7 @@ test("webhook deletion reserves, journals, mutates once, and verifies absence", 
 
   assert.equal(result.status, "completed")
   assert.equal(result.verifiedAbsent, true)
+  assert.equal(result.credentialCleanup, "not-configured")
   assert.deepEqual(setup.events.slice(-6), [
     "operation:reserve",
     "activity:pending",
@@ -551,6 +554,104 @@ test("webhook deletion reserves, journals, mutates once, and verifies absence", 
   for (const value of [PRIVATE_NAME, AUDIT_REASON, OPERATION_KEY]) {
     assert.equal(persisted.includes(value), false)
   }
+})
+
+test("webhook deletion removes only the exact private credential after verified absence", async () => {
+  const notPresent = fixture({
+    credentialStore: {
+      async remove() {
+        return false
+      },
+      async write() {
+        throw new Error("unexpected webhook credential write")
+      },
+    },
+  })
+  const notPresentPlan = await notPresent.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+  const notPresentResult = await notPresent.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    notPresentPlan.digest,
+  )
+  assert.equal(notPresentResult.status, "completed")
+  assert.equal(notPresentResult.credentialCleanup, "not-present")
+
+  const removedIds: string[] = []
+  const removed = fixture({
+    credentialStore: {
+      async remove(webhookId) {
+        removedIds.push(webhookId)
+        return true
+      },
+      async write() {
+        throw new Error("unexpected webhook credential write")
+      },
+    },
+  })
+  const removedPlan = await removed.service.plan(APPLICATION_ID, BOT_ID, request())
+  const removedResult = await removed.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    removedPlan.digest,
+  )
+  assert.equal(removedResult.status, "completed")
+  assert.equal(removedResult.credentialCleanup, "removed")
+  assert.deepEqual(removedIds, [WEBHOOK_ID])
+
+  const failed = fixture({
+    credentialStore: {
+      async remove() {
+        throw new Error("private root unavailable")
+      },
+      async write() {
+        throw new Error("unexpected webhook credential write")
+      },
+    },
+  })
+  const failedPlan = await failed.service.plan(APPLICATION_ID, BOT_ID, request())
+  const failedResult = await failed.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    failedPlan.digest,
+  )
+  assert.equal(failedResult.verifiedAbsent, true)
+  assert.equal(failedResult.credentialCleanup, "failed")
+  assert.equal(failedResult.status, "completed-with-drift")
+  assert.equal(failed.operationStore.receipt?.verification, "drift")
+
+  const survivingIds: string[] = []
+  const surviving = fixture({
+    credentialStore: {
+      async remove(webhookId) {
+        survivingIds.push(webhookId)
+        return true
+      },
+      async write() {
+        throw new Error("unexpected webhook credential write")
+      },
+    },
+    state: { mutationUpdatesState: false },
+  })
+  const survivingPlan = await surviving.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+  const survivingResult = await surviving.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    survivingPlan.digest,
+  )
+  assert.equal(survivingResult.credentialCleanup, "not-attempted")
+  assert.deepEqual(survivingIds, [])
 })
 
 test("webhook deletion rejects stale plans and spent operation keys", async () => {

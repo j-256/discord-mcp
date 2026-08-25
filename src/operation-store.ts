@@ -78,6 +78,9 @@ export const OPERATION_KINDS = [
   "webhook-change",
   "webhook-creation",
   "webhook-deletion",
+  "webhook-message-deletion",
+  "webhook-message-edit",
+  "webhook-message-send",
   "widget-settings-change",
 ] as const
 
@@ -295,7 +298,12 @@ function parseReceipt(value: unknown): OperationReceipt {
     throw new OperationStoreError("Incomplete Discord operation receipt contains verification state")
   }
   if (
-    ["attachment-message", "component-message"].includes(record.kind as string)
+    [
+      "attachment-message",
+      "component-message",
+      "webhook-message-edit",
+      "webhook-message-send",
+    ].includes(record.kind as string)
     && record.verification === "drift"
   ) {
     throw new OperationStoreError("Discord exact-message receipt cannot contain drift verification")

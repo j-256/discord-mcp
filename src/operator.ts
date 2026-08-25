@@ -82,7 +82,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 26
+export const OPERATOR_REPORT_SCHEMA_VERSION = 27
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -200,6 +200,10 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   webhookChangePolicy: "webhook-change-policy",
   webhookCreationPolicy: "webhook-creation-policy",
   webhookDeletionPolicy: "webhook-deletion-policy",
+  webhookMessageAuditPolicy: "webhook-message-audit-policy",
+  webhookMessageChangePolicy: "webhook-message-change-policy",
+  webhookMessageDeletionPolicy: "webhook-message-deletion-policy",
+  webhookMessageDeliveryPolicy: "webhook-message-delivery-policy",
 })
 
 const DEFAULT_CLI_COMMAND = "discord-mcp"
@@ -729,6 +733,18 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   if (config.allowWebhookDeletions && config.webhookChannelIds.size === 0) {
     warnings.push("The webhook-deletion toggle is enabled but deletion remains blocked because an exact channel allowlist is required")
+  }
+  if (config.allowWebhookMessageAudit && config.webhookMessageChannelIds.size === 0) {
+    warnings.push("The webhook-message-audit toggle is enabled but exact lookup remains blocked because an exact channel allowlist is required")
+  }
+  if (config.allowWebhookMessageDelivery && config.webhookMessageChannelIds.size === 0) {
+    warnings.push("The webhook-message-delivery toggle is enabled but delivery remains blocked because an exact channel allowlist is required")
+  }
+  if (config.allowWebhookMessageChanges && config.webhookMessageChannelIds.size === 0) {
+    warnings.push("The webhook-message-change toggle is enabled but edits remain blocked because an exact channel allowlist is required")
+  }
+  if (config.allowWebhookMessageDeletions && config.webhookMessageChannelIds.size === 0) {
+    warnings.push("The webhook-message-deletion toggle is enabled but deletion remains blocked because an exact channel allowlist is required")
   }
   if (config.allowGuildExpressionAudit && config.guildExpressionGuildIds.size === 0) {
     warnings.push("The guild-expression audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
@@ -2626,17 +2642,20 @@ export async function diagnoseConnector(
         "pass",
         "Reviewed Incoming-webhook creation is disabled",
       ))
-    } else if (config.webhookChannelIds.size === 0) {
+    } else if (
+      config.webhookChannelIds.size === 0
+      || config.webhookCredentialRoot === null
+    ) {
       checks.push(check(
         DOCTOR_CHECK_IDS.webhookCreationPolicy,
         "warn",
-        "Webhook-creation toggle is enabled, but the required exact channel allowlist is empty",
+        "Webhook creation is enabled, but exact channel scope and one canonical private credential root are both required",
       ))
     } else {
       checks.push(check(
         DOCTOR_CHECK_IDS.webhookCreationPolicy,
         "pass",
-        `Reviewed Incoming-webhook creation is constrained to ${config.webhookChannelIds.size} exact channels with credential projection, one-shot execution, and complete inventory readback`,
+        `Reviewed Incoming-webhook creation is constrained to ${config.webhookChannelIds.size} exact channels with exclusive private credential custody, one-shot execution, and complete inventory readback`,
       ))
     }
     if (!config.allowWebhookChanges) {
@@ -2656,6 +2675,94 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.webhookChangePolicy,
         "pass",
         `Reviewed Incoming-webhook rename and same-guild move operations are constrained to ${config.webhookChannelIds.size} exact channels with one-shot execution and complete inventory readback`,
+      ))
+    }
+    if (!config.allowWebhookMessageAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageAuditPolicy,
+        "pass",
+        "Credential-safe webhook message lookup is disabled",
+      ))
+    } else if (
+      config.webhookMessageChannelIds.size === 0
+      || config.webhookCredentialRoot === null
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageAuditPolicy,
+        "warn",
+        "Webhook message lookup is enabled, but exact channel scope and one canonical private credential root are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageAuditPolicy,
+        "pass",
+        `Exact webhook message lookup is constrained to ${config.webhookMessageChannelIds.size} direct channels with private credential custody, bounded projections, and no content persistence`,
+      ))
+    }
+    if (!config.allowWebhookMessageDelivery) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageDeliveryPolicy,
+        "pass",
+        "Credential-safe webhook message delivery is disabled",
+      ))
+    } else if (
+      config.webhookMessageChannelIds.size === 0
+      || config.webhookCredentialRoot === null
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageDeliveryPolicy,
+        "warn",
+        "Webhook message delivery is enabled, but exact channel scope and one canonical private credential root are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageDeliveryPolicy,
+        "pass",
+        `Webhook message delivery is constrained to ${config.webhookMessageChannelIds.size} direct channels and ${config.mentionUserIds.size} exact notification users with mention containment, a shared ${config.interactionMaxWritesPerMinute}-write rolling budget, durable one-shot keys, and no content persistence`,
+      ))
+    }
+    if (!config.allowWebhookMessageChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageChangePolicy,
+        "pass",
+        "Credential-safe webhook message edits are disabled",
+      ))
+    } else if (
+      config.webhookMessageChannelIds.size === 0
+      || config.webhookCredentialRoot === null
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageChangePolicy,
+        "warn",
+        "Webhook message edits are enabled, but exact channel scope and one canonical private credential root are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageChangePolicy,
+        "pass",
+        `Exact webhook message edits are constrained to ${config.webhookMessageChannelIds.size} direct channels with mention containment, durable one-shot keys, exact readback, and no content persistence`,
+      ))
+    }
+    if (!config.allowWebhookMessageDeletions) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageDeletionPolicy,
+        "pass",
+        "Reviewed webhook message deletion is disabled",
+      ))
+    } else if (
+      config.webhookMessageChannelIds.size === 0
+      || config.webhookCredentialRoot === null
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageDeletionPolicy,
+        "warn",
+        "Webhook message deletion is enabled, but exact channel scope and one canonical private credential root are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.webhookMessageDeletionPolicy,
+        "pass",
+        `Reviewed webhook message deletion is constrained to ${config.webhookMessageChannelIds.size} direct channels with transient content-bound planning, signed approval, one non-retried mutation, exact absence readback, and content-free durable records`,
       ))
     }
     if (!config.allowIntegrationAudit) {

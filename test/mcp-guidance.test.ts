@@ -697,6 +697,7 @@ function guidanceService(options: {
     executeWebhookChange: unexpected,
     executeWebhookCreation: unexpected,
     executeWebhookDeletion: unexpected,
+    executeWebhookMessageDeletion: unexpected,
     planAnnouncementCrosspost: unexpected,
     planAnnouncementSubscription: unexpected,
     planMessageForward: unexpected,
@@ -807,6 +808,7 @@ function guidanceService(options: {
       }
     },
     getChannelWebhook: unexpected,
+    getWebhookMessage: unexpected,
     getPoll: unexpected,
     async getChannel(channelId) {
       calls.channelMetadata += 1
@@ -1497,6 +1499,7 @@ function guidanceService(options: {
     planWebhookChange: unexpected,
     planWebhookCreation: unexpected,
     planWebhookDeletion: unexpected,
+    planWebhookMessageDeletion: unexpected,
     previewComponentLayout() {
       calls.unexpected += 1
       throw new Error("Unexpected service call")
@@ -2108,6 +2111,11 @@ function guidanceService(options: {
         webhookChangesEnabled: false,
         webhookCreationEnabled: false,
         webhookDeletionsEnabled: false,
+        webhookMessageAuditEnabled: false,
+        webhookMessageChannelIds: [],
+        webhookMessageChangesEnabled: false,
+        webhookMessageDeletionsEnabled: false,
+        webhookMessageDeliveryEnabled: false,
         welcomeScreenAuditEnabled: false,
         welcomeScreenChangesEnabled: false,
         welcomeScreenGuildIds: [],
@@ -2671,6 +2679,8 @@ function guidanceService(options: {
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
     sendMessage: unexpected,
+    sendWebhookMessage: unexpected,
+    editWebhookMessage: unexpected,
   }
   return { calls, service }
 }
@@ -3096,8 +3106,12 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Historical message mentions, Guild Template snapshot internals/)
   assert.match(safety.text, /Webhook inventory requires a separate exact direct-channel allowlist/)
   assert.match(safety.text, /Creation, rename or same-guild move, and deletion each require/)
-  assert.match(safety.text, /Creation validates and discards the returned credential/)
-  assert.match(safety.text, /Message delivery, credential-authenticated actions/)
+  assert.match(safety.text, /configured private exact-ID credential store/)
+  assert.match(safety.text, /credential-authenticated message lookup/)
+  assert.match(
+    safety.text,
+    /Independently gated credential-authenticated message lookup/,
+  )
   assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
   assert.match(safety.text, /Raw invite codes and URLs are bearer capabilities/)
   assert.match(safety.text, /full-inventory absence readback/)
@@ -4271,7 +4285,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   })
   assert.match(webhookCreation, /Call only plan_webhook_creation/)
   assert.match(webhookCreation, /Do not call execute_webhook_creation/)
-  assert.match(webhookCreation, /validates and discards the returned bearer credential/)
+  assert.match(webhookCreation, /connector-private credential root/)
   assert.match(webhookCreation, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
 
   const webhookChange = promptText(await client.getPrompt({
@@ -4316,6 +4330,26 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(webhookDeletion, /Call only plan_webhook_deletion/)
   assert.match(webhookDeletion, /Do not call execute_webhook_deletion/)
   assert.match(webhookDeletion, /VIEW_CHANNEL and MANAGE_WEBHOOKS/)
+
+  const webhookMessageDeletion = promptText(await client.getPrompt({
+    arguments: {
+      messageId: MESSAGE_ID,
+      operationKey: OPERATION_KEY,
+      reviewReason: "Remove the superseded deployment notice",
+      webhookId: WEBHOOK_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewWebhookMessageDeletion,
+  }))
+  assert.deepEqual(JSON.parse(webhookMessageDeletion.split("\n")[1] || ""), {
+    messageId: MESSAGE_ID,
+    operationKey: OPERATION_KEY,
+    reviewReason: "Remove the superseded deployment notice",
+    webhookId: WEBHOOK_ID,
+  })
+  assert.match(webhookMessageDeletion, /Call only plan_webhook_message_deletion/)
+  assert.match(webhookMessageDeletion, /Do not call execute_webhook_message_deletion/)
+  assert.match(webhookMessageDeletion, /message content are not persisted/)
+  assert.match(webhookMessageDeletion, /untrusted Discord data/)
 
   const integrationDeletion = promptText(await client.getPrompt({
     arguments: {
@@ -6049,6 +6083,16 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         webhookId: WEBHOOK_ID,
       },
       name: MCP_PROMPT_NAMES.reviewWebhookDeletion,
+    },
+    {
+      arguments: {
+        messageId: MESSAGE_ID,
+        operationKey: OPERATION_KEY,
+        reviewReason: "Remove the superseded deployment notice",
+        token: "credential-must-be-rejected",
+        webhookId: WEBHOOK_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewWebhookMessageDeletion,
     },
     {
       arguments: {

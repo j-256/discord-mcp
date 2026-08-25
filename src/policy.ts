@@ -184,6 +184,11 @@ export interface PolicyDescription {
   webhookChangesEnabled: boolean
   webhookCreationEnabled: boolean
   webhookDeletionsEnabled: boolean
+  webhookMessageAuditEnabled: boolean
+  webhookMessageChannelIds: string[]
+  webhookMessageChangesEnabled: boolean
+  webhookMessageDeletionsEnabled: boolean
+  webhookMessageDeliveryEnabled: boolean
   widgetPublicExposureEnabled: boolean
   widgetSettingsAuditEnabled: boolean
   widgetSettingsChangesEnabled: boolean
@@ -197,6 +202,11 @@ const WEBHOOK_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.stageVoice,
   DISCORD_CHANNEL_TYPES.text,
   DISCORD_CHANNEL_TYPES.voice,
+])
+
+const WEBHOOK_MESSAGE_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.text,
 ])
 
 export class ScopePolicy {
@@ -291,6 +301,10 @@ export class ScopePolicy {
   readonly #allowWebhookChanges: boolean
   readonly #allowWebhookCreation: boolean
   readonly #allowWebhookDeletions: boolean
+  readonly #allowWebhookMessageAudit: boolean
+  readonly #allowWebhookMessageChanges: boolean
+  readonly #allowWebhookMessageDeletions: boolean
+  readonly #allowWebhookMessageDelivery: boolean
   readonly #allowWidgetPublicExposure: boolean
   readonly #allowWidgetSettingsAudit: boolean
   readonly #allowWidgetSettingsChanges: boolean
@@ -371,6 +385,7 @@ export class ScopePolicy {
   readonly #threadMemberUserIds: ReadonlySet<string>
   readonly #welcomeScreenGuildIds: ReadonlySet<string>
   readonly #webhookChannelIds: ReadonlySet<string>
+  readonly #webhookMessageChannelIds: ReadonlySet<string>
   readonly #widgetSettingsGuildIds: ReadonlySet<string>
 
   constructor(config: Pick<
@@ -474,6 +489,10 @@ export class ScopePolicy {
     | "allowWebhookChanges"
     | "allowWebhookCreation"
     | "allowWebhookDeletions"
+    | "allowWebhookMessageAudit"
+    | "allowWebhookMessageChanges"
+    | "allowWebhookMessageDeletions"
+    | "allowWebhookMessageDelivery"
     | "allowWidgetPublicExposure"
     | "allowWidgetSettingsAudit"
     | "allowWidgetSettingsChanges"
@@ -548,6 +567,7 @@ export class ScopePolicy {
     | "threadMemberUserIds"
     | "welcomeScreenGuildIds"
     | "webhookChannelIds"
+    | "webhookMessageChannelIds"
     | "widgetSettingsGuildIds"
   >>) {
     this.#adminGuildIds = config.adminGuildIds
@@ -644,6 +664,10 @@ export class ScopePolicy {
     this.#allowWebhookChanges = config.allowWebhookChanges ?? false
     this.#allowWebhookCreation = config.allowWebhookCreation ?? false
     this.#allowWebhookDeletions = config.allowWebhookDeletions ?? false
+    this.#allowWebhookMessageAudit = config.allowWebhookMessageAudit ?? false
+    this.#allowWebhookMessageChanges = config.allowWebhookMessageChanges ?? false
+    this.#allowWebhookMessageDeletions = config.allowWebhookMessageDeletions ?? false
+    this.#allowWebhookMessageDelivery = config.allowWebhookMessageDelivery ?? false
     this.#allowWidgetPublicExposure = config.allowWidgetPublicExposure ?? false
     this.#allowWidgetSettingsAudit = config.allowWidgetSettingsAudit ?? false
     this.#allowWidgetSettingsChanges = config.allowWidgetSettingsChanges ?? false
@@ -727,6 +751,7 @@ export class ScopePolicy {
     this.#threadMemberUserIds = config.threadMemberUserIds ?? new Set()
     this.#welcomeScreenGuildIds = config.welcomeScreenGuildIds ?? new Set()
     this.#webhookChannelIds = config.webhookChannelIds ?? new Set()
+    this.#webhookMessageChannelIds = config.webhookMessageChannelIds ?? new Set()
     this.#widgetSettingsGuildIds = config.widgetSettingsGuildIds ?? new Set()
   }
 
@@ -1045,6 +1070,17 @@ export class ScopePolicy {
       webhookDeletionsEnabled: this.#allowWebhookAudit
         && this.#allowWebhookDeletions
         && this.#webhookChannelIds.size > 0,
+      webhookMessageAuditEnabled: this.#allowWebhookMessageAudit
+        && this.#webhookMessageChannelIds.size > 0,
+      webhookMessageChannelIds: [...this.#webhookMessageChannelIds].sort(),
+      webhookMessageChangesEnabled: this.#allowWebhookMessageAudit
+        && this.#allowWebhookMessageChanges
+        && this.#webhookMessageChannelIds.size > 0,
+      webhookMessageDeletionsEnabled: this.#allowWebhookMessageAudit
+        && this.#allowWebhookMessageDeletions
+        && this.#webhookMessageChannelIds.size > 0,
+      webhookMessageDeliveryEnabled: this.#allowWebhookMessageDelivery
+        && this.#webhookMessageChannelIds.size > 0,
       widgetPublicExposureEnabled: this.#allowWidgetSettingsAudit
         && this.#allowWidgetSettingsChanges
         && this.#allowWidgetPublicExposure
@@ -2281,6 +2317,81 @@ export class ScopePolicy {
     this.assertChannelWebhookIdAuditable(channelId)
     if (!this.#allowWebhookDeletions) {
       throw new PolicyError("Discord webhook deletion is disabled by connector configuration")
+    }
+  }
+
+  assertChannelWebhookMessageAuditable(channel: DiscordChannel): string {
+    this.assertChannelWebhookMessageIdAuditable(channel.id)
+    const guildId = this.assertChannelReadable(channel)
+    if (!WEBHOOK_MESSAGE_CHANNEL_TYPES.has(channel.type)) {
+      throw new PolicyError("Discord channel type does not support webhook message access")
+    }
+    return guildId
+  }
+
+  assertWebhookMessageAuditEnabled(): void {
+    if (!this.#allowWebhookMessageAudit) {
+      throw new PolicyError("Discord webhook message audit is disabled by connector configuration")
+    }
+    if (this.#webhookMessageChannelIds.size === 0) {
+      throw new PolicyError("Discord webhook messages require an explicit channel allowlist")
+    }
+  }
+
+  assertChannelWebhookMessageIdAuditable(channelId: string): void {
+    this.assertWebhookMessageAuditEnabled()
+    this.#assertWebhookMessageChannelId(channelId)
+  }
+
+  assertWebhookMessageChangesEnabled(): void {
+    this.assertWebhookMessageAuditEnabled()
+    if (!this.#allowWebhookMessageChanges) {
+      throw new PolicyError("Discord webhook message changes are disabled by connector configuration")
+    }
+  }
+
+  assertChannelWebhookMessageChangeable(channel: DiscordChannel): string {
+    this.assertWebhookMessageChangesEnabled()
+    return this.assertChannelWebhookMessageAuditable(channel)
+  }
+
+  assertWebhookMessageDeletionsEnabled(): void {
+    this.assertWebhookMessageAuditEnabled()
+    if (!this.#allowWebhookMessageDeletions) {
+      throw new PolicyError("Discord webhook message deletion is disabled by connector configuration")
+    }
+  }
+
+  assertChannelWebhookMessageDeletable(channel: DiscordChannel): string {
+    this.assertWebhookMessageDeletionsEnabled()
+    return this.assertChannelWebhookMessageAuditable(channel)
+  }
+
+  assertWebhookMessageDeliveryEnabled(): void {
+    if (!this.#allowWebhookMessageDelivery) {
+      throw new PolicyError("Discord webhook message delivery is disabled by connector configuration")
+    }
+    if (this.#webhookMessageChannelIds.size === 0) {
+      throw new PolicyError("Discord webhook messages require an explicit channel allowlist")
+    }
+  }
+
+  assertChannelWebhookMessageDeliverable(channel: DiscordChannel): string {
+    this.assertWebhookMessageDeliveryEnabled()
+    this.#assertWebhookMessageChannelId(channel.id)
+    const guildId = this.assertChannelReadable(channel)
+    if (!WEBHOOK_MESSAGE_CHANNEL_TYPES.has(channel.type)) {
+      throw new PolicyError("Discord channel type does not support webhook message delivery")
+    }
+    return guildId
+  }
+
+  #assertWebhookMessageChannelId(channelId: string): void {
+    if (this.#webhookMessageChannelIds.size === 0) {
+      throw new PolicyError("Discord webhook messages require an explicit channel allowlist")
+    }
+    if (!this.#webhookMessageChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the webhook message scope`)
     }
   }
 

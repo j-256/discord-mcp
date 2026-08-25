@@ -169,6 +169,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewWebhookChange: "review_webhook_change",
   reviewWebhookCreation: "review_webhook_creation",
   reviewWebhookDeletion: "review_webhook_deletion",
+  reviewWebhookMessageDeletion: "review_webhook_message_deletion",
   searchGuildMessages: "search_guild_messages",
   summarizeChannel: "summarize_channel",
 })
@@ -230,6 +231,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewWebhookChange]: "webhooks",
   [MCP_PROMPT_NAMES.reviewWebhookCreation]: "webhooks",
   [MCP_PROMPT_NAMES.reviewWebhookDeletion]: "webhooks",
+  [MCP_PROMPT_NAMES.reviewWebhookMessageDeletion]: "webhooks",
   [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",
   [MCP_PROMPT_NAMES.summarizeChannel]: "messages",
 } satisfies Record<McpPromptName, McpToolsetName>)

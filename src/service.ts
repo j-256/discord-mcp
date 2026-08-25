@@ -654,6 +654,22 @@ import {
   normalizeWebhookDeletionRequest,
   WebhookService,
 } from "./webhook-service.js"
+import { WebhookCredentialStore } from "./webhook-credential-store.js"
+import type {
+  WebhookMessageDeletionPlan,
+  WebhookMessageDeletionRequest,
+  WebhookMessageDeletionResult,
+  WebhookMessageEditRequest,
+  WebhookMessageLookupRequest,
+  WebhookMessageLookupResult,
+  WebhookMessageSendRequest,
+  WebhookMessageServiceOptions,
+  WebhookMessageWriteResult,
+} from "./webhook-message-service.js"
+import {
+  webhookMessageIntentKey,
+  WebhookMessageService,
+} from "./webhook-message-service.js"
 import {
   FileOperationStore,
   operationKeyHash,
@@ -737,10 +753,12 @@ export interface DiscordServiceClient {
   deleteOwnReaction: DiscordClient["deleteOwnReaction"]
   deleteUserReaction: DiscordClient["deleteUserReaction"]
   deleteWebhook: DiscordClient["deleteWebhook"]
+  deleteWebhookMessage: DiscordClient["deleteWebhookMessage"]
   endPoll: DiscordClient["endPoll"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editComponentMessage: DiscordClient["editComponentMessage"]
   editMessage: DiscordClient["editMessage"]
+  executeWebhookMessage: DiscordClient["executeWebhookMessage"]
   getChannel: DiscordClient["getChannel"]
   getApplicationEmoji: DiscordClient["getApplicationEmoji"]
   getGuildForumTags: DiscordClient["getGuildForumTags"]
@@ -773,6 +791,8 @@ export interface DiscordServiceClient {
   getGuildSticker: DiscordClient["getGuildSticker"]
   getStageInstance: DiscordClient["getStageInstance"]
   getMessage: DiscordClient["getMessage"]
+  getWebhookMessage: DiscordClient["getWebhookMessage"]
+  getWebhookWithToken: DiscordClient["getWebhookWithToken"]
   getThreadMember: DiscordClient["getThreadMember"]
   getThreadState: DiscordClient["getThreadState"]
   getUser: DiscordClient["getUser"]
@@ -811,6 +831,7 @@ export interface DiscordServiceClient {
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
   modifyThreadState: DiscordClient["modifyThreadState"]
   modifyWebhook: DiscordClient["modifyWebhook"]
+  modifyWebhookMessage: DiscordClient["modifyWebhookMessage"]
   modifyGuildForumTags: DiscordClient["modifyGuildForumTags"]
   modifyGuildChannelMetadata: DiscordClient["modifyGuildChannelMetadata"]
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
@@ -1049,6 +1070,10 @@ export interface ConnectorServiceOptions {
     "clock" | "planKey" | "randomId"
   >
   webhookOptions?: Pick<WebhookServiceOptions, "clock" | "planKey" | "randomId">
+  webhookMessageOptions?: Pick<
+    WebhookMessageServiceOptions,
+    "clock" | "intentKey" | "planKey" | "randomId"
+  >
   welcomeScreenOptions?: Pick<
     WelcomeScreenServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1247,6 +1272,8 @@ export class ConnectorService {
   readonly #voiceRegionService: VoiceRegionService
   readonly #voiceChannelStatusService: VoiceChannelStatusService
   readonly #webhookService: WebhookService
+  readonly #webhookCredentialStore: WebhookCredentialStore | undefined
+  readonly #webhookMessageService: WebhookMessageService | undefined
   readonly #welcomeScreenService: WelcomeScreenService
   readonly #writeCoordinator: WriteCoordinator
   readonly #widgetSettingsService: WidgetSettingsService
@@ -1271,6 +1298,9 @@ export class ConnectorService {
       writeCoordinationDirectory(options.config.auditFile),
       operationStore,
     )
+    this.#webhookCredentialStore = options.config.webhookCredentialRoot
+      ? new WebhookCredentialStore(options.config.webhookCredentialRoot)
+      : undefined
     const interactionClock = options.interactionOptions?.clock || (() => new Date())
     const interactionLimiter = options.interactionOptions?.limiter || new InteractionLimiter({
       clock: () => interactionClock().getTime(),
@@ -1526,8 +1556,23 @@ export class ConnectorService {
       client: this.#client,
       operationStore,
       policy: this.#policy,
+      ...(this.#webhookCredentialStore
+        ? { credentialStore: this.#webhookCredentialStore }
+        : {}),
       ...options.webhookOptions,
     })
+    this.#webhookMessageService = this.#webhookCredentialStore
+      ? new WebhookMessageService({
+          activityStore: this.#activityStore,
+          client: this.#client,
+          credentialStore: this.#webhookCredentialStore,
+          intentKey: webhookMessageIntentKey(options.config.token),
+          limiter: interactionLimiter,
+          operationStore,
+          policy: this.#policy,
+          ...options.webhookMessageOptions,
+        })
+      : undefined
     this.#guildExpressionService = new GuildExpressionService({
       activityStore: this.#activityStore,
       client: this.#client,
@@ -1697,6 +1742,15 @@ export class ConnectorService {
 
   describePolicy() {
     return this.#policy.describe()
+  }
+
+  #webhookMessages(): WebhookMessageService {
+    if (!this.#webhookMessageService) {
+      throw new ConfigurationError(
+        "Discord webhook message capabilities require a private credential store",
+      )
+    }
+    return this.#webhookMessageService
   }
 
   async #verifyIdentity(options: RequestOptions = {}): Promise<VerifiedIdentity> {
@@ -2953,6 +3007,93 @@ export class ConnectorService {
       channelId,
       webhookId,
       options,
+    )
+  }
+
+  async getWebhookMessage(
+    request: WebhookMessageLookupRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookMessageLookupResult> {
+    this.#policy.assertWebhookMessageAuditEnabled()
+    await this.#verifyIdentity(options)
+    return this.#webhookMessages().get(request, options)
+  }
+
+  async sendWebhookMessage(
+    request: WebhookMessageSendRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookMessageWriteResult> {
+    this.#policy.assertWebhookMessageDeliveryEnabled()
+    await this.#verifyIdentity(options)
+    const service = this.#webhookMessages()
+    return this.#coordinateWrite(
+      "webhook-message-send",
+      request.operationKey,
+      service.sendDigest(request),
+      [writeResourceTarget("webhook", request.webhookId)],
+      () => service.send(request, options),
+    )
+  }
+
+  async editWebhookMessage(
+    request: WebhookMessageEditRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookMessageWriteResult> {
+    this.#policy.assertWebhookMessageChangesEnabled()
+    await this.#verifyIdentity(options)
+    const service = this.#webhookMessages()
+    return this.#coordinateWrite(
+      "webhook-message-edit",
+      request.operationKey,
+      service.editDigest(request),
+      [
+        writeResourceTarget("message", request.messageId),
+        writeResourceTarget("webhook", request.webhookId),
+      ],
+      () => service.edit(request, options),
+    )
+  }
+
+  async planWebhookMessageDeletion(
+    request: WebhookMessageDeletionRequest,
+    options: RequestOptions = {},
+  ): Promise<WebhookMessageDeletionPlan> {
+    this.#policy.assertWebhookMessageDeletionsEnabled()
+    const identity = await this.#verifyIdentity(options)
+    return this.#webhookMessages().planDeletion(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async executeWebhookMessageDeletion(
+    request: WebhookMessageDeletionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<WebhookMessageDeletionResult> {
+    this.#policy.assertWebhookMessageDeletionsEnabled()
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord webhook message deletion plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const service = this.#webhookMessages()
+    return this.#coordinateWrite(
+      "webhook-message-deletion",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("message", request.messageId),
+        writeResourceTarget("webhook", request.webhookId),
+      ],
+      () => service.executeDeletion(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
     )
   }
 

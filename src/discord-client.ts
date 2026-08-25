@@ -336,6 +336,18 @@ export interface CreateWebhookInput {
   name: string
 }
 
+export interface ExecuteWebhookMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  content: string
+}
+
+export interface ModifyWebhookMessageInput extends ExecuteWebhookMessageInput {}
+
+export type WebhookCredentialSink = (
+  webhook: DiscordWebhookSummary,
+  token: string,
+) => Promise<void>
+
 export interface ModifyWebhookInput {
   channelId?: string
   name?: string
@@ -955,7 +967,6 @@ const EXPRESSION_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F
 const WEBHOOK_NAME_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
 const WEBHOOK_FORBIDDEN_NAME_PATTERN = /(?:clyde|discord)/iu
 const WEBHOOK_REPEATED_WHITESPACE_PATTERN = /\s{2,}/u
-const WEBHOOK_TOKEN_CHARACTERS = 2_048
 const CREATE_WEBHOOK_INPUT_KEYS = ["name"] as const
 const MODIFY_WEBHOOK_INPUT_KEYS = ["channelId", "name"] as const
 const POLL_TEXT_CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u
@@ -1441,6 +1452,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_channel_invite",
   "create_stage_instance",
   "create_webhook",
+  "execute_webhook",
   "delete_application_emoji",
   "delete_guild_channel",
   "delete_guild_auto_moderation_rule",
@@ -1450,6 +1462,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "delete_guild_template",
   "delete_guild_integration",
   "delete_webhook",
+  "delete_webhook_message",
   "delete_stage_instance",
   "delete_all_message_reactions",
   "delete_all_message_reactions_for_emoji",
@@ -1477,6 +1490,8 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_invite",
   "get_invite_target_users",
   "get_invite_target_users_job_status",
+  "get_webhook",
+  "get_webhook_message",
   "list_guild_invites",
   "list_guild_integrations",
   "list_application_emojis",
@@ -1502,6 +1517,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_member_voice",
   "modify_thread_state",
   "modify_webhook",
+  "modify_webhook_message",
   "modify_stage_instance",
   "modify_guild_onboarding",
   "modify_guild_incident_actions",
@@ -3321,7 +3337,7 @@ function assertWebhookNameInput(value: unknown): asserts value is string {
 function projectCreatedWebhook(
   value: unknown,
   channelId: string,
-): DiscordWebhookSummary {
+): { token: string; webhook: DiscordWebhookSummary } {
   const projected = projectWebhook(value)
   const record = value as Record<string, unknown>
   if (
@@ -3330,14 +3346,34 @@ function projectCreatedWebhook(
     || projected.guildId === null
     || typeof record.token !== "string"
     || record.token.length < 1
-    || record.token.length > WEBHOOK_TOKEN_CHARACTERS
+    || record.token.length > DISCORD_LIMITS.webhookTokenCharacters
     || /\s|[\u0000-\u001F\u007F]/u.test(record.token)
   ) {
     throw new WebhookEvidenceError(
       "Discord returned an invalid Incoming webhook creation result",
     )
   }
-  return projected
+  return {
+    token: record.token as string,
+    webhook: projected,
+  }
+}
+
+function webhookTokenRoute(webhookId: string, token: string): string {
+  assertPositiveSnowflake(webhookId, "Discord webhook ID")
+  if (
+    typeof token !== "string"
+    || token.length < 1
+    || token.length > DISCORD_LIMITS.webhookTokenCharacters
+    || /\s|[\u0000-\u001F\u007F]/u.test(token)
+  ) {
+    throw new RangeError("Discord webhook credential is invalid")
+  }
+  try {
+    return `/webhooks/${webhookId}/${encodeURIComponent(token)}`
+  } catch (error) {
+    throw new RangeError("Discord webhook credential is invalid", { cause: error })
+  }
 }
 
 const GUILD_INTEGRATION_KEYS = [
@@ -11192,6 +11228,7 @@ export class DiscordClient {
   async createWebhook(
     channelId: string,
     input: CreateWebhookInput,
+    credentialSink: WebhookCredentialSink,
     auditReason: string,
     options: RequestOptions = {},
   ): Promise<DiscordWebhookSummary> {
@@ -11205,6 +11242,9 @@ export class DiscordClient {
       throw new RangeError("Discord webhook creation must be an exact object")
     }
     assertWebhookNameInput(input.name)
+    if (typeof credentialSink !== "function") {
+      throw new RangeError("Discord webhook creation requires private credential custody")
+    }
     encodeDiscordAuditReason(auditReason)
     const response = await this.#request<unknown>(
       "create_webhook",
@@ -11218,7 +11258,129 @@ export class DiscordClient {
         suppressFailureCause: true,
       },
     )
-    return projectCreatedWebhook(response, channelId)
+    const created = projectCreatedWebhook(response, channelId)
+    await credentialSink(created.webhook, created.token)
+    return created.webhook
+  }
+
+  async getWebhookWithToken(
+    webhookId: string,
+    token: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordWebhookSummary> {
+    const route = webhookTokenRoute(webhookId, token)
+    const response = await this.#request<unknown>("get_webhook", route, {
+      ...options,
+      authentication: "none",
+      diagnosticRoute: "/webhooks/{webhook.id}/{webhook.token}",
+      suppressFailureCause: true,
+    })
+    const webhook = projectWebhook(response)
+    if (webhook.id !== webhookId) {
+      throw new WebhookEvidenceError(
+        "Discord returned a different webhook than the credential target",
+      )
+    }
+    return webhook
+  }
+
+  async executeWebhookMessage(
+    webhookId: string,
+    token: string,
+    input: ExecuteWebhookMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertMessageContent(input.content)
+    assertAllowedMentions(input.allowedMentions)
+    const route = webhookTokenRoute(webhookId, token)
+    return this.#request<DiscordMessage>(
+      "execute_webhook",
+      `${route}?wait=true`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: input.allowedMentions,
+          content: input.content,
+          flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+        },
+        diagnosticRoute: "/webhooks/{webhook.id}/{webhook.token}",
+        expectedSuccessStatus: 200,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async getWebhookMessage(
+    webhookId: string,
+    token: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(messageId, "Discord webhook message ID")
+    const route = webhookTokenRoute(webhookId, token)
+    return this.#request<DiscordMessage>(
+      "get_webhook_message",
+      `${route}/messages/${messageId}`,
+      {
+        ...options,
+        authentication: "none",
+        diagnosticRoute: "/webhooks/{webhook.id}/{webhook.token}/messages/{message.id}",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async modifyWebhookMessage(
+    webhookId: string,
+    token: string,
+    messageId: string,
+    input: ModifyWebhookMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertPositiveSnowflake(messageId, "Discord webhook message ID")
+    assertMessageContent(input.content)
+    assertAllowedMentions(input.allowedMentions)
+    const route = webhookTokenRoute(webhookId, token)
+    return this.#request<DiscordMessage>(
+      "modify_webhook_message",
+      `${route}/messages/${messageId}`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: input.allowedMentions,
+          content: input.content,
+          flags: DISCORD_MESSAGE_FLAGS.suppressEmbeds,
+        },
+        diagnosticRoute: "/webhooks/{webhook.id}/{webhook.token}/messages/{message.id}",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async deleteWebhookMessage(
+    webhookId: string,
+    token: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(messageId, "Discord webhook message ID")
+    const route = webhookTokenRoute(webhookId, token)
+    await this.#request<void>(
+      "delete_webhook_message",
+      `${route}/messages/${messageId}`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/webhooks/{webhook.id}/{webhook.token}/messages/{message.id}",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async followAnnouncementChannel(

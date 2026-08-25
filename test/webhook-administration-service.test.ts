@@ -164,6 +164,7 @@ class MemoryOperationStore implements OperationStore {
 }
 
 interface FixtureState {
+  createDepositsCredential: boolean
   createError: unknown
   createUpdatesState: boolean
   modifyError: unknown
@@ -172,12 +173,14 @@ interface FixtureState {
 }
 
 function fixture(options: {
+  credentialStore?: WebhookServiceOptions["credentialStore"]
   policy?: ScopePolicy
   state?: Partial<FixtureState>
 } = {}) {
   const permissions = DISCORD_PERMISSIONS.MANAGE_WEBHOOKS
     | DISCORD_PERMISSIONS.VIEW_CHANNEL
   const state: FixtureState = {
+    createDepositsCredential: true,
     createError: undefined,
     createUpdatesState: true,
     modifyError: undefined,
@@ -218,11 +221,14 @@ function fixture(options: {
     },
   }
   const client: WebhookServiceOptions["client"] = {
-    async createWebhook(channelId, input, reason) {
+    async createWebhook(channelId, input, credentialSink, reason) {
       events.push(`write:create:${reason}`)
       if (state.createError) throw state.createError
       mutationCompleted = true
       const created = webhook(CREATED_WEBHOOK_ID, channelId, input.name)
+      if (state.createDepositsCredential) {
+        await credentialSink(created, "private-webhook-token-canary")
+      }
       if (state.createUpdatesState) inventories.get(channelId)?.push(created)
       return created
     },
@@ -278,6 +284,16 @@ function fixture(options: {
     activityStore,
     client,
     clock: () => new Date(NOW),
+    credentialStore: options.credentialStore ?? {
+      async remove() {
+        return false
+      },
+      async write(webhookId, token) {
+        assert.equal(webhookId, CREATED_WEBHOOK_ID)
+        assert.equal(token, "private-webhook-token-canary")
+        events.push("credential:stored")
+      },
+    },
     operationStore,
     planKey: new Uint8Array(32).fill(9),
     policy: options.policy ?? policy(),
@@ -340,6 +356,7 @@ test("webhook creation executes once and verifies the complete inventory", async
   )
 
   assert.equal(result.status, "completed")
+  assert.equal(result.credentialStored, true)
   assert.equal(result.created.webhookId, CREATED_WEBHOOK_ID)
   assert.equal(result.readbackMatched, true)
   assert.equal(result.inventoryMatched, true)
@@ -419,6 +436,76 @@ test("webhook creation treats rate limits and readback failures as uncertain", a
       && (error.result as { webhookId: string }).webhookId === CREATED_WEBHOOK_ID
     ),
   )
+})
+
+test("webhook creation reports a known orphan when private custody fails", async () => {
+  const setup = fixture({
+    credentialStore: {
+      async remove() {
+        return false
+      },
+      async write() {
+        throw new Error("private credential root unavailable")
+      },
+    },
+  })
+  const request = creationRequest()
+  const plan = await setup.service.planCreation(
+    APPLICATION_ID,
+    BOT_ID,
+    request,
+  )
+
+  await assert.rejects(
+    () => setup.service.executeCreation(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    ),
+    (error: unknown) => (
+      error instanceof WebhookCreationExecutionError
+      && (error.result as { status: string; webhookId: string }).status === "uncertain"
+      && (error.result as { webhookId: string }).webhookId === CREATED_WEBHOOK_ID
+    ),
+  )
+  assert.deepEqual(setup.events, [
+    "activity:webhook-creation:pending",
+    "write:create:Reviewed webhook creation",
+    "activity:webhook-creation:uncertain",
+  ])
+  const serialized = JSON.stringify({
+    activities: setup.activities,
+    receipts: [...setup.operationStore.receipts.values()],
+  })
+  assert.equal(serialized.includes("private-webhook-token-canary"), false)
+  assert.equal(serialized.includes("private credential root unavailable"), false)
+})
+
+test("webhook creation requires transport-confirmed private custody", async () => {
+  const setup = fixture({ state: { createDepositsCredential: false } })
+  const request = creationRequest()
+  const plan = await setup.service.planCreation(
+    APPLICATION_ID,
+    BOT_ID,
+    request,
+  )
+
+  await assert.rejects(
+    () => setup.service.executeCreation(
+      APPLICATION_ID,
+      BOT_ID,
+      request,
+      plan.digest,
+    ),
+    (error: unknown) => (
+      error instanceof WebhookCreationExecutionError
+      && (error.result as { status: string; webhookId: string }).status === "uncertain"
+      && (error.result as { webhookId: string }).webhookId === CREATED_WEBHOOK_ID
+    ),
+  )
+  assert.equal(setup.events.includes("credential:stored"), false)
+  assert.equal(setup.activities.at(-1)?.status, "uncertain")
 })
 
 test("webhook changes plan and execute an exact same-guild move and rename", async () => {
