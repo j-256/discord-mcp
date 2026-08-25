@@ -3247,7 +3247,7 @@ export async function diagnoseConnector(
       ? check(
           DOCTOR_CHECK_IDS.gatewayPolicy,
           "pass",
-          `Discord Gateway events are enabled with authenticated shard and session-start preflight, a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, ${voiceChannelStatusCount} exact voice-status candidates, and only nonprivileged intents`,
+          `Discord Gateway events are enabled with authenticated exact-route sparse sharding and shared session-start preflight, a ${config.gatewayEventBufferSize}-event content-free buffer, ${layoutGuildCount} exact layout guilds, ${voiceChannelStatusCount} exact voice-status candidates, and only nonprivileged intents`,
         )
       : layoutGuildCount > 0 || voiceChannelStatusCount > 0
         ? check(
@@ -3275,7 +3275,7 @@ export async function diagnoseConnector(
       ? check(
         DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
         "pass",
-        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with application endpoint and command verification plus authenticated shard and session-start preflight`,
+        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with application endpoint and command verification plus authenticated exact-route sparse sharding and shared session-start preflight`,
       )
       : check(
         DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
@@ -3918,6 +3918,9 @@ function smokeGateway(config: ConnectorConfig): GatewayRuntime | undefined {
     config,
     discoverGateway(signal) {
       return client.getGatewayBot({ signal })
+    },
+    discoverGatewayChannel(channelId, signal) {
+      return client.getGatewayChannelRoute(channelId, { signal })
     },
     interactionHandler: { ingestInteraction() {} },
   })

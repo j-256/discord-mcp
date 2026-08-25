@@ -256,6 +256,120 @@ test("Discord client rejects malformed and oversized Gateway discovery without r
   }
 })
 
+test("Discord client resolves one exact Gateway channel route with minimal evidence", async () => {
+  const channelId = "300000000000000001"
+  const guildId = "200000000000000001"
+  let requestUrl = ""
+  let authorization = ""
+  let redirect: RequestInit["redirect"]
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requestUrl = String(input)
+      authorization = new Headers(init?.headers).get("Authorization") || ""
+      redirect = init?.redirect
+      return jsonResponse({
+        guild_id: guildId,
+        id: channelId,
+        name: `private ${TOKEN}`,
+        permission_overwrites: [{ private: TOKEN }],
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.getGatewayChannelRoute(channelId)
+
+  assert.equal(requestUrl, `${API_BASE_URL}/channels/${channelId}`)
+  assert.equal(authorization, `Bot ${TOKEN}`)
+  assert.equal(redirect, "error")
+  assert.deepEqual(result, { channelId, guildId })
+  assert.deepEqual(records.map((record) => record.operation), [
+    "get_gateway_channel_route",
+  ])
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("Discord client fails closed on unsafe Gateway channel-route evidence", async () => {
+  const channelId = "300000000000000001"
+  for (const payload of [
+    { id: channelId, private: TOKEN },
+    { guild_id: "200000000000000001", id: "300000000000000002" },
+    { future: "x".repeat(20_000) },
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(payload),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => client.getGatewayChannelRoute(channelId),
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.doesNotMatch(error.message, new RegExp(TOKEN))
+        assert.match(
+          error.message,
+          /Gateway topology evidence is invalid|exceeded its local response bound/,
+        )
+        return true
+      },
+    )
+  }
+})
+
+test("Discord client rejects an invalid Gateway route ID before transport", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.getGatewayChannelRoute("0"),
+    /positive Discord snowflake/,
+  )
+  assert.equal(requests, 0)
+})
+
+test("Discord client forwards Gateway route cancellation without retaining its cause", async () => {
+  const channelId = "300000000000000001"
+  let requestSignal: AbortSignal | undefined
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      requestSignal = init?.signal ?? undefined
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => {
+          reject(new Error(`private ${TOKEN}`))
+        }, { once: true })
+      })
+    },
+    token: TOKEN,
+  })
+  const controller = new AbortController()
+  const request = client.getGatewayChannelRoute(channelId, { signal: controller.signal })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  controller.abort()
+
+  await assert.rejects(request, (error: unknown) => {
+    assert.ok(error instanceof Error)
+    assert.doesNotMatch(error.message, new RegExp(TOKEN))
+    assert.equal(error.cause, undefined)
+    assert.equal(
+      (error as { operationalCategory?: unknown }).operationalCategory,
+      "cancelled",
+    )
+    return true
+  })
+  assert.equal(requestSignal?.aborted, true)
+})
+
 test("Discord client sends one exact non-retried current-application flag PATCH", async () => {
   const requests: Array<{
     authorization: string | null

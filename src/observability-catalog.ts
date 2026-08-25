@@ -284,6 +284,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   get_current_user_voice_state: "GET",
   get_current_user: "GET",
   get_gateway_bot: "GET",
+  get_gateway_channel_route: "GET",
   get_guild: "GET",
   get_guild_incident_actions: "GET",
   get_invite: "GET",

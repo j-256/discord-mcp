@@ -63,6 +63,10 @@ import {
   projectGatewayBotDiscovery,
   type GatewayBotDiscovery,
 } from "./gateway-discovery.js"
+import {
+  projectGatewayChannelRoute,
+  type GatewayChannelRoute,
+} from "./gateway-topology.js"
 import type {
   EmojiFileFormat,
   StickerFileFormat,
@@ -8592,6 +8596,24 @@ export class DiscordClient {
       },
     )
     return projectGatewayBotDiscovery(response)
+  }
+
+  async getGatewayChannelRoute(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<GatewayChannelRoute> {
+    assertPositiveSnowflake(channelId, "Discord Gateway channel-route channel ID")
+    const response = await this.#request<unknown>(
+      "get_gateway_channel_route",
+      `/channels/${channelId}`,
+      {
+        ...options,
+        diagnosticRoute: "/channels/{channel.id}",
+        maxResponseBytes: GATEWAY_DEFAULTS.channelRouteResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectGatewayChannelRoute(response, channelId)
   }
 
   listApplicationRoleConnectionMetadata(

@@ -535,6 +535,8 @@ export type SoundboardAction = typeof SOUNDBOARD_ACTIONS[number]
 export const GATEWAY_DEFAULTS = Object.freeze({
   authenticationTimeoutMs: 30_000,
   channelInfoTimeoutMs: 10_000,
+  channelRouteConcurrency: 4,
+  channelRouteResponseBytes: 16_384,
   connectionTimeoutMs: 30_000,
   discoveryResponseBytes: 16_384,
   eventBufferSize: 100,

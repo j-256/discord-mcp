@@ -1,14 +1,12 @@
-import process from "node:process"
-
 import type { ConnectorConfig } from "./config.js"
 import {
-  CONNECTOR_NAME,
   DISCORD_GATEWAY_INTENT_MASK,
   DISCORD_GATEWAY_INTENTS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GATEWAY_DEFAULTS,
 } from "./constants.js"
+import { GatewayVoiceChannelStatusError } from "./errors.js"
 import type {
   GatewayChannelLayoutListener,
   GatewayChannelLayoutSnapshot,
@@ -20,8 +18,6 @@ import {
   validateGatewayBotDiscovery,
   type GatewayBotDiscovery,
 } from "./gateway-discovery.js"
-import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
-import { GatewayVoiceChannelStatusError } from "./errors.js"
 import {
   GatewayEventStore,
   type GatewayChangeListener,
@@ -30,6 +26,22 @@ import {
   type GatewayEventSource,
   type GatewayStatusSnapshot,
 } from "./gateway-events.js"
+import { GatewayIdentifyCoordinator } from "./gateway-identify-coordinator.js"
+import {
+  GatewayShardSession,
+  type GatewayScheduler,
+  type GatewayShardDispatch,
+  type GatewayShardState,
+  type GatewaySocket,
+} from "./gateway-shard-session.js"
+import {
+  calculateGatewayShardId,
+  deriveGatewayTopology,
+  GatewayTopologyEvidenceError,
+  validateGatewayChannelRoute,
+  type GatewayChannelRoute,
+  type GatewayTopology,
+} from "./gateway-topology.js"
 import {
   channelInfoGuildId,
   projectGatewayVoiceChannelStatus,
@@ -41,6 +53,9 @@ import {
   type GatewayVoiceChannelStatusSource,
   type GatewayVoiceChannelStatusUpdate,
 } from "./gateway-voice-channel-status.js"
+import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
+
+export type { GatewayScheduler, GatewaySocket } from "./gateway-shard-session.js"
 
 export interface GatewayRuntime extends GatewayEventSource, GatewayVoiceChannelStatusSource {
   start(): Promise<void>
@@ -49,21 +64,6 @@ export interface GatewayRuntime extends GatewayEventSource, GatewayVoiceChannelS
 
 export interface GatewayInteractionHandler {
   ingestInteraction(payload: unknown): Promise<void> | void
-}
-
-export interface GatewaySocket {
-  readonly readyState: number
-  onclose: ((event: { code: number }) => void) | null
-  onerror: (() => void) | null
-  onmessage: ((event: { data: unknown }) => void) | null
-  onopen: (() => void) | null
-  close(code?: number, reason?: string): void
-  send(data: string): void
-}
-
-export interface GatewayScheduler {
-  clearTimeout(handle: unknown): void
-  setTimeout(handler: () => void, milliseconds: number): unknown
 }
 
 export interface DiscordGatewayOptions {
@@ -79,38 +79,34 @@ export interface DiscordGatewayOptions {
     | "token"
   > & Partial<Pick<
     ConnectorConfig,
+    | "allowChannelCloneAudit"
     | "allowChannelMetadataChanges"
     | "allowChannelOrderingAudit"
+    | "allowGuildSettingsAudit"
     | "allowGuildTemplateAudit"
     | "allowMemberRoleChanges"
     | "allowNativeInteractions"
     | "allowOnboardingAudit"
-    | "channelOrderingGuildIds"
+    | "channelCloneGuildIds"
     | "channelMetadataIds"
+    | "channelOrderingGuildIds"
+    | "guildSettingsGuildIds"
     | "guildTemplateGuildIds"
     | "memberRoleGuildIds"
+    | "nativeInteractionGuildIds"
     | "onboardingGuildIds"
   >>
-  eventStore?: GatewayEventStore
   discoverGateway: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
+  discoverGatewayChannel: (
+    channelId: string,
+    signal: AbortSignal,
+  ) => Promise<GatewayChannelRoute>
+  eventStore?: GatewayEventStore
   interactionHandler?: GatewayInteractionHandler
   logger?: (message: string) => void
   random?: () => number
   scheduler?: GatewayScheduler
   webSocketFactory?: (url: string) => GatewaySocket
-}
-
-interface GatewayPayload {
-  d: unknown
-  op: number
-  s?: number | null
-  t?: string | null
-}
-
-interface PendingReconnect {
-  clearSession: boolean
-  delayMs?: number
-  errorCategory?: GatewayErrorCategory
 }
 
 interface PendingChannelInfo {
@@ -135,37 +131,73 @@ interface PendingVoiceChannelStatusUpdate {
 }
 
 const GATEWAY_OPCODES = Object.freeze({
-  dispatch: 0,
-  heartbeat: 1,
-  heartbeatAck: 11,
-  hello: 10,
-  identify: 2,
-  invalidSession: 9,
-  reconnect: 7,
-  resume: 6,
   requestChannelInfo: 43,
 })
-const SOCKET_STATES = Object.freeze({
-  connecting: 0,
-  open: 1,
-})
-const RECONNECT_CLOSE_CODE = 4_000
-const STOP_CLOSE_CODE = 1_000
-const STATIC_RECONNECT_REASON = "discord-mcp reconnect"
-const STATIC_STOP_REASON = "discord-mcp stop"
 
-const FATAL_CLOSE_CATEGORIES: ReadonlyMap<number, GatewayErrorCategory> = new Map([
-  [4_004, "authentication-failed"],
-  [4_010, "invalid-shard"],
-  [4_011, "sharding-required"],
-  [4_012, "invalid-api-version"],
-  [4_013, "invalid-intents"],
-  [4_014, "disallowed-intents"],
+const EVENT_FEED_DISPATCH_NAMES: ReadonlySet<string> = new Set([
+  "CHANNEL_CREATE",
+  "CHANNEL_DELETE",
+  "CHANNEL_PINS_UPDATE",
+  "CHANNEL_UPDATE",
+  "GUILD_CREATE",
+  "GUILD_DELETE",
+  "GUILD_ROLE_CREATE",
+  "GUILD_ROLE_DELETE",
+  "GUILD_ROLE_UPDATE",
+  "GUILD_SOUNDBOARD_SOUND_CREATE",
+  "GUILD_SOUNDBOARD_SOUND_DELETE",
+  "GUILD_SOUNDBOARD_SOUND_UPDATE",
+  "GUILD_SOUNDBOARD_SOUNDS_UPDATE",
+  "GUILD_UPDATE",
+  "MESSAGE_CREATE",
+  "MESSAGE_DELETE",
+  "MESSAGE_DELETE_BULK",
+  "MESSAGE_POLL_VOTE_ADD",
+  "MESSAGE_POLL_VOTE_REMOVE",
+  "MESSAGE_REACTION_ADD",
+  "MESSAGE_REACTION_REMOVE",
+  "MESSAGE_REACTION_REMOVE_ALL",
+  "MESSAGE_REACTION_REMOVE_EMOJI",
+  "MESSAGE_UPDATE",
+  "STAGE_INSTANCE_CREATE",
+  "STAGE_INSTANCE_DELETE",
+  "STAGE_INSTANCE_UPDATE",
+  "THREAD_CREATE",
+  "THREAD_DELETE",
+  "THREAD_LIST_SYNC",
+  "THREAD_MEMBERS_UPDATE",
+  "THREAD_UPDATE",
 ])
 
-const REIDENTIFY_CLOSE_CODES: ReadonlySet<number> = new Set([
-  4_007,
-  4_009,
+const LAYOUT_DISPATCH_NAMES: ReadonlySet<string> = new Set([
+  "CHANNEL_CREATE",
+  "CHANNEL_DELETE",
+  "CHANNEL_UPDATE",
+  "GUILD_CREATE",
+  "GUILD_DELETE",
+])
+
+const ROOT_GUILD_ID_DISPATCH_NAMES: ReadonlySet<string> = new Set([
+  "GUILD_CREATE",
+  "GUILD_DELETE",
+  "GUILD_UPDATE",
+])
+
+const NON_GUILD_DISPATCH_NAMES: ReadonlySet<string> = new Set([
+  "CHANNEL_CREATE",
+  "CHANNEL_DELETE",
+  "CHANNEL_PINS_UPDATE",
+  "CHANNEL_UPDATE",
+  "INTERACTION_CREATE",
+  "MESSAGE_CREATE",
+  "MESSAGE_DELETE",
+  "MESSAGE_POLL_VOTE_ADD",
+  "MESSAGE_POLL_VOTE_REMOVE",
+  "MESSAGE_REACTION_ADD",
+  "MESSAGE_REACTION_REMOVE",
+  "MESSAGE_REACTION_REMOVE_ALL",
+  "MESSAGE_REACTION_REMOVE_EMOJI",
+  "MESSAGE_UPDATE",
 ])
 
 function defaultScheduler(): GatewayScheduler {
@@ -188,101 +220,60 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>
 }
 
-function safeInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value)
-    ? value
-    : undefined
-}
-
-function safeString(value: unknown, maximum: number): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.length <= maximum
-    ? value
-    : undefined
-}
-
 function positiveSnowflake(value: unknown): value is string {
-  return typeof value === "string"
-    && DISCORD_SNOWFLAKE_PATTERN.test(value)
-    && BigInt(value) >= 1n
-    && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+  if (typeof value !== "string" || !DISCORD_SNOWFLAKE_PATTERN.test(value)) return false
+  try {
+    const parsed = BigInt(value)
+    return parsed > 0n && parsed <= DISCORD_SNOWFLAKE_MAX
+  } catch {
+    return false
+  }
 }
 
 function voiceChannelStatusTargetKey(guildId: string, channelId: string): string {
   return `${guildId}\0${channelId}`
 }
 
+function dispatchGuildId(name: string, data: unknown): string | null | undefined {
+  const record = recordValue(data)
+  if (!record) return undefined
+  if (ROOT_GUILD_ID_DISPATCH_NAMES.has(name)) {
+    return positiveSnowflake(record.id) ? record.id : undefined
+  }
+  if (record.guild_id === undefined && NON_GUILD_DISPATCH_NAMES.has(name)) return null
+  return positiveSnowflake(record.guild_id) ? record.guild_id : undefined
+}
+
 export function normalizeGatewayResumeUrl(value: unknown): string | undefined {
   return normalizeDiscordGatewayUrl(value)
 }
 
-function parsePayload(data: unknown): GatewayPayload | undefined {
-  if (
-    typeof data !== "string"
-    || Buffer.byteLength(data, "utf8") > GATEWAY_DEFAULTS.maximumPayloadBytes
-  ) {
-    return undefined
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(data)
-  } catch {
-    return undefined
-  }
-  const record = recordValue(value)
-  const op = safeInteger(record?.op)
-  if (!record || op === undefined) return undefined
-  const sequence = record.s
-  if (
-    sequence !== undefined
-    && sequence !== null
-    && (safeInteger(sequence) === undefined || Number(sequence) < 0)
-  ) {
-    return undefined
-  }
-  const eventName = record.t
-  if (eventName !== undefined && eventName !== null && typeof eventName !== "string") {
-    return undefined
-  }
-  return {
-    d: record.d,
-    op,
-    ...(sequence === undefined ? {} : { s: sequence as number | null }),
-    ...(eventName === undefined ? {} : { t: eventName as string | null }),
-  }
-}
-
 export class DiscordGateway implements GatewayRuntime {
   readonly #applicationId: string
-  #awaitingHeartbeatAck = false
   readonly #botId: string
+  readonly #channelGuildIds = new Map<string, string>()
   readonly #clock: () => number
-  #discoveryAbort: AbortController | undefined
   readonly #discoverGateway: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
+  readonly #discoverGatewayChannel: DiscordGatewayOptions["discoverGatewayChannel"]
+  readonly #eventFeedEnabled: boolean
   readonly #eventStore: GatewayEventStore
-  #gatewayUrl: string | undefined
-  #heartbeatIntervalMs: number | undefined
-  #heartbeatTimer: unknown
-  readonly #identifyTimes: number[] = []
-  #identifyTimer: unknown
+  #identifyCoordinator: GatewayIdentifyCoordinator | undefined
   readonly #interactionHandler: GatewayInteractionHandler | undefined
+  readonly #knownGuildIds: ReadonlySet<string>
   readonly #logger: (message: string) => void
+  readonly #nativeInteractionsEnabled: boolean
   readonly #pendingChannelInfo = new Map<string, PendingChannelInfo>()
-  #pendingReconnect: PendingReconnect | undefined
-  #phaseTimer: unknown
   readonly #random: () => number
-  #reconnectAttempt = 0
-  #reconnectTimer: unknown
-  #remainingSessionStarts: number | undefined
-  #resumeUrl: string | undefined
-  #resuming = false
+  readonly #routeChannelIds: ReadonlySet<string>
   #running = false
   readonly #scheduler: GatewayScheduler
-  #sequence: number | null = null
-  #sessionId: string | undefined
-  #socket: GatewaySocket | undefined
+  readonly #sessions = new Map<number, GatewayShardSession>()
+  readonly #shardStates = new Map<number, GatewayShardState>()
+  #startupAbort: AbortController | undefined
   #startupGeneration = 0
   #terminal = false
   readonly #token: string
+  #topology: GatewayTopology | undefined
   readonly #voiceChannelStatusIds: ReadonlySet<string>
   readonly #voiceChannelStatusQueueTails = new Map<string, Promise<void>>()
   readonly #voiceChannelStatusUpdateWaiters = new Map<
@@ -293,14 +284,20 @@ export class DiscordGateway implements GatewayRuntime {
   readonly voiceChannelStatusEnabled: boolean
 
   constructor(options: DiscordGatewayOptions) {
-    if (!DISCORD_SNOWFLAKE_PATTERN.test(options.applicationId)) {
+    if (!positiveSnowflake(options.applicationId)) {
       throw new RangeError("Gateway application ID must be a Discord snowflake")
     }
     const botId = options.config.expectedBotId
-    if (!botId || !DISCORD_SNOWFLAKE_PATTERN.test(botId)) {
+    if (!positiveSnowflake(botId)) {
       throw new RangeError("Gateway bot ID must be a Discord snowflake")
     }
     if (!options.config.token.trim()) throw new RangeError("Gateway token must not be empty")
+    if (
+      typeof options.discoverGateway !== "function"
+      || typeof options.discoverGatewayChannel !== "function"
+    ) {
+      throw new RangeError("Gateway discovery providers are required")
+    }
     if (
       options.config.allowGateway
       && options.config.allowedGuildIds.size === 0
@@ -313,20 +310,43 @@ export class DiscordGateway implements GatewayRuntime {
         "Enabled Discord native Interactions require an Interaction handler",
       )
     }
+
     const layoutGuildIds = guildChannelLayoutGuildIds(options.config)
     const voiceChannelStatusIds = voiceChannelStatusChannelIds({
       allowChannelMetadataChanges: options.config.allowChannelMetadataChanges ?? false,
       channelMetadataIds: options.config.channelMetadataIds ?? new Set(),
     })
     const voiceChannelStatusEnabled = voiceChannelStatusIds.size > 0
+    const nativeInteractionsEnabled = options.config.allowNativeInteractions === true
     const connectionEnabled = options.config.allowGateway
       || layoutGuildIds.size > 0
-      || options.config.allowNativeInteractions === true
+      || nativeInteractionsEnabled
       || voiceChannelStatusEnabled
+    const knownGuildIds = new Set(layoutGuildIds)
+    const routeChannelIds = new Set<string>()
+    if (options.config.allowGateway) {
+      if (options.config.allowedGuildIds.size > 0) {
+        for (const guildId of options.config.allowedGuildIds) knownGuildIds.add(guildId)
+      } else {
+        for (const channelId of options.config.allowedChannelIds) routeChannelIds.add(channelId)
+      }
+    }
+    if (nativeInteractionsEnabled) {
+      for (const guildId of options.config.nativeInteractionGuildIds ?? []) {
+        knownGuildIds.add(guildId)
+      }
+    }
+    for (const channelId of voiceChannelStatusIds) routeChannelIds.add(channelId)
+    if (connectionEnabled && knownGuildIds.size === 0 && routeChannelIds.size === 0) {
+      throw new RangeError("Enabled Discord Gateway requires exact routing scope")
+    }
+
     this.#applicationId = options.applicationId
     this.#botId = botId
     this.#clock = options.clock || Date.now
     this.#discoverGateway = options.discoverGateway
+    this.#discoverGatewayChannel = options.discoverGatewayChannel
+    this.#eventFeedEnabled = options.config.allowGateway
     this.#eventStore = options.eventStore || new GatewayEventStore({
       allowedChannelIds: options.config.allowedChannelIds,
       allowedGuildIds: options.config.allowedGuildIds,
@@ -351,8 +371,11 @@ export class DiscordGateway implements GatewayRuntime {
       }
     }
     this.#interactionHandler = options.interactionHandler
+    this.#knownGuildIds = knownGuildIds
     this.#logger = options.logger || (() => undefined)
+    this.#nativeInteractionsEnabled = nativeInteractionsEnabled
     this.#random = options.random || Math.random
+    this.#routeChannelIds = routeChannelIds
     this.#scheduler = options.scheduler || defaultScheduler()
     this.#token = options.config.token
     this.#voiceChannelStatusIds = new Set(voiceChannelStatusIds)
@@ -426,14 +449,10 @@ export class DiscordGateway implements GatewayRuntime {
         "Discord Gateway voice channel status update evidence was cancelled",
       ))
     }
-    if (
-      !this.#running
-      || this.#terminal
-      || this.#eventStore.getStatus().connection.state !== "ready"
-    ) {
-      return Promise.reject(new GatewayVoiceChannelStatusError(
-        "Discord Gateway is not ready for voice channel status update evidence",
-      ))
+    try {
+      this.#requireReadyVoiceSession(guildId, channelId)
+    } catch (error) {
+      return Promise.reject(error)
     }
     return new Promise<GatewayVoiceChannelStatusUpdate>((resolve, reject) => {
       let pending: PendingVoiceChannelStatusUpdate
@@ -476,8 +495,9 @@ export class DiscordGateway implements GatewayRuntime {
     const generation = this.#startupGeneration + 1
     this.#startupGeneration = generation
     const controller = new AbortController()
-    this.#discoveryAbort = controller
+    this.#startupAbort = controller
     this.#eventStore.transition("discovering")
+
     let discovery: GatewayBotDiscovery
     try {
       const response = await this.#discoverGateway(controller.signal)
@@ -485,61 +505,118 @@ export class DiscordGateway implements GatewayRuntime {
       discovery = validateGatewayBotDiscovery(response)
     } catch (error) {
       if (!this.#startupActive(generation)) return
-      this.#discoveryAbort = undefined
       this.#fail(error instanceof GatewayDiscoveryEvidenceError
         ? "invalid-gateway-discovery"
         : "gateway-discovery-failed")
       return
     }
     if (!this.#startupActive(generation)) return
-    this.#discoveryAbort = undefined
     this.#eventStore.recordDiscovery({
       recommendedShards: discovery.shards,
       sessionStartLimit: discovery.sessionStartLimit,
     })
-    this.#remainingSessionStarts = discovery.sessionStartLimit.remaining
     if (discovery.sessionStartLimit.remaining === 0) {
       this.#fail("session-start-limit-exhausted")
       return
     }
-    if (discovery.shards !== 1) {
-      this.#fail("sharding-required")
+
+    this.#eventStore.transition("resolving-scope")
+    let topology: GatewayTopology
+    try {
+      const channelRoutes = await this.#resolveChannelRoutes(controller.signal)
+      if (!this.#startupActive(generation)) return
+      topology = deriveGatewayTopology({
+        channelRoutes,
+        guildIds: this.#knownGuildIds,
+        recommendedShards: discovery.shards,
+      })
+      this.#eventStore.recordTopology(topology.summary)
+    } catch (error) {
+      if (!this.#startupActive(generation)) return
+      this.#fail(error instanceof GatewayTopologyEvidenceError
+        ? "invalid-gateway-scope-evidence"
+        : "gateway-scope-discovery-failed")
       return
     }
-    this.#gatewayUrl = discovery.url
-    this.#connect(discovery.url)
+    if (!this.#startupActive(generation)) return
+    this.#startupAbort = undefined
+    if (discovery.sessionStartLimit.remaining < topology.activeShardIds.length) {
+      this.#fail("session-start-limit-insufficient")
+      return
+    }
+
+    this.#topology = topology
+    this.#channelGuildIds.clear()
+    for (const [channelId, guildId] of topology.channelGuildIds) {
+      this.#channelGuildIds.set(channelId, guildId)
+    }
+    const identifyCoordinator = new GatewayIdentifyCoordinator({
+      clock: this.#clock,
+      maxConcurrency: discovery.sessionStartLimit.maxConcurrency,
+      onFailure: (category) => this.#fail(category),
+      onIdentify: () => this.#eventStore.recordIdentify(),
+      remaining: discovery.sessionStartLimit.remaining,
+      scheduler: this.#scheduler,
+      shardCount: topology.summary.recommendedShards,
+      shardIds: topology.activeShardIds,
+    })
+    this.#identifyCoordinator = identifyCoordinator
+    const intents = this.#eventFeedEnabled
+      ? DISCORD_GATEWAY_INTENT_MASK
+      : this.#eventStore.guildIntentRequired
+        ? DISCORD_GATEWAY_INTENTS.guilds
+        : 0
+
+    try {
+      for (const shardId of topology.activeShardIds) {
+        const session = new GatewayShardSession({
+          applicationId: this.#applicationId,
+          botId: this.#botId,
+          gatewayUrl: discovery.url,
+          identifyCoordinator,
+          intents,
+          onContinuityGap: () => this.#onShardContinuityGap(),
+          onDispatch: (dispatch) => this.#onShardDispatch(dispatch),
+          onFatal: (_failedShardId, category) => this.#fail(category),
+          onReconnect: () => this.#onShardReconnect(),
+          onResume: () => this.#onShardResume(),
+          onState: (changedShardId, state, category) => {
+            this.#onShardState(changedShardId, state, category)
+          },
+          random: this.#random,
+          scheduler: this.#scheduler,
+          shardCount: topology.summary.recommendedShards,
+          shardId,
+          token: this.#token,
+          webSocketFactory: this.#webSocketFactory,
+        })
+        this.#sessions.set(shardId, session)
+        this.#shardStates.set(shardId, "stopped")
+      }
+    } catch {
+      this.#fail("invalid-gateway-scope-evidence")
+      return
+    }
+    for (const session of this.#sessions.values()) {
+      if (!this.#running || this.#terminal) break
+      session.start()
+    }
   }
 
   async stop(): Promise<void> {
     this.#running = false
-    this.#terminal = false
     this.#startupGeneration += 1
-    this.#discoveryAbort?.abort()
-    this.#discoveryAbort = undefined
-    this.#gatewayUrl = undefined
-    this.#remainingSessionStarts = undefined
-    this.#pendingReconnect = undefined
+    this.#startupAbort?.abort()
+    this.#startupAbort = undefined
+    this.#identifyCoordinator?.stop()
+    this.#identifyCoordinator = undefined
     this.#rejectPendingVoiceEvidence("Discord Gateway voice channel status evidence stopped")
-    this.#clearTimer("heartbeat")
-    this.#clearTimer("identify")
-    this.#clearTimer("phase")
-    this.#clearTimer("reconnect")
-    const socket = this.#socket
-    this.#socket = undefined
-    this.#reconnectAttempt = 0
-    this.#clearSession(true)
-    if (
-      socket
-      && (socket.readyState === SOCKET_STATES.connecting || socket.readyState === SOCKET_STATES.open)
-    ) {
-      try {
-        socket.onclose = null
-        socket.onerror = null
-        socket.onmessage = null
-        socket.onopen = null
-        socket.close(STOP_CLOSE_CODE, STATIC_STOP_REASON)
-      } catch {}
-    }
+    for (const session of this.#sessions.values()) session.stop()
+    this.#sessions.clear()
+    this.#shardStates.clear()
+    this.#channelGuildIds.clear()
+    this.#topology = undefined
+    this.#terminal = false
     if (this.enabled) this.#eventStore.transition("stopped")
   }
 
@@ -547,6 +624,139 @@ export class DiscordGateway implements GatewayRuntime {
     return this.#running
       && !this.#terminal
       && this.#startupGeneration === generation
+  }
+
+  async #resolveChannelRoutes(signal: AbortSignal): Promise<GatewayChannelRoute[]> {
+    const channelIds = [...this.#routeChannelIds].sort()
+    if (channelIds.length === 0) return []
+    const routes = new Map<string, GatewayChannelRoute>()
+    let nextIndex = 0
+    const worker = async (): Promise<void> => {
+      while (nextIndex < channelIds.length) {
+        if (signal.aborted) throw new Error("Gateway scope discovery was cancelled")
+        const index = nextIndex
+        nextIndex += 1
+        const channelId = channelIds[index]!
+        const route = await this.#discoverGatewayChannel(channelId, signal)
+        routes.set(channelId, validateGatewayChannelRoute(route, channelId))
+      }
+    }
+    const workerCount = Math.min(GATEWAY_DEFAULTS.channelRouteConcurrency, channelIds.length)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+    return channelIds.map((channelId) => {
+      const route = routes.get(channelId)
+      if (!route) throw new GatewayTopologyEvidenceError()
+      return route
+    })
+  }
+
+  #onShardState(
+    shardId: number,
+    state: GatewayShardState,
+    errorCategory?: GatewayErrorCategory,
+  ): void {
+    if (!this.#running || this.#terminal || !this.#sessions.has(shardId)) return
+    this.#shardStates.set(shardId, state)
+    if (state === "failed" || state === "stopped") return
+    this.#syncAggregateState(errorCategory)
+  }
+
+  #syncAggregateState(errorCategory?: GatewayErrorCategory): void {
+    if (!this.#running || this.#terminal || this.#shardStates.size === 0) return
+    const states = [...this.#shardStates.values()]
+    if (states.every((state) => state === "ready")) {
+      this.#eventStore.transition("ready")
+      return
+    }
+    const current = this.#eventStore.getStatus().connection.state
+    if (
+      current === "ready"
+      || current === "reconnecting"
+      || states.some((state) => state === "reconnecting")
+    ) {
+      this.#eventStore.transition("reconnecting", errorCategory)
+      return
+    }
+    if (states.some((state) => state === "connecting" || state === "stopped")) {
+      this.#eventStore.transition("connecting", errorCategory)
+      return
+    }
+    this.#eventStore.transition("authenticating", errorCategory)
+  }
+
+  #onShardReconnect(): void {
+    if (!this.#running || this.#terminal) return
+    this.#rejectPendingVoiceEvidence(
+      "Discord Gateway continuity changed during voice channel status evidence collection",
+    )
+    this.#eventStore.recordReconnect()
+  }
+
+  #onShardResume(): void {
+    if (!this.#running || this.#terminal) return
+    this.#eventStore.recordResume()
+  }
+
+  #onShardContinuityGap(): void {
+    if (!this.#running || this.#terminal) return
+    this.#rejectPendingVoiceEvidence(
+      "Discord Gateway continuity changed during voice channel status evidence collection",
+    )
+    this.#eventStore.recordContinuityGap()
+  }
+
+  #acceptsDispatch(name: string): boolean {
+    return (this.#eventFeedEnabled && EVENT_FEED_DISPATCH_NAMES.has(name))
+      || (this.layoutEnabled && LAYOUT_DISPATCH_NAMES.has(name))
+      || (this.#nativeInteractionsEnabled && name === "INTERACTION_CREATE")
+      || (this.voiceChannelStatusEnabled && (
+        name === "CHANNEL_INFO" || name === "VOICE_CHANNEL_STATUS_UPDATE"
+      ))
+  }
+
+  #onShardDispatch(dispatch: GatewayShardDispatch): void {
+    const topology = this.#topology
+    if (!this.#running || this.#terminal || !topology || !this.#acceptsDispatch(dispatch.name)) {
+      return
+    }
+    const guildId = dispatchGuildId(dispatch.name, dispatch.data)
+    if (guildId === null) return
+    if (!guildId) {
+      this.#fail("invalid-shard-routing")
+      return
+    }
+    let expectedShardId: number
+    try {
+      expectedShardId = calculateGatewayShardId(
+        guildId,
+        topology.summary.recommendedShards,
+      )
+    } catch {
+      this.#fail("invalid-shard-routing")
+      return
+    }
+    if (expectedShardId !== dispatch.shardId) {
+      this.#fail("invalid-shard-routing")
+      return
+    }
+    if (dispatch.name === "CHANNEL_INFO") {
+      this.#onChannelInfo(dispatch.data, dispatch.sequence)
+      return
+    }
+    if (dispatch.name === "VOICE_CHANNEL_STATUS_UPDATE") {
+      this.#onVoiceChannelStatusUpdate(dispatch.data, dispatch.sequence)
+      return
+    }
+    if (dispatch.name === "INTERACTION_CREATE" && this.#interactionHandler) {
+      try {
+        void Promise.resolve(this.#interactionHandler.ingestInteraction(dispatch.data))
+          .catch(() => this.#logger("[gateway] native Interaction handling failed"))
+      } catch {
+        this.#logger("[gateway] native Interaction handling failed")
+      }
+      return
+    }
+    this.#eventStore.ingestDispatch(dispatch.name, dispatch.data)
   }
 
   #assertVoiceChannelStatusTarget(guildId: string, channelId: string): void {
@@ -560,6 +770,41 @@ export class DiscordGateway implements GatewayRuntime {
     }
   }
 
+  #requireReadyVoiceSession(guildId: string, channelId: string): GatewayShardSession {
+    if (
+      !this.#running
+      || this.#terminal
+      || this.#eventStore.getStatus().connection.state !== "ready"
+      || !this.#topology
+    ) {
+      throw new GatewayVoiceChannelStatusError(
+        "Discord Gateway is not ready for voice channel status evidence",
+      )
+    }
+    if (this.#channelGuildIds.get(channelId) !== guildId) {
+      throw new GatewayVoiceChannelStatusError(
+        "Discord Gateway voice channel status target does not match its exact guild route",
+      )
+    }
+    let shardId: number
+    try {
+      shardId = calculateGatewayShardId(guildId, this.#topology.summary.recommendedShards)
+    } catch {
+      this.#fail("invalid-shard-routing")
+      throw new GatewayVoiceChannelStatusError(
+        "Discord Gateway could not route voice channel status evidence",
+      )
+    }
+    const session = this.#sessions.get(shardId)
+    if (!session || session.state !== "ready") {
+      this.#fail("invalid-shard-routing")
+      throw new GatewayVoiceChannelStatusError(
+        "Discord Gateway could not route voice channel status evidence",
+      )
+    }
+    return session
+  }
+
   #requestVoiceChannelStatus(
     guildId: string,
     channelId: string,
@@ -570,15 +815,7 @@ export class DiscordGateway implements GatewayRuntime {
         "Discord Gateway voice channel status evidence was cancelled",
       ))
     }
-    if (
-      !this.#running
-      || this.#terminal
-      || this.#eventStore.getStatus().connection.state !== "ready"
-    ) {
-      return Promise.reject(new GatewayVoiceChannelStatusError(
-        "Discord Gateway is not ready for voice channel status evidence",
-      ))
-    }
+    const session = this.#requireReadyVoiceSession(guildId, channelId)
     if (this.#pendingChannelInfo.has(guildId)) {
       return Promise.reject(new GatewayVoiceChannelStatusError(
         "Discord Gateway already has pending channel-info evidence for this guild",
@@ -614,7 +851,7 @@ export class DiscordGateway implements GatewayRuntime {
         options.signal.addEventListener("abort", pending.abortListener, { once: true })
       }
       this.#pendingChannelInfo.set(guildId, pending)
-      if (!this.#send({
+      if (!session.send({
         d: {
           fields: ["status"],
           guild_id: guildId,
@@ -669,296 +906,6 @@ export class DiscordGateway implements GatewayRuntime {
     for (const waiters of [...this.#voiceChannelStatusUpdateWaiters.values()]) {
       for (const pending of [...waiters]) this.#finishVoiceChannelStatusUpdate(pending, error)
     }
-  }
-
-  #clearTimer(kind: "heartbeat" | "identify" | "phase" | "reconnect"): void {
-    const handle = kind === "heartbeat"
-      ? this.#heartbeatTimer
-      : kind === "identify"
-        ? this.#identifyTimer
-        : kind === "phase"
-          ? this.#phaseTimer
-          : this.#reconnectTimer
-    if (handle !== undefined) this.#scheduler.clearTimeout(handle)
-    if (kind === "heartbeat") this.#heartbeatTimer = undefined
-    if (kind === "identify") this.#identifyTimer = undefined
-    if (kind === "phase") this.#phaseTimer = undefined
-    if (kind === "reconnect") this.#reconnectTimer = undefined
-  }
-
-  #clearSession(breakContinuity = false): void {
-    const hadSession = this.#sessionId !== undefined || this.#sequence !== null
-    if (breakContinuity && hadSession) this.#eventStore.recordContinuityGap()
-    this.#sessionId = undefined
-    this.#resumeUrl = undefined
-    this.#resuming = false
-    this.#sequence = null
-  }
-
-  #armPhaseTimeout(
-    category: "authentication-timeout" | "connection-timeout",
-    milliseconds: number,
-    clearSession: boolean,
-  ): void {
-    this.#clearTimer("phase")
-    this.#phaseTimer = this.#scheduler.setTimeout(() => {
-      this.#phaseTimer = undefined
-      this.#requestReconnect({ clearSession, errorCategory: category })
-    }, milliseconds)
-  }
-
-  #connect(url: string): void {
-    if (!this.#running || this.#terminal) return
-    this.#clearTimer("heartbeat")
-    this.#clearTimer("identify")
-    this.#clearTimer("phase")
-    this.#awaitingHeartbeatAck = false
-    this.#heartbeatIntervalMs = undefined
-    this.#resuming = false
-    this.#eventStore.transition(this.#reconnectAttempt > 0 ? "reconnecting" : "connecting")
-    let socket: GatewaySocket
-    try {
-      socket = this.#webSocketFactory(url)
-    } catch {
-      this.#scheduleReconnect({ errorCategory: "network-error", clearSession: false })
-      return
-    }
-    this.#socket = socket
-    socket.onopen = () => {
-      if (this.#socket !== socket || !this.#running) return
-    }
-    socket.onmessage = (event) => {
-      if (this.#socket !== socket || !this.#running) return
-      this.#onMessage(event.data)
-    }
-    socket.onerror = () => {
-      if (this.#socket !== socket || !this.#running) return
-      this.#requestReconnect({
-        clearSession: false,
-        errorCategory: "network-error",
-      })
-    }
-    socket.onclose = (event) => {
-      if (this.#socket !== socket) return
-      this.#socket = undefined
-      this.#rejectPendingVoiceEvidence(
-        "Discord Gateway continuity changed during voice channel status evidence collection",
-      )
-      this.#clearTimer("heartbeat")
-      this.#clearTimer("identify")
-      this.#clearTimer("phase")
-      this.#awaitingHeartbeatAck = false
-      if (!this.#running || this.#terminal) return
-      const pending = this.#pendingReconnect
-      this.#pendingReconnect = undefined
-      if (pending) {
-        this.#scheduleReconnect(pending)
-        return
-      }
-      this.#handleCloseCode(event.code)
-    }
-    this.#armPhaseTimeout(
-      "connection-timeout",
-      GATEWAY_DEFAULTS.connectionTimeoutMs,
-      false,
-    )
-  }
-
-  #onMessage(data: unknown): void {
-    const payload = parsePayload(data)
-    if (!payload) {
-      this.#fail("invalid-gateway-payload")
-      return
-    }
-    switch (payload.op) {
-      case GATEWAY_OPCODES.hello:
-        this.#onHello(payload.d)
-        return
-      case GATEWAY_OPCODES.heartbeatAck:
-        this.#awaitingHeartbeatAck = false
-        return
-      case GATEWAY_OPCODES.heartbeat:
-        this.#sendHeartbeat()
-        return
-      case GATEWAY_OPCODES.reconnect:
-        this.#requestReconnect({ clearSession: false })
-        return
-      case GATEWAY_OPCODES.invalidSession:
-        this.#onInvalidSession(payload.d)
-        return
-      case GATEWAY_OPCODES.dispatch:
-        this.#onDispatch(payload)
-        return
-      default:
-        return
-    }
-  }
-
-  #onHello(data: unknown): void {
-    if (this.#heartbeatIntervalMs !== undefined) {
-      this.#fail("protocol-error")
-      return
-    }
-    const record = recordValue(data)
-    const heartbeatIntervalMs = safeInteger(record?.heartbeat_interval)
-    if (
-      heartbeatIntervalMs === undefined
-      || heartbeatIntervalMs < GATEWAY_DEFAULTS.heartbeatMinimumMs
-      || heartbeatIntervalMs > GATEWAY_DEFAULTS.heartbeatMaximumMs
-    ) {
-      this.#fail("invalid-gateway-payload")
-      return
-    }
-    this.#heartbeatIntervalMs = heartbeatIntervalMs
-    this.#armPhaseTimeout(
-      "authentication-timeout",
-      GATEWAY_DEFAULTS.authenticationTimeoutMs,
-      true,
-    )
-    const jitter = Math.min(1, Math.max(0, this.#random()))
-    this.#heartbeatTimer = this.#scheduler.setTimeout(
-      () => this.#heartbeatTick(),
-      Math.floor(heartbeatIntervalMs * jitter),
-    )
-    this.#eventStore.transition("authenticating")
-    if (this.#sessionId && this.#sequence !== null && this.#resumeUrl) {
-      this.#resuming = true
-      this.#eventStore.recordResume()
-      this.#send({
-        d: {
-          seq: this.#sequence,
-          session_id: this.#sessionId,
-          token: this.#token,
-        },
-        op: GATEWAY_OPCODES.resume,
-      })
-      return
-    }
-    this.#scheduleIdentify()
-  }
-
-  #scheduleIdentify(): void {
-    if (
-      this.#remainingSessionStarts === undefined
-      || this.#remainingSessionStarts < 1
-    ) {
-      this.#fail("session-start-limit-exhausted")
-      return
-    }
-    const now = this.#clock()
-    const cutoff = now - GATEWAY_DEFAULTS.identifyBudgetWindowMs
-    while (this.#identifyTimes[0] !== undefined && this.#identifyTimes[0] < cutoff) {
-      this.#identifyTimes.shift()
-    }
-    if (this.#identifyTimes.length >= GATEWAY_DEFAULTS.identifyBudget) {
-      this.#fail("identify-budget-exhausted")
-      return
-    }
-    const latest = this.#identifyTimes.at(-1)
-    const wait = latest === undefined
-      ? 0
-      : Math.max(0, GATEWAY_DEFAULTS.identifyMinimumIntervalMs - (now - latest))
-    if (wait > 0) {
-      this.#identifyTimer = this.#scheduler.setTimeout(() => {
-        this.#identifyTimer = undefined
-        this.#scheduleIdentify()
-      }, wait)
-      return
-    }
-    this.#remainingSessionStarts -= 1
-    this.#identifyTimes.push(now)
-    this.#eventStore.recordIdentify()
-    this.#send({
-      d: {
-        intents: this.#eventStore.eventFeedEnabled
-          ? DISCORD_GATEWAY_INTENT_MASK
-          : this.#eventStore.guildIntentRequired
-            ? DISCORD_GATEWAY_INTENTS.guilds
-            : 0,
-        properties: {
-          browser: CONNECTOR_NAME,
-          device: CONNECTOR_NAME,
-          os: process.platform,
-        },
-        token: this.#token,
-      },
-      op: GATEWAY_OPCODES.identify,
-    })
-  }
-
-  #heartbeatTick(): void {
-    this.#heartbeatTimer = undefined
-    if (!this.#running || this.#terminal || this.#heartbeatIntervalMs === undefined) return
-    if (this.#awaitingHeartbeatAck) {
-      this.#requestReconnect({
-        clearSession: false,
-        errorCategory: "heartbeat-timeout",
-      })
-      return
-    }
-    this.#sendHeartbeat()
-    if (!this.#running || this.#terminal || this.#heartbeatIntervalMs === undefined) return
-    this.#heartbeatTimer = this.#scheduler.setTimeout(
-      () => this.#heartbeatTick(),
-      this.#heartbeatIntervalMs,
-    )
-  }
-
-  #sendHeartbeat(): void {
-    if (this.#send({ d: this.#sequence, op: GATEWAY_OPCODES.heartbeat })) {
-      this.#awaitingHeartbeatAck = true
-    }
-  }
-
-  #onDispatch(payload: GatewayPayload): void {
-    const sequence = safeInteger(payload.s)
-    const eventName = typeof payload.t === "string" ? payload.t : undefined
-    if (sequence === undefined || !eventName) {
-      this.#fail("invalid-gateway-payload")
-      return
-    }
-    this.#sequence = sequence
-    if (eventName === "READY") {
-      if (
-        this.#resuming
-        || this.#eventStore.getStatus().connection.state !== "authenticating"
-      ) {
-        this.#fail("protocol-error")
-        return
-      }
-      this.#onReady(payload.d)
-      return
-    }
-    if (eventName === "RESUMED") {
-      if (!this.#resuming || !this.#sessionId || !this.#resumeUrl) {
-        this.#fail("protocol-error")
-        return
-      }
-      this.#clearTimer("phase")
-      this.#resuming = false
-      this.#reconnectAttempt = 0
-      this.#eventStore.transition("ready")
-      return
-    }
-    if (!this.#resuming && this.#eventStore.getStatus().connection.state !== "ready") return
-    if (eventName === "CHANNEL_INFO") {
-      this.#onChannelInfo(payload.d, sequence)
-      return
-    }
-    if (eventName === "VOICE_CHANNEL_STATUS_UPDATE") {
-      this.#onVoiceChannelStatusUpdate(payload.d, sequence)
-      return
-    }
-    if (eventName === "INTERACTION_CREATE" && this.#interactionHandler) {
-      try {
-        void Promise.resolve(this.#interactionHandler.ingestInteraction(payload.d))
-          .catch(() => this.#logger("[gateway] native Interaction handling failed"))
-      } catch {
-        this.#logger("[gateway] native Interaction handling failed")
-      }
-      return
-    }
-    this.#eventStore.ingestDispatch(eventName, payload.d)
   }
 
   #onChannelInfo(data: unknown, sequence: number): void {
@@ -1019,156 +966,23 @@ export class DiscordGateway implements GatewayRuntime {
     for (const pending of [...waiters]) this.#finishVoiceChannelStatusUpdate(pending, result)
   }
 
-  #onReady(data: unknown): void {
-    const record = recordValue(data)
-    const application = recordValue(record?.application)
-    const applicationId = safeString(application?.id, 20)
-    const user = recordValue(record?.user)
-    const botId = safeString(user?.id, 20)
-    const sessionId = safeString(record?.session_id, 256)
-    if (
-      applicationId !== this.#applicationId
-      || !botId
-      || !DISCORD_SNOWFLAKE_PATTERN.test(botId)
-      || user?.bot !== true
-      || botId !== this.#botId
-    ) {
-      this.#fail("invalid-ready-identity")
-      return
-    }
-    if (!sessionId) {
-      this.#fail("invalid-gateway-payload")
-      return
-    }
-    const resumeUrl = normalizeGatewayResumeUrl(record?.resume_gateway_url)
-    if (!resumeUrl) {
-      this.#fail("invalid-resume-origin")
-      return
-    }
-    this.#sessionId = sessionId
-    this.#resumeUrl = resumeUrl
-    this.#resuming = false
-    this.#clearTimer("phase")
-    this.#reconnectAttempt = 0
-    this.#eventStore.transition("ready")
-  }
-
-  #onInvalidSession(value: unknown): void {
-    if (typeof value !== "boolean") {
-      this.#fail("invalid-gateway-payload")
-      return
-    }
-    this.#resuming = false
-    const delayMs = 1_000 + Math.floor(Math.min(1, Math.max(0, this.#random())) * 4_000)
-    this.#requestReconnect({
-      clearSession: !value,
-      delayMs,
-    })
-  }
-
-  #send(payload: object): boolean {
-    const socket = this.#socket
-    if (!socket || socket.readyState !== SOCKET_STATES.open) {
-      this.#requestReconnect({
-        clearSession: false,
-        errorCategory: "network-error",
-      })
-      return false
-    }
-    try {
-      socket.send(JSON.stringify(payload))
-      return true
-    } catch {
-      this.#requestReconnect({
-        clearSession: false,
-        errorCategory: "network-error",
-      })
-      return false
-    }
-  }
-
-  #requestReconnect(options: PendingReconnect): void {
-    if (!this.#running || this.#terminal || this.#pendingReconnect) return
-    this.#rejectPendingVoiceEvidence(
-      "Discord Gateway continuity changed during voice channel status evidence collection",
-    )
-    this.#eventStore.suspendChannelLayoutsForResume()
-    this.#pendingReconnect = options
-    const socket = this.#socket
-    if (!socket) {
-      this.#pendingReconnect = undefined
-      this.#scheduleReconnect(options)
-      return
-    }
-    try {
-      socket.close(RECONNECT_CLOSE_CODE, STATIC_RECONNECT_REASON)
-    } catch {
-      if (this.#socket === socket) this.#socket = undefined
-      this.#pendingReconnect = undefined
-      this.#scheduleReconnect(options)
-    }
-  }
-
-  #handleCloseCode(code: number): void {
-    const fatalCategory = FATAL_CLOSE_CATEGORIES.get(code)
-    if (fatalCategory) {
-      this.#fail(fatalCategory, false)
-      return
-    }
-    this.#scheduleReconnect({
-      clearSession: REIDENTIFY_CLOSE_CODES.has(code),
-      ...(code === 4_008 ? { errorCategory: "rate-limited" as const } : {}),
-      ...([4_001, 4_002, 4_003, 4_005].includes(code)
-        ? { errorCategory: "protocol-error" as const }
-        : {}),
-    })
-  }
-
-  #scheduleReconnect(options: PendingReconnect): void {
-    if (!this.#running || this.#terminal || this.#reconnectTimer !== undefined) return
-    if (options.clearSession) {
-      this.#clearSession(true)
-    }
-    this.#reconnectAttempt += 1
-    this.#eventStore.recordReconnect()
-    this.#eventStore.transition("reconnecting", options.errorCategory)
-    const exponential = Math.min(
-      GATEWAY_DEFAULTS.reconnectMaximumMs,
-      GATEWAY_DEFAULTS.reconnectMinimumMs * (2 ** (this.#reconnectAttempt - 1)),
-    )
-    const jitter = 0.8 + Math.min(1, Math.max(0, this.#random())) * 0.4
-    const delayMs = options.delayMs ?? Math.floor(exponential * jitter)
-    this.#reconnectTimer = this.#scheduler.setTimeout(() => {
-      this.#reconnectTimer = undefined
-      const target = this.#sessionId && this.#sequence !== null && this.#resumeUrl
-        ? this.#resumeUrl
-        : this.#gatewayUrl
-      if (!target) {
-        this.#fail("invalid-gateway-discovery")
-        return
-      }
-      this.#connect(target)
-    }, delayMs)
-  }
-
-  #fail(category: GatewayErrorCategory, closeSocket = true): void {
+  #fail(category: GatewayErrorCategory): void {
     if (this.#terminal) return
     this.#terminal = true
+    this.#startupGeneration += 1
+    this.#startupAbort?.abort()
+    this.#startupAbort = undefined
+    this.#identifyCoordinator?.stop()
+    this.#identifyCoordinator = undefined
     this.#rejectPendingVoiceEvidence(
       "Discord Gateway failed during voice channel status evidence collection",
     )
-    this.#clearTimer("heartbeat")
-    this.#clearTimer("identify")
-    this.#clearTimer("phase")
-    this.#clearTimer("reconnect")
-    this.#clearSession(true)
+    for (const session of this.#sessions.values()) session.stop()
+    this.#sessions.clear()
+    this.#shardStates.clear()
+    this.#channelGuildIds.clear()
+    this.#topology = undefined
     this.#eventStore.transition("failed", category)
     this.#logger(`[gateway] stopped: ${category}`)
-    if (!closeSocket) return
-    const socket = this.#socket
-    if (!socket) return
-    try {
-      socket.close(RECONNECT_CLOSE_CODE, STATIC_RECONNECT_REASON)
-    } catch {}
   }
 }

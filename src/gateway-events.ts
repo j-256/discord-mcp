@@ -60,6 +60,7 @@ export type GatewayConnectionState =
   | "failed"
   | "ready"
   | "reconnecting"
+  | "resolving-scope"
   | "stopped"
 
 export type GatewayErrorCategory =
@@ -68,19 +69,24 @@ export type GatewayErrorCategory =
   | "connection-timeout"
   | "disallowed-intents"
   | "gateway-discovery-failed"
+  | "gateway-scope-discovery-failed"
   | "heartbeat-timeout"
   | "identify-budget-exhausted"
   | "invalid-api-version"
   | "invalid-gateway-payload"
   | "invalid-gateway-discovery"
+  | "invalid-gateway-scope-evidence"
   | "invalid-intents"
   | "invalid-ready-identity"
+  | "invalid-ready-shard"
   | "invalid-resume-origin"
+  | "invalid-shard-routing"
   | "invalid-shard"
   | "network-error"
   | "protocol-error"
   | "rate-limited"
   | "session-start-limit-exhausted"
+  | "session-start-limit-insufficient"
   | "sharding-required"
   | "unknown-fatal-close"
 
@@ -154,6 +160,11 @@ export interface GatewayStatusSnapshot {
       resetAfterMs: number
       total: number
     } | null
+    topology: {
+      activeShards: number
+      resolvedChannels: number
+      scopedGuilds: number
+    } | null
   }
   enabled: boolean
   feedEnabled: boolean
@@ -209,6 +220,13 @@ export interface GatewayDiscoveryStatusInput {
     resetAfterMs: number
     total: number
   }
+}
+
+export interface GatewayTopologyStatusInput {
+  activeShards: number
+  recommendedShards: number
+  resolvedChannels: number
+  scopedGuilds: number
 }
 
 interface StoredGatewayEvent extends ContentFreeGatewayEvent {
@@ -319,6 +337,7 @@ export class GatewayEventStore implements GatewayEventSource {
     checkedAt: null,
     recommendedShards: null,
     sessionStartLimit: null,
+    topology: null,
   }
   readonly #events: StoredGatewayEvent[] = []
   #generation = 0
@@ -793,6 +812,32 @@ export class GatewayEventStore implements GatewayEventSource {
         resetAfterMs: value.sessionStartLimit.resetAfterMs,
         total: value.sessionStartLimit.total,
       },
+      topology: null,
+    }
+    this.#emit("status")
+  }
+
+  recordTopology(value: GatewayTopologyStatusInput): void {
+    if (!this.enabled) return
+    if (
+      !Number.isSafeInteger(value.activeShards)
+      || value.activeShards < 1
+      || !Number.isSafeInteger(value.recommendedShards)
+      || value.recommendedShards < 1
+      || value.recommendedShards !== this.#discovery.recommendedShards
+      || value.activeShards > value.recommendedShards
+      || !Number.isSafeInteger(value.resolvedChannels)
+      || value.resolvedChannels < 0
+      || !Number.isSafeInteger(value.scopedGuilds)
+      || value.scopedGuilds < 1
+      || value.activeShards > value.scopedGuilds
+    ) {
+      throw new RangeError("Gateway topology status evidence is invalid")
+    }
+    this.#discovery.topology = {
+      activeShards: value.activeShards,
+      resolvedChannels: value.resolvedChannels,
+      scopedGuilds: value.scopedGuilds,
     }
     this.#emit("status")
   }
@@ -826,13 +871,6 @@ export class GatewayEventStore implements GatewayEventSource {
     this.#emit("status")
   }
 
-  suspendChannelLayoutsForResume(): void {
-    if (!this.enabled) return
-    if (!this.#channelLayouts.suspendForResume()) return
-    this.#emit("layout")
-    this.#emit("status")
-  }
-
   recordResume(): void {
     if (!this.enabled) return
     this.#resumes += 1
@@ -862,6 +900,9 @@ export class GatewayEventStore implements GatewayEventSource {
         recommendedShards: this.#discovery.recommendedShards,
         sessionStartLimit: this.#discovery.sessionStartLimit
           ? { ...this.#discovery.sessionStartLimit }
+          : null,
+        topology: this.#discovery.topology
+          ? { ...this.#discovery.topology }
           : null,
       },
       enabled: this.enabled,

@@ -81,6 +81,7 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
       checkedAt: null,
       recommendedShards: null,
       sessionStartLimit: null,
+      topology: null,
     },
     enabled: false,
     feedEnabled: false,
@@ -587,7 +588,32 @@ test("Gateway discovery status is independently validated and content-free", () 
       resetAfterMs: 4_000,
       total: 10,
     },
+    topology: null,
   })
+  feed.recordTopology({
+    activeShards: 1,
+    recommendedShards: 1,
+    resolvedChannels: 3,
+    scopedGuilds: 2,
+  })
+  assert.deepEqual(feed.getStatus().discovery.topology, {
+    activeShards: 1,
+    resolvedChannels: 3,
+    scopedGuilds: 2,
+  })
+  const topology = feed.getStatus().discovery.topology
+  assert.ok(topology)
+  topology.scopedGuilds = 99
+  assert.equal(feed.getStatus().discovery.topology?.scopedGuilds, 2)
+  assert.throws(
+    () => feed.recordTopology({
+      activeShards: 2,
+      recommendedShards: 2,
+      resolvedChannels: 0,
+      scopedGuilds: 2,
+    }),
+    /topology status evidence is invalid/,
+  )
   assert.throws(
     () => feed.recordDiscovery({
       recommendedShards: 1,

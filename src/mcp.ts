@@ -26339,6 +26339,9 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
       discoverGateway(signal) {
         return discoveryClient.getGatewayBot({ signal })
       },
+      discoverGatewayChannel(channelId, signal) {
+        return discoveryClient.getGatewayChannelRoute(channelId, { signal })
+      },
       ...(nativeInteractionRuntime
         ? { interactionHandler: nativeInteractionRuntime }
         : {}),
