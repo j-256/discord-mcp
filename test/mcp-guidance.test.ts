@@ -35,6 +35,7 @@ import type {
   DiscordRole,
 } from "../src/types.js"
 import { loadFixtureConfig } from "./config-fixture.js"
+import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "500000000000000001"
@@ -164,6 +165,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 
 interface GuidanceCalls {
   activity: number
+  applicationCommands: number
   announcementSubscriptions: number
   applicationEmojis: number
   applicationPosture: number
@@ -222,6 +224,7 @@ function guidanceService(options: {
 } {
   const calls: GuidanceCalls = {
     activity: 0,
+    applicationCommands: 0,
     announcementSubscriptions: 0,
     applicationEmojis: 0,
     applicationPosture: 0,
@@ -276,6 +279,15 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    async auditApplicationCommands(guildId) {
+      calls.applicationCommands += 1
+      calls.lastGuildId = guildId
+      return fixtureApplicationCommandAudit({
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId,
+      })
+    },
     captureGuildBlueprint: unexpected,
     executeDirectMessageChange: unexpected,
     getDirectMessage: unexpected,
@@ -2733,6 +2745,7 @@ async function connectedFixture(
 
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
+    + calls.applicationCommands
     + calls.announcementSubscriptions
     + calls.applicationEmojis
     + calls.applicationPosture
@@ -2849,6 +2862,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       .map(({ name, uriTemplate }) => ({ name, uriTemplate }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     [
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.applicationCommands,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.applicationCommands,
+      },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.channelAccess,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.channelAccess,
@@ -3070,6 +3087,73 @@ test("MCP guidance completes exact configured IDs without service calls", async 
   assert.equal(totalCalls(calls), 0)
 })
 
+test("MCP application-command guidance completes scope and performs one private audit", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const uri = MCP_RESOURCE_TEMPLATE_URIS.applicationCommands.replace(
+    "{guildId}",
+    GUILD_ID,
+  )
+
+  const [resourceCompletion, promptCompletion] = await Promise.all([
+    client.complete({
+      argument: { name: "guildId", value: GUILD_ID.slice(0, 6) },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.applicationCommands,
+      },
+    }),
+    client.complete({
+      argument: { name: "guildId", value: GUILD_ID.slice(0, 6) },
+      ref: {
+        name: MCP_PROMPT_NAMES.reviewApplicationCommands,
+        type: "ref/prompt",
+      },
+    }),
+  ])
+  assert.deepEqual(resourceCompletion.completion.values, [GUILD_ID])
+  assert.deepEqual(promptCompletion.completion.values, [GUILD_ID])
+  assert.equal(totalCalls(calls), 0)
+
+  const resource = await readJsonResource(client, uri)
+  const audit = resource.value.data as Record<string, unknown>
+  assert.deepEqual(audit.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+    installationTypes: {
+      complete: true,
+      reported: true,
+      unknownValues: 0,
+      values: ["guild-install"],
+    },
+  })
+  assert.deepEqual(audit.inventory, {
+    completeness: "complete-current-application",
+    global: 1,
+    guild: 0,
+    permissions: 1,
+    total: 1,
+  })
+  assert.equal(
+    (resource.value.trust as Record<string, unknown>).classification,
+    "untrusted-external-data",
+  )
+  assert.equal(calls.applicationCommands, 1)
+  assert.equal(calls.lastGuildId, GUILD_ID)
+
+  const prompt = await client.getPrompt({
+    arguments: { guildId: GUILD_ID },
+    name: MCP_PROMPT_NAMES.reviewApplicationCommands,
+  })
+  const text = promptText(prompt)
+  assert.match(text, new RegExp(`"guildId":"${GUILD_ID}"`, "u"))
+  assert.match(text, /Call audit_application_commands exactly once/u)
+  assert.match(text, /application-default installation types/u)
+  assert.match(text, /potentially broader rather than absent/u)
+  assert.match(text, /do not prove effective access for an individual member/u)
+  assert.match(text, /Stop after the audit/u)
+  assert.equal(calls.applicationCommands, 1)
+})
+
 test("MCP local resources expose safety, policy, and content-free activity without secrets", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -3081,6 +3165,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Private-file send and reply require an independent capability/)
   assert.match(safety.text, /without reopening or downloading the attachment/)
   assert.match(safety.text, /request-bound schema-v2 content-free receipt/)
+  assert.match(safety.text, /Current-application command audit re-verifies pinned identity/)
+  assert.match(safety.text, /omitted global contexts remain explicitly incomplete/iu)
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Channel deletion requires separate audit and change toggles/)
   assert.match(safety.text, /never fetches message content, treats an absent target as success/)

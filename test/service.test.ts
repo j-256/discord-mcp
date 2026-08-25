@@ -755,6 +755,9 @@ function serviceFixture(overrides: {
       calls.guilds += 1
       return [guild()]
     },
+    async listGlobalApplicationCommands() {
+      throw new Error("Unexpected global application-command listing")
+    },
     async listGuildApplicationCommands() {
       throw new Error("Unexpected application-command listing")
     },
@@ -1162,6 +1165,157 @@ test("service rejects a token for the wrong pinned bot before data access", asyn
     ),
   )
   assert.equal(calls.guilds, 0)
+})
+
+test("service pins complete application-command audits to verified identity and scope", async () => {
+  const globalCommandId = "310000000000000001"
+  const guildCommandId = "310000000000000002"
+  const controller = new AbortController()
+  const reads: Array<{
+    applicationId?: string
+    guildId?: string
+    operation: string
+    signal: AbortSignal | undefined
+  }> = []
+  const { calls, service } = serviceFixture({
+    client: {
+      async getCurrentApplication(options) {
+        calls.application += 1
+        reads.push({ operation: "application", signal: options?.signal })
+        return application()
+      },
+      async getCurrentUser(options) {
+        calls.user += 1
+        reads.push({ operation: "bot", signal: options?.signal })
+        return bot()
+      },
+      async getGuild(guildId, options) {
+        reads.push({ guildId, operation: "guild", signal: options?.signal })
+        return guild()
+      },
+      async listGlobalApplicationCommands(applicationId, options) {
+        reads.push({
+          applicationId,
+          operation: "global-commands",
+          signal: options?.signal,
+        })
+        return [{
+          application_id: APPLICATION_ID,
+          contexts: [0, 1],
+          default_member_permissions: null,
+          description: "Review the connector",
+          id: globalCommandId,
+          integration_types: [0],
+          name: "review",
+          type: 1,
+          version: "310000000000000003",
+        }]
+      },
+      async listGuildApplicationCommands(applicationId, guildId, options) {
+        reads.push({
+          applicationId,
+          guildId,
+          operation: "guild-commands",
+          signal: options?.signal,
+        })
+        return [{
+          application_id: APPLICATION_ID,
+          contexts: [0],
+          default_member_permissions: "0",
+          description: "",
+          guild_id: GUILD_ID,
+          id: guildCommandId,
+          integration_types: [0],
+          name: "Inspect member",
+          type: 2,
+          version: "310000000000000004",
+        }]
+      },
+      async listGuildApplicationCommandPermissions(applicationId, guildId, options) {
+        reads.push({
+          applicationId,
+          guildId,
+          operation: "permissions",
+          signal: options?.signal,
+        })
+        return [{
+          applicationId: APPLICATION_ID,
+          commandId: globalCommandId,
+          guildId: GUILD_ID,
+          permissions: [{
+            allowed: false,
+            id: MEMBER_USER_ID,
+            type: 2,
+            unknownFieldCount: 0,
+          }],
+          unknownFieldCount: 0,
+        }]
+      },
+    },
+  })
+
+  const result = await service.auditApplicationCommands(GUILD_ID, {
+    signal: controller.signal,
+  })
+
+  assert.deepEqual(result.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+    installationTypes: {
+      complete: true,
+      reported: true,
+      unknownValues: 0,
+      values: ["guild-install"],
+    },
+  })
+  assert.deepEqual(result.inventory, {
+    completeness: "complete-current-application",
+    global: 1,
+    guild: 1,
+    permissions: 1,
+    total: 2,
+  })
+  assert.deepEqual(result.commands.map(({ id, permissionSource, scope }) => ({
+    id,
+    permissionSource,
+    scope,
+  })), [{
+    id: globalCommandId,
+    permissionSource: "command-specific",
+    scope: "global",
+  }, {
+    id: guildCommandId,
+    permissionSource: "discord-default",
+    scope: "guild",
+  }])
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(reads.map((read) => read.operation), [
+    "application",
+    "bot",
+    "guild",
+    "global-commands",
+    "guild-commands",
+    "permissions",
+  ])
+  assert.ok(reads.every(({ signal }) => signal === controller.signal))
+  assert.ok(reads.slice(2).every(({ applicationId }) => (
+    applicationId === undefined || applicationId === APPLICATION_ID
+  )))
+  assert.ok(reads.slice(2).every(({ guildId }) => (
+    guildId === undefined || guildId === GUILD_ID
+  )))
+})
+
+test("service rejects application-command scope before identity access", async () => {
+  const { calls, service } = serviceFixture()
+
+  await assert.rejects(
+    () => service.auditApplicationCommands(OTHER_GUILD_ID),
+    PolicyError,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
 })
 
 test("service rejects forum-tag scope before identity or channel access", async () => {

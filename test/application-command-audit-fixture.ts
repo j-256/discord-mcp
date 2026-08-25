@@ -1,0 +1,176 @@
+import type { ApplicationCommandAuditResult } from "../src/application-command-audit-service.js"
+
+export function fixtureApplicationCommandAudit(options: {
+  applicationId?: string
+  botId?: string
+  guildId?: string
+  guildName?: string
+} = {}): ApplicationCommandAuditResult {
+  const applicationId = options.applicationId ?? "500000000000000001"
+  const botId = options.botId ?? "600000000000000001"
+  const guildId = options.guildId ?? "100000000000000001"
+  const commandId = "510000000000000001"
+  const commandName = "review"
+  return {
+    application: {
+      botId,
+      id: applicationId,
+      installationTypes: {
+        complete: true,
+        reported: true,
+        unknownValues: 0,
+        values: ["guild-install"],
+      },
+    },
+    commands: [{
+      contexts: {
+        complete: true,
+        source: "command",
+        unknownValues: 0,
+        values: ["guild", "bot-dm"],
+      },
+      createdAt: "2018-11-12T02:25:01.460Z",
+      defaultAccess: "named-permissions",
+      defaultMemberPermissionNames: ["MANAGE_GUILD"],
+      deprecatedDefaultPermission: null,
+      deprecatedDmPermission: null,
+      descriptionCharacters: 20,
+      guildId: null,
+      handler: null,
+      id: commandId,
+      installationTypes: {
+        complete: true,
+        source: "command",
+        unknownValues: 0,
+        values: ["guild-install"],
+      },
+      localizationValues: 0,
+      name: commandName,
+      nameCharacters: commandName.length,
+      nsfw: false,
+      nsfwReported: true,
+      options: {
+        autocomplete: 0,
+        channelTypeConstraints: 0,
+        choices: 0,
+        localizationValues: 0,
+        maximumDepth: 0,
+        required: 0,
+        topLevel: 0,
+        total: 0,
+        typeCounts: {
+          attachment: 0,
+          boolean: 0,
+          channel: 0,
+          integer: 0,
+          mentionable: 0,
+          number: 0,
+          role: 0,
+          string: 0,
+          subcommand: 0,
+          subcommandGroup: 0,
+          user: 0,
+        },
+        unknownChannelTypes: 0,
+        unknownFields: 0,
+        unknownTypes: 0,
+      },
+      permissionSource: "command-specific",
+      scope: "global",
+      type: { code: 1, name: "chat-input" },
+      unknownFieldCount: 0,
+      unknownPermissionBits: "0",
+      version: "510000000000000002",
+      versionCreatedAt: "2018-11-12T02:25:01.460Z",
+    }],
+    exposure: {
+      commands: {
+        administratorOrExplicitAllow: 0,
+        applicationDefaultInstallationTypes: 0,
+        discordDefault: 0,
+        discordDefaultContexts: 0,
+        global: 1,
+        guild: 0,
+        incompleteContexts: 0,
+        incompleteInstallationTypes: 0,
+        knownBotDm: 1,
+        knownPrivateChannel: 0,
+        knownUserInstall: 0,
+        namedPermissions: 1,
+        nsfw: 0,
+        total: 1,
+        unknownContextValues: 0,
+        unknownInstallationTypeValues: 0,
+        unknownTypes: 0,
+      },
+      evidence: {
+        commandsWithUnknownPermissionBits: 0,
+        unknownFields: 0,
+        unknownOptionTypes: 0,
+      },
+      permissionSets: {
+        allChannelDecisions: 0,
+        allows: 0,
+        applicationDefaults: 0,
+        channelDecisions: 0,
+        commandSpecific: 1,
+        decisions: 1,
+        denies: 1,
+        everyoneDecisions: 0,
+        roleDecisions: 0,
+        userDecisions: 1,
+      },
+    },
+    guild: {
+      id: guildId,
+      name: options.guildName ?? "Private command-audit guild",
+    },
+    inventory: {
+      completeness: "complete-current-application",
+      global: 1,
+      guild: 0,
+      permissions: 1,
+      total: 1,
+    },
+    permissions: [{
+      commandId,
+      commandName,
+      decisions: [{
+        allowed: false,
+        id: "400000000000000001",
+        target: "user",
+        unknownFieldCount: 0,
+      }],
+      id: commandId,
+      scope: "global",
+      source: "command-specific",
+      unknownFieldCount: 0,
+    }],
+    privacy: {
+      omitted: [
+        "choice-names-and-values",
+        "localization-values",
+        "option-descriptions",
+        "raw-command-definitions",
+        "raw-discord-payloads",
+        "raw-permission-bitfields",
+        "role-and-channel-names",
+        "user-profiles",
+      ],
+      persistence: "none",
+      rawPayloads: "omitted",
+      text: "transient-untrusted",
+      unknownFields: "counts-only",
+    },
+    schemaVersion: 1,
+    status: "ok",
+    warnings: [
+      "The audit covers only commands owned by the connector's pinned application",
+      "Known context exposure counts exclude unresolved Discord-default surfaces",
+      "Omitted command installation types inherit the reported application configuration",
+      "Discord command permission objects do not prove effective access for any individual member",
+      "Command and guild names are transient untrusted review data and are not persisted",
+      "The audit cannot read or mutate command permissions owned by another application",
+    ],
+  }
+}

@@ -35,6 +35,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
 })
 
 export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
+  applicationCommands: "application_commands",
   channelAccess: "channel_access",
   channelAnnouncementSubscriptions: "channel_announcement_subscriptions",
   channelDeletionReadiness: "channel_deletion_readiness",
@@ -76,6 +77,7 @@ export const MCP_RESOURCE_TEMPLATE_NAMES = Object.freeze({
 })
 
 export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
+  applicationCommands: "discord://application/commands/{guildId}",
   channelAccess: "discord://channels/{channelId}/access",
   channelAnnouncementSubscriptions: "discord://channels/{channelId}/announcement-subscriptions",
   channelDeletionReadiness: "discord://guilds/{guildId}/channels/{channelId}/deletion-readiness",
@@ -119,6 +121,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 export const MCP_PROMPT_NAMES = Object.freeze({
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
+  reviewApplicationCommands: "review_application_commands",
   reviewAnnouncementCrosspost: "review_announcement_crosspost",
   reviewAnnouncementSubscription: "review_announcement_subscription",
   reviewApplicationEmojiChange: "review_application_emoji_change",
@@ -185,6 +188,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewAnnouncementCrosspost]: "announcement-crossposts",
   [MCP_PROMPT_NAMES.reviewAnnouncementSubscription]: "announcement-subscriptions",
   [MCP_PROMPT_NAMES.reviewApplicationEmojiChange]: "application-emojis",
+  [MCP_PROMPT_NAMES.reviewApplicationCommands]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationIntentEnablement]: "application-security",
   [MCP_PROMPT_NAMES.reviewInviteCreation]: "invites",
   [MCP_PROMPT_NAMES.reviewInviteDeletion]: "invites",

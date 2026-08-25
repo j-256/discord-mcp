@@ -525,6 +525,10 @@ export class ApplicationPostureEvidenceError extends Error {
   override name = "ApplicationPostureEvidenceError"
 }
 
+export class ApplicationCommandAuditEvidenceError extends Error {
+  override name = "ApplicationCommandAuditEvidenceError"
+}
+
 export class ChannelDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -3,6 +3,10 @@ import type {
   ActivityStore,
 } from "./activity-log.js"
 import { JsonlActivityLog } from "./activity-log.js"
+import {
+  ApplicationCommandAuditService,
+  type ApplicationCommandAuditResult,
+} from "./application-command-audit-service.js"
 import type {
   ApplicationEmojiChangeRequest,
   ApplicationEmojiInventoryResult,
@@ -830,6 +834,7 @@ export interface DiscordServiceClient {
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
   listGuildApplicationCommandPermissions: DiscordClient["listGuildApplicationCommandPermissions"]
+  listGlobalApplicationCommands: DiscordClient["listGlobalApplicationCommands"]
   listGuildBans: DiscordClient["listGuildBans"]
   listGuildInvites: DiscordClient["listGuildInvites"]
   listGuildIntegrations: DiscordClient["listGuildIntegrations"]
@@ -1297,6 +1302,7 @@ export class ConnectorService {
   readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #applicationEmojiService: ApplicationEmojiService
+  readonly #applicationCommandAuditService: ApplicationCommandAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
@@ -1423,6 +1429,10 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.applicationEmojiOptions,
+    })
+    this.#applicationCommandAuditService = new ApplicationCommandAuditService({
+      client: this.#client,
+      policy: this.#policy,
     })
     this.#applicationIntentService = new ApplicationIntentService({
       activityStore: this.#activityStore,
@@ -1975,6 +1985,36 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<ApplicationPostureResult> {
     return this.#applicationPosture(await this.#verifyIdentity(options))
+  }
+
+  async auditApplicationCommands(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationCommandAuditResult> {
+    this.#policy.assertGuildAllowed(guildId)
+    const identity = await this.#verifyIdentity(options)
+    const posture = this.#applicationPosture(identity)
+    const installationTypes:
+      ApplicationCommandAuditResult["application"]["installationTypes"]["values"] = []
+    if (posture.installation.guild.supported === true) {
+      installationTypes.push("guild-install")
+    }
+    if (posture.installation.user.supported === true) {
+      installationTypes.push("user-install")
+    }
+    return this.#applicationCommandAuditService.audit(
+      {
+        botId: identity.bot.id,
+        id: identity.application.id,
+        installationTypes: {
+          reported: posture.installation.contextsReported,
+          unknownValues: posture.installation.unknownContextCount,
+          values: installationTypes,
+        },
+      },
+      guildId,
+      options,
+    )
   }
 
   async listGuilds(options: GuildPageOptions = {}) {

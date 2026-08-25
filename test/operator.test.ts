@@ -417,6 +417,7 @@ function toolService(): DiscordToolService {
   }
   return {
     addReaction: unexpected,
+    auditApplicationCommands: unexpected,
     captureGuildBlueprint: unexpected,
     executeDirectMessageChange: unexpected,
     getDirectMessage: unexpected,
@@ -976,7 +977,7 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
     toolSurface?.summary || "",
     new RegExp(`2 of ${MCP_TOOLSET_NAMES.length}`),
   )
-  assert.match(toolSurface?.summary || "", /5 canonical tools/)
+  assert.match(toolSurface?.summary || "", /6 canonical tools/)
   const readResponseBudget = doctor.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.readResponseBudget,
   )
@@ -5357,6 +5358,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "inspect_guild_ban",
     "review_announcement_crosspost",
     "review_announcement_subscription",
+    "review_application_commands",
     "review_application_emoji_change",
     "review_application_intent_enablement",
     "review_attachment_message",
@@ -5427,6 +5429,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "ui://discord-mcp/plan-review",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
+    "discord://application/commands/{guildId}",
     "discord://channels/{channelId}",
     "discord://channels/{channelId}/access",
     "discord://channels/{channelId}/announcement-subscriptions",

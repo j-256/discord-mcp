@@ -7825,6 +7825,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  auditApplicationCommands: ConnectorService["auditApplicationCommands"]
   captureGuildBlueprint: ConnectorService["captureGuildBlueprint"]
   getApplicationPosture: ConnectorService["getApplicationPosture"]
   auditChannelDeletion: ConnectorService["auditChannelDeletion"]
@@ -16049,6 +16050,29 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord application posture found ${result.findingCounts.blockers} blockers and ${result.findingCounts.warnings} warnings`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("audit_application_commands", server.registerTool(
+    "audit_application_commands",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Audit the verified current Discord application's complete global and guild command inventories plus guild command-permission decisions. Returns strict structural exposure evidence that distinguishes known, inherited, defaulted, and incomplete contexts while omitting raw definitions, option descriptions, choice values, permission bitfields, profiles, and role or channel names. Persists nothing.",
+      inputSchema: guildInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Audit Discord application commands",
+    },
+    safeToolHandler("audit_application_commands", async (
+      { guildId }: z.infer<typeof guildInputSchema>,
+      context,
+    ) => {
+      const result = await service.auditApplicationCommands(guildId, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Audited ${result.inventory.total} current-application commands and ${result.inventory.permissions} permission sets for Discord guild ${guildId}`,
       )
     }, secrets, observability),
   ))

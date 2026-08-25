@@ -1,5 +1,6 @@
 export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   add_reaction: "interaction-write",
+  audit_application_commands: "discord-read",
   audit_application_posture: "discord-read",
   audit_channel_order: "discord-read",
   audit_role_deletion: "discord-read",
@@ -314,6 +315,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   list_active_guild_threads: "GET",
   list_application_emojis: "GET",
   list_current_user_guilds: "GET",
+  list_global_application_commands: "GET",
   list_guild_auto_moderation_rules: "GET",
   list_guild_application_commands: "GET",
   list_guild_application_command_permissions: "GET",

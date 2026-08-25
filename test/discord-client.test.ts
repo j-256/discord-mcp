@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   DISCORD_APPLICATION_FLAGS,
   DISCORD_CHANNEL_TYPES,
+  DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
   DISCORD_MESSAGE_REFERENCE_TYPES,
 } from "../src/constants.js"
@@ -1746,6 +1747,73 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     content: "Reviewed response",
     embeds: [],
   })
+})
+
+test("Discord client bounds and protects application-command inventories", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse([])
+    },
+    token: TOKEN,
+  })
+  await client.listGlobalApplicationCommands("100")
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/commands?with_localizations=false`,
+  }])
+
+  const privateMarker = "private-command-description"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateMarker }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    refused.listGlobalApplicationCommands("100"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.message.includes("request failed")
+      && !error.message.includes(privateMarker)
+    ),
+  )
+
+  const transport = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateMarker)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transport.listGuildApplicationCommands("100", "200"),
+    (error: unknown) => (
+      error instanceof Error
+      && error.name === "DiscordTransportError"
+      && error.cause === undefined
+      && error.message.includes("request failed")
+      && !error.message.includes(privateMarker)
+    ),
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(DISCORD_LIMITS.applicationCommandInventoryResponseBytes + 1),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.listGlobalApplicationCommands("100"),
+    /exceeded its local response bound/,
+  )
+  assert.throws(
+    () => client.listGlobalApplicationCommands("invalid"),
+    /application-command application ID/,
+  )
 })
 
 test("Discord client never retries or reveals an Interaction token after callback failure", async () => {

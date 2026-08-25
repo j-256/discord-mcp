@@ -63,6 +63,7 @@ function promptBinding(
 }
 
 export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding[] = Object.freeze([
+  resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.applicationCommands, "guildId", "allowedGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildChannels, "guildId", "allowedGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildRoles, "guildId", "allowedGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildVoiceRegions, "guildId", "allowedGuildIds"),
@@ -129,6 +130,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.exactMessage, "channelId", "allowedChannelIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.messageReactions, "channelId", "allowedChannelIds"),
 
+  promptBinding(MCP_PROMPT_NAMES.reviewApplicationCommands, "guildId", "allowedGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.findGuildMembers, "guildId", "memberDirectoryGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.inspectGuildBan, "guildId", "banAuditGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewAttachmentMessage, "channelId", "attachmentChannelIds"),

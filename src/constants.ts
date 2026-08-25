@@ -181,6 +181,9 @@ export const FORUM_TAG_ACTIONS = [
 export type ForumTagAction = typeof FORUM_TAG_ACTIONS[number]
 
 export const DISCORD_LIMITS = Object.freeze({
+  applicationCommandGlobalCommands: 131,
+  applicationCommandGuildCommands: 130,
+  applicationCommandInventoryResponseBytes: 2_500_000,
   allowedMentionUsers: 100,
   applicationCommandPermissionOverwrites: 100,
   applicationEmojis: 2_000,
@@ -230,7 +233,7 @@ export const DISCORD_LIMITS = Object.freeze({
   currentUserGuilds: 200,
   deletionMessages: 100,
   guildMessageSearch: 25,
-  guildApplicationCommandPermissions: 251,
+  guildApplicationCommandPermissions: 262,
   forumAppliedTags: 5,
   forumAvailableTags: 20,
   forumTagNameCharacters: 20,

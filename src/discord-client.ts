@@ -1539,6 +1539,9 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_application_emojis",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
+  "list_global_application_commands",
+  "list_guild_application_command_permissions",
+  "list_guild_application_commands",
   "list_guild_emojis",
   "list_default_soundboard_sounds",
   "list_guild_soundboard_sounds",
@@ -8568,6 +8571,22 @@ export class DiscordClient {
     return this.#request("get_current_user", "/users/@me", options)
   }
 
+  listGlobalApplicationCommands(
+    applicationId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand[]> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    return this.#request(
+      "list_global_application_commands",
+      `/applications/${applicationId}/commands?with_localizations=false`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/commands",
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+      },
+    )
+  }
+
   listGuildApplicationCommands(
     applicationId: string,
     guildId: string,
@@ -8581,6 +8600,7 @@ export class DiscordClient {
       {
         ...options,
         diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands",
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
       },
     )
   }
@@ -8598,6 +8618,7 @@ export class DiscordClient {
       {
         ...options,
         diagnosticRoute: "/applications/{application.id}/guilds/{guild.id}/commands/permissions",
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
         suppressFailureCause: true,
       },
     )

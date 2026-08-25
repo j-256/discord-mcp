@@ -112,6 +112,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["emoji", "react", "reaction"],
     toolset: "interactions",
   },
+  audit_application_commands: {
+    keywords: ["application", "audit", "command", "context", "exposure", "install", "permission", "security", "slash"],
+    toolset: "connector",
+  },
   audit_application_posture: {
     keywords: ["application", "audit", "bot", "install", "intent", "security", "setup"],
     toolset: "connector",

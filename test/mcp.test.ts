@@ -460,6 +460,7 @@ import {
   loadFixtureConfig,
   type FixtureConfigOverrides,
 } from "./config-fixture.js"
+import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 import type {
   ThreadChangePlan,
   ThreadChangeRequest,
@@ -7623,6 +7624,7 @@ function serviceFixture(overrides: {
   const calls = {
     active: 0,
     addReaction: 0,
+    applicationCommandAudit: 0,
     auditChannelOrder: 0,
     auditRoleOrder: 0,
     auditRoles: 0,
@@ -8065,6 +8067,14 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async auditApplicationCommands(guildId) {
+      calls.applicationCommandAudit += 1
+      return fixtureApplicationCommandAudit({
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId,
+      })
+    },
     async executeDirectMessageChange(request, planDigest) {
       if (overrides.directMessageError) throw overrides.directMessageError
       calls.directMessageExecute += 1
@@ -11705,6 +11715,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     result.tools.map((tool) => tool.name),
     [
       "audit_application_posture",
+      "audit_application_commands",
       "get_connector_status",
       "get_observability_status",
       "get_gateway_status",
@@ -13949,6 +13960,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     (await client.listTools()).tools.map(({ name }) => name),
     [
       "audit_application_posture",
+      "audit_application_commands",
       "get_connector_status",
       "read_messages",
       "search_messages",
@@ -13958,7 +13970,11 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
   )
   assert.deepEqual(
     (await client.listPrompts()).prompts.map(({ name }) => name),
-    ["summarize_channel", "search_guild_messages"],
+    [
+      "review_application_commands",
+      "summarize_channel",
+      "search_guild_messages",
+    ],
   )
   const unavailable = structuredContent(await client.callTool({
     arguments: { query: "moderation" },
@@ -14042,6 +14058,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     guildVoiceRegions: 0,
     voiceRegions: 0,
     addReaction: 0,
+    applicationCommandAudit: 0,
     auditChannelOrder: 0,
     auditRoleOrder: 0,
     auditRoles: 0,
@@ -14532,6 +14549,10 @@ test("progressive audit-log discovery reveals only the requested exact read", as
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
+  const commands = structuredContent(await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "audit_application_commands",
+  }))
   const posture = structuredContent(await client.callTool({
     arguments: {},
     name: "audit_application_posture",
@@ -14549,6 +14570,24 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     sharedStateRootRequired: true,
   })
   assert.deepEqual(status.applicationPosture, posture)
+  assert.deepEqual(commands.application, {
+    botId: BOT_ID,
+    id: APPLICATION_ID,
+    installationTypes: {
+      complete: true,
+      reported: true,
+      unknownValues: 0,
+      values: ["guild-install"],
+    },
+  })
+  assert.deepEqual(commands.inventory, {
+    completeness: "complete-current-application",
+    global: 1,
+    guild: 0,
+    permissions: 1,
+    total: 1,
+  })
+  assert.equal((commands.guild as Record<string, unknown>).id, GUILD_ID)
   assert.deepEqual(posture.findingCounts, { blockers: 0, warnings: 0 })
   assert.equal(
     (posture.interactions as Record<string, unknown>).delivery,
