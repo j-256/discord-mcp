@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 
 import type {
   ActivityStore,
@@ -34,6 +34,7 @@ import {
   errorMessage,
 } from "./errors.js"
 import {
+  type AutoModerationOperationReceipt,
   type OperationReceipt,
   type OperationStore,
   operationKeyHash,
@@ -410,6 +411,33 @@ export interface AutoModerationResult {
   status: "already-current" | "completed" | "completed-with-drift"
 }
 
+export type AutoModerationVerificationReason =
+  | "operation-failed"
+  | "operation-not-found"
+  | "operation-pending"
+  | "operation-uncertain"
+  | "receipt-target-mismatch"
+  | "request-mismatch"
+  | "rule-missing"
+  | "rule-state-mismatch"
+  | "rule-still-present"
+
+export interface AutoModerationVerificationResult {
+  action: AutoModerationChangeAction
+  activityId: string | null
+  guildId: string
+  operationKeyHash: string
+  planDigest: string | null
+  readbackMatched: boolean
+  reason: AutoModerationVerificationReason | null
+  receiptStatus: OperationReceipt["status"] | null
+  requestMatched: boolean
+  ruleId: string | null
+  schemaVersion: number
+  status: "blocked" | "drifted" | "not-found" | "verified"
+  timestamp: string | null
+}
+
 export interface AutoModerationServiceClient extends Pick<
   DiscordClient,
   | "createGuildAutoModerationRule"
@@ -431,6 +459,7 @@ export interface AutoModerationServiceOptions {
   planKey?: Uint8Array
   policy: ScopePolicy
   randomId?: () => string
+  verificationKey?: Uint8Array
 }
 
 interface AutoModerationEvidenceState {
@@ -918,6 +947,39 @@ export function normalizeAutoModerationChangeRequest(
   }
 }
 
+export function autoModerationVerificationKey(token: string): Uint8Array {
+  if (typeof token !== "string" || !token.trim()) {
+    throw new RangeError("Discord AutoMod verification requires a non-empty secret")
+  }
+  return createHmac("sha256", token)
+    .update("discord-mcp-automod-verification-key.v1\0")
+    .digest()
+}
+
+export function autoModerationRequestDigest(
+  key: Uint8Array,
+  applicationId: string,
+  botId: string,
+  request: NormalizedAutoModerationChangeRequest,
+): string {
+  assertSnowflake(applicationId, "Discord connector application ID")
+  assertSnowflake(botId, "Discord connector bot ID")
+  return reviewedPlanDigest(key, {
+    applicationId,
+    botId,
+    domain: "discord-mcp-automod-request.v1",
+    request,
+  })
+}
+
+function matchingDigest(left: string, right: string): boolean {
+  if (
+    !REVIEWED_PLAN_DIGEST_PATTERN.test(left)
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(right)
+  ) return false
+  return timingSafeEqual(Buffer.from(left), Buffer.from(right))
+}
+
 function projectedTrigger(
   trigger: DiscordAutoModerationTrigger,
 ): NormalizedAutoModerationTrigger {
@@ -1045,6 +1107,13 @@ function exactRules(
     const rightId = BigInt(right.ruleId)
     return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
   })
+}
+
+export function projectAutoModerationRuleInventory(
+  rules: readonly DiscordAutoModerationRuleSummary[],
+  guildId: string,
+): ProjectedAutoModerationRule[] {
+  return exactRules(rules, guildId)
 }
 
 function exactGuild(
@@ -1503,6 +1572,38 @@ function sameRule(
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+function requestMatchesObservedRule(
+  request: NormalizedAutoModerationChangeRequest,
+  observed: ProjectedAutoModerationRule,
+  botId: string,
+): boolean {
+  if (request.action === "create") {
+    return observed.creatorUserId === botId
+      && observed.eventType === eventTypeForTrigger(request.trigger)
+      && observed.guildId === request.guildId
+      && observed.name === request.name
+      && JSON.stringify(observed.actions) === JSON.stringify(request.actions)
+      && JSON.stringify(observed.exemptChannelIds)
+        === JSON.stringify(request.exemptChannelIds)
+      && JSON.stringify(observed.exemptRoleIds)
+        === JSON.stringify(request.exemptRoleIds)
+      && JSON.stringify(observed.trigger) === JSON.stringify(request.trigger)
+  }
+  if (request.action === "set-enabled") return observed.enabled === request.enabled
+  if (request.action === "delete") return false
+  return (request.actions === undefined
+      || JSON.stringify(observed.actions) === JSON.stringify(request.actions))
+    && (request.exemptChannelIds === undefined
+      || JSON.stringify(observed.exemptChannelIds)
+        === JSON.stringify(request.exemptChannelIds))
+    && (request.exemptRoleIds === undefined
+      || JSON.stringify(observed.exemptRoleIds)
+        === JSON.stringify(request.exemptRoleIds))
+    && (request.name === undefined || observed.name === request.name)
+    && (request.trigger === undefined
+      || JSON.stringify(observed.trigger) === JSON.stringify(request.trigger))
+}
+
 function hasTimeout(rule: PlannedAutoModerationRule): boolean {
   return rule.actions.some((action) => action.type === "timeout")
 }
@@ -1572,7 +1673,8 @@ function operationReceipt(options: {
   status: "completed" | "failed" | "pending" | "uncertain"
   timestamp: string
   verification?: "drift" | "match"
-}): OperationReceipt {
+  requestDigest: string
+}): AutoModerationOperationReceipt {
   return {
     activityId: options.activityId,
     error: options.error ?? null,
@@ -1581,7 +1683,8 @@ function operationReceipt(options: {
     operationKeyHash: options.request.operationKeyHash,
     planDigest: options.plan.digest,
     resourceId: options.ruleId ?? targetId(options.request),
-    schemaVersion: SCHEMA_VERSION,
+    requestDigest: options.requestDigest,
+    schemaVersion: 2,
     status: options.status,
     timestamp: options.timestamp,
     verification: options.verification ?? null,
@@ -1636,6 +1739,7 @@ export class AutoModerationService {
   readonly #planKey: Uint8Array
   readonly #policy: ScopePolicy
   readonly #randomId: () => string
+  readonly #verificationKey: Uint8Array
 
   constructor(options: AutoModerationServiceOptions) {
     this.#activityStore = options.activityStore
@@ -1645,6 +1749,7 @@ export class AutoModerationService {
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId || randomUUID
+    this.#verificationKey = options.verificationKey || this.#planKey
   }
 
   async #evidence(
@@ -2074,6 +2179,172 @@ export class AutoModerationService {
     )
   }
 
+  async verify(
+    applicationId: string,
+    botId: string,
+    request: AutoModerationChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<AutoModerationVerificationResult> {
+    const normalized = normalizeAutoModerationChangeRequest(request)
+    const requestDigest = autoModerationRequestDigest(
+      this.#verificationKey,
+      applicationId,
+      botId,
+      normalized,
+    )
+    const base = {
+      action: normalized.action,
+      guildId: normalized.guildId,
+      operationKeyHash: normalized.operationKeyHash,
+      schemaVersion: SCHEMA_VERSION,
+    }
+    const receipt = await this.#operationStore.get(
+      "automod-change",
+      normalized.operationKeyHash,
+    )
+    if (!receipt) {
+      return {
+        ...base,
+        activityId: null,
+        planDigest: null,
+        readbackMatched: false,
+        reason: "operation-not-found",
+        receiptStatus: null,
+        requestMatched: false,
+        ruleId: null,
+        status: "not-found",
+        timestamp: null,
+      }
+    }
+    if (receipt.kind !== "automod-change") {
+      throw new AutoModerationEvidenceError(
+        "Discord returned a mismatched AutoMod operation receipt",
+      )
+    }
+    if (!matchingDigest(receipt.requestDigest, requestDigest)) {
+      return {
+        ...base,
+        activityId: null,
+        planDigest: null,
+        readbackMatched: false,
+        reason: "request-mismatch",
+        receiptStatus: receipt.status,
+        requestMatched: false,
+        ruleId: null,
+        status: "blocked",
+        timestamp: null,
+      }
+    }
+    if (receipt.status !== "completed") {
+      const reason: AutoModerationVerificationReason = receipt.status === "pending"
+        ? "operation-pending"
+        : receipt.status === "failed"
+          ? "operation-failed"
+          : "operation-uncertain"
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        planDigest: receipt.planDigest,
+        readbackMatched: false,
+        reason,
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        ruleId: receipt.resourceId,
+        status: "blocked",
+        timestamp: receipt.timestamp,
+      }
+    }
+    const ruleId = receipt.resourceId
+    if (
+      !validSnowflake(ruleId)
+      || receipt.guildId !== normalized.guildId
+      || normalized.action !== "create" && normalized.ruleId !== ruleId
+    ) {
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        planDigest: receipt.planDigest,
+        readbackMatched: false,
+        reason: "receipt-target-mismatch",
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        ruleId,
+        status: "blocked",
+        timestamp: receipt.timestamp,
+      }
+    }
+    if (receipt.verification !== "match") {
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        planDigest: receipt.planDigest,
+        readbackMatched: false,
+        reason: "rule-state-mismatch",
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        ruleId,
+        status: "drifted",
+        timestamp: receipt.timestamp,
+      }
+    }
+
+    const state = await this.#evidence(botId, normalized.guildId, "audit", options)
+    permissionEvidence(state, ["MANAGE_GUILD"])
+    let observed: ProjectedAutoModerationRule | null
+    try {
+      observed = projectedRule(await this.#client.getGuildAutoModerationRule(
+        normalized.guildId,
+        ruleId,
+        options,
+      ))
+      if (observed.guildId !== normalized.guildId || observed.ruleId !== ruleId) {
+        throw new AutoModerationEvidenceError(
+          "Discord returned another AutoMod rule during exact verification",
+        )
+      }
+    } catch (error) {
+      if (error instanceof DiscordApiError && error.status === 404) {
+        observed = null
+      } else {
+        throw error
+      }
+    }
+    const readbackMatched = normalized.action === "delete"
+      ? observed === null
+      : observed !== null
+        && requestMatchesObservedRule(normalized, observed, botId)
+    if (readbackMatched) {
+      return {
+        ...base,
+        activityId: receipt.activityId,
+        planDigest: receipt.planDigest,
+        readbackMatched: true,
+        reason: null,
+        receiptStatus: receipt.status,
+        requestMatched: true,
+        ruleId,
+        status: "verified",
+        timestamp: receipt.timestamp,
+      }
+    }
+    return {
+      ...base,
+      activityId: receipt.activityId,
+      planDigest: receipt.planDigest,
+      readbackMatched: false,
+      reason: normalized.action === "delete"
+        ? "rule-still-present"
+        : observed === null
+          ? "rule-missing"
+          : "rule-state-mismatch",
+      receiptStatus: receipt.status,
+      requestMatched: true,
+      ruleId,
+      status: "drifted",
+      timestamp: receipt.timestamp,
+    }
+  }
+
   execute(
     applicationId: string,
     botId: string,
@@ -2115,6 +2386,12 @@ export class AutoModerationService {
     expectedDigest: string,
     options: RequestOptions,
   ): Promise<AutoModerationResult> {
+    const requestDigest = autoModerationRequestDigest(
+      this.#verificationKey,
+      applicationId,
+      botId,
+      request,
+    )
     let plan: AutoModerationPlan
     try {
       plan = await this.#buildPlan(applicationId, botId, request, options)
@@ -2153,6 +2430,7 @@ export class AutoModerationService {
       activityId,
       plan,
       request,
+      requestDigest,
       status: "pending",
       timestamp: this.#clock().toISOString(),
     }))
@@ -2176,6 +2454,7 @@ export class AutoModerationService {
           error: safeErrorCode(error),
           plan,
           request,
+          requestDigest,
           status: "failed",
           timestamp: this.#clock().toISOString(),
         }))
@@ -2301,6 +2580,7 @@ export class AutoModerationService {
           error: errorCode,
           plan,
           request,
+          requestDigest,
           ruleId,
           status,
           timestamp: this.#clock().toISOString(),
@@ -2366,6 +2646,7 @@ export class AutoModerationService {
         activityId,
         plan,
         request,
+        requestDigest,
         ruleId,
         status: "completed",
         timestamp: this.#clock().toISOString(),

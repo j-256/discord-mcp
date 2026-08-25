@@ -18,9 +18,13 @@ import type {
   DiscordGuild,
   DiscordRole,
 } from "../src/types.js"
-import type {
-  DiscordGuildOnboarding,
-  DiscordGuildWelcomeScreen,
+import {
+  DISCORD_AUTO_MODERATION_ACTION_TYPES,
+  DISCORD_AUTO_MODERATION_EVENT_TYPES,
+  DISCORD_AUTO_MODERATION_TRIGGER_TYPES,
+  type DiscordAutoModerationRuleSummary,
+  type DiscordGuildOnboarding,
+  type DiscordGuildWelcomeScreen,
 } from "../src/discord-client.js"
 
 const APPLICATION_ID = "900000000000000001"
@@ -39,11 +43,13 @@ const FOURTH_CHANNEL_ID = "200000000000000005"
 const FIFTH_CHANNEL_ID = "200000000000000006"
 const MISSING_CHANNEL_ID = "200000000000000099"
 const MISSING_ROLE_ID = "300000000000000099"
+const AUTOMOD_RULE_ID = "800000000000000001"
 const TOKEN_VARIABLE = "DISCORD_CAPTURE_TEST_TOKEN"
 const OPERATION_KEY = "guild-blueprint-capture-operation-0001"
 const AUDIT_REASON = "Restore the reviewed caller-retained guild blueprint"
 
 interface CapturePass {
+  autoModerationRules: DiscordAutoModerationRuleSummary[]
   channels: DiscordChannel[]
   guild: DiscordGuild
   onboarding: DiscordGuildOnboarding
@@ -114,8 +120,39 @@ function textChannel(
   }
 }
 
+function autoModerationRule(
+  overrides: Partial<DiscordAutoModerationRuleSummary> = {},
+): DiscordAutoModerationRuleSummary {
+  return {
+    actions: [{
+      customMessage: "Keep it civil",
+      type: DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage,
+    }, {
+      channelId: CHANNEL_ID,
+      type: DISCORD_AUTO_MODERATION_ACTION_TYPES.sendAlertMessage,
+    }],
+    creatorUserId: BOT_ID,
+    enabled: true,
+    eventType: DISCORD_AUTO_MODERATION_EVENT_TYPES.messageSend,
+    exemptChannelIds: [CHANNEL_ID],
+    exemptRoleIds: [ROLE_ID],
+    guildId: GUILD_ID,
+    id: AUTOMOD_RULE_ID,
+    name: "Community safety",
+    trigger: {
+      allowList: [],
+      keywordFilter: ["blocked phrase"],
+      regexPatterns: [],
+      type: DISCORD_AUTO_MODERATION_TRIGGER_TYPES.keyword,
+    },
+    unknownFieldCount: 0,
+    ...overrides,
+  }
+}
+
 function capturePass(overrides: Partial<CapturePass> = {}): CapturePass {
   return {
+    autoModerationRules: [],
     channels: [textChannel()],
     guild: {
       afk_channel_id: null,
@@ -177,6 +214,7 @@ function capturePass(overrides: Partial<CapturePass> = {}): CapturePass {
 }
 
 function policy(capabilities: Record<string, boolean> = {
+  automodAudit: true,
   guildProfileAudit: true,
   guildSettingsAudit: true,
   onboardingAudit: true,
@@ -191,6 +229,7 @@ function policy(capabilities: Record<string, boolean> = {
     guildIds: [GUILD_ID],
     name: "capture-test",
     scopes: {
+      automodGuildIds: [GUILD_ID],
       guildProfileGuildIds: [GUILD_ID],
       guildSettingsGuildIds: [GUILD_ID],
       onboardingGuildIds: [GUILD_ID],
@@ -210,6 +249,7 @@ function fixture(
 ) {
   let passIndex = -1
   const calls = {
+    autoModerationRules: 0,
     channels: 0,
     guild: 0,
     onboarding: 0,
@@ -243,6 +283,10 @@ function fixture(
       async getGuildWelcomeScreen() {
         calls.welcomeScreen += 1
         return structuredClone(current().welcomeScreen)
+      },
+      async listGuildAutoModerationRules() {
+        calls.autoModerationRules += 1
+        return structuredClone(current().autoModerationRules)
       },
     },
     clock: (() => {
@@ -286,6 +330,7 @@ test("guild blueprint capture returns one strict planner-ready caller-retained i
   assert.deepEqual(result.omissions, [])
   assert.deepEqual(result.blockers, [])
   assert.deepEqual(calls, {
+    autoModerationRules: 2,
     channels: 2,
     guild: 2,
     onboarding: 2,
@@ -330,6 +375,84 @@ test("guild blueprint capture returns no torn blueprint when the second pass cha
   assert.deepEqual(result.omissions, [])
   assert.deepEqual(result.blockers.map((entry) => entry.code), ["CAPTURE_CHANGED"])
   assert.doesNotMatch(JSON.stringify(result), /Changed during capture/u)
+})
+
+test("guild blueprint capture retains complete exact-ID AutoMod policy with scaffold references", async () => {
+  const pass = capturePass({ autoModerationRules: [autoModerationRule()] })
+  const { service } = fixture([pass, pass])
+  const result = await service.capture(APPLICATION_ID, BOT_ID, request())
+
+  assert.equal(result.status, "ready")
+  assert.equal(result.coverage?.autoModerationRules.captured, 1)
+  assert.equal(result.coverage?.autoModerationRules.returned, 1)
+  assert.deepEqual(result.blueprint?.autoModerationRules, [{
+    actions: [{
+      customMessage: "Keep it civil",
+      type: "block-message",
+    }, {
+      channel: { key: `channel-${CHANNEL_ID}`, kind: "scaffold" },
+      type: "send-alert-message",
+    }],
+    enabled: true,
+    exemptChannels: [{ key: `channel-${CHANNEL_ID}`, kind: "scaffold" }],
+    exemptRoles: [{ key: `role-${ROLE_ID}`, kind: "scaffold" }],
+    key: `automod-${AUTOMOD_RULE_ID}`,
+    name: "Community safety",
+    ruleId: AUTOMOD_RULE_ID,
+    trigger: {
+      allowList: [],
+      keywordFilter: ["blocked phrase"],
+      regexPatterns: [],
+      type: "keyword",
+    },
+  }])
+  assert.equal(result.coverage?.exactChannelReferences, 0)
+  assert.equal(result.coverage?.exactRoleReferences, 0)
+})
+
+test("guild blueprint capture includes AutoMod policy in two-pass stability", async () => {
+  const first = capturePass({ autoModerationRules: [autoModerationRule()] })
+  const second = capturePass({
+    autoModerationRules: [autoModerationRule({
+      actions: [{
+        customMessage: "Changed policy",
+        type: DISCORD_AUTO_MODERATION_ACTION_TYPES.blockMessage,
+      }],
+    })],
+  })
+  const result = await fixture([first, second]).service.capture(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.equal(result.status, "changed-during-capture")
+  assert.equal(result.blueprint, null)
+  assert.doesNotMatch(JSON.stringify(result), /Changed policy/u)
+})
+
+test("guild blueprint capture blocks unknown or unresolved AutoMod evidence", async () => {
+  const rule = autoModerationRule({
+    actions: [{
+      channelId: MISSING_CHANNEL_ID,
+      type: DISCORD_AUTO_MODERATION_ACTION_TYPES.sendAlertMessage,
+    }],
+    exemptRoleIds: [MISSING_ROLE_ID],
+    unknownFieldCount: 1,
+  })
+  const pass = capturePass({ autoModerationRules: [rule] })
+  const result = await fixture([pass, pass]).service.capture(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.equal(result.status, "blocked")
+  assert.equal(result.blueprint, null)
+  const codes = new Set(result.blockers.map(({ code }) => code))
+  assert.equal(codes.has("AUTOMOD_UNKNOWN_EVIDENCE"), true)
+  assert.equal(codes.has("CHANNEL_REFERENCE_UNRESOLVED"), true)
+  assert.equal(codes.has("ROLE_REFERENCE_UNRESOLVED"), true)
 })
 
 test("guild blueprint capture detects drift between unknown system flag values", async () => {
@@ -784,6 +907,31 @@ test("guild blueprint capture composes every existing audit policy before Discor
     /Welcome Screen audit is disabled/u,
   )
   assert.deepEqual(calls, {
+    autoModerationRules: 0,
+    channels: 0,
+    guild: 0,
+    onboarding: 0,
+    roles: 0,
+    welcomeScreen: 0,
+  })
+})
+
+test("guild blueprint capture requires AutoMod audit policy before Discord reads", async () => {
+  const pass = capturePass()
+  const { calls, service } = fixture([pass, pass], policy({
+    automodAudit: false,
+    guildProfileAudit: true,
+    guildSettingsAudit: true,
+    onboardingAudit: true,
+    welcomeScreenAudit: true,
+  }))
+
+  await assert.rejects(
+    service.capture(APPLICATION_ID, BOT_ID, request()),
+    /AutoMod audit is disabled/u,
+  )
+  assert.deepEqual(calls, {
+    autoModerationRules: 0,
     channels: 0,
     guild: 0,
     onboarding: 0,

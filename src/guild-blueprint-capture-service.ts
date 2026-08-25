@@ -6,6 +6,10 @@ import {
   normalizeChannelCreationRequest,
 } from "./channel-administration-service.js"
 import {
+  projectAutoModerationRuleInventory,
+  type ProjectedAutoModerationRule,
+} from "./automod-service.js"
+import {
   CONNECTOR_LIMITS,
   DISCORD_CHANNEL_FLAGS,
   DISCORD_CHANNEL_TYPES,
@@ -26,6 +30,7 @@ import {
   DISCORD_ONBOARDING_MODES,
   DISCORD_ONBOARDING_PROMPT_TYPES,
   encodeDiscordAuditReason,
+  type DiscordAutoModerationRuleSummary,
   type DiscordClient,
   type DiscordGuildOnboarding,
   type DiscordGuildWelcomeScreen,
@@ -35,6 +40,8 @@ import {
   type DiscordGuildProfile,
 } from "./guild-profile.js"
 import {
+  type GuildBlueprintAutoModerationActionInput,
+  type GuildBlueprintAutoModerationRuleInput,
   type GuildBlueprintChannelReference,
   type GuildBlueprintOnboardingInput,
   type GuildBlueprintOnboardingPromptInput,
@@ -125,6 +132,7 @@ export type GuildBlueprintCaptureStatus =
   | "review-required"
 
 export type GuildBlueprintCaptureFindingCode =
+  | "AUTOMOD_UNKNOWN_EVIDENCE"
   | "BLUEPRINT_RESOURCE_LIMIT"
   | "BLUEPRINT_VALIDATION_FAILED"
   | "CAPTURE_CHANGED"
@@ -160,7 +168,7 @@ export interface GuildBlueprintCaptureFinding {
   code: GuildBlueprintCaptureFindingCode
   message: string
   resourceId: string | null
-  resourceType: "capture" | "channel" | "role"
+  resourceType: "auto-moderation" | "capture" | "channel" | "role"
 }
 
 export interface GuildBlueprintCaptureRequest {
@@ -175,6 +183,11 @@ export interface NormalizedGuildBlueprintCaptureRequest
 }
 
 export interface GuildBlueprintCaptureCoverage {
+  autoModerationRules: {
+    captured: number
+    returned: number
+    visibility: "connector-visible"
+  }
   channels: {
     captured: number
     returned: number
@@ -186,6 +199,7 @@ export interface GuildBlueprintCaptureCoverage {
     "settings",
     "welcome-screen",
     "onboarding",
+    "auto-moderation",
   ]
   exactChannelReferences: number
   exactRoleReferences: number
@@ -198,6 +212,7 @@ export interface GuildBlueprintCaptureCoverage {
 export interface GuildBlueprintCapturePrivacy {
   activityPersistence: "none"
   attachments: "not-read"
+  autoModerationExecutionEvents: "not-read"
   components: "not-read"
   memberProfiles: "not-read"
   messageContent: "not-read"
@@ -276,6 +291,7 @@ export type GuildBlueprintCaptureResult =
   | GuildBlueprintCaptureReadyResult
 
 interface GuildBlueprintCapturePass {
+  autoModerationRules: DiscordAutoModerationRuleSummary[]
   channels: DiscordChannel[]
   guild: DiscordGuild
   onboarding: DiscordGuildOnboarding
@@ -319,6 +335,7 @@ export interface GuildBlueprintCaptureServiceOptions {
     | "getGuildOnboarding"
     | "getGuildRoles"
     | "getGuildWelcomeScreen"
+    | "listGuildAutoModerationRules"
   >
   clock?: () => Date
   policy: ScopePolicy
@@ -478,6 +495,10 @@ function channelKey(channelId: string): string {
   return `channel-${channelId}`
 }
 
+function autoModerationRuleKey(ruleId: string): string {
+  return `automod-${ruleId}`
+}
+
 function channelKind(type: number): "category" | "forum" | "text" | null {
   if (type === DISCORD_CHANNEL_TYPES.category) return "category"
   if (type === DISCORD_CHANNEL_TYPES.forum) return "forum"
@@ -587,6 +608,64 @@ function referenceForRole(
   return { kind: "exact", roleId }
 }
 
+function capturedAutoModerationAction(
+  action: ProjectedAutoModerationRule["actions"][number],
+  capturedChannelKeys: ReadonlyMap<string, string>,
+  exactChannelReferences: Set<string>,
+): GuildBlueprintAutoModerationActionInput {
+  if (action.type === "send-alert-message") {
+    return {
+      channel: referenceForChannel(
+        action.channelId,
+        capturedChannelKeys,
+        exactChannelReferences,
+      ),
+      type: "send-alert-message",
+    }
+  }
+  if (action.type === "block-message") {
+    return {
+      ...(action.customMessage === null
+        ? {}
+        : { customMessage: action.customMessage }),
+      type: "block-message",
+    }
+  }
+  if (action.type === "timeout") return { ...action }
+  return { type: "block-member-interaction" }
+}
+
+function capturedAutoModerationRule(
+  rule: ProjectedAutoModerationRule,
+  capturedChannelKeys: ReadonlyMap<string, string>,
+  capturedRoleKeys: ReadonlyMap<string, string>,
+  exactChannelReferences: Set<string>,
+  exactRoleReferences: Set<string>,
+): GuildBlueprintAutoModerationRuleInput {
+  return {
+    actions: rule.actions.map((action) => capturedAutoModerationAction(
+      action,
+      capturedChannelKeys,
+      exactChannelReferences,
+    )),
+    enabled: rule.enabled,
+    exemptChannels: rule.exemptChannelIds.map((channelId) => referenceForChannel(
+      channelId,
+      capturedChannelKeys,
+      exactChannelReferences,
+    )),
+    exemptRoles: rule.exemptRoleIds.map((roleId) => referenceForRole(
+      roleId,
+      capturedRoleKeys,
+      exactRoleReferences,
+    )),
+    key: autoModerationRuleKey(rule.ruleId),
+    name: rule.name,
+    ruleId: rule.ruleId,
+    trigger: rule.trigger,
+  }
+}
+
 function unresolvedReferenceFinding(
   id: string,
   type: "channel" | "role",
@@ -671,6 +750,20 @@ function projectPass(
   assertGuildChannelInventory(pass.channels, request.guildId)
   for (const channel of pass.channels) assertChannelCaptureBounds(channel)
   const channels = [...pass.channels].sort(channelSort)
+  const autoModerationRules = projectAutoModerationRuleInventory(
+    pass.autoModerationRules,
+    request.guildId,
+  )
+  for (const rule of pass.autoModerationRules) {
+    if ((rule.unknownFieldCount ?? 0) > 0) {
+      blockers.push(finding(
+        "AUTOMOD_UNKNOWN_EVIDENCE",
+        "An AutoMod rule with unknown response fields cannot be captured as complete policy",
+        "auto-moderation",
+        rule.id,
+      ))
+    }
+  }
   const returnedChannelIds = new Set(channels.map((channel) => channel.id))
   const returnedRoleIds = new Set(roles.map((role) => role.id))
   const unresolvedChannelIds = new Set<string>()
@@ -703,6 +796,15 @@ function projectPass(
     for (const option of prompt.options) {
       for (const channelId of option.channelIds) requireChannelReference(channelId)
       for (const roleId of option.roleIds) requireRoleReference(roleId)
+    }
+  }
+  for (const rule of autoModerationRules) {
+    for (const channelId of rule.exemptChannelIds) requireChannelReference(channelId)
+    for (const roleId of rule.exemptRoleIds) requireRoleReference(roleId)
+    for (const action of rule.actions) {
+      if (action.type === "send-alert-message") {
+        requireChannelReference(action.channelId)
+      }
     }
   }
   if (
@@ -1002,6 +1104,15 @@ function projectPass(
 
   const exactChannelReferences = new Set<string>()
   const exactRoleReferences = new Set<string>()
+  const autoModerationRuleInputs = autoModerationRules.map((rule) => (
+    capturedAutoModerationRule(
+      rule,
+      selectedChannelKeys,
+      selectedRoleKeys,
+      exactChannelReferences,
+      exactRoleReferences,
+    )
+  ))
   const settingsInput = (
     settings.verificationLevel === null
     || settings.defaultMessageNotifications === null
@@ -1165,6 +1276,11 @@ function projectPass(
   }
 
   const coverage: GuildBlueprintCaptureCoverage = {
+    autoModerationRules: {
+      captured: autoModerationRuleInputs.length,
+      returned: autoModerationRules.length,
+      visibility: "connector-visible",
+    },
     channels: {
       captured: selectedChannels.length,
       returned: channels.length,
@@ -1176,6 +1292,7 @@ function projectPass(
       "settings",
       "welcome-screen",
       "onboarding",
+      "auto-moderation",
     ],
     exactChannelReferences: exactChannelReferences.size,
     exactRoleReferences: exactRoleReferences.size,
@@ -1189,6 +1306,9 @@ function projectPass(
   if (blockers.length === 0 && settingsInput !== null) {
     const candidate: GuildBlueprintRequest = {
       auditReason: request.auditReason,
+      ...(autoModerationRuleInputs.length === 0
+        ? {}
+        : { autoModerationRules: autoModerationRuleInputs }),
       guildId: request.guildId,
       ...(onboarding === undefined ? {} : { onboarding }),
       operationKey: request.operationKey,
@@ -1224,6 +1344,7 @@ function projectPass(
     coverage,
     omissions,
     source: {
+      autoModerationRules,
       channels: channels.map(sourceChannelProjection),
       guild: settings,
       onboarding: pass.onboarding,
@@ -1259,6 +1380,7 @@ function captureDigest(
 const PRIVACY: GuildBlueprintCapturePrivacy = Object.freeze({
   activityPersistence: "none",
   attachments: "not-read",
+  autoModerationExecutionEvents: "not-read",
   components: "not-read",
   memberProfiles: "not-read",
   messageContent: "not-read",
@@ -1294,20 +1416,30 @@ export class GuildBlueprintCaptureService {
     this.#policy.assertGuildSettingsAuditable(normalized.guildId)
     this.#policy.assertGuildWelcomeScreenAuditable(normalized.guildId)
     this.#policy.assertGuildOnboardingAuditable(normalized.guildId)
+    this.#policy.assertAutomodAuditable(normalized.guildId)
   }
 
   async #pass(
     guildId: string,
     options: RequestOptions,
   ): Promise<GuildBlueprintCapturePass> {
-    const [guild, roles, channels, onboarding, welcomeScreen] = await Promise.all([
+    const [
+      guild,
+      roles,
+      channels,
+      onboarding,
+      welcomeScreen,
+      autoModerationRules,
+    ] = await Promise.all([
       this.#client.getGuild(guildId, options),
       this.#client.getGuildRoles(guildId, options),
       this.#client.getGuildChannels(guildId, options),
       this.#client.getGuildOnboarding(guildId, options),
       this.#client.getGuildWelcomeScreen(guildId, options),
+      this.#client.listGuildAutoModerationRules(guildId, options),
     ])
     return {
+      autoModerationRules,
       channels: this.#policy.filterChannels(channels),
       guild,
       onboarding,
@@ -1330,8 +1462,14 @@ export class GuildBlueprintCaptureService {
     this.assertCaptureAllowed(request)
 
     const startedAt = this.#clock().toISOString()
-    const first = projectPass(await this.#pass(normalized.guildId, options), normalized)
-    const second = projectPass(await this.#pass(normalized.guildId, options), normalized)
+    const first = projectPass(
+      await this.#pass(normalized.guildId, options),
+      normalized,
+    )
+    const second = projectPass(
+      await this.#pass(normalized.guildId, options),
+      normalized,
+    )
     const completedAt = this.#clock().toISOString()
     const base = {
       applicationId,

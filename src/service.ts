@@ -96,8 +96,12 @@ import type {
   AutoModerationPlan,
   AutoModerationResult,
   AutoModerationServiceOptions,
+  AutoModerationVerificationResult,
 } from "./automod-service.js"
-import { AutoModerationService } from "./automod-service.js"
+import {
+  autoModerationVerificationKey,
+  AutoModerationService,
+} from "./automod-service.js"
 import type {
   BanAuditGetOptions,
   BanAuditListOptions,
@@ -1456,6 +1460,7 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.automodOptions,
+      verificationKey: autoModerationVerificationKey(options.config.token),
     })
     this.#banAuditService = new BanAuditService({
       client: this.#client,
@@ -1724,6 +1729,7 @@ export class ConnectorService {
     })
     this.#guildBlueprintService = new GuildBlueprintService({
       domains: {
+        automod: this.#automodService,
         component: this.#componentMessageService,
         onboarding: this.#onboardingService,
         profile: this.#guildProfileService,
@@ -2888,6 +2894,19 @@ export class ConnectorService {
   ): Promise<AutoModerationLookupResult> {
     const identity = await this.#verifyIdentity(options)
     return this.#automodService.get(identity.bot.id, guildId, ruleId, options)
+  }
+
+  async verifyAutoModerationChange(
+    request: AutoModerationChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<AutoModerationVerificationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#automodService.verify(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
   }
 
   async getGuildExpression(
@@ -4414,6 +4433,13 @@ export class ConnectorService {
       request,
       planDigest,
       {
+        executeAutoModeration: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeAutoModerationChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
         executeComponent: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeComponentMessage(
             nestedRequest,

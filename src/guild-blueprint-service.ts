@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto"
 
 import {
   CONNECTOR_LIMITS,
+  DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GUILD_SCAFFOLD_SYMBOL_PATTERN,
@@ -14,6 +15,21 @@ import type {
   NormalizedComponentLayout,
 } from "./component-layout.js"
 import {
+  type AutoModerationActionRequest,
+  type AutoModerationChangeRequest,
+  type AutoModerationInventoryResult,
+  type AutoModerationLookupResult,
+  type AutoModerationPlan,
+  type AutoModerationResult,
+  type AutoModerationTriggerRequest,
+  type AutoModerationVerificationReason,
+  type AutoModerationVerificationResult,
+  type CreateAutoModerationRuleRequest,
+  normalizeAutoModerationChangeRequest,
+  type ProjectedAutoModerationRule,
+  type UpdateAutoModerationRuleRequest,
+} from "./automod-service.js"
+import {
   type ComponentMessageContentIntentStatus,
   type ComponentMessagePlan,
   type ComponentMessageRequest,
@@ -22,7 +38,7 @@ import {
   type ComponentMessageVerificationResult,
   normalizeComponentMessageRequest,
 } from "./component-message-service.js"
-import { GuildBlueprintPlanChangedError } from "./errors.js"
+import { DiscordApiError, GuildBlueprintPlanChangedError } from "./errors.js"
 import {
   type GuildProfileChangePlan,
   type GuildProfileChangeRequest,
@@ -48,7 +64,10 @@ import {
   type OnboardingChangeResult,
   normalizeOnboardingChangeRequest,
 } from "./onboarding-service.js"
-import { operationKeyHash } from "./operation-store.js"
+import {
+  operationKeyHash,
+  type OperationReceiptStatus,
+} from "./operation-store.js"
 import {
   createReviewedPlanKey,
   REVIEWED_PLAN_DIGEST_PATTERN,
@@ -65,6 +84,7 @@ import {
 const BLUEPRINT_REQUEST_DIGEST_PREFIX = "hmac-sha256:"
 const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "auditReason",
+  "autoModerationRules",
   "guildId",
   "onboarding",
   "operationKey",
@@ -73,6 +93,31 @@ const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "scaffold",
   "settings",
   "welcomeScreen",
+] as const)
+const BLUEPRINT_AUTOMOD_RULE_KEYS = Object.freeze([
+  "actions",
+  "enabled",
+  "exemptChannels",
+  "exemptRoles",
+  "key",
+  "name",
+  "ruleId",
+  "trigger",
+] as const)
+const BLUEPRINT_AUTOMOD_BLOCK_MESSAGE_ACTION_KEYS = Object.freeze([
+  "customMessage",
+  "type",
+] as const)
+const BLUEPRINT_AUTOMOD_ALERT_ACTION_KEYS = Object.freeze([
+  "channel",
+  "type",
+] as const)
+const BLUEPRINT_AUTOMOD_TIMEOUT_ACTION_KEYS = Object.freeze([
+  "durationSeconds",
+  "type",
+] as const)
+const BLUEPRINT_AUTOMOD_INTERACTION_ACTION_KEYS = Object.freeze([
+  "type",
 ] as const)
 const BLUEPRINT_SCAFFOLD_KEYS = Object.freeze([
   "channels",
@@ -158,15 +203,29 @@ export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "settings",
   "welcome-screen",
   "onboarding",
+  "auto-moderation",
   "publication",
 ] as const)
 
 export type GuildBlueprintPhase = typeof GUILD_BLUEPRINT_PHASES[number]
-export type GuildBlueprintSingletonPhase = Exclude<GuildBlueprintPhase, "publication">
+export type GuildBlueprintSingletonPhase = Exclude<
+  GuildBlueprintPhase,
+  "auto-moderation" | "publication"
+>
 export type GuildBlueprintPhaseState = "blocked" | "ready" | "satisfied" | "waiting"
 const GUILD_BLUEPRINT_SINGLETON_PHASES: ReadonlySet<string> = new Set(
-  GUILD_BLUEPRINT_PHASES.filter((phase) => phase !== "publication"),
+  GUILD_BLUEPRINT_PHASES.filter((phase) => (
+    phase !== "auto-moderation" && phase !== "publication"
+  )),
 )
+
+export const GUILD_BLUEPRINT_AUTOMOD_STAGES = Object.freeze([
+  "configure",
+  "disable",
+  "enable",
+] as const)
+export type GuildBlueprintAutoModerationStage =
+  typeof GUILD_BLUEPRINT_AUTOMOD_STAGES[number]
 
 export interface GuildBlueprintExactChannelReference {
   channelId: string
@@ -195,6 +254,35 @@ export interface GuildBlueprintScaffoldRoleReference {
 export type GuildBlueprintRoleReference =
   | GuildBlueprintExactRoleReference
   | GuildBlueprintScaffoldRoleReference
+
+export type GuildBlueprintAutoModerationActionInput =
+  | Exclude<AutoModerationActionRequest, { type: "send-alert-message" }>
+  | {
+      channel: GuildBlueprintChannelReference
+      type: "send-alert-message"
+    }
+
+export interface GuildBlueprintAutoModerationRuleInput {
+  actions: readonly GuildBlueprintAutoModerationActionInput[]
+  enabled: boolean
+  exemptChannels: readonly GuildBlueprintChannelReference[]
+  exemptRoles: readonly GuildBlueprintRoleReference[]
+  key: string
+  name: string
+  ruleId?: string
+  trigger: AutoModerationTriggerRequest
+}
+
+export interface NormalizedGuildBlueprintAutoModerationRuleInput {
+  actions: GuildBlueprintAutoModerationActionInput[]
+  enabled: boolean
+  exemptChannels: GuildBlueprintChannelReference[]
+  exemptRoles: GuildBlueprintRoleReference[]
+  key: string
+  name: string
+  ruleId?: string
+  trigger: AutoModerationTriggerRequest
+}
 
 export type GuildBlueprintScaffoldInput = Omit<
   GuildScaffoldRequest,
@@ -279,6 +367,7 @@ export type GuildBlueprintPublicationInput =
 
 export interface GuildBlueprintRequest {
   auditReason: string
+  autoModerationRules?: readonly GuildBlueprintAutoModerationRuleInput[]
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
@@ -310,6 +399,7 @@ export type NormalizedGuildBlueprintPublicationInput = {
 
 export interface NormalizedGuildBlueprintRequest {
   auditReason: string
+  autoModerationRules?: NormalizedGuildBlueprintAutoModerationRuleInput[]
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
@@ -336,6 +426,11 @@ const TEXT_OR_FORUM_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "forum",
   "text",
 ])
+const AUTOMOD_EXEMPT_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
+  "category",
+  "forum",
+  "text",
+])
 
 interface GuildBlueprintPlanStepBase {
   nestedPlanDigest: string | null
@@ -359,11 +454,31 @@ export interface GuildBlueprintPublicationPlanStep extends GuildBlueprintPlanSte
   verificationStatus: ComponentMessageVerificationResult["status"] | null
 }
 
+export type GuildBlueprintAutoModerationBlockerReason =
+  | AutoModerationVerificationReason
+  | "exact-rule-missing"
+  | "trigger-type-mismatch"
+  | "unbound-name-collision"
+
+export interface GuildBlueprintAutoModerationPlanStep
+  extends GuildBlueprintPlanStepBase {
+  index: number
+  key: string
+  kind: "auto-moderation"
+  receiptStatus: AutoModerationVerificationResult["receiptStatus"]
+  ruleId: string | null
+  stage: GuildBlueprintAutoModerationStage | null
+  verificationReason: GuildBlueprintAutoModerationBlockerReason | null
+  verificationStatus: AutoModerationVerificationResult["status"] | null
+}
+
 export type GuildBlueprintPlanStep =
+  | GuildBlueprintAutoModerationPlanStep
   | GuildBlueprintPublicationPlanStep
   | GuildBlueprintSingletonPlanStep
 
 export interface GuildBlueprintPublicationBlocker {
+  kind: "publication"
   channelId: string
   index: number
   messageId: string | null
@@ -373,7 +488,33 @@ export interface GuildBlueprintPublicationBlocker {
   verificationStatus: "blocked" | "drifted"
 }
 
+export interface GuildBlueprintAutoModerationBlocker {
+  channelId: null
+  index: number
+  kind: "auto-moderation"
+  messageId: null
+  operationKeyHash: string
+  receiptStatus: AutoModerationVerificationResult["receiptStatus"]
+  ruleId: string | null
+  ruleIds: string[]
+  stage: GuildBlueprintAutoModerationStage
+  verificationReason: GuildBlueprintAutoModerationBlockerReason
+  verificationStatus: AutoModerationVerificationResult["status"] | null
+}
+
+export type GuildBlueprintBlocker =
+  | GuildBlueprintAutoModerationBlocker
+  | GuildBlueprintPublicationBlocker
+
 export type GuildBlueprintFrontier =
+  | {
+      index: number
+      key: string
+      kind: "auto-moderation"
+      plan: AutoModerationPlan
+      stage: GuildBlueprintAutoModerationStage
+      writeRequired: true
+    }
   | {
       kind: "onboarding"
       plan: OnboardingChangePlan
@@ -410,7 +551,7 @@ export type GuildBlueprintFrontier =
 export interface GuildBlueprintPlan {
   applicationId: string
   bindings: GuildBlueprintBinding[]
-  blocker: GuildBlueprintPublicationBlocker | null
+  blocker: GuildBlueprintBlocker | null
   botId: string
   createdAt: string
   digest: string
@@ -435,6 +576,7 @@ export interface GuildBlueprintPlan {
 }
 
 export type GuildBlueprintNestedResult =
+  | AutoModerationResult
   | ComponentMessageResult
   | OnboardingChangeResult
   | GuildProfileChangeResult
@@ -443,9 +585,10 @@ export type GuildBlueprintNestedResult =
   | WelcomeScreenChangeResult
 
 export interface GuildBlueprintResult {
-  blocker: GuildBlueprintPublicationBlocker | null
+  blocker: GuildBlueprintBlocker | null
   digest: string
   executedPhase: GuildBlueprintPhase | null
+  executedAutoModerationRuleIndex: number | null
   executedPublicationIndex: number | null
   guildId: string
   nestedResult: GuildBlueprintNestedResult | null
@@ -463,16 +606,26 @@ export interface GuildBlueprintVerificationStep {
   messageId?: string | null
   nestedPlanDigest: string | null
   operationKeyHash: string
-  receiptStatus?: ComponentMessageVerificationResult["receiptStatus"]
   state: GuildBlueprintPhaseState
-  verificationReason?: ComponentMessageVerificationReason | null
-  verificationStatus?: ComponentMessageVerificationResult["status"] | null
+  receiptStatus?: OperationReceiptStatus | null
+  ruleId?: string | null
+  stage?: GuildBlueprintAutoModerationStage | null
+  verificationReason?: GuildBlueprintAutoModerationBlockerReason
+    | ComponentMessageVerificationReason
+    | null
+  verificationStatus?: AutoModerationVerificationResult["status"]
+    | ComponentMessageVerificationResult["status"]
+    | null
   writeRequired: boolean
 }
 
 export interface GuildBlueprintVerification {
   applicationId: string
-  blocker: GuildBlueprintPublicationBlocker | null
+  autoModerationRules: Array<{
+    index: number
+    ruleId: string
+  }>
+  blocker: GuildBlueprintBlocker | null
   botId: string
   checkedAt: string
   digest: string
@@ -497,6 +650,31 @@ export interface GuildBlueprintVerification {
 }
 
 export interface GuildBlueprintDomainServices {
+  automod: {
+    get(
+      botId: string,
+      guildId: string,
+      ruleId: string,
+      options?: RequestOptions,
+    ): Promise<AutoModerationLookupResult>
+    list(
+      botId: string,
+      guildId: string,
+      options?: RequestOptions,
+    ): Promise<AutoModerationInventoryResult>
+    plan(
+      applicationId: string,
+      botId: string,
+      request: AutoModerationChangeRequest,
+      options?: RequestOptions,
+    ): Promise<AutoModerationPlan>
+    verify(
+      applicationId: string,
+      botId: string,
+      request: AutoModerationChangeRequest,
+      options?: RequestOptions,
+    ): Promise<AutoModerationVerificationResult>
+  }
   component: {
     plan(
       applicationId: string,
@@ -556,6 +734,11 @@ export interface GuildBlueprintDomainServices {
 }
 
 export interface GuildBlueprintExecutors {
+  executeAutoModeration(
+    request: AutoModerationChangeRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<AutoModerationResult>
   executeComponent(
     request: ComponentMessageRequest,
     planDigest: string,
@@ -595,6 +778,11 @@ export interface GuildBlueprintServiceOptions {
 }
 
 type GuildBlueprintFrontierRequest =
+  | {
+      index: number
+      kind: "auto-moderation"
+      request: AutoModerationChangeRequest
+    }
   | {
       kind: "onboarding"
       request: OnboardingChangeRequest
@@ -717,6 +905,36 @@ export function guildBlueprintPublicationOperationKey(
   return derivedPublicationOperationKey(operationKey, key)
 }
 
+function derivedAutoModerationOperationKey(
+  operationKey: string,
+  key: string,
+  stage: GuildBlueprintAutoModerationStage,
+): string {
+  return `blueprint-automod:${createHmac("sha256", operationKey)
+    .update("discord-mcp-guild-blueprint-automod.v1\0")
+    .update(key)
+    .update("\0")
+    .update(stage)
+    .digest("hex")}`
+}
+
+export function guildBlueprintAutoModerationOperationKey(
+  operationKey: string,
+  key: string,
+  stage: GuildBlueprintAutoModerationStage,
+): string {
+  operationKeyHash(operationKey)
+  if (
+    typeof key !== "string"
+    || key.length > CONNECTOR_LIMITS.scaffoldSymbolCharacters
+    || !GUILD_SCAFFOLD_SYMBOL_PATTERN.test(key)
+    || !(GUILD_BLUEPRINT_AUTOMOD_STAGES as readonly string[]).includes(stage)
+  ) {
+    throw new RangeError("Discord guild blueprint AutoMod operation identity is invalid")
+  }
+  return derivedAutoModerationOperationKey(operationKey, key, stage)
+}
+
 function normalizeChannelReference(
   value: unknown,
   channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
@@ -833,6 +1051,238 @@ function canonicalRoleReferences(
     if (seen.has(key)) throw new RangeError(`${description} must be unique`)
     seen.add(key)
     return reference
+  })
+}
+
+function canonicalAutoModerationInputs(
+  request: GuildBlueprintRequest,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+  scaffoldRoleKeys: ReadonlySet<string>,
+): NormalizedGuildBlueprintAutoModerationRuleInput[] | undefined {
+  if (request.autoModerationRules === undefined) return undefined
+  if (
+    !Array.isArray(request.autoModerationRules)
+    || request.autoModerationRules.length < 1
+    || request.autoModerationRules.length > DISCORD_LIMITS.autoModerationRules
+  ) {
+    throw new RangeError("Discord guild blueprint AutoMod rules are invalid")
+  }
+  const keys = new Set<string>()
+  const ruleIds = new Set<string>()
+  const unboundNames = new Set<string>()
+  const usedTemporaryIds = new Set<string>([request.guildId])
+  for (const value of request.autoModerationRules) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue
+    const candidate = value as unknown as Record<string, unknown>
+    const references = [
+      ...(Array.isArray(candidate.actions) ? candidate.actions : []),
+      ...(Array.isArray(candidate.exemptChannels) ? candidate.exemptChannels : []),
+      ...(Array.isArray(candidate.exemptRoles) ? candidate.exemptRoles : []),
+    ]
+    for (const reference of references) {
+      if (!reference || typeof reference !== "object" || Array.isArray(reference)) continue
+      const record = reference as Record<string, unknown>
+      for (const id of [record.channelId, record.roleId]) {
+        if (typeof id === "string" && DISCORD_SNOWFLAKE_PATTERN.test(id)) {
+          usedTemporaryIds.add(id)
+        }
+      }
+      if (
+        record.channel
+        && typeof record.channel === "object"
+        && !Array.isArray(record.channel)
+      ) {
+        const channelId = (record.channel as Record<string, unknown>).channelId
+        if (
+          typeof channelId === "string"
+          && DISCORD_SNOWFLAKE_PATTERN.test(channelId)
+        ) usedTemporaryIds.add(channelId)
+      }
+    }
+  }
+  let temporaryId = DISCORD_SNOWFLAKE_MAX
+  const temporaryIds = new Map<string, string>()
+  function temporaryReferenceId(referenceKey: string): string {
+    const existing = temporaryIds.get(referenceKey)
+    if (existing !== undefined) return existing
+    while (usedTemporaryIds.has(temporaryId.toString())) temporaryId -= 1n
+    const value = temporaryId.toString()
+    usedTemporaryIds.add(value)
+    temporaryIds.set(referenceKey, value)
+    temporaryId -= 1n
+    return value
+  }
+  function temporaryChannelId(reference: GuildBlueprintChannelReference): string {
+    return reference.kind === "exact"
+      ? reference.channelId
+      : temporaryReferenceId(`channel:${reference.key}`)
+  }
+  function temporaryRoleId(reference: GuildBlueprintRoleReference): string {
+    return reference.kind === "exact"
+      ? reference.roleId
+      : temporaryReferenceId(`role:${reference.key}`)
+  }
+
+  return request.autoModerationRules.map((value, index) => {
+    exactObject(
+      value,
+      BLUEPRINT_AUTOMOD_RULE_KEYS,
+      `Discord guild blueprint AutoMod rule ${index} must be an exact object`,
+    )
+    const rule = value as unknown as GuildBlueprintAutoModerationRuleInput
+    if (
+      typeof rule.key !== "string"
+      || rule.key.length > CONNECTOR_LIMITS.scaffoldSymbolCharacters
+      || !GUILD_SCAFFOLD_SYMBOL_PATTERN.test(rule.key)
+      || keys.has(rule.key)
+    ) {
+      throw new RangeError("Discord guild blueprint AutoMod rule keys must be valid and unique")
+    }
+    keys.add(rule.key)
+    if (rule.ruleId !== undefined) {
+      const ruleId = positiveSnowflake(
+        rule.ruleId,
+        `Discord guild blueprint AutoMod rule ${index} ID`,
+      )
+      if (ruleIds.has(ruleId)) {
+        throw new RangeError("Discord guild blueprint AutoMod rule IDs must be unique")
+      }
+      ruleIds.add(ruleId)
+    } else {
+      if (typeof rule.name !== "string" || unboundNames.has(rule.name)) {
+        throw new RangeError(
+          "Discord guild blueprint unbound AutoMod rule names must be unique",
+        )
+      }
+      unboundNames.add(rule.name)
+    }
+    if (!Array.isArray(rule.actions)) {
+      throw new RangeError(`Discord guild blueprint AutoMod rule ${index} actions are invalid`)
+    }
+    const actionSources = new Map<string, GuildBlueprintAutoModerationActionInput>()
+    const wireActions = rule.actions.map((action, actionIndex): AutoModerationActionRequest => {
+      if (!action || typeof action !== "object" || Array.isArray(action)) {
+        throw new RangeError(
+          `Discord guild blueprint AutoMod rule ${index} action ${actionIndex} is invalid`,
+        )
+      }
+      if (action.type === "send-alert-message") {
+        exactObject(
+          action,
+          BLUEPRINT_AUTOMOD_ALERT_ACTION_KEYS,
+          `Discord guild blueprint AutoMod rule ${index} alert action is invalid`,
+        )
+        const channel = normalizeChannelReference(
+          action.channel,
+          channelKinds,
+          SYSTEM_CHANNEL_SCAFFOLD_KINDS,
+          `Discord guild blueprint AutoMod rule ${index} alert channel`,
+        )
+        if (channel === null) {
+          throw new RangeError(
+            `Discord guild blueprint AutoMod rule ${index} alert channel is required`,
+          )
+        }
+        const normalizedAction = { channel, type: "send-alert-message" } as const
+        actionSources.set(action.type, normalizedAction)
+        return {
+          channelId: temporaryChannelId(channel),
+          type: "send-alert-message",
+        }
+      }
+      if (action.type === "block-message") {
+        exactObject(
+          action,
+          BLUEPRINT_AUTOMOD_BLOCK_MESSAGE_ACTION_KEYS,
+          `Discord guild blueprint AutoMod rule ${index} block action is invalid`,
+        )
+      } else if (action.type === "timeout") {
+        exactObject(
+          action,
+          BLUEPRINT_AUTOMOD_TIMEOUT_ACTION_KEYS,
+          `Discord guild blueprint AutoMod rule ${index} timeout action is invalid`,
+        )
+      } else if (action.type === "block-member-interaction") {
+        exactObject(
+          action,
+          BLUEPRINT_AUTOMOD_INTERACTION_ACTION_KEYS,
+          `Discord guild blueprint AutoMod rule ${index} interaction action is invalid`,
+        )
+      } else {
+        throw new RangeError(
+          `Discord guild blueprint AutoMod rule ${index} action type is invalid`,
+        )
+      }
+      const validated = action as unknown as GuildBlueprintAutoModerationActionInput
+      actionSources.set(validated.type, validated)
+      if (validated.type === "block-message") return { ...validated }
+      if (validated.type === "timeout") return { ...validated }
+      if (validated.type === "block-member-interaction") return { ...validated }
+      throw new RangeError(
+        `Discord guild blueprint AutoMod rule ${index} action type changed`,
+      )
+    })
+    const exemptChannels = canonicalChannelReferences(
+      rule.exemptChannels,
+      DISCORD_LIMITS.autoModerationExemptChannels,
+      channelKinds,
+      AUTOMOD_EXEMPT_SCAFFOLD_KINDS,
+      `Discord guild blueprint AutoMod rule ${index} exempt channels`,
+    ).sort((left, right) => channelReferenceKey(left).localeCompare(channelReferenceKey(right)))
+    const exemptRoles = canonicalRoleReferences(
+      rule.exemptRoles,
+      DISCORD_LIMITS.autoModerationExemptRoles,
+      scaffoldRoleKeys,
+      `Discord guild blueprint AutoMod rule ${index} exempt roles`,
+    ).sort((left, right) => roleReferenceKey(left).localeCompare(roleReferenceKey(right)))
+    const normalized = normalizeAutoModerationChangeRequest({
+      action: "create",
+      actions: wireActions,
+      auditReason: request.auditReason,
+      exemptChannelIds: exemptChannels.map(temporaryChannelId),
+      exemptRoleIds: exemptRoles.map(temporaryRoleId),
+      guildId: request.guildId,
+      name: rule.name,
+      operationKey: derivedAutoModerationOperationKey(
+        request.operationKey,
+        rule.key,
+        "configure",
+      ),
+      trigger: rule.trigger,
+    })
+    if (normalized.action !== "create" || typeof rule.enabled !== "boolean") {
+      throw new RangeError(`Discord guild blueprint AutoMod rule ${index} is invalid`)
+    }
+    return {
+      actions: normalized.actions.map((action): GuildBlueprintAutoModerationActionInput => {
+        if (action.type === "send-alert-message") {
+          const source = actionSources.get(action.type)
+          if (source?.type !== "send-alert-message") {
+            throw new RangeError(
+              `Discord guild blueprint AutoMod rule ${index} alert action is missing`,
+            )
+          }
+          return source
+        }
+        if (action.type === "block-message") {
+          return {
+            ...(action.customMessage === null
+              ? {}
+              : { customMessage: action.customMessage }),
+            type: "block-message",
+          }
+        }
+        if (action.type === "timeout") return { ...action }
+        return { type: "block-member-interaction" }
+      }),
+      enabled: rule.enabled,
+      exemptChannels,
+      exemptRoles,
+      key: rule.key,
+      name: normalized.name,
+      ...(rule.ruleId === undefined ? {} : { ruleId: rule.ruleId }),
+      trigger: normalized.trigger,
+    }
   })
 }
 
@@ -1409,14 +1859,15 @@ export function normalizeGuildBlueprintRequest(
   ) throw new RangeError("Discord guild blueprint request is invalid")
   positiveSnowflake(request.guildId, "Discord guild blueprint guild ID")
   if (
-    request.onboarding === undefined
+    request.autoModerationRules === undefined
+    && request.onboarding === undefined
     && request.profile === undefined
     && request.publications === undefined
     && request.settings === undefined
     && request.welcomeScreen === undefined
   ) {
     throw new RangeError(
-      "Discord guild blueprint requires a profile, settings, Welcome Screen, onboarding, or publication phase after the scaffold",
+      "Discord guild blueprint requires a profile, settings, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
     )
   }
   const operationKeyHashValue = operationKeyHash(request.operationKey)
@@ -1426,6 +1877,11 @@ export function normalizeGuildBlueprintRequest(
     scaffold.channels.map((channel) => [channel.key, channel.kind] as const),
   )
   const scaffoldRoleKeys = new Set(scaffold.roles.map((role) => role.key))
+  const autoModerationRules = canonicalAutoModerationInputs(
+    request,
+    channelKinds,
+    scaffoldRoleKeys,
+  )
   const onboarding = canonicalOnboardingInput(
     request,
     derivedOperationKey(request.operationKey, "onboarding"),
@@ -1449,6 +1905,7 @@ export function normalizeGuildBlueprintRequest(
   )
   return {
     auditReason: scaffold.auditReason,
+    ...(autoModerationRules === undefined ? {} : { autoModerationRules }),
     guildId: scaffold.guildId,
     ...(onboarding === undefined ? {} : { onboarding }),
     operationKey: request.operationKey,
@@ -1475,6 +1932,9 @@ export function normalizeGuildBlueprintRequest(
 function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
   return {
     auditReason: request.auditReason,
+    ...(request.autoModerationRules === undefined
+      ? {}
+      : { autoModerationRules: request.autoModerationRules }),
     guildId: request.guildId,
     ...(request.onboarding === undefined ? {} : { onboarding: request.onboarding }),
     operationKeyHash: request.operationKeyHash,
@@ -1492,7 +1952,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v4\0")
+    .update("discord-mcp-guild-blueprint-request.v5\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -1717,6 +2177,366 @@ function onboardingRequest(
       title: prompt.title,
       type: prompt.type,
     })),
+  }
+}
+
+interface ResolvedGuildBlueprintAutoModerationRule {
+  actions: AutoModerationActionRequest[]
+  enabled: boolean
+  exemptChannelIds: string[]
+  exemptRoleIds: string[]
+  key: string
+  name: string
+  ruleId: string | null
+  trigger: AutoModerationTriggerRequest
+}
+
+function resolvedAutoModerationRule(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+  index: number,
+): ResolvedGuildBlueprintAutoModerationRule {
+  const rule = request.autoModerationRules?.[index]
+  if (rule === undefined) {
+    throw new RangeError("Discord guild blueprint AutoMod rule is missing")
+  }
+  const actions = rule.actions.map((action): AutoModerationActionRequest => {
+    if (action.type !== "send-alert-message") return { ...action }
+    const channelId = resolveChannelReference(
+      action.channel,
+      bindings,
+      `Discord guild blueprint AutoMod rule ${index} alert channel`,
+    )
+    if (typeof channelId !== "string") {
+      throw new RangeError(
+        `Discord guild blueprint AutoMod rule ${index} alert channel is unresolved`,
+      )
+    }
+    return { channelId, type: "send-alert-message" }
+  })
+  const normalized = normalizeAutoModerationChangeRequest({
+    action: "create",
+    actions,
+    auditReason: request.auditReason,
+    exemptChannelIds: rule.exemptChannels.map((reference) => {
+      const channelId = resolveChannelReference(
+        reference,
+        bindings,
+        `Discord guild blueprint AutoMod rule ${index} exempt channel`,
+      )
+      if (typeof channelId !== "string") {
+        throw new RangeError(
+          `Discord guild blueprint AutoMod rule ${index} exempt channel is unresolved`,
+        )
+      }
+      return channelId
+    }),
+    exemptRoleIds: rule.exemptRoles.map((reference) => resolveRoleReference(
+      reference,
+      bindings,
+      `Discord guild blueprint AutoMod rule ${index} exempt role`,
+    )),
+    guildId: request.guildId,
+    name: rule.name,
+    operationKey: derivedAutoModerationOperationKey(
+      request.operationKey,
+      rule.key,
+      "configure",
+    ),
+    trigger: rule.trigger,
+  })
+  if (normalized.action !== "create") {
+    throw new RangeError("Discord guild blueprint AutoMod rule normalization changed")
+  }
+  return {
+    actions: normalized.actions.map((action): AutoModerationActionRequest => (
+      action.type === "block-message" && action.customMessage === null
+        ? { type: "block-message" }
+        : { ...action } as AutoModerationActionRequest
+    )),
+    enabled: rule.enabled,
+    exemptChannelIds: normalized.exemptChannelIds,
+    exemptRoleIds: normalized.exemptRoleIds,
+    key: rule.key,
+    name: normalized.name,
+    ruleId: rule.ruleId ?? null,
+    trigger: normalized.trigger,
+  }
+}
+
+function autoModerationConfigureRequest(
+  request: NormalizedGuildBlueprintRequest,
+  rule: ResolvedGuildBlueprintAutoModerationRule,
+  ruleId: string | null,
+): CreateAutoModerationRuleRequest | UpdateAutoModerationRuleRequest {
+  const base = {
+    actions: rule.actions,
+    auditReason: request.auditReason,
+    exemptChannelIds: rule.exemptChannelIds,
+    exemptRoleIds: rule.exemptRoleIds,
+    guildId: request.guildId,
+    name: rule.name,
+    operationKey: derivedAutoModerationOperationKey(
+      request.operationKey,
+      rule.key,
+      "configure",
+    ),
+    trigger: rule.trigger,
+  }
+  return ruleId === null
+    ? { ...base, action: "create" }
+    : { ...base, action: "update", ruleId }
+}
+
+function autoModerationStateRequest(
+  request: NormalizedGuildBlueprintRequest,
+  rule: ResolvedGuildBlueprintAutoModerationRule,
+  ruleId: string,
+  enabled: boolean,
+): AutoModerationChangeRequest {
+  return {
+    action: "set-enabled",
+    auditReason: request.auditReason,
+    enabled,
+    guildId: request.guildId,
+    operationKey: derivedAutoModerationOperationKey(
+      request.operationKey,
+      rule.key,
+      enabled ? "enable" : "disable",
+    ),
+    ruleId,
+  }
+}
+
+function autoModerationOperationKeyHash(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+  stage: GuildBlueprintAutoModerationStage,
+): string {
+  const rule = request.autoModerationRules?.[index]
+  if (rule === undefined) {
+    throw new RangeError("Discord guild blueprint AutoMod rule is missing")
+  }
+  return operationKeyHash(
+    derivedAutoModerationOperationKey(request.operationKey, rule.key, stage),
+  )
+}
+
+function waitingAutoModerationStep(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): GuildBlueprintAutoModerationPlanStep {
+  const rule = request.autoModerationRules?.[index]
+  if (rule === undefined) {
+    throw new RangeError("Discord guild blueprint AutoMod rule is missing")
+  }
+  return {
+    index,
+    key: rule.key,
+    kind: "auto-moderation",
+    nestedPlanDigest: null,
+    operationKeyHash: autoModerationOperationKeyHash(request, index, "configure"),
+    receiptStatus: null,
+    ruleId: rule.ruleId ?? null,
+    stage: null,
+    state: "waiting",
+    verificationReason: null,
+    verificationStatus: null,
+    writeRequired: false,
+  }
+}
+
+function appendWaitingAutoModerationSteps(
+  request: NormalizedGuildBlueprintRequest,
+  steps: GuildBlueprintPlanStep[],
+  startIndex = 0,
+): void {
+  for (
+    let index = startIndex;
+    index < (request.autoModerationRules?.length ?? 0);
+    index += 1
+  ) {
+    steps.push(waitingAutoModerationStep(request, index))
+  }
+}
+
+function sameAutoModerationPolicy(
+  rule: ResolvedGuildBlueprintAutoModerationRule,
+  observed: ProjectedAutoModerationRule,
+): boolean {
+  return stableString({
+    actions: rule.actions,
+    exemptChannelIds: rule.exemptChannelIds,
+    exemptRoleIds: rule.exemptRoleIds,
+    name: rule.name,
+    trigger: rule.trigger,
+  }) === stableString({
+    actions: observed.actions,
+    exemptChannelIds: observed.exemptChannelIds,
+    exemptRoleIds: observed.exemptRoleIds,
+    name: observed.name,
+    trigger: observed.trigger,
+  })
+}
+
+function assertAutoModerationLookupBinding(
+  guildId: string,
+  ruleId: string,
+  lookup: AutoModerationLookupResult,
+): void {
+  if (
+    lookup.schemaVersion !== SCHEMA_VERSION
+    || lookup.status !== "ok"
+    || lookup.guild.id !== guildId
+    || lookup.rule.guildId !== guildId
+    || lookup.rule.ruleId !== ruleId
+  ) {
+    throw new RangeError("Discord guild blueprint AutoMod lookup binding changed")
+  }
+}
+
+function exactAutoModerationInventoryRuleIds(
+  guildId: string,
+  inventory: AutoModerationInventoryResult,
+  name: string,
+): string[] {
+  if (
+    inventory.schemaVersion !== SCHEMA_VERSION
+    || inventory.status !== "ok"
+    || inventory.guild.id !== guildId
+    || inventory.page.returned !== inventory.rules.length
+  ) {
+    throw new RangeError("Discord guild blueprint AutoMod inventory binding changed")
+  }
+  const seen = new Set<string>()
+  for (const rule of inventory.rules) {
+    if (
+      rule.guildId !== guildId
+      || !isPositiveSnowflake(rule.ruleId)
+      || seen.has(rule.ruleId)
+    ) {
+      throw new RangeError("Discord guild blueprint AutoMod inventory identity changed")
+    }
+    seen.add(rule.ruleId)
+  }
+  return inventory.rules
+    .filter((rule) => rule.name === name)
+    .map((rule) => rule.ruleId)
+    .sort((left, right) => BigInt(left) < BigInt(right) ? -1 : 1)
+}
+
+function assertAutoModerationVerificationBinding(
+  request: AutoModerationChangeRequest,
+  verification: AutoModerationVerificationResult,
+): void {
+  const normalized = normalizeAutoModerationChangeRequest(request)
+  if (
+    verification.action !== normalized.action
+    || verification.guildId !== normalized.guildId
+    || verification.operationKeyHash !== normalized.operationKeyHash
+    || verification.schemaVersion !== SCHEMA_VERSION
+  ) {
+    throw new RangeError("Discord guild blueprint AutoMod verification binding changed")
+  }
+  if (verification.status === "verified") {
+    if (
+      !isPositiveSnowflake(verification.ruleId)
+      || verification.planDigest === null
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(verification.planDigest)
+      || !verification.readbackMatched
+      || !verification.requestMatched
+      || verification.reason !== null
+      || verification.receiptStatus !== "completed"
+    ) {
+      throw new RangeError("Discord guild blueprint AutoMod verification evidence changed")
+    }
+    return
+  }
+  if (verification.status === "not-found") {
+    if (
+      verification.reason !== "operation-not-found"
+      || verification.receiptStatus !== null
+      || verification.requestMatched
+      || verification.readbackMatched
+      || verification.ruleId !== null
+      || verification.planDigest !== null
+    ) {
+      throw new RangeError("Discord guild blueprint AutoMod absence evidence changed")
+    }
+    return
+  }
+  if (verification.status === "drifted") {
+    if (
+      !isPositiveSnowflake(verification.ruleId)
+      || verification.planDigest === null
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(verification.planDigest)
+      || verification.readbackMatched
+      || !verification.requestMatched
+      || verification.receiptStatus !== "completed"
+      || !["rule-missing", "rule-state-mismatch", "rule-still-present"].includes(
+        verification.reason as string,
+      )
+    ) {
+      throw new RangeError("Discord guild blueprint AutoMod drift evidence changed")
+    }
+    return
+  }
+  if (verification.status === "blocked") {
+    if (verification.reason === "request-mismatch") {
+      if (
+        verification.ruleId !== null
+        || verification.planDigest !== null
+        || verification.readbackMatched
+        || verification.requestMatched
+        || verification.receiptStatus === null
+      ) {
+        throw new RangeError("Discord guild blueprint AutoMod blocker evidence changed")
+      }
+      return
+    }
+    const expectedReceiptStatus = verification.reason === "operation-pending"
+      ? "pending"
+      : verification.reason === "operation-failed"
+        ? "failed"
+        : verification.reason === "operation-uncertain"
+          ? "uncertain"
+          : verification.reason === "receipt-target-mismatch"
+            ? "completed"
+            : null
+    if (
+      expectedReceiptStatus === null
+      || verification.planDigest === null
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(verification.planDigest)
+      || verification.readbackMatched
+      || !verification.requestMatched
+      || verification.receiptStatus !== expectedReceiptStatus
+      || verification.ruleId !== null && !isPositiveSnowflake(verification.ruleId)
+    ) {
+      throw new RangeError("Discord guild blueprint AutoMod blocker evidence changed")
+    }
+    return
+  }
+  throw new RangeError("Discord guild blueprint AutoMod verification status changed")
+}
+
+function assertAutoModerationPlanBinding(
+  applicationId: string,
+  botId: string,
+  guildId: string,
+  request: AutoModerationChangeRequest,
+  plan: AutoModerationPlan,
+): void {
+  const normalized = normalizeAutoModerationChangeRequest(request)
+  assertNestedIdentity(applicationId, botId, guildId, plan)
+  assertNestedPlanBinding(request.operationKey, plan)
+  if (
+    plan.action !== normalized.action
+    || plan.guild.id !== guildId
+    || (normalized.action === "create"
+      ? plan.existing !== null || plan.desired?.ruleId !== null
+      : plan.existing?.ruleId !== normalized.ruleId)
+  ) {
+    throw new RangeError("Discord guild blueprint AutoMod plan target changed")
   }
 }
 
@@ -2061,8 +2881,8 @@ function digestStep(step: GuildBlueprintPlanStep) {
     state: step.state,
     writeRequired: step.writeRequired,
   }
-  return step.kind === "publication"
-    ? {
+  if (step.kind === "publication") {
+    return {
         ...base,
         channelId: step.channelId,
         index: step.index,
@@ -2072,7 +2892,20 @@ function digestStep(step: GuildBlueprintPlanStep) {
         verificationReason: step.verificationReason,
         verificationStatus: step.verificationStatus,
       }
-    : base
+  }
+  if (step.kind === "auto-moderation") {
+    return {
+      ...base,
+      index: step.index,
+      key: step.key,
+      receiptStatus: step.receiptStatus,
+      ruleId: step.ruleId,
+      stage: step.stage,
+      verificationReason: step.verificationReason,
+      verificationStatus: step.verificationStatus,
+    }
+  }
+  return base
 }
 
 function verificationStep(
@@ -2085,8 +2918,8 @@ function verificationStep(
     state: step.state,
     writeRequired: step.writeRequired,
   }
-  return step.kind === "publication"
-    ? {
+  if (step.kind === "publication") {
+    return {
         ...base,
         channelId: step.channelId,
         index: step.index,
@@ -2095,7 +2928,19 @@ function verificationStep(
         verificationReason: step.verificationReason,
         verificationStatus: step.verificationStatus,
       }
-    : base
+  }
+  if (step.kind === "auto-moderation") {
+    return {
+      ...base,
+      index: step.index,
+      receiptStatus: step.receiptStatus,
+      ruleId: step.ruleId,
+      stage: step.stage,
+      verificationReason: step.verificationReason,
+      verificationStatus: step.verificationStatus,
+    }
+  }
+  return base
 }
 
 export class GuildBlueprintService {
@@ -2133,7 +2978,7 @@ export class GuildBlueprintService {
 
     const steps: GuildBlueprintPlanStep[] = []
     let bindings: GuildBlueprintBinding[] = []
-    let blocker: GuildBlueprintPublicationBlocker | null = null
+    let blocker: GuildBlueprintBlocker | null = null
     let frontier: GuildBlueprintFrontier | null = null
     let frontierRequest: GuildBlueprintFrontierRequest | null = null
     const structureSatisfied = ["already-current", "completed"].includes(
@@ -2161,6 +3006,7 @@ export class GuildBlueprintService {
       if (request.onboarding !== undefined) {
         steps.push(waitingStep(request, "onboarding"))
       }
+      appendWaitingAutoModerationSteps(request, steps)
       appendWaitingPublications(request, steps)
     } else {
       bindings = exactScaffoldBindings(request, structurePlan)
@@ -2192,6 +3038,7 @@ export class GuildBlueprintService {
           if (request.onboarding !== undefined) {
             steps.push(waitingStep(request, "onboarding"))
           }
+          appendWaitingAutoModerationSteps(request, steps)
           appendWaitingPublications(request, steps)
         }
       }
@@ -2224,6 +3071,7 @@ export class GuildBlueprintService {
             if (request.onboarding !== undefined) {
               steps.push(waitingStep(request, "onboarding"))
             }
+            appendWaitingAutoModerationSteps(request, steps)
             appendWaitingPublications(request, steps)
           }
         }
@@ -2272,6 +3120,7 @@ export class GuildBlueprintService {
             if (request.onboarding !== undefined) {
               steps.push(waitingStep(request, "onboarding"))
             }
+            appendWaitingAutoModerationSteps(request, steps)
             appendWaitingPublications(request, steps)
           }
         }
@@ -2309,12 +3158,379 @@ export class GuildBlueprintService {
               kind: "onboarding",
               request: requestedOnboarding,
             }
+            appendWaitingAutoModerationSteps(request, steps)
             appendWaitingPublications(request, steps)
           }
         }
       }
 
-      if (frontier === null && request.publications !== undefined) {
+      if (frontier === null && request.autoModerationRules !== undefined) {
+        const bindingsByKey = bindingMap(bindings)
+        for (const [index, manifestRule] of request.autoModerationRules.entries()) {
+          const rule = resolvedAutoModerationRule(request, bindingsByKey, index)
+          let ruleId = rule.ruleId
+          let creationVerification: AutoModerationVerificationResult | null = null
+          let stage: GuildBlueprintAutoModerationStage
+          let stageCompletesRule = false
+          let requestedAutoModeration: AutoModerationChangeRequest
+
+          if (ruleId === null) {
+            const createRequest = autoModerationConfigureRequest(request, rule, null)
+            creationVerification = await this.#domains.automod.verify(
+              applicationId,
+              botId,
+              createRequest,
+              options,
+            )
+            assertAutoModerationVerificationBinding(
+              createRequest,
+              creationVerification,
+            )
+            if (
+              creationVerification.status === "blocked"
+              || creationVerification.status === "drifted"
+            ) {
+              blocker = {
+                channelId: null,
+                index,
+                kind: "auto-moderation",
+                messageId: null,
+                operationKeyHash: creationVerification.operationKeyHash,
+                receiptStatus: creationVerification.receiptStatus,
+                ruleId: creationVerification.ruleId,
+                ruleIds: [],
+                stage: "configure",
+                verificationReason:
+                  creationVerification.reason as AutoModerationVerificationReason,
+                verificationStatus: creationVerification.status,
+              }
+              steps.push({
+                index,
+                key: manifestRule.key,
+                kind: "auto-moderation",
+                nestedPlanDigest: creationVerification.planDigest,
+                operationKeyHash: creationVerification.operationKeyHash,
+                receiptStatus: creationVerification.receiptStatus,
+                ruleId: creationVerification.ruleId,
+                stage: "configure",
+                state: "blocked",
+                verificationReason: creationVerification.reason,
+                verificationStatus: creationVerification.status,
+                writeRequired: false,
+              })
+              appendWaitingAutoModerationSteps(request, steps, index + 1)
+              appendWaitingPublications(request, steps)
+              break
+            }
+            if (creationVerification.status === "not-found") {
+              const inventory = await this.#domains.automod.list(
+                botId,
+                request.guildId,
+                options,
+              )
+              const collisions = exactAutoModerationInventoryRuleIds(
+                request.guildId,
+                inventory,
+                rule.name,
+              )
+              if (collisions.length > 0) {
+                blocker = {
+                  channelId: null,
+                  index,
+                  kind: "auto-moderation",
+                  messageId: null,
+                  operationKeyHash: creationVerification.operationKeyHash,
+                  receiptStatus: null,
+                  ruleId: null,
+                  ruleIds: collisions,
+                  stage: "configure",
+                  verificationReason: "unbound-name-collision",
+                  verificationStatus: "not-found",
+                }
+                steps.push({
+                  index,
+                  key: manifestRule.key,
+                  kind: "auto-moderation",
+                  nestedPlanDigest: null,
+                  operationKeyHash: creationVerification.operationKeyHash,
+                  receiptStatus: null,
+                  ruleId: null,
+                  stage: "configure",
+                  state: "blocked",
+                  verificationReason: "unbound-name-collision",
+                  verificationStatus: "not-found",
+                  writeRequired: false,
+                })
+                appendWaitingAutoModerationSteps(request, steps, index + 1)
+                appendWaitingPublications(request, steps)
+                break
+              }
+              stage = "configure"
+              requestedAutoModeration = createRequest
+            } else {
+              ruleId = creationVerification.ruleId
+              if (!isPositiveSnowflake(ruleId)) {
+                throw new RangeError(
+                  "Discord guild blueprint AutoMod receipt did not bind an exact rule",
+                )
+              }
+              stage = rule.enabled ? "enable" : "disable"
+              stageCompletesRule = true
+              requestedAutoModeration = autoModerationStateRequest(
+                request,
+                rule,
+                ruleId,
+                rule.enabled,
+              )
+            }
+          } else {
+            let lookup: AutoModerationLookupResult
+            try {
+              lookup = await this.#domains.automod.get(
+                botId,
+                request.guildId,
+                ruleId,
+                options,
+              )
+            } catch (error) {
+              if (!(error instanceof DiscordApiError && error.status === 404)) throw error
+              blocker = {
+                channelId: null,
+                index,
+                kind: "auto-moderation",
+                messageId: null,
+                operationKeyHash: autoModerationOperationKeyHash(
+                  request,
+                  index,
+                  "configure",
+                ),
+                receiptStatus: null,
+                ruleId,
+                ruleIds: [],
+                stage: "configure",
+                verificationReason: "exact-rule-missing",
+                verificationStatus: null,
+              }
+              steps.push({
+                index,
+                key: manifestRule.key,
+                kind: "auto-moderation",
+                nestedPlanDigest: null,
+                operationKeyHash: blocker.operationKeyHash,
+                receiptStatus: null,
+                ruleId,
+                stage: "configure",
+                state: "blocked",
+                verificationReason: "exact-rule-missing",
+                verificationStatus: null,
+                writeRequired: false,
+              })
+              appendWaitingAutoModerationSteps(request, steps, index + 1)
+              appendWaitingPublications(request, steps)
+              break
+            }
+            assertAutoModerationLookupBinding(request.guildId, ruleId, lookup)
+            const current = lookup.rule
+            if (current.trigger.type !== rule.trigger.type) {
+              blocker = {
+                channelId: null,
+                index,
+                kind: "auto-moderation",
+                messageId: null,
+                operationKeyHash: autoModerationOperationKeyHash(
+                  request,
+                  index,
+                  "configure",
+                ),
+                receiptStatus: null,
+                ruleId,
+                ruleIds: [],
+                stage: "configure",
+                verificationReason: "trigger-type-mismatch",
+                verificationStatus: null,
+              }
+              steps.push({
+                index,
+                key: manifestRule.key,
+                kind: "auto-moderation",
+                nestedPlanDigest: null,
+                operationKeyHash: blocker.operationKeyHash,
+                receiptStatus: null,
+                ruleId,
+                stage: "configure",
+                state: "blocked",
+                verificationReason: "trigger-type-mismatch",
+                verificationStatus: null,
+                writeRequired: false,
+              })
+              appendWaitingAutoModerationSteps(request, steps, index + 1)
+              appendWaitingPublications(request, steps)
+              break
+            }
+            const policyMatches = sameAutoModerationPolicy(rule, current)
+            if (current.enabled && (!policyMatches || !rule.enabled)) {
+              stage = "disable"
+              stageCompletesRule = policyMatches && !rule.enabled
+              requestedAutoModeration = autoModerationStateRequest(
+                request,
+                rule,
+                ruleId,
+                false,
+              )
+            } else if (!policyMatches) {
+              stage = "configure"
+              requestedAutoModeration = autoModerationConfigureRequest(
+                request,
+                rule,
+                ruleId,
+              )
+            } else {
+              stage = rule.enabled ? "enable" : "disable"
+              stageCompletesRule = true
+              requestedAutoModeration = autoModerationStateRequest(
+                request,
+                rule,
+                ruleId,
+                rule.enabled,
+              )
+            }
+          }
+
+          const stageVerification = requestedAutoModeration.action === "create"
+            ? creationVerification
+            : await this.#domains.automod.verify(
+                applicationId,
+                botId,
+                requestedAutoModeration,
+                options,
+              )
+          if (stageVerification === null) {
+            throw new RangeError(
+              "Discord guild blueprint AutoMod creation verification is missing",
+            )
+          }
+          assertAutoModerationVerificationBinding(
+            requestedAutoModeration,
+            stageVerification,
+          )
+          if (
+            stageVerification.status === "blocked"
+            || stageVerification.status === "drifted"
+          ) {
+            blocker = {
+              channelId: null,
+              index,
+              kind: "auto-moderation",
+              messageId: null,
+              operationKeyHash: stageVerification.operationKeyHash,
+              receiptStatus: stageVerification.receiptStatus,
+              ruleId: stageVerification.ruleId ?? ruleId,
+              ruleIds: [],
+              stage,
+              verificationReason:
+                stageVerification.reason as AutoModerationVerificationReason,
+              verificationStatus: stageVerification.status,
+            }
+            steps.push({
+              index,
+              key: manifestRule.key,
+              kind: "auto-moderation",
+              nestedPlanDigest: stageVerification.planDigest,
+              operationKeyHash: stageVerification.operationKeyHash,
+              receiptStatus: stageVerification.receiptStatus,
+              ruleId: stageVerification.ruleId ?? ruleId,
+              stage,
+              state: "blocked",
+              verificationReason: stageVerification.reason,
+              verificationStatus: stageVerification.status,
+              writeRequired: false,
+            })
+            appendWaitingAutoModerationSteps(request, steps, index + 1)
+            appendWaitingPublications(request, steps)
+            break
+          }
+          if (stageVerification.status === "verified") {
+            if (!stageCompletesRule) {
+              throw new RangeError(
+                "Discord guild blueprint AutoMod state advanced during reconciliation; plan again",
+              )
+            }
+            steps.push({
+              index,
+              key: manifestRule.key,
+              kind: "auto-moderation",
+              nestedPlanDigest: stageVerification.planDigest,
+              operationKeyHash: stageVerification.operationKeyHash,
+              receiptStatus: stageVerification.receiptStatus,
+              ruleId: stageVerification.ruleId,
+              stage,
+              state: "satisfied",
+              verificationReason: null,
+              verificationStatus: "verified",
+              writeRequired: false,
+            })
+            continue
+          }
+
+          const autoModerationPlan = await this.#domains.automod.plan(
+            applicationId,
+            botId,
+            requestedAutoModeration,
+            options,
+          )
+          assertAutoModerationPlanBinding(
+            applicationId,
+            botId,
+            request.guildId,
+            requestedAutoModeration,
+            autoModerationPlan,
+          )
+          const satisfied = autoModerationPlan.effect === "none"
+          if (satisfied && requestedAutoModeration.action === "update") {
+            throw new RangeError(
+              "Discord guild blueprint AutoMod policy plan changed during reconciliation",
+            )
+          }
+          steps.push({
+            index,
+            key: manifestRule.key,
+            kind: "auto-moderation",
+            nestedPlanDigest: autoModerationPlan.digest,
+            operationKeyHash: autoModerationPlan.operationKeyHash,
+            receiptStatus: stageVerification.receiptStatus,
+            ruleId: ruleId ?? autoModerationPlan.existing?.ruleId ?? null,
+            stage,
+            state: satisfied ? "satisfied" : "ready",
+            verificationReason: stageVerification.reason,
+            verificationStatus: stageVerification.status,
+            writeRequired: !satisfied,
+          })
+          if (!satisfied) {
+            frontier = {
+              index,
+              key: manifestRule.key,
+              kind: "auto-moderation",
+              plan: autoModerationPlan,
+              stage,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              index,
+              kind: "auto-moderation",
+              request: requestedAutoModeration,
+            }
+            appendWaitingAutoModerationSteps(request, steps, index + 1)
+            appendWaitingPublications(request, steps)
+            break
+          }
+        }
+      }
+
+      if (
+        frontier === null
+        && blocker === null
+        && request.publications !== undefined
+      ) {
         const bindingsByKey = bindingMap(bindings)
         for (const [index, publication] of request.publications.entries()) {
           const requestedPublication = publicationRequest(
@@ -2356,6 +3572,7 @@ export class GuildBlueprintService {
             blocker = {
               channelId: requestedPublication.channelId,
               index,
+              kind: "publication",
               messageId,
               operationKeyHash: verification.operationKeyHash,
               receiptStatus: verification.receiptStatus,
@@ -2446,13 +3663,18 @@ export class GuildBlueprintService {
         : {
             kind: frontier.kind,
             nestedPlanDigest: frontier.plan.digest,
-            ...(frontier.kind === "publication" ? { index: frontier.index } : {}),
+            ...(frontier.kind === "auto-moderation" || frontier.kind === "publication"
+              ? { index: frontier.index }
+              : {}),
+            ...(frontier.kind === "auto-moderation"
+              ? { stage: frontier.stage }
+              : {}),
             writeRequired: frontier.writeRequired,
           },
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v4",
+      version: "guild-blueprint-plan.v5",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -2482,6 +3704,8 @@ export class GuildBlueprintService {
         "The exact blueprint manifest and master operation key remain caller-retained and are not persisted by the connector",
         "One execution call can run only this fresh reviewed frontier; plan again before any later phase",
         "A failed, drifting, or uncertain nested operation remains quarantined under its existing domain workflow",
+        "Unbound AutoMod identity recovery uses only an exact request-bound receipt; names and singleton trigger types are never adopted",
+        "AutoMod rules are created disabled and advance through at most one disable, configure, or enable frontier per call",
         "Publication recovery uses only exact receipt-bound message reads and never scans channel history",
       ],
     }
@@ -2518,6 +3742,7 @@ export class GuildBlueprintService {
       return {
         blocker: built.plan.blocker,
         digest: built.plan.digest,
+        executedAutoModerationRuleIndex: null,
         executedPhase: null,
         executedPublicationIndex: null,
         guildId: built.plan.guild.id,
@@ -2533,6 +3758,7 @@ export class GuildBlueprintService {
       return {
         blocker: null,
         digest: built.plan.digest,
+        executedAutoModerationRuleIndex: null,
         executedPhase: null,
         executedPublicationIndex: null,
         guildId: built.plan.guild.id,
@@ -2545,7 +3771,13 @@ export class GuildBlueprintService {
       }
     }
     let nestedResult: GuildBlueprintNestedResult
-    if (built.frontierRequest.kind === "structure") {
+    if (built.frontierRequest.kind === "auto-moderation") {
+      nestedResult = await executors.executeAutoModeration(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else if (built.frontierRequest.kind === "structure") {
       nestedResult = await executors.executeScaffold(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
@@ -2585,6 +3817,10 @@ export class GuildBlueprintService {
     return {
       blocker: null,
       digest: built.plan.digest,
+      executedAutoModerationRuleIndex:
+        built.frontierRequest.kind === "auto-moderation"
+          ? built.frontierRequest.index
+          : null,
       executedPhase: built.frontierRequest.kind,
       executedPublicationIndex: built.frontierRequest.kind === "publication"
         ? built.frontierRequest.index
@@ -2609,6 +3845,11 @@ export class GuildBlueprintService {
     const plan = await this.plan(applicationId, botId, intent, request, options)
     return {
       applicationId: plan.applicationId,
+      autoModerationRules: plan.steps.flatMap((step) => (
+        step.kind === "auto-moderation" && step.ruleId !== null
+          ? [{ index: step.index, ruleId: step.ruleId }]
+          : []
+      )),
       blocker: plan.blocker,
       botId: plan.botId,
       checkedAt: this.#clock().toISOString(),

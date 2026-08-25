@@ -3,6 +3,7 @@ import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import {
+  autoModerationRequestDigest,
   AutoModerationService,
   normalizeAutoModerationChangeRequest,
   type AutoModerationChangeRequest,
@@ -224,6 +225,7 @@ interface FixtureState {
 function fixture(options: {
   policy?: ScopePolicy
   state?: Partial<FixtureState>
+  verificationKey?: Uint8Array
 } = {}) {
   const permissions = DISCORD_PERMISSIONS.MANAGE_GUILD
     | DISCORD_PERMISSIONS.MODERATE_MEMBERS
@@ -379,8 +381,19 @@ function fixture(options: {
     planKey: Buffer.alloc(32, 11),
     policy: options.policy || policy(),
     randomId: () => "automod-activity-0001",
+    ...(options.verificationKey === undefined
+      ? {}
+      : { verificationKey: options.verificationKey }),
   })
-  return { activities, events, operationStore, service, state }
+  return {
+    activities,
+    activityStore,
+    client,
+    events,
+    operationStore,
+    service,
+    state,
+  }
 }
 
 test("AutoMod normalization canonicalizes closed policy unions without retaining raw keys", () => {
@@ -627,10 +640,200 @@ test("AutoMod execution journals content-free intent before one write and verifi
   const receipt = await operationStore.get("automod-change", plan.operationKeyHash)
   assert.equal(receipt?.status, "completed")
   assert.equal(receipt?.verification, "match")
+  assert.equal(receipt?.schemaVersion, 2)
+  assert.equal(receipt?.kind, "automod-change")
+  if (receipt?.kind !== "automod-change") throw new Error("Expected AutoMod receipt")
+  assert.match(receipt.requestDigest, REVIEWED_PLAN_DIGEST_PATTERN)
+  assert.equal(JSON.stringify(receipt).includes("Private create policy"), false)
   await assert.rejects(
     () => service.plan(APPLICATION_ID, BOT_ID, request),
     AutoModerationOperationConflictError,
   )
+})
+
+test("AutoMod verification binds exact requests and receipt-bound live state", async () => {
+  const verificationKey = Buffer.alloc(32, 19)
+  const target = fixture({ verificationKey })
+  const request = createRequest({
+    operationKey: "automod-verification-operation-0001",
+  })
+
+  const absent = await target.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    request,
+  )
+  assert.deepEqual(absent, {
+    action: "create",
+    activityId: null,
+    guildId: GUILD_ID,
+    operationKeyHash: normalizeAutoModerationChangeRequest(request).operationKeyHash,
+    planDigest: null,
+    readbackMatched: false,
+    reason: "operation-not-found",
+    receiptStatus: null,
+    requestMatched: false,
+    ruleId: null,
+    schemaVersion: 1,
+    status: "not-found",
+    timestamp: null,
+  })
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, request)
+  await target.service.execute(APPLICATION_ID, BOT_ID, request, plan.digest)
+  target.events.length = 0
+
+  const verified = await target.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    request,
+  )
+  assert.equal(verified.status, "verified")
+  assert.equal(verified.requestMatched, true)
+  assert.equal(verified.readbackMatched, true)
+  assert.equal(verified.ruleId, CREATED_RULE_ID)
+  assert.equal(target.events.some((event) => event.startsWith("write:")), false)
+  assert.equal(target.events.includes("operation:reserve"), false)
+  assert.equal(JSON.stringify(verified).includes("Private create policy"), false)
+
+  const createdRule = target.state.rules.find((rule) => rule.id === CREATED_RULE_ID)
+  if (!createdRule) throw new Error("Expected created AutoMod rule")
+  createdRule.enabled = true
+  assert.equal(
+    (await target.service.verify(APPLICATION_ID, BOT_ID, request)).status,
+    "verified",
+  )
+
+  const mismatched = await target.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    createRequest({
+      name: "Another private policy",
+      operationKey: "automod-verification-operation-0001",
+    }),
+  )
+  assert.equal(mismatched.status, "blocked")
+  assert.equal(mismatched.reason, "request-mismatch")
+  assert.equal(mismatched.requestMatched, false)
+
+  const restarted = new AutoModerationService({
+    activityStore: target.activityStore,
+    client: target.client,
+    operationStore: target.operationStore,
+    planKey: Buffer.alloc(32, 23),
+    policy: policy(),
+    verificationKey,
+  })
+  assert.equal(
+    (await restarted.verify(APPLICATION_ID, BOT_ID, request)).status,
+    "verified",
+  )
+  const rotated = new AutoModerationService({
+    activityStore: target.activityStore,
+    client: target.client,
+    operationStore: target.operationStore,
+    planKey: Buffer.alloc(32, 29),
+    policy: policy(),
+    verificationKey: Buffer.alloc(32, 31),
+  })
+  target.events.length = 0
+  const rotatedResult = await rotated.verify(APPLICATION_ID, BOT_ID, request)
+  assert.equal(rotatedResult.status, "blocked")
+  assert.equal(rotatedResult.reason, "request-mismatch")
+  assert.deepEqual(target.events, [])
+
+  createdRule.name = "Externally drifted policy"
+  const drifted = await target.service.verify(APPLICATION_ID, BOT_ID, request)
+  assert.equal(drifted.status, "drifted")
+  assert.equal(drifted.reason, "rule-state-mismatch")
+})
+
+test("AutoMod verification checks partial updates and exact deletion absence", async () => {
+  const updated = fixture()
+  const update = updateRequest({
+    operationKey: "automod-update-verification-0001",
+  })
+  const updatePlan = await updated.service.plan(APPLICATION_ID, BOT_ID, update)
+  await updated.service.execute(APPLICATION_ID, BOT_ID, update, updatePlan.digest)
+  assert.equal(
+    (await updated.service.verify(APPLICATION_ID, BOT_ID, update)).status,
+    "verified",
+  )
+  const existing = updated.state.rules.find((rule) => rule.id === RULE_ID)
+  if (!existing) throw new Error("Expected updated AutoMod rule")
+  existing.exemptRoleIds = []
+  assert.equal(
+    (await updated.service.verify(APPLICATION_ID, BOT_ID, update)).status,
+    "verified",
+  )
+  existing.name = "Changed again"
+  assert.equal(
+    (await updated.service.verify(APPLICATION_ID, BOT_ID, update)).reason,
+    "rule-state-mismatch",
+  )
+
+  const deleted = fixture()
+  const deletion: AutoModerationChangeRequest = {
+    action: "delete",
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: "automod-delete-verification-0001",
+    ruleId: RULE_ID,
+  }
+  const deletionPlan = await deleted.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    deletion,
+  )
+  await deleted.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    deletion,
+    deletionPlan.digest,
+  )
+  assert.equal(
+    (await deleted.service.verify(APPLICATION_ID, BOT_ID, deletion)).status,
+    "verified",
+  )
+  deleted.state.rules.push(keywordRule())
+  const present = await deleted.service.verify(APPLICATION_ID, BOT_ID, deletion)
+  assert.equal(present.status, "drifted")
+  assert.equal(present.reason, "rule-still-present")
+})
+
+test("AutoMod verification blocks nonterminal receipts before Discord reads", async () => {
+  const verificationKey = Buffer.alloc(32, 37)
+  const target = fixture({ verificationKey })
+  const request = createRequest({
+    operationKey: "automod-pending-verification-0001",
+  })
+  const normalized = normalizeAutoModerationChangeRequest(request)
+  await target.operationStore.reserve({
+    activityId: "automod-pending-activity-0001",
+    error: null,
+    guildId: GUILD_ID,
+    kind: "automod-change",
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest: `hmac-sha256:${"7".repeat(64)}`,
+    requestDigest: autoModerationRequestDigest(
+      verificationKey,
+      APPLICATION_ID,
+      BOT_ID,
+      normalized,
+    ),
+    resourceId: null,
+    schemaVersion: 2,
+    status: "pending",
+    timestamp: NOW,
+    verification: null,
+  })
+  target.events.length = 0
+
+  const result = await target.service.verify(APPLICATION_ID, BOT_ID, request)
+
+  assert.equal(result.status, "blocked")
+  assert.equal(result.reason, "operation-pending")
+  assert.equal(result.requestMatched, true)
+  assert.deepEqual(target.events, [])
 })
 
 test("AutoMod execution returns an exact no-op without spending the operation key", async () => {

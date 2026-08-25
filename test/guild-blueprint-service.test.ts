@@ -1,16 +1,28 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { GuildBlueprintPlanChangedError } from "../src/errors.js"
+import type {
+  AutoModerationChangeRequest,
+  AutoModerationPlan,
+  AutoModerationResult,
+  AutoModerationVerificationResult,
+  ProjectedAutoModerationRule,
+} from "../src/automod-service.js"
+import { normalizeAutoModerationChangeRequest } from "../src/automod-service.js"
+import { DiscordApiError, GuildBlueprintPlanChangedError } from "../src/errors.js"
 import type {
   ComponentMessagePlan,
   ComponentMessageRequest,
   ComponentMessageResult,
   ComponentMessageVerificationResult,
 } from "../src/component-message-service.js"
-import { CONNECTOR_LIMITS } from "../src/constants.js"
+import {
+  CONNECTOR_LIMITS,
+  DISCORD_SNOWFLAKE_MAX,
+} from "../src/constants.js"
 import {
   GuildBlueprintService,
+  guildBlueprintAutoModerationOperationKey,
   guildBlueprintPublicationOperationKey,
   guildBlueprintRequestDigest,
   guildBlueprintStepOperationKey,
@@ -58,6 +70,9 @@ const PUBLICATION_MESSAGE_ID = "700000000000000003"
 const NOTIFICATION_USER_ID = "700000000000000004"
 const ONBOARDING_PROMPT_ID = "800000000000000001"
 const ONBOARDING_OPTION_ID = "900000000000000001"
+const AUTOMOD_RULE_ID = "910000000000000001"
+const CREATED_AUTOMOD_RULE_ID = "910000000000000002"
+const AUTOMOD_KEY = "private-automod-rule"
 const OPERATION_KEY = "guild-blueprint-operation-0001"
 const AUDIT_REASON = "Private blueprint audit reason"
 const WELCOME_DESCRIPTION = "Private Welcome Screen description"
@@ -161,6 +176,156 @@ function publications(): NonNullable<GuildBlueprintRequest["publications"]> {
     key: PUBLICATION_KEY,
     notifyUserIds: [NOTIFICATION_USER_ID],
   }]
+}
+
+function autoModerationRules(
+  overrides: Partial<
+    NonNullable<GuildBlueprintRequest["autoModerationRules"]>[number]
+  > = {},
+): NonNullable<GuildBlueprintRequest["autoModerationRules"]> {
+  return [{
+    actions: [{
+      customMessage: "Private AutoMod response",
+      type: "block-message",
+    }, {
+      channel: { key: "private-system-channel", kind: "scaffold" },
+      type: "send-alert-message",
+    }],
+    enabled: true,
+    exemptChannels: [{ key: "private-system-channel", kind: "scaffold" }],
+    exemptRoles: [{ key: "private-role", kind: "scaffold" }],
+    key: AUTOMOD_KEY,
+    name: "Private AutoMod policy",
+    trigger: {
+      allowList: ["private allowed phrase"],
+      keywordFilter: ["private blocked phrase"],
+      type: "keyword",
+    },
+    ...overrides,
+  }]
+}
+
+function projectedAutoModerationRule(
+  overrides: Partial<ProjectedAutoModerationRule> = {},
+): ProjectedAutoModerationRule {
+  return {
+    actions: [{
+      customMessage: "Private AutoMod response",
+      type: "block-message",
+    }, {
+      channelId: CHANNEL_ID,
+      type: "send-alert-message",
+    }],
+    creatorUserId: BOT_ID,
+    enabled: false,
+    eventType: "message-send",
+    exemptChannelIds: [CHANNEL_ID],
+    exemptRoleIds: [ROLE_ID],
+    guildId: GUILD_ID,
+    name: "Private AutoMod policy",
+    ruleId: AUTOMOD_RULE_ID,
+    trigger: {
+      allowList: ["private allowed phrase"],
+      keywordFilter: ["private blocked phrase"],
+      regexPatterns: [],
+      type: "keyword",
+    },
+    ...overrides,
+  }
+}
+
+function autoModerationPlan(
+  value: AutoModerationChangeRequest,
+  existingRule: ProjectedAutoModerationRule | null = null,
+  effectOverride?: AutoModerationPlan["effect"],
+): AutoModerationPlan {
+  const normalized = normalizeAutoModerationChangeRequest(value)
+  const existing = normalized.action === "create"
+    ? null
+    : existingRule ?? projectedAutoModerationRule({ ruleId: normalized.ruleId })
+  const desired = normalized.action === "delete"
+    ? null
+    : normalized.action === "create"
+      ? {
+          actions: normalized.actions,
+          creatorUserId: BOT_ID,
+          enabled: false,
+          eventType: normalized.trigger.type === "member-profile"
+            ? "member-update" as const
+            : "message-send" as const,
+          exemptChannelIds: normalized.exemptChannelIds,
+          exemptRoleIds: normalized.exemptRoleIds,
+          guildId: normalized.guildId,
+          name: normalized.name,
+          ruleId: null,
+          trigger: normalized.trigger,
+        }
+      : normalized.action === "set-enabled"
+        ? { ...existing!, enabled: normalized.enabled }
+        : {
+            ...existing!,
+            ...(normalized.actions === undefined ? {} : { actions: normalized.actions }),
+            ...(normalized.exemptChannelIds === undefined
+              ? {}
+              : { exemptChannelIds: normalized.exemptChannelIds }),
+            ...(normalized.exemptRoleIds === undefined
+              ? {}
+              : { exemptRoleIds: normalized.exemptRoleIds }),
+            ...(normalized.name === undefined ? {} : { name: normalized.name }),
+            ...(normalized.trigger === undefined ? {} : { trigger: normalized.trigger }),
+          }
+  const effect = effectOverride ?? normalized.action
+  const digestByte = normalized.action === "create"
+    ? "1"
+    : normalized.action === "update"
+      ? "2"
+      : normalized.action === "set-enabled"
+        ? normalized.enabled ? "3" : "4"
+        : "5"
+  return {
+    action: normalized.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    desired,
+    digest: `hmac-sha256:${digestByte.repeat(64)}`,
+    effect,
+    existing,
+    guild: { id: GUILD_ID, name: "Private Guild" },
+    operationKeyHash: normalized.operationKeyHash,
+    schemaVersion: 1,
+    status: effect === "none" ? "already-current" : "planned",
+  } as AutoModerationPlan
+}
+
+function autoModerationVerification(
+  value: AutoModerationChangeRequest,
+  status: AutoModerationVerificationResult["status"],
+  ruleId: string | null = null,
+): AutoModerationVerificationResult {
+  const normalized = normalizeAutoModerationChangeRequest(value)
+  const completed = status === "verified" || status === "drifted"
+  const recorded = completed || status === "blocked"
+  return {
+    action: normalized.action,
+    activityId: recorded ? "activity-automod" : null,
+    guildId: normalized.guildId,
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest: recorded ? `hmac-sha256:${"5".repeat(64)}` : null,
+    readbackMatched: status === "verified",
+    reason: status === "verified"
+      ? null
+      : status === "not-found"
+        ? "operation-not-found"
+        : status === "drifted"
+          ? "rule-state-mismatch"
+          : "operation-pending",
+    receiptStatus: completed ? "completed" : status === "blocked" ? "pending" : null,
+    requestMatched: completed || status === "blocked",
+    ruleId: completed ? ruleId ?? CREATED_AUTOMOD_RULE_ID : null,
+    schemaVersion: 1,
+    status,
+    timestamp: recorded ? NOW : null,
+  }
 }
 
 function scaffoldPlan(
@@ -395,6 +560,15 @@ function componentReceiptBlocker(
 }
 
 interface FixtureOptions {
+  autoModerationPlan?: (
+    request: AutoModerationChangeRequest,
+    index: number,
+  ) => AutoModerationPlan
+  autoModerationRules?: ProjectedAutoModerationRule[]
+  autoModerationVerification?: (
+    request: AutoModerationChangeRequest,
+    index: number,
+  ) => AutoModerationVerificationResult
   componentPlanTransform?: (
     plan: ComponentMessagePlan,
     request: ComponentMessageRequest,
@@ -415,11 +589,101 @@ interface FixtureOptions {
 
 function fixture(options: FixtureOptions = {}) {
   const calls: string[] = []
+  const resolvedAutoModeration: AutoModerationChangeRequest[] = []
   let resolvedOnboarding: OnboardingChangeRequest | null = null
   const resolvedPublications: ComponentMessageRequest[] = []
   let resolvedSettings: GuildSettingsChangeRequest | null = null
   let resolvedWelcomeScreen: WelcomeScreenChangeRequest | null = null
   const domains: GuildBlueprintDomainServices = {
+    automod: {
+      async get(_botId, guildId, ruleId) {
+        calls.push("get-automod")
+        const rule = options.autoModerationRules?.find((entry) => (
+          entry.guildId === guildId && entry.ruleId === ruleId
+        ))
+        if (!rule) {
+          throw new DiscordApiError({
+            message: "Unknown AutoMod rule",
+            method: "GET",
+            route: "/guilds/:guildId/auto-moderation/rules/:ruleId",
+            status: 404,
+          })
+        }
+        return {
+          guild: { id: guildId, name: "Private Guild" },
+          permission: {} as never,
+          privacy: {} as never,
+          references: {} as never,
+          rule,
+          schemaVersion: 1,
+          status: "ok",
+        }
+      },
+      async list(_botId, guildId) {
+        calls.push("list-automod")
+        const rules = options.autoModerationRules ?? []
+        return {
+          guild: { id: guildId, name: "Private Guild" },
+          page: {
+            returned: rules.length,
+            safetyLimit: 10,
+            visibility: "connector-visible" as const,
+          },
+          permission: {} as never,
+          privacy: {} as never,
+          rules: rules.map((rule) => ({
+            actionTypes: rule.actions.map((action) => action.type),
+            creatorUserId: rule.creatorUserId,
+            enabled: rule.enabled,
+            eventType: rule.eventType,
+            exemptChannelCount: rule.exemptChannelIds.length,
+            exemptRoleCount: rule.exemptRoleIds.length,
+            guildId: rule.guildId,
+            name: rule.name,
+            policyEntryCounts: {
+              allowList: 0,
+              keywordFilter: 0,
+              presets: 0,
+              regexPatterns: 0,
+            },
+            references: { healthy: true },
+            ruleId: rule.ruleId,
+            triggerType: rule.trigger.type,
+          })),
+          schemaVersion: 1,
+          status: "ok" as const,
+        }
+      },
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-automod")
+        const index = resolvedAutoModeration.length
+        resolvedAutoModeration.push(value)
+        if (options.autoModerationPlan) {
+          return options.autoModerationPlan(value, index)
+        }
+        throw new Error("Unexpected AutoMod blueprint plan")
+      },
+      async verify(_applicationId, _botId, value) {
+        calls.push("verify-automod")
+        const index = resolvedAutoModeration.length
+        resolvedAutoModeration.push(value)
+        return options.autoModerationVerification?.(value, index) ?? {
+          action: value.action,
+          activityId: null,
+          guildId: value.guildId,
+          operationKeyHash: operationKeyHash(value.operationKey),
+          planDigest: null,
+          readbackMatched: false,
+          reason: "operation-not-found",
+          receiptStatus: null,
+          requestMatched: false,
+          ruleId: null,
+          schemaVersion: 1,
+          status: "not-found",
+          timestamp: null,
+        }
+      },
+    },
     component: {
       async plan(_applicationId, _botId, intent, value) {
         calls.push("plan-publication")
@@ -525,6 +789,9 @@ function fixture(options: FixtureOptions = {}) {
     get resolvedOnboarding() {
       return resolvedOnboarding
     },
+    get resolvedAutoModeration() {
+      return resolvedAutoModeration
+    },
     get resolvedPublications() {
       return resolvedPublications
     },
@@ -540,6 +807,24 @@ function fixture(options: FixtureOptions = {}) {
 
 function executors(calls: string[]): GuildBlueprintExecutors {
   return {
+    async executeAutoModeration(value, planDigest) {
+      calls.push(`execute-automod:${planDigest}`)
+      const normalized = normalizeAutoModerationChangeRequest(value)
+      const ruleId = normalized.action === "create"
+        ? CREATED_AUTOMOD_RULE_ID
+        : normalized.ruleId
+      return {
+        action: normalized.action,
+        activityId: "activity-automod",
+        guildId: normalized.guildId,
+        observed: null,
+        operationKeyHash: normalized.operationKeyHash,
+        planDigest,
+        ruleId,
+        schemaVersion: 1,
+        status: "completed",
+      } as AutoModerationResult
+    },
     async executeComponent(value, planDigest) {
       calls.push("execute-publication")
       return {
@@ -640,8 +925,18 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   )
   const structureKey = guildBlueprintStepOperationKey(OPERATION_KEY, "structure")
   const profileKey = guildBlueprintStepOperationKey(OPERATION_KEY, "profile")
+  const automodKey = guildBlueprintAutoModerationOperationKey(
+    OPERATION_KEY,
+    AUTOMOD_KEY,
+    "configure",
+  )
   assert.equal(structureKey, guildBlueprintStepOperationKey(OPERATION_KEY, "structure"))
   assert.notEqual(structureKey, profileKey)
+  assert.notEqual(automodKey, structureKey)
+  assert.notEqual(
+    automodKey,
+    guildBlueprintAutoModerationOperationKey(OPERATION_KEY, AUTOMOD_KEY, "enable"),
+  )
   assert.equal(structureKey.includes(OPERATION_KEY), false)
   assert.match(guildBlueprintRequestDigest(request()), /^hmac-sha256:[a-f0-9]{64}$/)
   assert.notEqual(
@@ -656,7 +951,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   delete noPostPhase.settings
   assert.throws(
     () => normalizeGuildBlueprintRequest(noPostPhase),
-    /requires a profile, settings, Welcome Screen, onboarding, or publication phase/u,
+    /requires a profile, settings, Welcome Screen, onboarding, AutoMod, or publication phase/u,
   )
   const unknownReference = request({
     settings: {
@@ -719,6 +1014,83 @@ test("guild blueprint validation is strict and binds deterministic phase identit
       unexpected: true,
     } as GuildBlueprintRequest),
     /must be an exact object/u,
+  )
+})
+
+test("guild blueprint AutoMod rules normalize strict references and identities", () => {
+  const normalized = normalizeGuildBlueprintRequest(request({
+    autoModerationRules: autoModerationRules(),
+  }))
+  const rule = normalized.autoModerationRules?.[0]
+
+  assert.equal(rule?.key, AUTOMOD_KEY)
+  assert.equal(rule?.enabled, true)
+  assert.deepEqual(rule?.actions.map((action) => action.type), [
+    "block-message",
+    "send-alert-message",
+  ])
+  assert.deepEqual(rule?.exemptChannels, [{
+    key: "private-system-channel",
+    kind: "scaffold",
+  }])
+  assert.equal("operationKey" in (rule ?? {}), false)
+
+  const maximumSnowflake = DISCORD_SNOWFLAKE_MAX.toString()
+  const collisionSafe = normalizeGuildBlueprintRequest(request({
+    autoModerationRules: autoModerationRules({
+      exemptChannels: [{
+        channelId: maximumSnowflake,
+        kind: "exact",
+      }, {
+        key: "private-system-channel",
+        kind: "scaffold",
+      }],
+    }),
+  }))
+  assert.deepEqual(collisionSafe.autoModerationRules?.[0]?.exemptChannels, [{
+    channelId: maximumSnowflake,
+    kind: "exact",
+  }, {
+    key: "private-system-channel",
+    kind: "scaffold",
+  }])
+
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      autoModerationRules: [
+        ...autoModerationRules(),
+        ...autoModerationRules(),
+      ],
+    })),
+    /keys must be valid and unique/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      autoModerationRules: autoModerationRules({
+        actions: [{
+          channel: { key: "private-category", kind: "scaffold" },
+          type: "send-alert-message",
+        }],
+      }),
+    })),
+    /alert channel scaffold key is not a compatible requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      autoModerationRules: autoModerationRules({
+        ruleId: "0",
+      }),
+    })),
+    /must be a positive Discord snowflake/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      autoModerationRules: autoModerationRules({
+        actions: [{ durationSeconds: 60, type: "timeout" }],
+        trigger: { type: "spam" },
+      }),
+    })),
+    /timeout is incompatible/u,
   )
 })
 
@@ -1481,6 +1853,331 @@ test("guild blueprint rejects duplicate or mismatched scaffold evidence", async 
     () => wrongBinding.service.plan(APPLICATION_ID, BOT_ID, request()),
     /nested plan binding changed/u,
   )
+})
+
+test("guild blueprint plans unbound AutoMod creation without fuzzy adoption", async () => {
+  const state = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value)
+    },
+  })
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const manifest: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules(),
+  }
+
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+
+  assert.equal(plan.frontier?.kind, "auto-moderation")
+  if (plan.frontier?.kind !== "auto-moderation") {
+    throw new Error("Expected AutoMod blueprint frontier")
+  }
+  assert.equal(plan.frontier.stage, "configure")
+  assert.equal(plan.frontier.plan.action, "create")
+  assert.deepEqual(state.calls, [
+    "plan-structure",
+    "verify-automod",
+    "list-automod",
+    "plan-automod",
+  ])
+  const resolved = state.resolvedAutoModeration.at(-1)
+  assert.equal(resolved?.action, "create")
+  if (resolved?.action !== "create") throw new Error("Expected resolved create")
+  assert.deepEqual(resolved.exemptChannelIds, [CHANNEL_ID])
+  assert.deepEqual(resolved.exemptRoleIds, [ROLE_ID])
+  assert.deepEqual(resolved.actions, [{
+    customMessage: "Private AutoMod response",
+    type: "block-message",
+  }, {
+    channelId: CHANNEL_ID,
+    type: "send-alert-message",
+  }])
+  assert.equal(
+    resolved.operationKey,
+    guildBlueprintAutoModerationOperationKey(
+      OPERATION_KEY,
+      AUTOMOD_KEY,
+      "configure",
+    ),
+  )
+})
+
+test("guild blueprint recovers new AutoMod identity only from a matching receipt", async () => {
+  const state = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(
+        value,
+        projectedAutoModerationRule({ ruleId: CREATED_AUTOMOD_RULE_ID }),
+      )
+    },
+    autoModerationVerification(value) {
+      return value.action === "create"
+        ? autoModerationVerification(value, "verified", CREATED_AUTOMOD_RULE_ID)
+        : autoModerationVerification(value, "not-found")
+    },
+  })
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const manifest: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules(),
+  }
+
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+
+  assert.equal(plan.frontier?.kind, "auto-moderation")
+  if (plan.frontier?.kind !== "auto-moderation") {
+    throw new Error("Expected AutoMod blueprint frontier")
+  }
+  assert.equal(plan.frontier.stage, "enable")
+  assert.equal(plan.frontier.plan.action, "set-enabled")
+  assert.equal(plan.frontier.plan.existing?.ruleId, CREATED_AUTOMOD_RULE_ID)
+  assert.equal(state.calls.includes("list-automod"), false)
+  assert.equal(state.calls.includes("get-automod"), false)
+  const step = plan.steps.find((entry) => entry.kind === "auto-moderation")
+  assert.equal(step?.ruleId, CREATED_AUTOMOD_RULE_ID)
+  assert.equal(step?.receiptStatus, null)
+  assert.equal(step?.verificationStatus, "not-found")
+  assert.equal(state.calls.filter((call) => call === "verify-automod").length, 2)
+})
+
+test("guild blueprint reconciles disabled state after recovering created AutoMod identity", async () => {
+  const enabledRule = projectedAutoModerationRule({
+    enabled: true,
+    ruleId: CREATED_AUTOMOD_RULE_ID,
+  })
+  const state = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value, enabledRule)
+    },
+    autoModerationVerification(value) {
+      return value.action === "create"
+        ? autoModerationVerification(value, "verified", CREATED_AUTOMOD_RULE_ID)
+        : autoModerationVerification(value, "not-found")
+    },
+  })
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const manifest: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules({ enabled: false }),
+  }
+
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+
+  assert.equal(plan.frontier?.kind, "auto-moderation")
+  if (plan.frontier?.kind !== "auto-moderation") {
+    throw new Error("Expected AutoMod blueprint frontier")
+  }
+  assert.equal(plan.frontier.stage, "disable")
+  assert.equal(plan.frontier.plan.action, "set-enabled")
+  assert.equal(plan.frontier.plan.desired?.enabled, false)
+})
+
+test("guild blueprint stages exact AutoMod disable, configure, and enable frontiers", async () => {
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const manifest: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules({ ruleId: AUTOMOD_RULE_ID }),
+  }
+
+  const enabledDrift = projectedAutoModerationRule({
+    enabled: true,
+    name: "Old private policy",
+  })
+  const disable = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value, enabledDrift)
+    },
+    autoModerationRules: [enabledDrift],
+  })
+  const disablePlan = await disable.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(disablePlan.frontier?.kind, "auto-moderation")
+  if (disablePlan.frontier?.kind !== "auto-moderation") {
+    throw new Error("Expected disable frontier")
+  }
+  assert.equal(disablePlan.frontier.stage, "disable")
+  assert.equal(disablePlan.frontier.plan.action, "set-enabled")
+  assert.equal(disablePlan.frontier.plan.desired?.enabled, false)
+
+  const disabledDrift = projectedAutoModerationRule({ name: "Old private policy" })
+  const configure = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value, disabledDrift)
+    },
+    autoModerationRules: [disabledDrift],
+  })
+  const configurePlan = await configure.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+  )
+  assert.equal(configurePlan.frontier?.kind, "auto-moderation")
+  if (configurePlan.frontier?.kind !== "auto-moderation") {
+    throw new Error("Expected configure frontier")
+  }
+  assert.equal(configurePlan.frontier.stage, "configure")
+  assert.equal(configurePlan.frontier.plan.action, "update")
+
+  const disabledCurrent = projectedAutoModerationRule()
+  const enable = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value, disabledCurrent)
+    },
+    autoModerationRules: [disabledCurrent],
+  })
+  const enablePlan = await enable.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(enablePlan.frontier?.kind, "auto-moderation")
+  if (enablePlan.frontier?.kind !== "auto-moderation") {
+    throw new Error("Expected enable frontier")
+  }
+  assert.equal(enablePlan.frontier.stage, "enable")
+  assert.equal(enablePlan.frontier.plan.action, "set-enabled")
+
+  const enabledCurrent = projectedAutoModerationRule({ enabled: true })
+  const satisfied = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value, enabledCurrent, "none")
+    },
+    autoModerationRules: [enabledCurrent],
+  })
+  const satisfiedPlan = await satisfied.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+  )
+  assert.equal(satisfiedPlan.status, "already-current")
+  assert.equal(satisfiedPlan.frontier, null)
+  assert.equal(
+    satisfiedPlan.steps.find((step) => step.kind === "auto-moderation")?.state,
+    "satisfied",
+  )
+})
+
+test("guild blueprint blocks ambiguous, missing, immutable, and unsafe AutoMod recovery", async () => {
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const unbound: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules(),
+  }
+  const collisionRule = projectedAutoModerationRule()
+  const collision = fixture({ autoModerationRules: [collisionRule] })
+  const collisionPlan = await collision.service.plan(APPLICATION_ID, BOT_ID, unbound)
+  assert.equal(collisionPlan.status, "blocked")
+  assert.equal(collisionPlan.blocker?.kind, "auto-moderation")
+  assert.equal(collisionPlan.blocker?.verificationReason, "unbound-name-collision")
+  if (collisionPlan.blocker?.kind !== "auto-moderation") {
+    throw new Error("Expected AutoMod collision blocker")
+  }
+  assert.deepEqual(collisionPlan.blocker.ruleIds, [AUTOMOD_RULE_ID])
+  assert.equal(collision.calls.includes("plan-automod"), false)
+
+  const exact: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules({ ruleId: AUTOMOD_RULE_ID }),
+  }
+  const missing = fixture()
+  const missingPlan = await missing.service.plan(APPLICATION_ID, BOT_ID, exact)
+  assert.equal(missingPlan.blocker?.verificationReason, "exact-rule-missing")
+
+  const incompatibleRule = projectedAutoModerationRule({
+    actions: [{ customMessage: null, type: "block-message" }],
+    trigger: { type: "spam" },
+  })
+  const incompatible = fixture({ autoModerationRules: [incompatibleRule] })
+  const incompatiblePlan = await incompatible.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    exact,
+  )
+  assert.equal(incompatiblePlan.blocker?.verificationReason, "trigger-type-mismatch")
+
+  const pending = fixture({
+    autoModerationVerification(value) {
+      return autoModerationVerification(value, "blocked")
+    },
+  })
+  const pendingPlan = await pending.service.plan(APPLICATION_ID, BOT_ID, unbound)
+  assert.equal(pendingPlan.blocker?.verificationReason, "operation-pending")
+  assert.equal(pending.calls.includes("list-automod"), false)
+
+  const enabledCurrent = projectedAutoModerationRule({ enabled: true })
+  const stagePending = fixture({
+    autoModerationRules: [enabledCurrent],
+    autoModerationVerification(value) {
+      return autoModerationVerification(value, "blocked")
+    },
+  })
+  const stagePendingPlan = await stagePending.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    exact,
+  )
+  assert.equal(stagePendingPlan.blocker?.verificationReason, "operation-pending")
+  assert.equal(stagePendingPlan.blocker?.kind, "auto-moderation")
+  assert.equal(stagePending.calls.includes("plan-automod"), false)
+})
+
+test("guild blueprint executes one AutoMod frontier and verifies content-free identity", async () => {
+  const state = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(value)
+    },
+  })
+  const { profile: _profile, settings: _settings, ...base } = request()
+  const manifest: GuildBlueprintRequest = {
+    ...base,
+    autoModerationRules: autoModerationRules(),
+  }
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  state.calls.length = 0
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(state.calls),
+  )
+
+  assert.equal(result.executedPhase, "auto-moderation")
+  assert.equal(result.executedAutoModerationRuleIndex, 0)
+  assert.equal(state.calls.filter((call) => call.startsWith("execute-")).length, 1)
+  assert.match(state.calls.at(-1) as string, /^execute-automod:/u)
+
+  const recovered = fixture({
+    autoModerationPlan(value) {
+      return autoModerationPlan(
+        value,
+        projectedAutoModerationRule({ ruleId: CREATED_AUTOMOD_RULE_ID }),
+        "none",
+      )
+    },
+    autoModerationVerification(value) {
+      return autoModerationVerification(value, "verified", CREATED_AUTOMOD_RULE_ID)
+    },
+  })
+  const disabledManifest = {
+    ...manifest,
+    autoModerationRules: autoModerationRules({ enabled: false }),
+  }
+  const verification = await recovered.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    disabledManifest,
+  )
+  assert.equal(verification.status, "verified")
+  assert.deepEqual(verification.autoModerationRules, [{
+    index: 0,
+    ruleId: CREATED_AUTOMOD_RULE_ID,
+  }])
+  assert.equal(recovered.calls.includes("plan-automod"), false)
+  assert.equal(
+    recovered.calls.filter((call) => call === "verify-automod").length,
+    2,
+  )
+  const serialized = JSON.stringify(verification)
+  assert.equal(serialized.includes(AUTOMOD_KEY), false)
+  assert.equal(serialized.includes("Private AutoMod policy"), false)
+  assert.equal(serialized.includes("private blocked phrase"), false)
 })
 
 test("guild blueprint verification is live and content-free", async () => {

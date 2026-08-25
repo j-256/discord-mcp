@@ -974,6 +974,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "interactions",
     workflow: "component-message",
   },
+  verify_automod_change: {
+    keywords: ["automod", "drift", "moderation", "receipt", "recover", "rule", "verify"],
+    toolset: "automod",
+    workflow: "automod-change",
+  },
   read_messages: {
     keywords: ["channel", "history", "list", "message", "read"],
     toolset: "messages",

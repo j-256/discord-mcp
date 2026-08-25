@@ -6564,6 +6564,7 @@ function guildBlueprintPlan(
   onboardingFrontier = false,
   publicationFrontier = false,
   blocked = false,
+  autoModerationFrontier = false,
 ): GuildBlueprintPlan {
   const requestDigest = `hmac-sha256:${"b".repeat(64)}`
   const nested = guildScaffoldPlan({
@@ -6626,6 +6627,61 @@ function guildBlueprintPlan(
           type: prompt.type,
         })),
       })
+  const autoModerationRule = request.autoModerationRules?.[0]
+  const desiredAutoModeration = autoModerationRule === undefined
+    ? null
+    : autoModerationPlan(
+        autoModerationRule.ruleId === undefined
+          ? {
+              action: "create",
+              actions: autoModerationRule.actions.map((action) => (
+                action.type === "send-alert-message"
+                  ? {
+                      channelId: action.channel.kind === "exact"
+                        ? action.channel.channelId
+                        : CHANNEL_ID,
+                      type: "send-alert-message" as const,
+                    }
+                  : action
+              )),
+              auditReason: request.auditReason,
+              exemptChannelIds: autoModerationRule.exemptChannels.map((reference) => (
+                reference.kind === "exact" ? reference.channelId : CHANNEL_ID
+              )),
+              exemptRoleIds: autoModerationRule.exemptRoles.map((reference) => (
+                reference.kind === "exact" ? reference.roleId : ROLE_ID
+              )),
+              guildId: request.guildId,
+              name: autoModerationRule.name,
+              operationKey: request.operationKey,
+              trigger: autoModerationRule.trigger,
+            }
+          : {
+              action: "update",
+              actions: autoModerationRule.actions.map((action) => (
+                action.type === "send-alert-message"
+                  ? {
+                      channelId: action.channel.kind === "exact"
+                        ? action.channel.channelId
+                        : CHANNEL_ID,
+                      type: "send-alert-message" as const,
+                    }
+                  : action
+              )),
+              auditReason: request.auditReason,
+              exemptChannelIds: autoModerationRule.exemptChannels.map((reference) => (
+                reference.kind === "exact" ? reference.channelId : CHANNEL_ID
+              )),
+              exemptRoleIds: autoModerationRule.exemptRoles.map((reference) => (
+                reference.kind === "exact" ? reference.roleId : ROLE_ID
+              )),
+              guildId: request.guildId,
+              name: autoModerationRule.name,
+              operationKey: request.operationKey,
+              ruleId: autoModerationRule.ruleId,
+              trigger: autoModerationRule.trigger,
+            },
+      )
   const publication = request.publications?.[0]
   const desiredPublication = publication === undefined
     ? null
@@ -6665,12 +6721,17 @@ function guildBlueprintPlan(
     && publicationFrontier
     && publication !== undefined
     && desiredPublication !== null
+  const useAutoModerationFrontier = writeRequired
+    && autoModerationFrontier
+    && autoModerationRule !== undefined
+    && desiredAutoModeration !== null
   const publicationBlocker = blocked
     && publication !== undefined
     && desiredPublication !== null
     ? {
         channelId: desiredPublication.channel.id,
         index: 0,
+        kind: "publication" as const,
         messageId: null,
         operationKeyHash: desiredPublication.operationKeyHash,
         receiptStatus: "pending" as const,
@@ -6693,6 +6754,7 @@ function guildBlueprintPlan(
     bindings: writeRequired
       && !useWelcomeScreenFrontier
       && !useOnboardingFrontier
+      && !useAutoModerationFrontier
       && !usePublicationFrontier
       && publicationBlocker === null
       ? []
@@ -6718,7 +6780,16 @@ function guildBlueprintPlan(
         ? { kind: "onboarding", plan: desiredOnboarding, writeRequired: true }
         : useWelcomeScreenFrontier
           ? { kind: "welcome-screen", plan: desiredWelcomeScreen, writeRequired: true }
-          : usePublicationFrontier
+          : useAutoModerationFrontier
+            ? {
+                index: 0,
+                key: autoModerationRule.key,
+                kind: "auto-moderation",
+                plan: desiredAutoModeration,
+                stage: "configure",
+                writeRequired: true,
+              }
+            : usePublicationFrontier
             ? {
                 index: 0,
                 key: publication.key,
@@ -6797,7 +6868,28 @@ function guildBlueprintPlan(
             state: "ready",
             writeRequired: true,
           }]
-        : usePublicationFrontier
+        : useAutoModerationFrontier
+          ? [{
+              kind: "structure",
+              nestedPlanDigest: nested.digest,
+              operationKeyHash: OPERATION_KEY_HASH,
+              state: "satisfied",
+              writeRequired: false,
+            }, {
+              index: 0,
+              key: autoModerationRule.key,
+              kind: "auto-moderation",
+              nestedPlanDigest: desiredAutoModeration.digest,
+              operationKeyHash: desiredAutoModeration.operationKeyHash,
+              receiptStatus: null,
+              ruleId: autoModerationRule.ruleId ?? null,
+              stage: "configure",
+              state: "ready",
+              verificationReason: null,
+              verificationStatus: null,
+              writeRequired: true,
+            }]
+          : usePublicationFrontier
           ? [{
               kind: "structure",
               nestedPlanDigest: nested.digest,
@@ -6876,6 +6968,11 @@ function guildBlueprintCaptureResult(
       startedAt: "2026-08-24T00:00:00.000Z",
     },
     coverage: {
+      autoModerationRules: {
+        captured: 0,
+        returned: 0,
+        visibility: "connector-visible",
+      },
       channels: {
         captured: 1,
         returned: 1,
@@ -6887,6 +6984,7 @@ function guildBlueprintCaptureResult(
         "settings",
         "welcome-screen",
         "onboarding",
+        "auto-moderation",
       ],
       exactChannelReferences: 0,
       exactRoleReferences: 0,
@@ -6909,6 +7007,7 @@ function guildBlueprintCaptureResult(
     privacy: {
       activityPersistence: "none",
       attachments: "not-read",
+      autoModerationExecutionEvents: "not-read",
       components: "not-read",
       memberProfiles: "not-read",
       messageContent: "not-read",
@@ -6986,6 +7085,32 @@ function guildBlueprintOnboardingToolInput(planDigest?: string) {
         type: "multiple-choice" as const,
       }],
     },
+  }
+}
+
+function guildBlueprintAutoModerationToolInput(planDigest?: string) {
+  const { settings: _settings, ...input } = guildBlueprintToolInput(planDigest)
+  return {
+    ...input,
+    autoModerationRules: [{
+      actions: [{
+        customMessage: "Keep this community safe",
+        type: "block-message" as const,
+      }, {
+        channel: { channelId: CHANNEL_ID, kind: "exact" as const },
+        type: "send-alert-message" as const,
+      }],
+      enabled: true,
+      exemptChannels: [{ channelId: CHANNEL_ID, kind: "exact" as const }],
+      exemptRoles: [{ kind: "exact" as const, roleId: ROLE_ID }],
+      key: "community-safety",
+      name: "Community safety",
+      ruleId: AUTOMOD_RULE_ID,
+      trigger: {
+        keywordFilter: ["blocked phrase"],
+        type: "keyword" as const,
+      },
+    }],
   }
 }
 
@@ -7239,6 +7364,7 @@ function serviceFixture(overrides: {
   autoModerationEffect?: "change" | "none"
   autoModerationError?: Error
   autoModerationPlanDigest?: string
+  autoModerationVerificationStatus?: "blocked" | "drifted" | "not-found" | "verified"
   channelCreationAction?: "create" | "none"
   channelCreationError?: Error
   channelCreationPlanDigest?: string
@@ -7271,6 +7397,7 @@ function serviceFixture(overrides: {
   forumTagError?: Error
   forumTagPlanDigest?: string
   guildBlueprintError?: Error
+  guildBlueprintAutoModerationFrontier?: boolean
   guildBlueprintBlocked?: boolean
   guildBlueprintCaptureResult?: GuildBlueprintCaptureResult
   guildBlueprintOnboardingFrontier?: boolean
@@ -7437,6 +7564,7 @@ function serviceFixture(overrides: {
     autoModerationGet: 0,
     autoModerationList: 0,
     autoModerationPlan: 0,
+    autoModerationVerify: 0,
     banGet: 0,
     banList: 0,
     channelCloneExecute: 0,
@@ -8650,6 +8778,40 @@ function serviceFixture(overrides: {
         overrides.autoModerationEffect,
       )
     },
+    async verifyAutoModerationChange(request) {
+      calls.autoModerationVerify += 1
+      const normalized = normalizeAutoModerationChangeRequest(request)
+      const status = overrides.autoModerationVerificationStatus ?? "verified"
+      return {
+        action: normalized.action,
+        activityId: status === "not-found" ? null : "activity-automod",
+        guildId: normalized.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest: status === "not-found" ? null : DIGEST,
+        readbackMatched: status === "verified",
+        reason: status === "verified"
+          ? null
+          : status === "not-found"
+            ? "operation-not-found" as const
+            : status === "drifted"
+              ? "rule-state-mismatch" as const
+              : "operation-uncertain" as const,
+        receiptStatus: status === "not-found"
+          ? null
+          : status === "blocked"
+            ? "uncertain" as const
+            : "completed" as const,
+        requestMatched: !["not-found"].includes(status),
+        ruleId: status === "not-found"
+          ? null
+          : normalized.action === "create"
+            ? AUTOMOD_RULE_ID
+            : normalized.ruleId,
+        schemaVersion: 1,
+        status,
+        timestamp: status === "not-found" ? null : "2026-08-21T00:00:00.000Z",
+      }
+    },
     async executeScheduledEventChange(request, planDigest) {
       if (overrides.scheduledEventError) throw overrides.scheduledEventError
       calls.scheduledEventExecute += 1
@@ -9468,10 +9630,15 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintOnboardingFrontier ?? false,
         overrides.guildBlueprintPublicationFrontier ?? false,
         overrides.guildBlueprintBlocked ?? false,
+        overrides.guildBlueprintAutoModerationFrontier ?? false,
       )
       const result: GuildBlueprintResult = {
         blocker: planned.blocker,
         digest: planned.digest,
+        executedAutoModerationRuleIndex:
+          planned.frontier?.kind === "auto-moderation"
+            ? planned.frontier.index
+            : null,
         executedPhase: planned.status === "blocked"
           ? null
           : planned.frontier?.kind ?? null,
@@ -10687,6 +10854,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintOnboardingFrontier ?? false,
         overrides.guildBlueprintPublicationFrontier ?? false,
         overrides.guildBlueprintBlocked ?? false,
+        overrides.guildBlueprintAutoModerationFrontier ?? false,
       )
     },
     async verifyGuildBlueprint(request) {
@@ -10699,9 +10867,11 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintOnboardingFrontier ?? false,
         overrides.guildBlueprintPublicationFrontier ?? false,
         overrides.guildBlueprintBlocked ?? false,
+        overrides.guildBlueprintAutoModerationFrontier ?? false,
       )
       const result: GuildBlueprintVerification = {
         applicationId: planned.applicationId,
+        autoModerationRules: [],
         blocker: planned.blocker,
         botId: planned.botId,
         checkedAt: planned.createdAt,
@@ -11333,6 +11503,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_guild_soundboard_change",
       "execute_guild_soundboard_change",
       "plan_automod_change",
+      "verify_automod_change",
       "execute_automod_change",
       "plan_scheduled_event_change",
       "execute_scheduled_event_change",
@@ -13220,11 +13391,13 @@ test("progressive discovery enables the complete reviewed AutoMod workflow", asy
   assert.deepEqual(discovery.newlyEnabledToolNames, [
     "execute_automod_change",
     "plan_automod_change",
+    "verify_automod_change",
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
       "plan_automod_change",
+      "verify_automod_change",
       "execute_automod_change",
       "discover_discord_tools",
     ],
@@ -13514,6 +13687,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     autoModerationGet: 0,
     autoModerationList: 0,
     autoModerationPlan: 0,
+    autoModerationVerify: 0,
     banGet: 0,
     banList: 0,
     channelCloneExecute: 0,
@@ -22516,6 +22690,58 @@ test("MCP AutoMod plans accept exact lifecycle unions and reject unsafe policy s
   assert.equal(calls.autoModerationPlan, validRequests.length)
 })
 
+test("MCP AutoMod verification is read-only and uses the exact request shape", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+  })
+  const argumentsValue = {
+    action: "create" as const,
+    actions: [{ customMessage: "Review this message", type: "block-message" as const }],
+    auditReason: AUDIT_REASON,
+    exemptChannelIds: [],
+    exemptRoleIds: [],
+    guildId: GUILD_ID,
+    name: "Reviewed keyword policy",
+    operationKey: AUTOMOD_OPERATION_KEY,
+    trigger: {
+      keywordFilter: ["reviewed-keyword"],
+      type: "keyword" as const,
+    },
+  }
+  const verified = await client.callTool({
+    arguments: argumentsValue,
+    name: "verify_automod_change",
+  })
+  const extraPlanDigest = await client.callTool({
+    arguments: { ...argumentsValue, planDigest: DIGEST },
+    name: "verify_automod_change",
+  })
+
+  assert.equal(structuredContent(verified).status, "verified")
+  assert.equal(structuredContent(verified).ruleId, AUTOMOD_RULE_ID)
+  assert.equal(extraPlanDigest.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.autoModerationVerify, 1)
+  assert.equal(calls.autoModerationPlan, 0)
+  assert.equal(calls.autoModerationExecute, 0)
+  assert.equal(JSON.stringify(verified).includes("reviewed-keyword"), false)
+
+  const drifted = await connectedFixture(context, {
+    serviceOverrides: { autoModerationVerificationStatus: "drifted" },
+  })
+  const driftResult = await drifted.client.callTool({
+    arguments: argumentsValue,
+    name: "verify_automod_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "drifted")
+  assert.equal(structuredContent(driftResult).reason, "rule-state-mismatch")
+  assert.equal(driftResult.isError, undefined)
+})
+
 test("MCP AutoMod execution binds signed approval to the complete reviewed policy", async (context) => {
   let confirmationMessage = ""
   const serverMessages: unknown[] = []
@@ -24624,6 +24850,7 @@ test("MCP guild blueprint capture returns one strict planner-compatible draft", 
   assert.deepEqual(capture.privacy, {
     activityPersistence: "none",
     attachments: "not-read",
+    autoModerationExecutionEvents: "not-read",
     components: "not-read",
     memberProfiles: "not-read",
     messageContent: "not-read",
@@ -24743,6 +24970,10 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     arguments: guildBlueprintOnboardingToolInput(),
     name: "plan_guild_blueprint",
   })
+  const plannedAutoModeration = await client.callTool({
+    arguments: guildBlueprintAutoModerationToolInput(),
+    name: "plan_guild_blueprint",
+  })
   const plannedPublication = await client.callTool({
     arguments: guildBlueprintPublicationToolInput(),
     name: "plan_guild_blueprint",
@@ -24841,6 +25072,54 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     },
     name: "plan_guild_blueprint",
   })
+  const incompatibleAutoModerationAlert = await client.callTool({
+    arguments: {
+      ...guildBlueprintAutoModerationToolInput(),
+      autoModerationRules: [{
+        ...guildBlueprintAutoModerationToolInput().autoModerationRules[0],
+        actions: [{
+          channel: { key: "review-category", kind: "scaffold" },
+          type: "send-alert-message",
+        }],
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const missingAutoModerationRole = await client.callTool({
+    arguments: {
+      ...guildBlueprintAutoModerationToolInput(),
+      autoModerationRules: [{
+        ...guildBlueprintAutoModerationToolInput().autoModerationRules[0],
+        exemptRoles: [{ key: "missing-role", kind: "scaffold" }],
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const duplicateAutoModerationKey = await client.callTool({
+    arguments: {
+      ...guildBlueprintAutoModerationToolInput(),
+      autoModerationRules: [
+        ...guildBlueprintAutoModerationToolInput().autoModerationRules,
+        ...guildBlueprintAutoModerationToolInput().autoModerationRules,
+      ],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const incompatibleAutoModerationPolicy = await client.callTool({
+    arguments: {
+      ...guildBlueprintAutoModerationToolInput(),
+      autoModerationRules: [{
+        ...guildBlueprintAutoModerationToolInput().autoModerationRules[0],
+        actions: [{ type: "block-message" }],
+        exemptChannels: [{ channelId: CHANNEL_ID, kind: "exact" }],
+        trigger: {
+          keywordFilter: ["profile phrase"],
+          type: "member-profile",
+        },
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
   const incompatiblePublicationChannel = await client.callTool({
     arguments: {
       ...guildBlueprintPublicationToolInput(),
@@ -24885,6 +25164,7 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(structuredContent(planned).status, "planned")
   assert.equal(structuredContent(plannedWelcomeScreen).status, "planned")
   assert.equal(structuredContent(plannedOnboarding).status, "planned")
+  assert.equal(structuredContent(plannedAutoModeration).status, "planned")
   assert.equal(structuredContent(plannedPublication).status, "planned")
   assert.equal(missingPostPhase.isError, true)
   assert.equal(emptySettings.isError, true)
@@ -24895,11 +25175,15 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(incompatibleOnboardingChannel.isError, true)
   assert.equal(missingOnboardingRole.isError, true)
   assert.equal(duplicateOnboardingChannel.isError, true)
+  assert.equal(incompatibleAutoModerationAlert.isError, true)
+  assert.equal(missingAutoModerationRole.isError, true)
+  assert.equal(duplicateAutoModerationKey.isError, true)
+  assert.equal(incompatibleAutoModerationPolicy.isError, true)
   assert.equal(incompatiblePublicationChannel.isError, true)
   assert.equal(duplicatePublicationKey.isError, true)
   assert.equal(createPublicationMessageId.isError, true)
   assert.equal(publicationReply.isError, true)
-  assert.equal(calls.guildBlueprintPlan, 4)
+  assert.equal(calls.guildBlueprintPlan, 5)
 })
 
 test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
@@ -25033,6 +25317,34 @@ test("MCP guild blueprints review and execute an onboarding frontier", async (co
   assert.match(confirmationMessage, new RegExp(ROLE_ID))
   assert.match(confirmationMessage, /MANAGE_GUILD/u)
   assert.match(confirmationMessage, /MANAGE_ROLES/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
+})
+
+test("MCP guild blueprints review and execute one staged AutoMod frontier", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintAutoModerationFrontier: true },
+  })
+  const result = await client.callTool({
+    arguments: guildBlueprintAutoModerationToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(result).executedPhase, "auto-moderation")
+  assert.equal(structuredContent(result).executedAutoModerationRuleIndex, 0)
+  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(calls.guildBlueprintExecute, 1)
+  assert.match(confirmationMessage, /Frontier phase: auto-moderation/u)
+  assert.match(confirmationMessage, /auto-moderation 1 key "community-safety" stage configure/u)
+  assert.match(confirmationMessage, /reviewed Discord AutoMod update/u)
+  assert.match(confirmationMessage, /Community safety/u)
+  assert.match(confirmationMessage, /Keep this community safe/u)
+  assert.match(confirmationMessage, new RegExp(AUTOMOD_RULE_ID))
+  assert.match(confirmationMessage, /MANAGE_GUILD/u)
   assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
 })
 

@@ -19,6 +19,7 @@ import {
   FileOperationStore,
   operationKeyHash,
   type ApplicationOperationReceipt,
+  type AutoModerationOperationReceipt,
   type ComponentMessageOperationReceipt,
   type OperationReceipt,
   type StandardOperationReceipt,
@@ -60,6 +61,17 @@ function componentReceipt(
   return {
     ...receipt(status),
     kind: "component-message",
+    requestDigest: REQUEST_DIGEST,
+    schemaVersion: 2,
+  }
+}
+
+function automodReceipt(
+  status: OperationReceipt["status"] = "pending",
+): AutoModerationOperationReceipt {
+  return {
+    ...receipt(status),
+    kind: "automod-change",
     requestDigest: REQUEST_DIGEST,
     schemaVersion: 2,
   }
@@ -236,6 +248,53 @@ test("component-message receipts strictly bind a content-free keyed request dige
   )
 })
 
+test("AutoMod receipts strictly bind a content-free keyed request digest", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-automod-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = automodReceipt()
+
+  assert.deepEqual(await store.reserve(pending), {
+    created: true,
+    receipt: pending,
+  })
+  await assert.rejects(
+    store.finish({
+      ...automodReceipt("completed"),
+      requestDigest: `hmac-sha256:${"c".repeat(64)}`,
+    }),
+    /changed reserved identity/,
+  )
+  await store.finish(automodReceipt("completed"))
+  assert.deepEqual(
+    await store.get("automod-change", pending.operationKeyHash),
+    automodReceipt("completed"),
+  )
+
+  const operationDirectory = join(directory, (await readdir(directory))[0] as string)
+  const durableText = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.match(durableText, new RegExp(REQUEST_DIGEST))
+  assert.doesNotMatch(durableText, /private keyword|custom response|raw operation key/)
+
+  const malformedStore = new FileOperationStore(join(root, "malformed"))
+  await assert.rejects(
+    malformedStore.reserve({
+      ...automodReceipt(),
+      schemaVersion: 1,
+    } as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+  const { requestDigest: _requestDigest, ...missingDigest } = automodReceipt()
+  await assert.rejects(
+    malformedStore.reserve(missingDigest as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+})
+
 test("file operation store accepts voice status receipts and rejects status text", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "discord-mcp-voice-status-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
@@ -398,7 +457,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const announcementCrosspost = { ...receipt(), kind: "announcement-crosspost" as const }
   const attachment = { ...receipt(), kind: "attachment-message" as const }
   const component = componentReceipt()
-  const automod = { ...receipt(), kind: "automod-change" as const }
+  const automod = automodReceipt()
   const bulkGuildBan = { ...receipt(), kind: "bulk-guild-ban" as const }
   const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }

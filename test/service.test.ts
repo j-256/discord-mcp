@@ -4724,6 +4724,7 @@ test("service pins identity through privacy-safe AutoMod reads and reviewed chan
   const exact = await service.getAutoModerationRule(GUILD_ID, AUTOMOD_RULE_ID)
   const plan = await service.planAutoModerationChange(request)
   const result = await service.executeAutoModerationChange(request, plan.digest)
+  const verification = await service.verifyAutoModerationChange(request)
 
   assert.equal(listed.rules.length, 1)
   assert.equal(JSON.stringify(listed).includes("private blocked phrase"), false)
@@ -4732,8 +4733,10 @@ test("service pins identity through privacy-safe AutoMod reads and reviewed chan
   assert.deepEqual(plan.permission.requiredPermissions, ["MANAGE_GUILD"])
   assert.equal(result.status, "completed")
   assert.equal(result.observed?.name, "Updated keyword policy")
+  assert.equal(verification.status, "verified")
+  assert.equal(verification.ruleId, AUTOMOD_RULE_ID)
   assert.equal(inventoryReads, 1)
-  assert.equal(exactReads, 4)
+  assert.equal(exactReads, 5)
   assert.equal(updateCalls, 1)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
@@ -6510,6 +6513,7 @@ test("service durably coordinates active guild scaffolds by request identity", a
 
 test("service captures a two-pass guild-blueprint draft under verified identity", async () => {
   const reads = {
+    autoModerationRules: 0,
     channels: 0,
     guild: 0,
     onboarding: 0,
@@ -6580,6 +6584,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
   }
   const config = loadConnectorConfig({
     capabilities: {
+      automodAudit: true,
       guildProfileAudit: true,
       guildSettingsAudit: true,
       onboardingAudit: true,
@@ -6595,6 +6600,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
       guildIds: [GUILD_ID],
     },
     scopes: {
+      automodGuildIds: [GUILD_ID],
       guildProfileGuildIds: [GUILD_ID],
       guildSettingsGuildIds: [GUILD_ID],
       onboardingGuildIds: [GUILD_ID],
@@ -6632,6 +6638,10 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
         reads.welcomeScreen += 1
         return structuredClone(capturedWelcomeScreen)
       },
+      async listGuildAutoModerationRules() {
+        reads.autoModerationRules += 1
+        return []
+      },
     },
     config,
   })
@@ -6646,6 +6656,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
   assert.equal(result.botId, BOT_ID)
   assert.equal(result.blueprint?.guildId, GUILD_ID)
   assert.deepEqual(reads, {
+    autoModerationRules: 2,
     channels: 2,
     guild: 2,
     onboarding: 2,

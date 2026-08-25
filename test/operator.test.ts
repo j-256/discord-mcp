@@ -429,6 +429,7 @@ function toolService(): DiscordToolService {
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
+    verifyAutoModerationChange: unexpected,
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
     executeGuildIntegrationDeletion: unexpected,

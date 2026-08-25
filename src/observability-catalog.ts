@@ -194,6 +194,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   send_message: "interaction-write",
   send_webhook_message: "interaction-write",
   verify_component_message: "discord-read",
+  verify_automod_change: "discord-read",
   respond_to_discord_interaction: "interaction-write",
 })
 

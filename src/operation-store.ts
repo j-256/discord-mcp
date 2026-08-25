@@ -89,7 +89,10 @@ export type ApplicationOperationKind =
   | "application-emoji-change"
   | "application-intent-enablement"
 export type GuildOperationKind = Exclude<OperationKind, ApplicationOperationKind>
-export type StandardGuildOperationKind = Exclude<GuildOperationKind, "component-message">
+export type StandardGuildOperationKind = Exclude<
+  GuildOperationKind,
+  "automod-change" | "component-message"
+>
 export type OperationReceiptStatus = "completed" | "failed" | "pending" | "uncertain"
 export type OperationVerification = "drift" | "match" | null
 
@@ -116,7 +119,16 @@ export interface ComponentMessageOperationReceipt extends OperationReceiptFields
   schemaVersion: 2
 }
 
-export type OperationReceipt = StandardOperationReceipt | ComponentMessageOperationReceipt
+export interface AutoModerationOperationReceipt extends OperationReceiptFields {
+  kind: "automod-change"
+  requestDigest: string
+  schemaVersion: 2
+}
+
+export type OperationReceipt =
+  | AutoModerationOperationReceipt
+  | ComponentMessageOperationReceipt
+  | StandardOperationReceipt
 
 export interface ApplicationOperationReceipt {
   activityId: string
@@ -183,7 +195,7 @@ const GUILD_OPERATION_KINDS = OPERATION_KINDS.filter(
 )
 
 const OPERATION_RECEIPT_SCHEMA_VERSION = 1
-const COMPONENT_MESSAGE_RECEIPT_SCHEMA_VERSION = 2
+const REQUEST_BOUND_RECEIPT_SCHEMA_VERSION = 2
 const RECEIPT_KEYS = [
   "activityId",
   "error",
@@ -197,7 +209,7 @@ const RECEIPT_KEYS = [
   "timestamp",
   "verification",
 ] as const
-const COMPONENT_MESSAGE_RECEIPT_KEYS = [
+const REQUEST_BOUND_RECEIPT_KEYS = [
   ...RECEIPT_KEYS,
   "requestDigest",
 ] as const
@@ -231,14 +243,16 @@ function parseReceipt(value: unknown): OperationReceipt {
     throw new OperationStoreError("Discord operation receipt is not an object")
   }
   const record = value as Record<string, unknown>
-  const componentMessage = record.kind === "component-message"
-  const expectedKeys = componentMessage
-    ? COMPONENT_MESSAGE_RECEIPT_KEYS
+  const requestBound = ["automod-change", "component-message"].includes(
+    String(record.kind),
+  )
+  const expectedKeys = requestBound
+    ? REQUEST_BOUND_RECEIPT_KEYS
     : RECEIPT_KEYS
   if (
     Object.keys(record).sort().join("\0") !== [...expectedKeys].sort().join("\0")
-    || (componentMessage
-      ? record.schemaVersion !== COMPONENT_MESSAGE_RECEIPT_SCHEMA_VERSION
+    || (requestBound
+      ? record.schemaVersion !== REQUEST_BOUND_RECEIPT_SCHEMA_VERSION
         || typeof record.requestDigest !== "string"
         || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.requestDigest)
       : record.schemaVersion !== OPERATION_RECEIPT_SCHEMA_VERSION)
@@ -319,12 +333,20 @@ function parseReceipt(value: unknown): OperationReceipt {
     timestamp: record.timestamp,
     verification: record.verification as OperationVerification,
   }
-  if (componentMessage) {
+  if (record.kind === "component-message") {
     return {
       ...common,
       kind: "component-message",
       requestDigest: record.requestDigest as string,
-      schemaVersion: COMPONENT_MESSAGE_RECEIPT_SCHEMA_VERSION,
+      schemaVersion: REQUEST_BOUND_RECEIPT_SCHEMA_VERSION,
+    }
+  }
+  if (record.kind === "automod-change") {
+    return {
+      ...common,
+      kind: "automod-change",
+      requestDigest: record.requestDigest as string,
+      schemaVersion: REQUEST_BOUND_RECEIPT_SCHEMA_VERSION,
     }
   }
   return {
@@ -443,8 +465,8 @@ function assertIdentity(
     || pending.operationKeyHash !== terminal.operationKeyHash
     || pending.planDigest !== terminal.planDigest
     || pending.schemaVersion !== terminal.schemaVersion
-    || (pending.kind === "component-message" && (
-      terminal.kind !== "component-message"
+    || ("requestDigest" in pending && (
+      !("requestDigest" in terminal)
       || pending.requestDigest !== terminal.requestDigest
     ))
   ) {
@@ -466,8 +488,8 @@ function sameTerminal(left: OperationReceipt, right: OperationReceipt): boolean 
     && left.schemaVersion === right.schemaVersion
     && left.status === right.status
     && left.verification === right.verification
-    && (left.kind !== "component-message" || (
-      right.kind === "component-message"
+    && (!("requestDigest" in left) || (
+      "requestDigest" in right
       && left.requestDigest === right.requestDigest
     ))
 }

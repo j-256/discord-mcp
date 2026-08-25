@@ -84,7 +84,10 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "plan_guild_blueprint",
     "verify_guild_blueprint",
   ])
+  assert.equal(guildBuilder.capabilities.includes("automodAudit"), true)
+  assert.equal(guildBuilder.capabilities.includes("automodChanges"), true)
   assert.deepEqual(guildBuilder.requirements.scope.targets, [
+    "$.scopes.automodGuildIds",
     "$.scopes.guildScaffoldGuildIds",
     "$.scopes.guildProfileGuildIds",
     "$.scopes.guildSettingsGuildIds",
@@ -100,6 +103,14 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     intents: ["GUILDS"],
   })
   assert.equal(guildBuilder.riskClasses.includes("destructive-write"), true)
+  assert.equal(
+    guildBuilder.requirements.botPermissions.includes("MODERATE_MEMBERS"),
+    false,
+  )
+  assert.equal(
+    guildBuilder.warnings.some((warning) => warning.includes("MODERATE_MEMBERS")),
+    true,
+  )
 
   const channelPublisher = getConfigRecipe("channel-publisher")
   assert.deepEqual(channelPublisher.toolsets, ["interactions", "messages"])
