@@ -55,6 +55,14 @@
           "type": "boolean",
           "description": "Enable ban audit policy"
         },
+        "bulkBanAudit": {
+          "type": "boolean",
+          "description": "Enable reviewed exact-target Bulk Guild Ban planning"
+        },
+        "bulkBans": {
+          "type": "boolean",
+          "description": "Enable reviewed exact-target Bulk Guild Ban execution"
+        },
         "channelCreation": {
           "type": "boolean",
           "description": "Enable channel creation policy"
@@ -800,6 +808,16 @@
           },
           "description": "Exact Discord ID allowlist for ban audit guild ids"
         },
+        "bulkBanGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
+        },
         "channelCreationGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1411,7 +1429,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 57,
+          "maxItems": 58,
           "type": "array",
           "items": {
             "type": "string",
@@ -1425,6 +1443,7 @@
               "audit-logs",
               "automod",
               "bans",
+              "bulk-bans",
               "channel-creation",
               "channel-deletion",
               "channel-cloning",

@@ -24,6 +24,7 @@ import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  DISCORD_LIMITS,
   DISCORD_CHANNEL_TYPES,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
@@ -33,6 +34,11 @@ import {
   REACTION_LIMITS,
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
+import {
+  normalizeBulkGuildBanRequest,
+  type BulkGuildBanPlan,
+  type BulkGuildBanRequest,
+} from "../src/bulk-guild-ban-service.js"
 import { createConnectorConfigDocument } from "../src/config-document.js"
 import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
 import type {
@@ -276,6 +282,8 @@ import type {
 import {
   AdministrationExecutionError,
   AdministrationOperationConflictError,
+  BulkGuildBanExecutionError,
+  BulkGuildBanOperationConflictError,
   AnnouncementCrosspostExecutionError,
   AnnouncementCrosspostOperationConflictError,
   AnnouncementSubscriptionExecutionError,
@@ -471,6 +479,7 @@ const MESSAGE_ID = "300000000000000001"
 const ROLE_ID = "350000000000000001"
 const AUDIT_ENTRY_ID = "360000000000000001"
 const USER_ID = "400000000000000001"
+const OTHER_USER_ID = "400000000000000002"
 
 async function stdioConfigFile(
   context: TestContext,
@@ -539,6 +548,7 @@ const POLL_ANSWER_TWO = "Usability"
 const MEMBER_NICKNAME_OPERATION_KEY = "member-nickname-attempt-0001"
 const MEMBER_NICKNAME = "Reviewed nickname"
 const MEMBER_MODERATION_OPERATION_KEY = "member-moderation-attempt-0001"
+const BULK_GUILD_BAN_OPERATION_KEY = "bulk-guild-ban-attempt-0001"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
@@ -4412,6 +4422,77 @@ function moderationPlan(digest = DIGEST) {
   }
 }
 
+function bulkGuildBanPlan(
+  request: BulkGuildBanRequest,
+  digest = DIGEST,
+): BulkGuildBanPlan {
+  const normalized = normalizeBulkGuildBanRequest(request)
+  const effectivePermissions = (
+    DISCORD_PERMISSIONS.BAN_MEMBERS
+    | DISCORD_PERMISSIONS.MANAGE_GUILD
+  ).toString()
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: normalized.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-25T00:00:00.000Z",
+    deleteMessageSeconds: normalized.deleteMessageSeconds,
+    digest,
+    estimatedRequests: {
+      destructive: 1,
+      planningEvidence: 3 + normalized.userIds.length * 2,
+      readback: normalized.userIds.length,
+    },
+    guildId: normalized.guildId,
+    memberCount: normalized.userIds.length,
+    nonMemberCount: 0,
+    operationKeyHash: normalized.operationKeyHash,
+    permission: {
+      appliedRoleIds: [GUILD_ID],
+      botAdministrator: false,
+      botGuildOwner: false,
+      botHighestRoleIds: [ROLE_ID],
+      botHighestRolePosition: 2,
+      effectivePermissionNames: ["BAN_MEMBERS", "MANAGE_GUILD"],
+      effectivePermissions,
+      required: ["BAN_MEMBERS", "MANAGE_GUILD"],
+      unknownPermissionBits: "0",
+    },
+    privacy: {
+      persistence: "content-free-exact-id-outcomes-only",
+      rawPayloadExposed: false,
+      transientUntrustedFields: ["globalName", "nickname", "username"],
+    },
+    risks: ["Discord can partially succeed without rollback"],
+    schemaVersion: 1,
+    status: "planned",
+    targetCount: normalized.userIds.length,
+    targetSetDigest: normalized.targetSetDigest,
+    targets: normalized.userIds.map((userId, index) => ({
+      administrator: false,
+      banState: "not-banned",
+      bot: false,
+      globalName: null,
+      highestRoleIds: [GUILD_ID],
+      highestRolePosition: 1,
+      id: userId,
+      membership: "member",
+      nickname: null,
+      roleIds: [GUILD_ID],
+      username: `private-member-${index + 1}`,
+    })),
+    verificationBoundary: {
+      automaticRetry: false,
+      destructiveRequests: 1,
+      exactReadbackPerTarget: true,
+      partialSuccess: "explicit",
+      rollback: "not-automatic",
+      subsetRetry: "never-automatic",
+    },
+    warnings: ["Every target uses exact fresh readback"],
+  }
+}
+
 function attachmentPlan(
   request: AttachmentMessageRequest,
   digest = DIGEST,
@@ -6771,6 +6852,9 @@ function fixturePolicy(): PolicyDescription {
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    bulkBanAuditEnabled: false,
+    bulkBanGuildIds: [],
+    bulkBansEnabled: false,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],
@@ -6941,6 +7025,9 @@ function fixtureApplicationPosture(
 function serviceFixture(overrides: {
   administrationDrift?: boolean
   administrationError?: Error
+  bulkGuildBanDrift?: boolean
+  bulkGuildBanError?: Error
+  bulkGuildBanPlanDigest?: string
   activityError?: Error
   announcementCrosspostAction?: "crosspost" | "none"
   announcementCrosspostError?: Error
@@ -7134,6 +7221,8 @@ function serviceFixture(overrides: {
     archived: 0,
     administrationExecute: 0,
     administrationPlan: 0,
+    bulkGuildBanExecute: 0,
+    bulkGuildBanPlan: 0,
     attachmentExecute: 0,
     attachmentPlan: 0,
     announcementCrosspostExecute: 0,
@@ -9238,6 +9327,31 @@ function serviceFixture(overrides: {
         verification,
       }
     },
+    async executeBulkGuildBan(request, planDigest) {
+      if (overrides.bulkGuildBanError) throw overrides.bulkGuildBanError
+      calls.bulkGuildBanExecute += 1
+      const normalized = normalizeBulkGuildBanRequest(request)
+      const verification = overrides.bulkGuildBanDrift
+        ? "drift" as const
+        : "match" as const
+      return {
+        activityId: "activity-bulk-guild-ban",
+        guildId: normalized.guildId,
+        observedBannedUserIds: normalized.userIds,
+        observedNotBannedUserIds: [],
+        operationKeyHash: normalized.operationKeyHash,
+        planDigest,
+        requestedUserIds: normalized.userIds,
+        responseBannedUserIds: overrides.bulkGuildBanDrift ? [] : normalized.userIds,
+        responseFailedUserIds: [],
+        schemaVersion: 1,
+        status: overrides.bulkGuildBanDrift
+          ? "completed-with-drift" as const
+          : "completed" as const,
+        targetSetDigest: normalized.targetSetDigest,
+        verification,
+      }
+    },
     async executeMessagePin(request, planDigest) {
       if (overrides.messagePinError) throw overrides.messagePinError
       calls.messagePinExecute += 1
@@ -10353,6 +10467,13 @@ function serviceFixture(overrides: {
       calls.administrationPlan += 1
       return moderationPlan(overrides.planDigest || DIGEST)
     },
+    async planBulkGuildBan(request) {
+      calls.bulkGuildBanPlan += 1
+      return bulkGuildBanPlan(
+        request,
+        overrides.bulkGuildBanPlanDigest || DIGEST,
+      )
+    },
     async planMemberRoleChange(request) {
       calls.memberRolePlan += 1
       return memberRolePlan(
@@ -10938,6 +11059,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_role_deletion",
       "plan_member_moderation",
       "execute_member_moderation",
+      "plan_bulk_guild_ban",
+      "execute_bulk_guild_ban",
       "list_activity",
       "discover_discord_tools",
     ],
@@ -11013,6 +11136,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const administration = result.tools.find((tool) => (
     tool.name === "execute_member_moderation"
+  ))
+  const bulkGuildBan = result.tools.find((tool) => (
+    tool.name === "execute_bulk_guild_ban"
   ))
   const memberRole = result.tools.find((tool) => (
     tool.name === "execute_member_role_change"
@@ -11174,6 +11300,21 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: true,
   })
+  assert.deepEqual(bulkGuildBan?.annotations, {
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(
+    listedTool(result.tools, "plan_bulk_guild_ban").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    },
+  )
   for (const name of [
     "list_channel_permission_overwrites",
     "list_message_pins",
@@ -12861,6 +13002,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     auditRoles: 0,
     administrationExecute: 0,
     administrationPlan: 0,
+    bulkGuildBanExecute: 0,
+    bulkGuildBanPlan: 0,
     announcementCrosspostExecute: 0,
     announcementCrosspostPlan: 0,
     announcementSubscriptionExecute: 0,
@@ -28035,6 +28178,324 @@ test("MCP member moderation reports uncertain and rate-limited execution outcome
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(MEMBER_MODERATION_OPERATION_KEY),
+  )
+})
+
+test("MCP bulk guild-ban planning validates and normalizes the complete exact target set", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      deleteMessageSeconds: 120,
+      guildId: GUILD_ID,
+      operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+      userIds: [OTHER_USER_ID, USER_ID],
+    },
+    name: "plan_bulk_guild_ban",
+  })
+  const oneTarget = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+      userIds: [USER_ID],
+    },
+    name: "plan_bulk_guild_ban",
+  })
+  const duplicateTarget = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+      userIds: [USER_ID, USER_ID],
+    },
+    name: "plan_bulk_guild_ban",
+  })
+  const oversizedSet = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+      userIds: Array.from(
+        { length: DISCORD_LIMITS.bulkGuildBanUsers + 1 },
+        (_, index) => `${500000000000000000n + BigInt(index)}`,
+      ),
+    },
+    name: "plan_bulk_guild_ban",
+  })
+  const invalidWindow = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      deleteMessageSeconds: DISCORD_LIMITS.banDeleteMessageSeconds + 1,
+      guildId: GUILD_ID,
+      operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+      userIds: [USER_ID, OTHER_USER_ID],
+    },
+    name: "plan_bulk_guild_ban",
+  })
+
+  const structured = structuredContent(planned)
+  assert.equal(structured.status, "planned")
+  assert.deepEqual(
+    (structured.targets as { id: string }[]).map(({ id }) => id),
+    [USER_ID, OTHER_USER_ID],
+  )
+  assert.equal(calls.bulkGuildBanPlan, 1)
+  for (const rejected of [oneTarget, duplicateTarget, oversizedSet, invalidWindow]) {
+    assert.equal(rejected.isError, true)
+  }
+})
+
+test("MCP bulk guild bans bind signed approval to the full normalized batch", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      deleteMessageSeconds: 120,
+      guildId: GUILD_ID,
+      operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+      planDigest: DIGEST,
+      userIds: [OTHER_USER_ID, USER_ID],
+    },
+    name: "execute_bulk_guild_ban",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.bulkGuildBanPlan, 1)
+  assert.equal(calls.bulkGuildBanExecute, 1)
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, new RegExp(OTHER_USER_ID))
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, /BAN_MEMBERS, MANAGE_GUILD/)
+  assert.match(confirmationMessage, /partially succeed/)
+  assert.match(confirmationMessage, /failed subsets are never retried/)
+  assert.match(
+    confirmationMessage,
+    new RegExp(operationKeyHash(BULK_GUILD_BAN_OPERATION_KEY)),
+  )
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(BULK_GUILD_BAN_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(BULK_GUILD_BAN_OPERATION_KEY),
+  )
+})
+
+test("MCP bulk guild-ban signed state rejects changed intent and accepts target reordering", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    auditReason: AUDIT_REASON,
+    deleteMessageSeconds: 120,
+    guildId: GUILD_ID,
+    operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+    planDigest: DIGEST,
+    userIds: [OTHER_USER_ID, USER_ID],
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_bulk_guild_ban",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, deleteMessageSeconds: 121 },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, operationKey: "bulk-guild-ban-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, userIds: [USER_ID, GUILD_OWNER_ID] },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_bulk_guild_ban: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_bulk_guild_ban",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  const reordered = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, userIds: [USER_ID, OTHER_USER_ID] },
+      inputResponses: {
+        confirm_bulk_guild_ban: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_bulk_guild_ban",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(reordered).status, "completed")
+  assert.equal(fixture.calls.bulkGuildBanExecute, 1)
+})
+
+test("MCP bulk guild bans stop on decline or a changed fresh plan", async (context) => {
+  const request = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+    planDigest: DIGEST,
+    userIds: [USER_ID, OTHER_USER_ID],
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: request,
+    name: "execute_bulk_guild_ban",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.bulkGuildBanExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { bulkGuildBanPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: request,
+    name: "execute_bulk_guild_ban",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.bulkGuildBanExecute, 0)
+})
+
+test("MCP bulk guild bans expose typed partial, uncertain, rate-limit, and receipt outcomes", async (context) => {
+  const request = {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: BULK_GUILD_BAN_OPERATION_KEY,
+    planDigest: DIGEST,
+    userIds: [USER_ID, OTHER_USER_ID],
+  }
+  const approveBulkBan = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const partial = await connectedFixture(context, {
+    elicitationHandler: approveBulkBan,
+    serviceOverrides: {
+      bulkGuildBanError: new BulkGuildBanExecutionError(
+        "Discord bulk guild ban partially succeeded",
+        { status: "partial" },
+      ),
+    },
+  })
+  const partialResult = await partial.client.callTool({
+    arguments: request,
+    name: "execute_bulk_guild_ban",
+  })
+  assert.equal(structuredContent(partialResult).status, "bulk-guild-ban-partial")
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approveBulkBan,
+    serviceOverrides: {
+      bulkGuildBanError: new BulkGuildBanExecutionError(
+        "Discord bulk guild ban outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: request,
+    name: "execute_bulk_guild_ban",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "POST",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/bulk-ban`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approveBulkBan,
+    serviceOverrides: {
+      bulkGuildBanError: new BulkGuildBanExecutionError(
+        "Discord bulk guild ban was rate limited",
+        { status: "uncertain" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: request,
+    name: "execute_bulk_guild_ban",
+  })
+  const limitedStructured = structuredContent(limitedResult)
+  assert.equal(limitedStructured.status, "rate-limited")
+  assert.equal(
+    (limitedStructured.error as Record<string, unknown>).retryAfterMs,
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "bulk-guild-ban-operation",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(BULK_GUILD_BAN_OPERATION_KEY),
+    status: "completed" as const,
+    timestamp: "2026-08-25T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approveBulkBan,
+    serviceOverrides: {
+      bulkGuildBanError: new BulkGuildBanOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: request,
+    name: "execute_bulk_guild_ban",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(BULK_GUILD_BAN_OPERATION_KEY),
   )
 })
 

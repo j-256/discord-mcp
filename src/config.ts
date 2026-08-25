@@ -56,6 +56,8 @@ export interface ConnectorConfig {
   allowAutomodAudit: boolean
   allowAutomodChanges: boolean
   allowBanAudit: boolean
+  allowBulkBanAudit: boolean
+  allowBulkBans: boolean
   allowChannelCloneAudit: boolean
   allowChannelCloning: boolean
   allowChannelCreation: boolean
@@ -140,6 +142,7 @@ export interface ConnectorConfig {
   automodAlertChannelIds: ReadonlySet<string>
   automodGuildIds: ReadonlySet<string>
   banAuditGuildIds: ReadonlySet<string>
+  bulkBanGuildIds: ReadonlySet<string>
   channelCloneGuildIds: ReadonlySet<string>
   channelCloneSourceIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
@@ -401,6 +404,7 @@ export function loadConnectorConfigDocument(
   const allowedGuildIds = new Set(document.readScope.guildIds)
   const automodGuildIds = configScope(document, "automodGuildIds")
   const banAuditGuildIds = configScope(document, "banAuditGuildIds")
+  const bulkBanGuildIds = configScope(document, "bulkBanGuildIds")
   const adminGuildIds = configScope(document, "adminGuildIds")
   const channelCreationGuildIds = configScope(document, "channelCreationGuildIds")
   const channelCloneGuildIds = configScope(
@@ -532,6 +536,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("adminGuildIds"), adminGuildIds],
     [configPolicyPath("automodGuildIds"), automodGuildIds],
     [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
+    [configPolicyPath("bulkBanGuildIds"), bulkBanGuildIds],
     [configPolicyPath("channelCreationGuildIds"), channelCreationGuildIds],
     [configPolicyPath("channelCloneGuildIds"), channelCloneGuildIds],
     [configPolicyPath("channelOrderingGuildIds"), channelOrderingGuildIds],
@@ -613,6 +618,18 @@ export function loadConnectorConfigDocument(
   if (allowCrossGuildMessageForwarding && !allowMessageForwarding) {
     throw new ConfigurationError(
       `${configPolicyPath("allowCrossGuildMessageForwarding")} requires ${configPolicyPath("allowMessageForwarding")}`,
+    )
+  }
+  const allowBulkBanAudit = configCapability(document, "bulkBanAudit")
+  const allowBulkBans = configCapability(document, "bulkBans")
+  if (allowBulkBans && !allowBulkBanAudit) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowBulkBans")} requires ${configPolicyPath("allowBulkBanAudit")}`,
+    )
+  }
+  if (allowBulkBanAudit && bulkBanGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowBulkBanAudit")} requires ${configPolicyPath("bulkBanGuildIds")}`,
     )
   }
   if (
@@ -965,6 +982,8 @@ export function loadConnectorConfigDocument(
     allowAutomodAudit,
     allowAutomodChanges,
     allowBanAudit: configCapability(document, "banAudit"),
+    allowBulkBanAudit,
+    allowBulkBans,
     allowChannelCloneAudit,
     allowChannelCloning,
     allowChannelCreation: configCapability(document, "channelCreation"),
@@ -1060,6 +1079,7 @@ export function loadConnectorConfigDocument(
     automodAlertChannelIds,
     automodGuildIds,
     banAuditGuildIds,
+    bulkBanGuildIds,
     channelCloneGuildIds,
     channelCloneSourceIds,
     channelCreationGuildIds,

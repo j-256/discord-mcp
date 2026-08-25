@@ -214,6 +214,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    bulkBanAuditEnabled: false,
+    bulkBanGuildIds: [],
+    bulkBansEnabled: false,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],
@@ -886,6 +889,9 @@ test("configuration and policy require an exact administration guild and protect
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    bulkBanAuditEnabled: false,
+    bulkBanGuildIds: [],
+    bulkBansEnabled: false,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],
@@ -1149,6 +1155,99 @@ test("configuration and policy require an opt-in exact ban-audit guild scope", (
       token: TOKEN,
       capabilities: {
         banAudit: "sometimes" as never,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /expected boolean/,
+  )
+})
+
+test("configuration and policy isolate reviewed bulk guild bans", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      bulkBanAudit: true,
+      bulkBans: true,
+    },
+    readScope: {
+      guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    },
+    scopes: {
+      bulkBanGuildIds: [GUILD_ID],
+      protectedUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowBulkBanAudit, true)
+  assert.equal(config.allowBulkBans, true)
+  assert.deepEqual([...config.bulkBanGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().bulkBanAuditEnabled, true)
+  assert.equal(policy.describe().bulkBansEnabled, true)
+  assert.deepEqual(policy.describe().bulkBanGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertBulkBanAuditAllowed(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertBulkBanExecutionAllowed(GUILD_ID))
+  assert.throws(
+    () => policy.assertBulkBanAuditAllowed(OTHER_GUILD_ID),
+    /outside the bulk-ban scope/,
+  )
+  assert.throws(
+    () => policy.assertUserNotProtected(USER_ID),
+    /protected from administration/,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      bulkBanAudit: true,
+    },
+    scopes: {
+      bulkBanGuildIds: [GUILD_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertBulkBanAuditAllowed(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertBulkBanExecutionAllowed(GUILD_ID),
+    /bulk bans are disabled/,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        bulkBans: true,
+      },
+      scopes: {
+        bulkBanGuildIds: [GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.capabilities\.bulkBans requires \$\.capabilities\.bulkBanAudit/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        bulkBanAudit: true,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.capabilities\.bulkBanAudit requires \$\.scopes\.bulkBanGuildIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        bulkBanGuildIds: [OTHER_GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.bulkBanGuildIds must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        bulkBanAudit: "sometimes" as never,
       },
     }, { homeDirectory: "/test/home" }),
     /expected boolean/,
@@ -4191,6 +4290,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     automodGuildIds: [],
     banAuditEnabled: false,
     banAuditGuildIds: [],
+    bulkBanAuditEnabled: false,
+    bulkBanGuildIds: [],
+    bulkBansEnabled: false,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],

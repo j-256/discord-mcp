@@ -32,6 +32,7 @@ export const OPERATION_KINDS = [
   "application-intent-enablement",
   "attachment-message",
   "automod-change",
+  "bulk-guild-ban",
   "channel-clone",
   "channel-creation",
   "channel-deletion",

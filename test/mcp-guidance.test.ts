@@ -69,6 +69,7 @@ const SCHEDULED_EVENT_ID = "390000000000000001"
 const STAGE_INSTANCE_ID = "395000000000000001"
 const SOUNDBOARD_SOUND_ID = "397000000000000001"
 const USER_ID = "400000000000000001"
+const SECOND_USER_ID = "400000000000000002"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
 function rawChannel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
@@ -1961,6 +1962,9 @@ function guidanceService(options: {
         automodGuildIds: [],
         banAuditEnabled: false,
         banAuditGuildIds: [],
+        bulkBanAuditEnabled: false,
+        bulkBanGuildIds: [],
+        bulkBansEnabled: false,
         channelCloneAuditEnabled: false,
         channelCloneGuildIds: [],
         channelCloneSourceIds: [],
@@ -2120,6 +2124,7 @@ function guidanceService(options: {
     executeGuildBlueprint: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
+    executeBulkGuildBan: unexpected,
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
@@ -2634,6 +2639,7 @@ function guidanceService(options: {
     planChannelCreation: unexpected,
     planChannelPermissionOverwrite: unexpected,
     planMemberModeration: unexpected,
+    planBulkGuildBan: unexpected,
     planMessageDeletion: unexpected,
     planMessagePin: unexpected,
     planPollCreation: unexpected,
@@ -3067,6 +3073,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Reaction aggregate reads use ordinary readable-channel scope/)
   assert.match(safety.text, /reason is local-only/)
   assert.match(safety.text, /same-message uncertain outcomes remain quarantined/)
+  assert.match(safety.text, /Bulk guild-ban planning and execution require their own exact guild scope/)
+  assert.match(safety.text, /strict response-partition validation/)
+  assert.match(safety.text, /failed subsets are never retried automatically/)
   assert.match(safety.text, /Attachment messages require separate exact channel/)
   assert.match(safety.text, /never accepts URLs or base64/)
   assert.match(safety.text, /Role creation is additive-only/)
@@ -5341,6 +5350,28 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(moderation, /Do not call execute_member_moderation/)
   assert.match(moderation, /one-shot operation-key hash/)
 
+  const bulkGuildBan = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed bulk ban",
+      deleteMessageSeconds: "120",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      userIds: `${SECOND_USER_ID},${USER_ID}`,
+    },
+    name: MCP_PROMPT_NAMES.reviewBulkGuildBan,
+  }))
+  assert.deepEqual(JSON.parse(bulkGuildBan.split("\n")[1] || ""), {
+    auditReason: "Reviewed bulk ban",
+    deleteMessageSeconds: 120,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    userIds: [SECOND_USER_ID, USER_ID],
+  })
+  assert.match(bulkGuildBan, /Call only plan_bulk_guild_ban/)
+  assert.match(bulkGuildBan, /Do not call execute_bulk_guild_ban/)
+  assert.match(bulkGuildBan, /partial-success risks/)
+  assert.match(bulkGuildBan, /failed subsets are never retried/)
+
   const ban = promptText(await client.getPrompt({
     arguments: {
       action: "ban",
@@ -5367,6 +5398,15 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
   const { calls, client } = await connectedFixture(context)
 
   const invalidRequests = [
+    {
+      arguments: {
+        auditReason: "Reviewed bulk ban",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        userIds: `${USER_ID},${USER_ID}`,
+      },
+      name: MCP_PROMPT_NAMES.reviewBulkGuildBan,
+    },
     {
       arguments: {
         acceptanceKind: "bearer",

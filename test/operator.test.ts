@@ -222,6 +222,9 @@ function status(
       automodGuildIds: [],
       banAuditEnabled: false,
       banAuditGuildIds: [],
+      bulkBanAuditEnabled: false,
+      bulkBanGuildIds: [],
+      bulkBansEnabled: false,
       channelCloneAuditEnabled: false,
       channelCloneGuildIds: [],
       channelCloneSourceIds: [],
@@ -519,6 +522,7 @@ function toolService(): DiscordToolService {
     executeGuildBlueprint: unexpected,
     executeGuildScaffold: unexpected,
     executeMemberModeration: unexpected,
+    executeBulkGuildBan: unexpected,
     executeMessagePin: unexpected,
     executeRoleCreation: unexpected,
     executeRoleConfiguration: unexpected,
@@ -572,6 +576,7 @@ function toolService(): DiscordToolService {
     planGuildScaffold: unexpected,
     verifyGuildScaffold: unexpected,
     planMemberModeration: unexpected,
+    planBulkGuildBan: unexpected,
     planRoleCreation: unexpected,
     planRoleConfiguration: unexpected,
     planRoleDeletion: unexpected,
@@ -1124,6 +1129,53 @@ test("doctor and setup explain exact administration scope without Discord writes
     "warn",
   )
   assert.match(setup.warnings.join("\n"), /administration-guild allowlist/)
+})
+
+test("doctor and setup explain reviewed native bulk-ban boundaries without Discord writes", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      bulkBanAudit: true,
+      bulkBans: true,
+    },
+    scopes: {
+      bulkBanGuildIds: [GUILD_ID],
+      protectedUserIds: ["400000000000000001"],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: fixturePolicy({
+      capabilities: {
+        bulkBanAudit: true,
+        bulkBans: true,
+      },
+      scopes: {
+        bulkBanGuildIds: [GUILD_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
+    }),
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.bulkBanAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.bulkBanChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /BAN_MEMBERS plus MANAGE_GUILD/)
+  assert.match(audit?.summary || "", /per-target hierarchy checks/)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /complete-set durable member claims/)
+  assert.match(changes?.summary || "", /one non-retried native batch request/)
+  assert.match(changes?.summary || "", /explicit partial outcomes/)
+  assert.match(omitted.warnings.join("\n"), /bulk-bans toolset/)
 })
 
 test("doctor and setup explain reviewed channel-creation scope without Discord writes", async () => {
@@ -5063,6 +5115,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_application_intent_enablement",
     "review_attachment_message",
     "review_automod_change",
+    "review_bulk_guild_ban",
     "review_channel_clone",
     "review_channel_creation",
     "review_channel_deletion",
@@ -5172,6 +5225,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_application_emoji_change",
     "execute_application_intent_enablement",
     "execute_automod_change",
+    "execute_bulk_guild_ban",
     "execute_channel_clone",
     "execute_channel_deletion",
     "execute_channel_metadata_change",

@@ -407,6 +407,9 @@ function serviceFixture(overrides: {
       ownReaction = emoji
     },
     async bulkDeleteMessages() {},
+    async bulkGuildBan() {
+      throw new Error("Unexpected bulk guild ban")
+    },
     async crosspostMessage() {
       throw new Error("unexpected")
     },
@@ -5304,6 +5307,99 @@ test("service coordinates exact member moderation after verifying identity", asy
     operationKeyHash: operationKeyHash(request.operationKey),
     planDigest: plan.digest,
     targets: [{ id: targetId, kind: "member" }],
+  }])
+})
+
+test("service coordinates one reviewed bulk guild ban over every exact member target", async () => {
+  const targetA = "700000000000000011"
+  const targetB = "700000000000000012"
+  const botRoleId = "800000000000000011"
+  const targetRoleId = "800000000000000012"
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const operationStore = new KeyedMemoryOperationStore()
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildBan(guildId, userId) {
+        throw new DiscordApiError({
+          message: "Discord ban not found",
+          method: "GET",
+          route: `/guilds/${guildId}/bans/${userId}`,
+          status: 404,
+        })
+      },
+      async getGuildMember(guildId, userId) {
+        if (userId === BOT_ID) return { roles: [botRoleId], user: bot() }
+        if (userId === targetA) {
+          return {
+            roles: [targetRoleId],
+            user: { id: targetA, username: "target-a" },
+          }
+        }
+        throw new DiscordApiError({
+          message: "Discord member not found",
+          method: "GET",
+          route: `/guilds/${guildId}/members/${userId}`,
+          status: 404,
+        })
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.BAN_MEMBERS | DISCORD_PERMISSIONS.MANAGE_GUILD,
+              "bot-role",
+            ),
+            position: 10,
+          },
+          { ...role(targetRoleId, 0n, "target-role"), position: 1 },
+        ]
+      },
+      async getUser(userId) {
+        return { id: userId, username: "target-b" }
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        bulkBanAudit: true,
+        bulkBans: true,
+      },
+      scopes: {
+        bulkBanGuildIds: [GUILD_ID],
+      },
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    auditReason: "Reviewed safety incident 43",
+    deleteMessageSeconds: 0,
+    guildId: GUILD_ID,
+    operationKey: "bulk-guild-ban-attempt-0001",
+    userIds: [targetB, targetA],
+  }
+
+  const plan = await service.planBulkGuildBan(request)
+  await assert.rejects(
+    () => service.executeBulkGuildBan(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  assert.deepEqual(plan.targets.map((target) => target.id), [targetA, targetB])
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "bulk-guild-ban",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [
+      { id: targetA, kind: "member" },
+      { id: targetB, kind: "member" },
+    ],
   }])
 })
 

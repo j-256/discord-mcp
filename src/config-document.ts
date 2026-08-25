@@ -137,6 +137,8 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "automodAudit",
   "automodChanges",
   "banAudit",
+  "bulkBanAudit",
+  "bulkBans",
   "channelCreation",
   "channelDeletionAudit",
   "channelDeletions",
@@ -223,6 +225,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "automodAlertChannelIds",
   "automodGuildIds",
   "banAuditGuildIds",
+  "bulkBanGuildIds",
   "channelCreationGuildIds",
   "channelDeletionIds",
   "channelCloneGuildIds",
@@ -389,6 +392,9 @@ const INVITE_CREATION_CAPABILITY_DESCRIPTION = "Enable reviewed finite invite cr
 const INVITE_CREATION_SCOPE_DESCRIPTION = "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
 const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for exclusive private invite capability files"
 const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed additive application privileged-intent enablement"
+const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
+const BULK_BANS_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban execution"
+const BULK_BAN_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "applicationIntentChanges") {
@@ -396,6 +402,12 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "channelMetadataChanges") {
     return CHANNEL_METADATA_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "bulkBanAudit") {
+    return BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "bulkBans") {
+    return BULK_BANS_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "inviteCreation") {
     return INVITE_CREATION_CAPABILITY_DESCRIPTION
@@ -409,6 +421,9 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "inviteCreationChannelIds") {
     return INVITE_CREATION_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "bulkBanGuildIds") {
+    return BULK_BAN_SCOPE_DESCRIPTION
   }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }

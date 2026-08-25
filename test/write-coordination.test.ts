@@ -448,6 +448,66 @@ test("coordination accepts one exact maximum-size deletion batch and rejects exp
   )
 })
 
+test("coordination requires two through 200 unique member targets for bulk guild bans", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const memberTargets = Array.from(
+    { length: 200 },
+    (_, index) => writeResourceTarget(
+      "member",
+      (400_000_000_000_000_001n + BigInt(index)).toString(),
+    ),
+  )
+
+  const publishedTargets = await coordinator.run({
+    kind: "bulk-guild-ban",
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    targets: memberTargets,
+  }, async () => (await claimFiles(directory)).length)
+
+  assert.equal(publishedTargets, 200)
+  assert.deepEqual(await claimFiles(directory), [])
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-guild-ban",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: memberTargets.slice(0, 1),
+    }, async () => "unsafe"),
+    /requires 2-200 targets/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-guild-ban",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [
+        ...memberTargets,
+        writeResourceTarget("member", "400000000000000201"),
+      ],
+    }, async () => "unsafe"),
+    /requires 2-200 targets/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-guild-ban",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberTargets[0]!, memberTargets[0]!],
+    }, async () => "unsafe"),
+    /unique exact member targets/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-guild-ban",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberTargets[0]!, writeResourceTarget("role", MESSAGE_ID)],
+    }, async () => "unsafe"),
+    /unique exact member targets/,
+  )
+})
+
 test("coordination permits only the exact role-deletion evidence target count", async (context) => {
   const { coordinator, directory } = await fixture(context)
   const targets = [

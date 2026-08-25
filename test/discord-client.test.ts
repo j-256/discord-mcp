@@ -1515,6 +1515,171 @@ test("Discord client never retries member moderation or leaks transport causes",
   assert.equal(sleeps, 0)
 })
 
+test("Discord client sends one exact bulk guild ban and projects its response partition", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)),
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse({
+        banned_users: ["402", "400"],
+        failed_users: ["401"],
+      })
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.bulkGuildBan(
+    "100",
+    ["400", "401", "402"],
+    3_600,
+    "Safety review / case 42",
+  )
+
+  assert.deepEqual(result, {
+    bannedUserIds: ["400", "402"],
+    failedUserIds: ["401"],
+  })
+  assert.deepEqual(requests, [{
+    body: {
+      delete_message_seconds: 3_600,
+      user_ids: ["400", "401", "402"],
+    },
+    method: "POST",
+    reason: "Safety%20review%20%2F%20case%2042",
+    url: `${API_BASE_URL}/guilds/100/bulk-ban`,
+  }])
+})
+
+test("Discord client accepts the full bulk guild ban target limit", async () => {
+  const userIds = Array.from(
+    { length: 200 },
+    (_, index) => String(1_000 + index),
+  )
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      banned_users: [...userIds].reverse(),
+      failed_users: [],
+    }),
+    token: TOKEN,
+  })
+
+  const result = await client.bulkGuildBan("100", userIds, 0, "reviewed")
+
+  assert.deepEqual(result.bannedUserIds, userIds)
+  assert.deepEqual(result.failedUserIds, [])
+})
+
+test("Discord client rejects invalid bulk guild ban parameters before fetching", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ banned_users: [], failed_users: [] })
+    },
+    token: TOKEN,
+  })
+  const tooManyUserIds = Array.from(
+    { length: 201 },
+    (_, index) => String(1_000 + index),
+  )
+  const operations = [
+    () => client.bulkGuildBan("100", ["400"], 0, "reviewed"),
+    () => client.bulkGuildBan("100", tooManyUserIds, 0, "reviewed"),
+    () => client.bulkGuildBan("100", ["400", "400"], 0, "reviewed"),
+    () => client.bulkGuildBan("100", ["0", "401"], 0, "reviewed"),
+    () => client.bulkGuildBan("100", ["400", "401"], 604_801, "reviewed"),
+    () => client.bulkGuildBan("100", ["400", "401"], 0, " "),
+  ]
+
+  for (const operation of operations) await assert.rejects(operation())
+  assert.equal(requests, 0)
+})
+
+test("Discord client rejects malformed bulk guild ban response partitions", async () => {
+  const malformedResponses = [
+    null,
+    { banned_users: ["400"], failed_users: ["401"], future: true },
+    { banned_users: ["400"] },
+    { banned_users: "400", failed_users: ["401"] },
+    { banned_users: ["400", "400"], failed_users: ["401"] },
+    { banned_users: ["400"], failed_users: ["400", "401"] },
+    { banned_users: ["400"], failed_users: [] },
+    { banned_users: ["400"], failed_users: ["402"] },
+    { banned_users: ["0"], failed_users: ["401"] },
+  ]
+
+  for (const response of malformedResponses) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(response),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => client.bulkGuildBan("100", ["400", "401"], 0, "reviewed"),
+      /invalid bulk guild ban evidence/,
+    )
+  }
+})
+
+test("Discord client never retries bulk guild bans and redacts sensitive failures", async () => {
+  let rateLimitRequests = 0
+  let sleeps = 0
+  const rateLimitedClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      rateLimitRequests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => rateLimitedClient.bulkGuildBan("100", ["400", "401"], 0, "reviewed"),
+    (error: DiscordApiError) => {
+      assert.equal(error.route, "/guilds/{guild.id}/bulk-ban")
+      assert.equal(error.status, 429)
+      return true
+    },
+  )
+  assert.equal(rateLimitRequests, 1)
+  assert.equal(sleeps, 0)
+
+  const secret = "private-bulk-ban-transport-cause"
+  const transportClient = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(secret)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => transportClient.bulkGuildBan("100", ["400", "401"], 0, "reviewed"),
+    (error: Error) => {
+      assert.doesNotMatch(error.message, new RegExp(secret))
+      assert.doesNotMatch(error.message, /100|400|401/)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+})
+
 test("Discord client projects exact member voice state and sends one-field PATCH bodies", async () => {
   const requests: Array<{
     body: unknown

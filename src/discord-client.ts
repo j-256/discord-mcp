@@ -1290,6 +1290,11 @@ export interface ModifyGuildMemberTimeoutInput {
   communicationDisabledUntil: string | null
 }
 
+export interface DiscordBulkGuildBanResponse {
+  bannedUserIds: string[]
+  failedUserIds: string[]
+}
+
 export interface ModifyCurrentApplicationFlagsInput {
   flags: number
 }
@@ -1416,6 +1421,7 @@ type QueryValue = QueryScalar | readonly QueryScalar[] | undefined
 const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new Set([
   "add_own_reaction",
   "add_thread_member",
+  "bulk_guild_ban",
   "crosspost_message",
   "create_application_emoji",
   "create_component_message",
@@ -7962,6 +7968,55 @@ function compareDiscordSnowflakes(left: string, right: string): number {
   return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
 }
 
+function projectBulkGuildBanResponse(
+  value: unknown,
+  requestedUserIds: readonly string[],
+): DiscordBulkGuildBanResponse {
+  const invalid = (): DiscordTransportError => new DiscordTransportError(
+    "Discord returned invalid bulk guild ban evidence",
+    "discord-client-error",
+  )
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid()
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).sort().join("\0") !== "banned_users\0failed_users") {
+    throw invalid()
+  }
+  if (!Array.isArray(record.banned_users) || !Array.isArray(record.failed_users)) {
+    throw invalid()
+  }
+  const bannedUserIds = record.banned_users
+  const failedUserIds = record.failed_users
+  if (
+    bannedUserIds.length > requestedUserIds.length
+    || failedUserIds.length > requestedUserIds.length
+    || bannedUserIds.some((userId) => typeof userId !== "string")
+    || failedUserIds.some((userId) => typeof userId !== "string")
+  ) {
+    throw invalid()
+  }
+  try {
+    for (const userId of [...bannedUserIds, ...failedUserIds]) {
+      assertPositiveSnowflake(userId, "Discord bulk guild ban response user ID")
+    }
+  } catch {
+    throw invalid()
+  }
+  const responseUserIds = [...bannedUserIds, ...failedUserIds] as string[]
+  const responseSet = new Set(responseUserIds)
+  const requestedSet = new Set(requestedUserIds)
+  if (
+    responseSet.size !== responseUserIds.length
+    || responseSet.size !== requestedSet.size
+    || [...responseSet].some((userId) => !requestedSet.has(userId))
+  ) {
+    throw invalid()
+  }
+  return {
+    bannedUserIds: [...bannedUserIds].sort(compareDiscordSnowflakes) as string[],
+    failedUserIds: [...failedUserIds].sort(compareDiscordSnowflakes) as string[],
+  }
+}
+
 function projectGuildApplicationCommandPermissions(
   value: unknown,
   applicationId: string,
@@ -10788,6 +10843,56 @@ export class DiscordClient {
       diagnosticRoute: "/guilds/{guild.id}/bans/{user.id}",
       suppressFailureCause: true,
     })
+  }
+
+  async bulkGuildBan(
+    guildId: string,
+    userIds: readonly string[],
+    deleteMessageSeconds: number,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordBulkGuildBanResponse> {
+    assertPositiveSnowflake(guildId, "Discord bulk guild ban guild ID")
+    if (
+      !Array.isArray(userIds)
+      || userIds.length < 2
+      || userIds.length > DISCORD_LIMITS.bulkGuildBanUsers
+    ) {
+      throw new RangeError(
+        `Discord bulk guild ban user IDs must contain between 2 and ${DISCORD_LIMITS.bulkGuildBanUsers} values`,
+      )
+    }
+    if (new Set(userIds).size !== userIds.length) {
+      throw new RangeError("Discord bulk guild ban user IDs must not contain duplicates")
+    }
+    for (const userId of userIds) {
+      assertPositiveSnowflake(userId, "Discord bulk guild ban user ID")
+    }
+    assertIntegerRange(
+      deleteMessageSeconds,
+      0,
+      DISCORD_LIMITS.banDeleteMessageSeconds,
+      "Discord bulk guild ban message-history deletion seconds",
+    )
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "bulk_guild_ban",
+      `/guilds/${guildId}/bulk-ban`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: {
+          delete_message_seconds: deleteMessageSeconds,
+          user_ids: userIds,
+        },
+        diagnosticRoute: "/guilds/{guild.id}/bulk-ban",
+        expectedSuccessStatus: 200,
+        maxResponseBytes: DISCORD_LIMITS.bulkGuildBanResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectBulkGuildBanResponse(response, userIds)
   }
 
   async removeGuildBan(

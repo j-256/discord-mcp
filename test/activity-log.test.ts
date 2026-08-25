@@ -18,6 +18,7 @@ import {
   type ApplicationIntentActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
+  type BulkGuildBanActivity,
   type ChannelCloneActivity,
   type ChannelCreationActivity,
   type ChannelDeletionActivity,
@@ -189,6 +190,54 @@ function moderation(
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     userId: "400",
     verification: status === "completed" ? "match" : null,
+  }
+}
+
+function bulkGuildBan(
+  id: string,
+  status: BulkGuildBanActivity["status"],
+): BulkGuildBanActivity {
+  const response = status === "completed"
+    ? { banned: ["400", "401"], failed: [] }
+    : status === "completed-with-drift"
+      ? { banned: ["400"], failed: ["401"] }
+      : status === "partial"
+        ? { banned: ["400"], failed: ["401"] }
+        : status === "failed"
+          ? { banned: [], failed: ["400", "401"] }
+          : { banned: [], failed: [] }
+  const observed = ["completed", "completed-with-drift"].includes(status)
+    ? { banned: ["400", "401"], notBanned: [] }
+    : ["partial", "partial-with-drift"].includes(status)
+      ? { banned: ["400"], notBanned: ["401"] }
+      : status === "failed"
+        ? { banned: [], notBanned: ["400", "401"] }
+        : status === "uncertain"
+          ? { banned: ["400"], notBanned: [] }
+          : { banned: [], notBanned: [] }
+  return {
+    deleteMessageSeconds: 3_600,
+    error: ["failed", "partial", "partial-with-drift", "uncertain"].includes(status)
+      ? "BulkGuildBanError.partial"
+      : null,
+    guildId: "100",
+    id,
+    kind: "bulk-guild-ban",
+    observedBannedUserIds: observed.banned,
+    observedNotBannedUserIds: observed.notBanned,
+    operationKeyHash: `sha256:${"d".repeat(64)}`,
+    planDigest: `hmac-sha256:${"e".repeat(64)}`,
+    requestedUserIds: ["400", "401"],
+    responseBannedUserIds: response.banned,
+    responseFailedUserIds: response.failed,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" || status === "partial" || status === "failed"
+      ? "match"
+      : status === "completed-with-drift" || status === "partial-with-drift"
+        ? "drift"
+        : null,
   }
 }
 
@@ -1571,6 +1620,55 @@ test("JSONL activity log rejects member moderation records with private fields",
     /private reason|private nickname|private role|private username/,
   )
   assert.equal(result.entries[0]?.kind, "member-moderation")
+})
+
+test("JSONL activity log keeps exact bulk guild ban evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const statuses: BulkGuildBanActivity["status"][] = [
+    "pending",
+    "completed",
+    "completed-with-drift",
+    "partial",
+    "partial-with-drift",
+    "failed",
+    "uncertain",
+  ]
+  for (const [index, status] of statuses.entries()) {
+    await store.append(bulkGuildBan(String(index + 1), status))
+  }
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...bulkGuildBan("8", "completed"),
+      auditReason: "private reason",
+      profiles: [{ username: "private username" }],
+      rawOperationKey: "private operation key",
+      roleIds: ["private role"],
+    })}\n${JSON.stringify({
+      ...bulkGuildBan("9", "partial"),
+      requestedUserIds: ["401", "400"],
+    })}\n${JSON.stringify({
+      ...bulkGuildBan("10", "completed"),
+      responseFailedUserIds: ["401"],
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+
+  assert.deepEqual(
+    result.entries.map((entry) => entry.id),
+    ["7", "6", "5", "4", "3", "2", "1"],
+  )
+  assert.equal(result.skippedLines, 3)
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private reason|private username|private operation key|private role/,
+  )
+  assert.equal(result.entries[0]?.kind, "bulk-guild-ban")
 })
 
 test("JSONL activity log strips channel content and raw operation keys from creation records", async (context) => {

@@ -35,6 +35,9 @@ export interface PolicyDescription {
   automodGuildIds: string[]
   banAuditEnabled: boolean
   banAuditGuildIds: string[]
+  bulkBanAuditEnabled: boolean
+  bulkBanGuildIds: string[]
+  bulkBansEnabled: boolean
   channelCloneAuditEnabled: boolean
   channelCloneGuildIds: string[]
   channelCloneSourceIds: string[]
@@ -206,6 +209,8 @@ export class ScopePolicy {
   readonly #allowAutomodAudit: boolean
   readonly #allowAutomodChanges: boolean
   readonly #allowBanAudit: boolean
+  readonly #allowBulkBanAudit: boolean
+  readonly #allowBulkBans: boolean
   readonly #allowChannelCloneAudit: boolean
   readonly #allowChannelCloning: boolean
   readonly #allowChannelCreation: boolean
@@ -293,6 +298,7 @@ export class ScopePolicy {
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
+  readonly #bulkBanGuildIds: ReadonlySet<string>
   readonly #channelCloneGuildIds: ReadonlySet<string>
   readonly #channelCloneSourceIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
@@ -383,6 +389,8 @@ export class ScopePolicy {
     | "allowAutomodAudit"
     | "allowAutomodChanges"
     | "allowBanAudit"
+    | "allowBulkBanAudit"
+    | "allowBulkBans"
     | "allowChannelCloneAudit"
     | "allowChannelCloning"
     | "allowChannelDeletionAudit"
@@ -473,6 +481,7 @@ export class ScopePolicy {
     | "automodAlertChannelIds"
     | "automodGuildIds"
     | "banAuditGuildIds"
+    | "bulkBanGuildIds"
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
     | "guildExpressionGuildIds"
@@ -542,6 +551,8 @@ export class ScopePolicy {
     this.#allowAutomodAudit = config.allowAutomodAudit ?? false
     this.#allowAutomodChanges = config.allowAutomodChanges ?? false
     this.#allowBanAudit = config.allowBanAudit ?? false
+    this.#allowBulkBanAudit = config.allowBulkBanAudit ?? false
+    this.#allowBulkBans = config.allowBulkBans ?? false
     this.#allowChannelCloneAudit = config.allowChannelCloneAudit ?? false
     this.#allowChannelCloning = config.allowChannelCloning ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
@@ -632,6 +643,7 @@ export class ScopePolicy {
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
+    this.#bulkBanGuildIds = config.bulkBanGuildIds ?? new Set()
     this.#channelCloneGuildIds = config.channelCloneGuildIds ?? new Set()
     this.#channelCloneSourceIds = config.channelCloneSourceIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
@@ -741,6 +753,11 @@ export class ScopePolicy {
       automodGuildIds: [...this.#automodGuildIds].sort(),
       banAuditEnabled: this.#allowBanAudit && this.#banAuditGuildIds.size > 0,
       banAuditGuildIds: [...this.#banAuditGuildIds].sort(),
+      bulkBanAuditEnabled: this.#allowBulkBanAudit && this.#bulkBanGuildIds.size > 0,
+      bulkBanGuildIds: [...this.#bulkBanGuildIds].sort(),
+      bulkBansEnabled: this.#allowBulkBanAudit
+        && this.#allowBulkBans
+        && this.#bulkBanGuildIds.size > 0,
       channelCloneAuditEnabled: this.#allowChannelCloneAudit
         && this.#channelCloneGuildIds.size > 0
         && this.#channelCloneSourceIds.size > 0,
@@ -1104,6 +1121,26 @@ export class ScopePolicy {
     }
     if (!this.#banAuditGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the ban-audit scope`)
+    }
+  }
+
+  assertBulkBanAuditAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowBulkBanAudit) {
+      throw new PolicyError("Discord bulk-ban audit is disabled by connector configuration")
+    }
+    if (this.#bulkBanGuildIds.size === 0) {
+      throw new PolicyError("Discord bulk-ban audit requires an explicit guild allowlist")
+    }
+    if (!this.#bulkBanGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the bulk-ban scope`)
+    }
+  }
+
+  assertBulkBanExecutionAllowed(guildId: string): void {
+    this.assertBulkBanAuditAllowed(guildId)
+    if (!this.#allowBulkBans) {
+      throw new PolicyError("Discord bulk bans are disabled by connector configuration")
     }
   }
 

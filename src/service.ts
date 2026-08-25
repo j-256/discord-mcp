@@ -118,6 +118,16 @@ import {
   normalizeMemberModerationRequest,
 } from "./administration-service.js"
 import type {
+  BulkGuildBanPlan,
+  BulkGuildBanRequest,
+  BulkGuildBanResult,
+  BulkGuildBanServiceOptions,
+} from "./bulk-guild-ban-service.js"
+import {
+  BulkGuildBanService,
+  normalizeBulkGuildBanRequest,
+} from "./bulk-guild-ban-service.js"
+import type {
   ChannelAdministrationServiceOptions,
   ChannelCreationPlan,
   ChannelCreationRequest,
@@ -670,6 +680,7 @@ export interface DiscordServiceClient {
   addGuildMemberRole: DiscordClient["addGuildMemberRole"]
   addOwnReaction: DiscordClient["addOwnReaction"]
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
+  bulkGuildBan: DiscordClient["bulkGuildBan"]
   createApplicationEmoji: DiscordClient["createApplicationEmoji"]
   crosspostMessage: DiscordClient["crosspostMessage"]
   createGuildBan: DiscordClient["createGuildBan"]
@@ -863,6 +874,10 @@ export interface ConnectorServiceOptions {
   >
   automodOptions?: Pick<
     AutoModerationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  bulkGuildBanOptions?: Pick<
+    BulkGuildBanServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   channelAdministrationOptions?: Pick<
@@ -1165,6 +1180,7 @@ export class ConnectorService {
   readonly #componentMessageService: ComponentMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
+  readonly #bulkGuildBanService: BulkGuildBanService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #channelCloneService: ChannelCloneService
   readonly #channelDeletionService: ChannelDeletionService
@@ -1286,6 +1302,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.administrationOptions,
+    })
+    this.#bulkGuildBanService = new BulkGuildBanService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.bulkGuildBanOptions,
     })
     this.#channelAdministrationService = new ChannelAdministrationService({
       activityStore: this.#activityStore,
@@ -3261,6 +3284,20 @@ export class ConnectorService {
     )
   }
 
+  async planBulkGuildBan(
+    request: BulkGuildBanRequest,
+    options: RequestOptions = {},
+  ): Promise<BulkGuildBanPlan> {
+    normalizeBulkGuildBanRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#bulkGuildBanService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberRoleChange(
     request: MemberRoleChangeRequest,
     options: RequestOptions = {},
@@ -4409,6 +4446,31 @@ export class ConnectorService {
       planDigest,
       [writeResourceTarget("member", normalized.userId)],
       () => this.#administrationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeBulkGuildBan(
+    request: BulkGuildBanRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<BulkGuildBanResult> {
+    const normalized = normalizeBulkGuildBanRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord bulk guild ban plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "bulk-guild-ban",
+      normalized.operationKey,
+      planDigest,
+      normalized.userIds.map((userId) => writeResourceTarget("member", userId)),
+      () => this.#bulkGuildBanService.execute(
         identity.application.id,
         identity.bot.id,
         request,

@@ -34,6 +34,42 @@ export class BanAuditEvidenceError extends ConfigurationError {
   override name = "BanAuditEvidenceError"
 }
 
+export class BulkGuildBanEvidenceError extends Error {
+  override name = "BulkGuildBanEvidenceError"
+}
+
+export class BulkGuildBanPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord bulk guild ban evidence does not match the reviewed plan")
+    this.name = "BulkGuildBanPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class BulkGuildBanOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord bulk guild ban operation key has already been reserved")
+    this.name = "BulkGuildBanOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class BulkGuildBanExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "BulkGuildBanExecutionError"
+    this.result = result
+  }
+}
+
 export class InviteEvidenceError extends Error {
   override name = "InviteEvidenceError"
 }

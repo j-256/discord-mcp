@@ -214,6 +214,11 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
     "guildId",
     "administrationGuildIds",
   ),
+  promptBinding(
+    MCP_PROMPT_NAMES.reviewBulkGuildBan,
+    "guildId",
+    "bulkBanGuildIds",
+  ),
 ].sort((left, right) => {
   const leftKey = `${left.kind}\u0000${left.reference}\u0000${left.argument}`
   const rightKey = `${right.kind}\u0000${right.reference}\u0000${right.argument}`

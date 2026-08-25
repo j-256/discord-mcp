@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
-import { DISCORD_SNOWFLAKE_PATTERN } from "./constants.js"
+import { DISCORD_LIMITS, DISCORD_SNOWFLAKE_PATTERN } from "./constants.js"
 import {
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
@@ -185,6 +185,7 @@ const MAX_CLAIM_BYTES = 16_384
 const MAX_RESOLUTION_BYTES = 32_768
 const MAX_TARGETS = 8
 const MAX_DELETION_TARGETS = 100
+const MAX_BULK_GUILD_BAN_TARGETS = DISCORD_LIMITS.bulkGuildBanUsers
 const MAX_ROLE_DELETION_TARGETS = 9
 const CLAIM_FILE = "claim.json"
 const ACKNOWLEDGEMENT_FILE = "acknowledgement.json"
@@ -321,12 +322,15 @@ function normalizeTargets(
 ): WriteCoordinationTarget[] {
   const maximum = kind === "message-deletion"
     ? MAX_DELETION_TARGETS
-    : kind === "role-deletion"
-      ? MAX_ROLE_DELETION_TARGETS
-      : MAX_TARGETS
-  if (!Array.isArray(values) || values.length < 1 || values.length > maximum) {
+    : kind === "bulk-guild-ban"
+      ? MAX_BULK_GUILD_BAN_TARGETS
+      : kind === "role-deletion"
+        ? MAX_ROLE_DELETION_TARGETS
+        : MAX_TARGETS
+  const minimum = kind === "bulk-guild-ban" ? 2 : 1
+  if (!Array.isArray(values) || values.length < minimum || values.length > maximum) {
     throw new WriteCoordinationStateError(
-      `Discord write coordination requires 1-${maximum} targets for ${kind}`,
+      `Discord write coordination requires ${minimum}-${maximum} targets for ${kind}`,
     )
   }
   const byDescriptor = new Map<string, WriteCoordinationTarget>()
@@ -338,6 +342,17 @@ function normalizeTargets(
       )
     }
     byDescriptor.set(targetDescriptor(target), target)
+  }
+  if (
+    kind === "bulk-guild-ban"
+    && (
+      byDescriptor.size !== values.length
+      || [...byDescriptor.values()].some((target) => target.kind !== "member")
+    )
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord bulk guild ban coordination requires unique exact member targets",
+    )
   }
   if (isApplicationOperationKind(kind) && byDescriptor.size !== 1) {
     throw new WriteCoordinationStateError(

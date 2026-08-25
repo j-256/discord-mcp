@@ -43,6 +43,7 @@ type McpToolWorkflow =
   | "application-intent-enablement"
   | "attachment-message"
   | "automod-change"
+  | "bulk-guild-ban"
   | "channel-cloning"
   | "channel-creation"
   | "channel-deletion"
@@ -335,6 +336,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  execute_bulk_guild_ban: {
+    keywords: ["ban", "batch", "bulk", "execute", "guild", "moderate", "users"],
+    toolset: "bulk-bans",
+    workflow: "bulk-guild-ban",
   },
   execute_member_nickname_change: {
     keywords: ["change", "clear", "execute", "member", "nick", "nickname", "profile"],
@@ -657,6 +663,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
+  },
+  plan_bulk_guild_ban: {
+    keywords: ["ban", "batch", "bulk", "guild", "plan", "review", "users"],
+    toolset: "bulk-bans",
+    workflow: "bulk-guild-ban",
   },
   plan_member_nickname_change: {
     keywords: ["change", "clear", "member", "nick", "nickname", "plan", "profile", "review"],

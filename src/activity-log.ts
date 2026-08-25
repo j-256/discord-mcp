@@ -123,6 +123,24 @@ const MEMBER_MODERATION_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "userId",
   "verification",
 ])
+const BULK_GUILD_BAN_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "deleteMessageSeconds",
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "observedBannedUserIds",
+  "observedNotBannedUserIds",
+  "operationKeyHash",
+  "planDigest",
+  "requestedUserIds",
+  "responseBannedUserIds",
+  "responseFailedUserIds",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+])
 
 export type DeletionActivityStatus =
   | "completed"
@@ -196,6 +214,34 @@ export interface MemberModerationActivity {
   timeoutUntil: string | null
   timestamp: string
   userId: string
+  verification: "drift" | "match" | null
+}
+
+export type BulkGuildBanActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "partial"
+  | "partial-with-drift"
+  | "pending"
+  | "uncertain"
+
+export interface BulkGuildBanActivity {
+  deleteMessageSeconds: number
+  error: string | null
+  guildId: string
+  id: string
+  kind: "bulk-guild-ban"
+  observedBannedUserIds: string[]
+  observedNotBannedUserIds: string[]
+  operationKeyHash: string
+  planDigest: string
+  requestedUserIds: string[]
+  responseBannedUserIds: string[]
+  responseFailedUserIds: string[]
+  schemaVersion: number
+  status: BulkGuildBanActivityStatus
+  timestamp: string
   verification: "drift" | "match" | null
 }
 
@@ -1274,6 +1320,7 @@ export type ActivityEntry =
   | ApplicationIntentActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
+  | BulkGuildBanActivity
   | ChannelCloneActivity
   | ChannelCreationActivity
   | ChannelDeletionActivity
@@ -1348,6 +1395,29 @@ function positiveActivitySnowflake(value: string): boolean {
   return DISCORD_SNOWFLAKE_PATTERN.test(value)
     && BigInt(value) >= 1n
     && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+}
+
+function compareActivitySnowflakes(left: string, right: string): number {
+  const leftId = BigInt(left)
+  const rightId = BigInt(right)
+  return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+}
+
+function canonicalActivitySnowflakeIds(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): value is string[] {
+  if (
+    !Array.isArray(value)
+    || value.length < minimum
+    || value.length > maximum
+    || value.some((entry) => typeof entry !== "string" || !positiveActivitySnowflake(entry))
+    || new Set(value).size !== value.length
+  ) {
+    return false
+  }
+  return JSON.stringify(value) === JSON.stringify([...value].sort(compareActivitySnowflakes))
 }
 
 function parseDeletionActivity(value: unknown): DeletionActivity | undefined {
@@ -1650,6 +1720,176 @@ function parseMemberModerationActivity(
     timeoutUntil: record.timeoutUntil as string | null,
     timestamp: record.timestamp,
     userId: record.userId,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseBulkGuildBanActivity(
+  value: unknown,
+): BulkGuildBanActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const status = String(record.status)
+  if (
+    Object.keys(record).length !== BULK_GUILD_BAN_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !BULK_GUILD_BAN_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "bulk-guild-ban"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "partial",
+      "partial-with-drift",
+      "pending",
+      "uncertain",
+    ].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || !Number.isInteger(record.deleteMessageSeconds)
+    || (record.deleteMessageSeconds as number) < 0
+    || (record.deleteMessageSeconds as number) > DISCORD_LIMITS.banDeleteMessageSeconds
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !canonicalActivitySnowflakeIds(
+      record.requestedUserIds,
+      2,
+      DISCORD_LIMITS.bulkGuildBanUsers,
+    )
+    || !canonicalActivitySnowflakeIds(
+      record.responseBannedUserIds,
+      0,
+      DISCORD_LIMITS.bulkGuildBanUsers,
+    )
+    || !canonicalActivitySnowflakeIds(
+      record.responseFailedUserIds,
+      0,
+      DISCORD_LIMITS.bulkGuildBanUsers,
+    )
+    || !canonicalActivitySnowflakeIds(
+      record.observedBannedUserIds,
+      0,
+      DISCORD_LIMITS.bulkGuildBanUsers,
+    )
+    || !canonicalActivitySnowflakeIds(
+      record.observedNotBannedUserIds,
+      0,
+      DISCORD_LIMITS.bulkGuildBanUsers,
+    )
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+  ) {
+    return undefined
+  }
+  const requestedUserIds = record.requestedUserIds as string[]
+  const responseBannedUserIds = record.responseBannedUserIds as string[]
+  const responseFailedUserIds = record.responseFailedUserIds as string[]
+  const observedBannedUserIds = record.observedBannedUserIds as string[]
+  const observedNotBannedUserIds = record.observedNotBannedUserIds as string[]
+  const requestedSet = new Set(requestedUserIds)
+  const responseIds = [...responseBannedUserIds, ...responseFailedUserIds]
+  const observedIds = [...observedBannedUserIds, ...observedNotBannedUserIds]
+  const responseEmpty = responseIds.length === 0
+  const responseComplete = responseIds.length === requestedUserIds.length
+    && new Set(responseIds).size === requestedUserIds.length
+  const observationsComplete = observedIds.length === requestedUserIds.length
+    && new Set(observedIds).size === requestedUserIds.length
+  const responseMatchesObservation = responseComplete
+    && JSON.stringify(responseBannedUserIds) === JSON.stringify(observedBannedUserIds)
+    && JSON.stringify(responseFailedUserIds) === JSON.stringify(observedNotBannedUserIds)
+  if (
+    responseIds.some((userId) => !requestedSet.has(userId))
+    || observedIds.some((userId) => !requestedSet.has(userId))
+    || responseBannedUserIds.some((userId) => responseFailedUserIds.includes(userId))
+    || observedBannedUserIds.some((userId) => observedNotBannedUserIds.includes(userId))
+    || (!responseEmpty && !responseComplete)
+    || (status === "pending" && (
+      !responseEmpty
+      || observedIds.length !== 0
+      || record.error !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+      || !observationsComplete
+      || observedBannedUserIds.length !== requestedUserIds.length
+      || !responseMatchesObservation
+    ))
+    || (status === "completed-with-drift" && (
+      record.error !== null
+      || record.verification !== "drift"
+      || !observationsComplete
+      || observedBannedUserIds.length !== requestedUserIds.length
+      || (responseComplete && responseMatchesObservation)
+    ))
+    || (status === "partial" && (
+      record.error === null
+      || record.verification !== "match"
+      || !observationsComplete
+      || observedBannedUserIds.length === 0
+      || observedNotBannedUserIds.length === 0
+      || !responseMatchesObservation
+    ))
+    || (status === "partial-with-drift" && (
+      record.error === null
+      || record.verification !== "drift"
+      || !observationsComplete
+      || observedBannedUserIds.length === 0
+      || observedNotBannedUserIds.length === 0
+      || (responseComplete && responseMatchesObservation)
+    ))
+    || (status === "failed" && (
+      record.error === null
+      || !["drift", "match"].includes(String(record.verification))
+      || !observationsComplete
+      || observedBannedUserIds.length !== 0
+      || (
+        record.verification === "drift"
+        && (!responseComplete || responseMatchesObservation)
+      )
+      || (
+        record.verification === "match"
+        && responseComplete
+        && !responseMatchesObservation
+      )
+    ))
+    || (status === "uncertain" && (
+      record.error === null
+      || record.verification !== null
+      || (
+        observationsComplete
+        && observedBannedUserIds.length === requestedUserIds.length
+      )
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    deleteMessageSeconds: record.deleteMessageSeconds as number,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "bulk-guild-ban",
+    observedBannedUserIds,
+    observedNotBannedUserIds,
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    requestedUserIds,
+    responseBannedUserIds,
+    responseFailedUserIds,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as BulkGuildBanActivityStatus,
+    timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
 }
@@ -5093,6 +5333,7 @@ function parseStageInstanceActivity(
 
 function parseActivityEntry(value: unknown): ActivityEntry | undefined {
   return parseAnnouncementCrosspostActivity(value)
+    || parseBulkGuildBanActivity(value)
     || parseMessageForwardActivity(value)
     || parseAnnouncementSubscriptionActivity(value)
     || parseNativeInteractionCommandActivity(value)

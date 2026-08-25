@@ -399,6 +399,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const attachment = { ...receipt(), kind: "attachment-message" as const }
   const component = componentReceipt()
   const automod = { ...receipt(), kind: "automod-change" as const }
+  const bulkGuildBan = { ...receipt(), kind: "bulk-guild-ban" as const }
   const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }
   const forumTag = { ...receipt(), kind: "forum-tag-change" as const }
@@ -432,6 +433,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(attachment)).created, true)
   assert.equal((await store.reserve(component)).created, true)
   assert.equal((await store.reserve(automod)).created, true)
+  assert.equal((await store.reserve(bulkGuildBan)).created, true)
   assert.equal((await store.reserve(overwrite)).created, true)
   assert.equal((await store.reserve(forum)).created, true)
   assert.equal((await store.reserve(forumTag)).created, true)
@@ -473,6 +475,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("automod-change", automod.operationKeyHash),
     automod,
+  )
+  assert.deepEqual(
+    await store.get("bulk-guild-ban", bulkGuildBan.operationKeyHash),
+    bulkGuildBan,
   )
   assert.deepEqual(
     await store.get("channel-creation", channel.operationKeyHash),

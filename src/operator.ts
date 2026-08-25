@@ -82,7 +82,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 24
+export const OPERATOR_REPORT_SCHEMA_VERSION = 25
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -109,6 +109,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   automodAuditPolicy: "automod-audit-policy",
   automodChangePolicy: "automod-change-policy",
   banAuditPolicy: "ban-audit-policy",
+  bulkBanAuditPolicy: "bulk-ban-audit-policy",
+  bulkBanChangePolicy: "bulk-ban-change-policy",
   botIdentity: "bot-identity",
   channelCloneAuditPolicy: "channel-clone-audit-policy",
   channelCloneChangePolicy: "channel-clone-change-policy",
@@ -539,6 +541,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowAdministration && config.adminGuildIds.size === 0) {
     warnings.push("The administration toggle is enabled but administration remains blocked because no administration-guild allowlist is configured")
   }
+  if (config.allowBulkBanAudit && config.bulkBanGuildIds.size === 0) {
+    warnings.push("The bulk-ban audit toggle is enabled but planning remains blocked because no exact bulk-ban guild allowlist is configured")
+  }
+  if (config.allowBulkBans && !config.allowBulkBanAudit) {
+    warnings.push("The bulk-ban change toggle is enabled but execution remains blocked because reviewed bulk-ban audit is disabled")
+  }
   if (config.allowChannelCreation && config.channelCreationGuildIds.size === 0) {
     warnings.push("The channel-creation toggle is enabled but channel creation remains blocked because no channel-creation guild allowlist is configured")
   }
@@ -778,6 +786,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
   }
   for (const [enabled, toolset, capability] of [
     [config.allowAdministration, "moderation", "Member administration"],
+    [
+      config.allowBulkBanAudit || config.allowBulkBans,
+      "bulk-bans",
+      "Reviewed bulk guild bans",
+    ],
     [
       config.allowApplicationEmojiAudit || config.allowApplicationEmojiChanges,
       "application-emojis",
@@ -1298,6 +1311,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.administrationPolicy,
         "pass",
         `Member administration is constrained to ${config.adminGuildIds.size} guilds with ${config.protectedUserIds.size} protected users, durable exact-member coordination, one-shot receipt reservation, and exact fresh readback`,
+      ))
+    }
+    if (!config.allowBulkBanAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkBanAuditPolicy,
+        "pass",
+        "Reviewed bulk guild-ban planning is disabled",
+      ))
+    } else if (config.bulkBanGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkBanAuditPolicy,
+        "warn",
+        "Bulk-ban audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkBanAuditPolicy,
+        "pass",
+        `Bulk guild-ban planning is constrained to ${config.bulkBanGuildIds.size} exact guilds with protected-user exclusion, complete BAN_MEMBERS plus MANAGE_GUILD evidence, per-target hierarchy checks, and no writes`,
+      ))
+    }
+    if (!config.allowBulkBans) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkBanChangePolicy,
+        "pass",
+        "Reviewed bulk guild-ban execution is disabled",
+      ))
+    } else if (!config.allowBulkBanAudit || config.bulkBanGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkBanChangePolicy,
+        "warn",
+        "Bulk-ban execution is enabled, but reviewed audit and a non-empty exact guild allowlist are required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkBanChangePolicy,
+        "pass",
+        `Bulk guild-ban execution is constrained to ${config.bulkBanGuildIds.size} exact guilds with complete-set durable member claims, signed approval, one non-retried native batch request, explicit partial outcomes, and exact per-target readback`,
       ))
     }
     if (!config.allowChannelCreation) {
@@ -3675,6 +3726,7 @@ export async function smokeConnector(
     }
     for (const name of [
       "delete_messages",
+      "execute_bulk_guild_ban",
       "execute_member_moderation",
       "execute_poll_end",
     ] as const) {
