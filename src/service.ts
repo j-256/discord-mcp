@@ -667,6 +667,18 @@ import {
   normalizeGuildSettingsChangeRequest,
 } from "./guild-settings-service.js"
 import type {
+  GuildCommunityAuditResult,
+  GuildCommunityChangePlan,
+  GuildCommunityChangeRequest,
+  GuildCommunityChangeResult,
+  GuildCommunityServiceOptions,
+} from "./guild-community-service.js"
+import {
+  assertGuildCommunityAuditInput,
+  GuildCommunityService,
+  normalizeGuildCommunityChangeRequest,
+} from "./guild-community-service.js"
+import type {
   GuildProfileAuditResult,
   GuildProfileChangePlan,
   GuildProfileChangeRequest,
@@ -939,6 +951,7 @@ export interface DiscordServiceClient {
   modifyGuildOnboarding: DiscordClient["modifyGuildOnboarding"]
   modifyGuildWelcomeScreen: DiscordClient["modifyGuildWelcomeScreen"]
   modifyGuildWidgetSettings: DiscordClient["modifyGuildWidgetSettings"]
+  modifyGuildCommunity: DiscordClient["modifyGuildCommunity"]
   modifyGuildSettings: DiscordClient["modifyGuildSettings"]
   modifyGuildIncidentActions: DiscordClient["modifyGuildIncidentActions"]
   modifyGuildProfile: DiscordClient["modifyGuildProfile"]
@@ -1092,6 +1105,10 @@ export interface ConnectorServiceOptions {
   >
   guildIncidentOptions?: Pick<
     GuildIncidentServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildCommunityOptions?: Pick<
+    GuildCommunityServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   guildSettingsOptions?: Pick<
@@ -1434,6 +1451,7 @@ export class ConnectorService {
   readonly #forumTagService: ForumTagService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
+  readonly #guildCommunityService: GuildCommunityService
   readonly #guildIncidentService: GuildIncidentService
   readonly #guildProfileService: GuildProfileService
   readonly #guildSettingsService: GuildSettingsService
@@ -1733,6 +1751,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildTemplateOptions,
+    })
+    this.#guildCommunityService = new GuildCommunityService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      layoutSource: gateway,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildCommunityOptions,
     })
     this.#guildSettingsService = new GuildSettingsService({
       activityStore: this.#activityStore,
@@ -2581,6 +2607,20 @@ export class ConnectorService {
     assertGuildSettingsGetInput(guildId)
     const identity = await this.#verifyIdentity(options)
     return this.#guildSettingsService.get(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
+      options,
+    )
+  }
+
+  async getGuildCommunity(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<GuildCommunityAuditResult> {
+    assertGuildCommunityAuditInput(guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildCommunityService.get(
       identity.application.id,
       identity.bot.id,
       guildId,
@@ -3693,6 +3733,20 @@ export class ConnectorService {
     normalizeGuildSettingsChangeRequest(request)
     const identity = await this.#verifyIdentity(options)
     return this.#guildSettingsService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildCommunityChange(
+    request: GuildCommunityChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildCommunityChangePlan> {
+    normalizeGuildCommunityChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildCommunityService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -5955,6 +6009,31 @@ export class ConnectorService {
       planDigest,
       [writeGuildCollectionTarget("guild-settings", request.guildId)],
       () => this.#guildSettingsService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildCommunityChange(
+    request: GuildCommunityChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildCommunityChangeResult> {
+    normalizeGuildCommunityChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild Community plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "guild-community-change",
+      request.operationKey,
+      planDigest,
+      [writeGuildCollectionTarget("community", request.guildId)],
+      () => this.#guildCommunityService.execute(
         identity.application.id,
         identity.bot.id,
         request,

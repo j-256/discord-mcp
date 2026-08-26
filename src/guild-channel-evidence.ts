@@ -291,12 +291,14 @@ export function guildChannelLayoutGuildIds(
     | "allowChannelCloneAudit"
     | "allowChannelOrderingAudit"
     | "allowGuildTemplateAudit"
+    | "allowGuildCommunityAudit"
     | "allowGuildSettingsAudit"
     | "allowMemberRoleChanges"
     | "allowOnboardingAudit"
     | "channelCloneGuildIds"
     | "channelOrderingGuildIds"
     | "guildTemplateGuildIds"
+    | "guildCommunityGuildIds"
     | "guildSettingsGuildIds"
     | "memberRoleGuildIds"
     | "onboardingGuildIds"
@@ -311,6 +313,7 @@ export function guildChannelLayoutGuildIds(
   add(config.allowChannelCloneAudit === true, config.channelCloneGuildIds ?? new Set())
   add(config.allowChannelOrderingAudit === true, config.channelOrderingGuildIds ?? new Set())
   add(config.allowGuildTemplateAudit === true, config.guildTemplateGuildIds ?? new Set())
+  add(config.allowGuildCommunityAudit === true, config.guildCommunityGuildIds ?? new Set())
   add(config.allowGuildSettingsAudit === true, config.guildSettingsGuildIds ?? new Set())
   add(config.allowMemberRoleChanges === true, config.memberRoleGuildIds ?? new Set())
   add(config.allowOnboardingAudit === true, config.onboardingGuildIds ?? new Set())

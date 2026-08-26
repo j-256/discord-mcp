@@ -155,6 +155,14 @@
           "type": "boolean",
           "description": "Enable guild expression changes policy"
         },
+        "guildCommunityAudit": {
+          "type": "boolean",
+          "description": "Enable privacy-minimized Discord Community routing and authority audits"
+        },
+        "guildCommunityChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed monotonic Community enablement and exact routing changes"
+        },
         "guildIncidentAudit": {
           "type": "boolean",
           "description": "Enable guild incident audit policy"
@@ -1064,6 +1072,16 @@
           },
           "description": "Exact Discord ID allowlist for guild scaffold guild ids"
         },
+        "guildCommunityGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact guild ID allowlist for Discord Community audit and reviewed changes"
+        },
         "guildExpressionGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1631,7 +1649,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 64,
+          "maxItems": 65,
           "type": "array",
           "items": {
             "type": "string",
@@ -1661,6 +1679,7 @@
               "forum-tags",
               "gateway",
               "guild-blueprints",
+              "guild-community",
               "guild-expressions",
               "guild-incidents",
               "guild-profile",

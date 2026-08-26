@@ -48,6 +48,7 @@ export const OPERATION_KINDS = [
   "forum-post",
   "forum-tag-change",
   "guild-application-command-change",
+  "guild-community-change",
   "guild-expression-change",
   "guild-incident-action-change",
   "guild-profile-change",

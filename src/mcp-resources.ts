@@ -269,6 +269,7 @@ export function registerDiscordResources(
           "Welcome Screen audit requires a separate exact guild allowlist, verified connector identity, complete bounded guild-feature, role, emoji, membership, and Welcome Screen evidence, plus visible channels and their overwrites. Descriptions and Unicode emoji text are omitted by default and returned only transiently through explicit tool opt-in; unknown fields are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD evidence, the COMMUNITY guild feature, directly supported channels visible to @everyone and resolved by exact ID, exact available public custom emoji or one validated Unicode grapheme, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PATCH with an audit-log reason, authoritative response validation, and a fresh full readback. A configured or desired channel omitted by Discord fails closed. Omitted ordered channel entries are deletions. Disabled state without MANAGE_GUILD is reported as unavailable rather than guessed, same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client experience. Descriptions, Unicode emoji text, names, audit reasons, channel IDs, raw operation keys, and raw payloads are never persisted.",
           "",
           "Guild-settings audit requires a separate exact guild allowlist, verified connector identity, complete MANAGE_GUILD or exact-owner evidence, complete bounded roles, and continuity-safe channel evidence. It returns only finite named verification, notification, explicit-media, AFK, system-routing, suppression, and presentation settings with names, members, raw payloads, raw numeric enums, raw bitfields, and unknown values omitted. Unknown system bits are presence-only. Reviewed sparse changes require an additional toggle, at least one named field, eligible trusted requested channel references, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried sparse PATCH with an audit-log reason, strict authoritative response validation, and a fresh complete readback. Omitted fields are preserved, an explicit null clears a channel reference, and unknown system bits block only suppression changes. Same-guild uncertain outcomes fail closed, and setting values, channel IDs, names, audit reasons, raw operation keys, and raw payloads are never persisted.",
+          "Discord Community audit requires a separate exact guild allowlist, verified connector identity, complete bounded bot roles and permission evidence, and continuity-safe direct-channel evidence. It reports only Community presence, feature count and digest, state digest, exact routing IDs, @everyone rules visibility and sendability, minimized authority, fixed warnings, and verification boundaries. Raw feature values, permission bits, names, topics, profiles, and payloads are omitted. Reviewed changes require an additional toggle, exact distinct rules and public-updates channels, an optional exact safety-alerts channel, explicit enablement acknowledgement, dynamic guild-owner or ADMINISTRATOR authority when enabling and guild-owner or MANAGE_GUILD authority when rerouting, a fresh matching keyed plan, signed approval, an exact Community collection claim, durable one-shot reservation, pending content-free activity, one non-retried feature-preserving PATCH with an audit-log reason, strict response validation, and a fresh full readback. The workflow can add COMMUNITY but can never disable it, remove or edit another feature, infer channels by name, grant permissions, retry, or roll back. Feature loss, routing mismatch, rate limiting, malformed success, or unreadable readback is uncertain and quarantines later same-guild Community changes. Feature values, names, topics, profiles, audit reasons, raw operation keys, and raw payloads are never persisted.",
           "",
           "Guild incident-action audit requires a separate exact guild allowlist, verified connector identity, complete bounded roles and permissions, exact owner evidence, and an explicit known MANAGE_GUILD or owner authority verdict. It returns exact invite and direct-message disable deadlines, reduces detection timestamps to booleans, counts unknown incident fields, omits names and raw payloads, and persists nothing. Reviewed sparse changes require an additional toggle, at least one exact action, future deadlines no more than 24 hours ahead, a fresh matching keyed plan, signed approval, durable exact-guild coordination, one-shot reservation, pending content-free activity, one non-retried sparse PUT without an undocumented audit header, strict Incidents Data response validation, and a fresh exact readback. Omitted actions are preserved, null clears one action early, the review reason remains local and digest-bound, unrequested controlled-field drift is reported, and ambiguous outcomes quarantine later same-guild changes. Deadlines, detection timestamps, reasons, names, permission evidence, raw operation keys, and raw payloads are never persisted.",
           "",
@@ -965,6 +966,31 @@ export function registerDiscordResources(
       "untrusted-external-data",
       secrets,
       () => service.getGuildSettings(
+        templateSnowflake(variables, "guildId"),
+        { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildCommunity,
+    new ResourceTemplate(
+      MCP_RESOURCE_TEMPLATE_URIS.guildCommunity,
+      resourceTemplateCompletionCallbacks(MCP_RESOURCE_TEMPLATE_URIS.guildCommunity, completionPolicy),
+    ),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Privacy-minimized Discord Community audit for one exact separately allowlisted guild. Returns feature presence and digests, exact routing IDs, trusted direct-channel evidence, @everyone rules visibility and sendability, complete connector authority, fixed risks, and verification boundaries. Guild, channel, and role names, topics, raw feature values, raw permission bits, member profiles, and payloads are omitted, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Privacy-minimized Discord Community state",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildCommunity(
         templateSnowflake(variables, "guildId"),
         { signal: context.mcpReq.signal },
       ),

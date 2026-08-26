@@ -192,6 +192,7 @@ interface GuidanceCalls {
   channels: number
   forumTags: number
   guilds: number
+  guildCommunity: number
   guildExpressions: number
   guildIncidents: number
   guildProfiles: number
@@ -233,6 +234,7 @@ function guidanceService(options: {
   applicationEntitlementUserIds?: readonly string[]
   applicationMonetizationSkuIds?: readonly string[]
   applicationSubscriptionUserIds?: readonly string[]
+  guildCommunityGuildIds?: readonly string[]
   messageContent?: string
   messageError?: Error
   webhookGuildIds?: readonly string[]
@@ -259,6 +261,7 @@ function guidanceService(options: {
     channels: 0,
     forumTags: 0,
     guilds: 0,
+    guildCommunity: 0,
     guildExpressions: 0,
     guildIncidents: 0,
     guildProfiles: 0,
@@ -754,6 +757,7 @@ function guidanceService(options: {
     executeWelcomeScreenChange: unexpected,
     executeWidgetSettingsChange: unexpected,
     executeGuildSettingsChange: unexpected,
+    executeGuildCommunityChange: unexpected,
     executeGuildProfileChange: unexpected,
     executePollCreation: unexpected,
     executePollEnd: unexpected,
@@ -1455,6 +1459,95 @@ function guidanceService(options: {
         },
       }
     },
+    async getGuildCommunity(guildId) {
+      calls.guildCommunity += 1
+      calls.lastGuildId = guildId
+      const channel = (channelId: string, everyoneCanSend: boolean) => ({
+        channelId,
+        direct: true as const,
+        everyoneCanSend,
+        everyoneCanView: true,
+        exists: true as const,
+        parentId: null,
+        type: 0,
+        unknownPermissionBitsPresent: false as const,
+      })
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          authorizedForEnablement: true,
+          authorizedForRoutingChange: true,
+          botAdministrator: true,
+          botIsGuildOwner: false,
+          complete: true as const,
+          effectivePermissionNames: ["ADMINISTRATOR" as const],
+          manageGuild: true,
+          unknownPermissionBitsPresent: false as const,
+          warnings: [],
+        },
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        configuration: {
+          communityEnabled: true,
+          featureCount: 3,
+          featureDigest: `sha256:${"a".repeat(64)}`,
+          issues: [],
+          publicUpdatesChannel: channel(SECOND_CHANNEL_ID, true),
+          publicUpdatesChannelId: SECOND_CHANNEL_ID,
+          rulesChannel: channel(CHANNEL_ID, false),
+          rulesChannelId: CHANNEL_ID,
+          safetyAlertsChannel: null,
+          safetyAlertsChannelId: null,
+          stateDigest: `sha256:${"b".repeat(64)}`,
+        },
+        guildId,
+        inventory: {
+          gatewayChannelCount: 2,
+          httpChannelCount: 2,
+          httpMode: "complete" as const,
+          layoutRevision: 7,
+          layoutUpdatedAt: "2026-08-24T00:00:00.000Z",
+          metadataCoverage: "complete" as const,
+          obfuscatedChannelCount: 0,
+          trustedMetadataCount: 2,
+        },
+        localConstraints: {
+          channelTypes: [0, 5],
+          communityDisablement: false as const,
+          featureEditing: "add-community-only" as const,
+          guildAllowlist: 100,
+          requiredAcknowledgement: true as const,
+          rulesAndPublicUpdatesMustDiffer: true as const,
+          supportedFields: [
+            "communityEnabled",
+            "publicUpdatesChannelId",
+            "rulesChannelId",
+            "safetyAlertsChannelId",
+          ] as Array<"communityEnabled" | "publicUpdatesChannelId" | "rulesChannelId" | "safetyAlertsChannelId">,
+        },
+        privacy: {
+          auditReasons: "not-persisted" as const,
+          channelNamesAndTopics: "omitted" as const,
+          featureValues: "digests-only" as const,
+          guildPresentation: "omitted" as const,
+          memberProfiles: "omitted" as const,
+          persistence: "content-free-identifiers-and-digests-only" as const,
+          rawPayloads: "omitted" as const,
+          roleNames: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        verificationBoundary: {
+          automaticRetry: false as const,
+          featureRemoval: false as const,
+          freshApiReadback: true as const,
+          gatewayLayoutContinuity: true as const,
+          mutationResponse: true as const,
+          rollback: "not-automatic" as const,
+        },
+        warnings: ["The rules channel is visible but not sendable by @everyone"],
+      }
+    },
     async getGuildIncidentActions(guildId) {
       calls.guildIncidents += 1
       calls.lastGuildId = guildId
@@ -2004,6 +2097,7 @@ function guidanceService(options: {
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildSettingsChange: unexpected,
+    planGuildCommunityChange: unexpected,
     planGuildIncidentActionChange: unexpected,
     planGuildProfileChange: unexpected,
     executeGuildIncidentActionChange: unexpected,
@@ -2102,6 +2196,9 @@ function guidanceService(options: {
         guildPruneIncludeRoleIds: [],
         guildPruneMaxMembers: 0,
         guildPrunesEnabled: false,
+        guildCommunityAuditEnabled: (options.guildCommunityGuildIds?.length ?? 0) > 0,
+        guildCommunityChangesEnabled: false,
+        guildCommunityGuildIds: [...(options.guildCommunityGuildIds ?? [])],
         guildSettingsAuditEnabled: false,
         guildSettingsChangesEnabled: false,
         guildSettingsGuildIds: [],
@@ -2820,6 +2917,12 @@ async function connectedFixture(
     ...(options.configOverrides?.scopes?.webhookGuildIds === undefined
       ? {}
       : { webhookGuildIds: options.configOverrides.scopes.webhookGuildIds }),
+    ...(options.configOverrides?.scopes?.guildCommunityGuildIds === undefined
+      ? {}
+      : {
+          guildCommunityGuildIds:
+            options.configOverrides.scopes.guildCommunityGuildIds,
+        }),
   })
   const environment = {
     DISCORD_BOT_TOKEN: TOKEN,
@@ -2869,6 +2972,7 @@ function totalCalls(calls: GuidanceCalls): number {
     + calls.channels
     + calls.forumTags
     + calls.guilds
+    + calls.guildCommunity
     + calls.guildExpressions
     + calls.guildIncidents
     + calls.guildProfiles
@@ -3055,6 +3159,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildChannels,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+      },
+      {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildCommunity,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildCommunity,
       },
       {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildChannelOrder,
@@ -3495,6 +3603,37 @@ test("MCP guild webhook guidance completes scope and performs one private audit"
   assert.equal(calls.guildWebhookAudits, 1)
 })
 
+test("MCP guild Community guidance completes exact scope without enumeration", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      capabilities: { guildCommunityAudit: true },
+      scopes: { guildCommunityGuildIds: [GUILD_ID] },
+    },
+  })
+  const uri = MCP_RESOURCE_TEMPLATE_URIS.guildCommunity.replace(
+    "{guildId}",
+    GUILD_ID,
+  )
+
+  const completion = await client.complete({
+    argument: { name: "guildId", value: GUILD_ID.slice(0, 6) },
+    ref: {
+      type: "ref/resource",
+      uri: MCP_RESOURCE_TEMPLATE_URIS.guildCommunity,
+    },
+  })
+  assert.deepEqual(completion.completion.values, [GUILD_ID])
+  assert.equal(totalCalls(calls), 0)
+
+  const resource = await readJsonResource(client, uri)
+  const configuration = (
+    resource.value.data as Record<string, unknown>
+  ).configuration as Record<string, unknown>
+  assert.equal(configuration.communityEnabled, true)
+  assert.equal("features" in configuration, false)
+  assert.equal(calls.guildCommunity, 1)
+})
+
 test("MCP local resources expose safety, policy, and content-free activity without secrets", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
@@ -3588,6 +3727,11 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /never calls anonymous widget JSON or image endpoints/)
   assert.match(safety.text, /presence-bearing member summaries/)
   assert.match(safety.text, /manual restoration may be required/)
+  assert.match(safety.text, /Guild-settings audit requires a separate exact guild allowlist/)
+  assert.match(safety.text, /Unknown system bits are presence-only/)
+  assert.match(safety.text, /Discord Community audit requires a separate exact guild allowlist/)
+  assert.match(safety.text, /can add COMMUNITY but can never disable it/)
+  assert.match(safety.text, /dynamic guild-owner or ADMINISTRATOR authority/)
   assert.match(safety.text, /Guild emoji and sticker inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /Application emoji inventory is bound to the verified pinned current application/)
@@ -4215,6 +4359,30 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   )
   assert.doesNotMatch(guildSettings.text, /system_channel_flags|Private guild/u)
 
+  const guildCommunity = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/community`,
+  )
+  const guildCommunityData = guildCommunity.value.data as Record<string, unknown>
+  const guildCommunityPrivacy = guildCommunityData.privacy as Record<string, unknown>
+  const guildCommunityConfiguration = guildCommunityData.configuration as Record<string, unknown>
+  assert.equal(guildCommunityPrivacy.featureValues, "digests-only")
+  assert.equal(guildCommunityPrivacy.channelNamesAndTopics, "omitted")
+  assert.equal(guildCommunityPrivacy.rawPayloads, "omitted")
+  assert.equal(guildCommunityConfiguration.communityEnabled, true)
+  assert.equal(guildCommunityConfiguration.featureCount, 3)
+  assert.match(
+    String(guildCommunityConfiguration.featureDigest),
+    /^sha256:[a-f0-9]{64}$/u,
+  )
+  assert.equal(guildCommunityConfiguration.rulesChannelId, CHANNEL_ID)
+  assert.equal(guildCommunityConfiguration.publicUpdatesChannelId, SECOND_CHANNEL_ID)
+  assert.equal("features" in guildCommunityConfiguration, false)
+  assert.doesNotMatch(
+    guildCommunity.text,
+    /private-role|private-channel|"features"|permission_overwrites/u,
+  )
+
   const guildIncidents = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/incident-actions`,
@@ -4339,6 +4507,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.welcomeScreens, 1)
   assert.equal(calls.widgetSettings, 1)
   assert.equal(calls.guildSettings, 1)
+  assert.equal(calls.guildCommunity, 1)
   assert.equal(calls.guildIncidents, 1)
   assert.equal(calls.guildProfiles, 1)
   assert.equal(calls.automod, 1)
@@ -5226,6 +5395,29 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildSettings, /requested and changed fields/)
   assert.match(guildSettings, /unknown-bit boundary/)
   assert.match(guildSettings, /uncertain same-guild predecessor/)
+
+  const guildCommunityRequest = {
+    acknowledgeCommunityEnablement: true,
+    auditReason: "Reviewed Community routing",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    publicUpdatesChannelId: SECOND_CHANNEL_ID,
+    rulesChannelId: CHANNEL_ID,
+    safetyAlertsChannelId: null,
+  }
+  const guildCommunity = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(guildCommunityRequest) },
+    name: MCP_PROMPT_NAMES.reviewGuildCommunityChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(guildCommunity.split("\n")[1] || ""),
+    guildCommunityRequest,
+  )
+  assert.match(guildCommunity, /Call only plan_guild_community_change/u)
+  assert.match(guildCommunity, /Do not call execute_guild_community_change/u)
+  assert.match(guildCommunity, /dynamic ADMINISTRATOR or MANAGE_GUILD authority/u)
+  assert.match(guildCommunity, /@everyone rules visibility and sendability/u)
+  assert.match(guildCommunity, /uncertain same-guild predecessor/u)
 
   const guildIncidentRequest = {
     auditReason: "Reviewed temporary incident lockdown",

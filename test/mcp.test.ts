@@ -38,6 +38,7 @@ import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
+  GUILD_COMMUNITY_CHANGE_FIELDS,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
   MCP_DISCOVERY_TOOL_NAME,
@@ -248,6 +249,14 @@ import type {
   GuildProfileChangeRequest,
 } from "../src/guild-profile-service.js"
 import type {
+  GuildCommunityAccessEvidence,
+  GuildCommunityAuditResult,
+  GuildCommunityChangePlan,
+  GuildCommunityChangeRequest,
+  GuildCommunityConfigurationView,
+  GuildCommunityPrivacyProjection,
+} from "../src/guild-community-service.js"
+import type {
   GuildSettingsAccessEvidence,
   GuildSettingsAuditResult,
   GuildSettingsChangePlan,
@@ -431,6 +440,8 @@ import {
   WelcomeScreenOperationConflictError,
   WidgetSettingsExecutionError,
   WidgetSettingsOperationConflictError,
+  GuildCommunityExecutionError,
+  GuildCommunityOperationConflictError,
   GuildSettingsExecutionError,
   GuildSettingsOperationConflictError,
   GuildIncidentExecutionError,
@@ -756,6 +767,10 @@ const ONBOARDING_OPERATION_KEY = "onboarding-change-attempt-0001"
 const WELCOME_SCREEN_OPERATION_KEY = "welcome-screen-change-attempt-0001"
 const WIDGET_SETTINGS_OPERATION_KEY = "widget-settings-change-attempt-0001"
 const GUILD_SETTINGS_OPERATION_KEY = "guild-settings-change-attempt-0001"
+const GUILD_COMMUNITY_OPERATION_KEY = "guild-community-change-attempt-0001"
+const GUILD_COMMUNITY_RULES_CHANNEL_ID = "200000000000000003"
+const GUILD_COMMUNITY_UPDATES_CHANNEL_ID = "200000000000000004"
+const GUILD_COMMUNITY_SAFETY_CHANNEL_ID = "200000000000000005"
 const GUILD_INCIDENT_OPERATION_KEY = "guild-incident-change-attempt-0001"
 const GUILD_PROFILE_OPERATION_KEY = "guild-profile-change-attempt-0001"
 const GUILD_INCIDENT_UNTIL = "2026-08-25T11:00:00.000Z"
@@ -2767,6 +2782,179 @@ function guildSettingsPlan(
     warnings: changed
       ? ["Only the reviewed named fields will be patched"]
       : ["The requested guild settings already match Discord"],
+    writeRequired: changed,
+  }
+}
+
+function guildCommunityRequest(
+  overrides: Partial<GuildCommunityChangeRequest> = {},
+): GuildCommunityChangeRequest {
+  return {
+    acknowledgeCommunityEnablement: true,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: GUILD_COMMUNITY_OPERATION_KEY,
+    publicUpdatesChannelId: GUILD_COMMUNITY_UPDATES_CHANNEL_ID,
+    rulesChannelId: GUILD_COMMUNITY_RULES_CHANNEL_ID,
+    safetyAlertsChannelId: GUILD_COMMUNITY_SAFETY_CHANNEL_ID,
+    ...overrides,
+  }
+}
+
+function guildCommunityAccess(): GuildCommunityAccessEvidence {
+  return {
+    appliedRoleIds: [GUILD_ID],
+    authorizedForEnablement: true,
+    authorizedForRoutingChange: true,
+    botAdministrator: true,
+    botIsGuildOwner: false,
+    complete: true,
+    effectivePermissionNames: ["ADMINISTRATOR"],
+    manageGuild: true,
+    unknownPermissionBitsPresent: false,
+    warnings: [],
+  }
+}
+
+function guildCommunityPrivacy(): GuildCommunityPrivacyProjection {
+  return {
+    auditReasons: "not-persisted",
+    channelNamesAndTopics: "omitted",
+    featureValues: "digests-only",
+    guildPresentation: "omitted",
+    memberProfiles: "omitted",
+    persistence: "content-free-identifiers-and-digests-only",
+    rawPayloads: "omitted",
+    roleNames: "omitted",
+  }
+}
+
+function guildCommunityChannelReference(
+  channelId: string,
+  everyoneCanSend: boolean,
+): NonNullable<GuildCommunityConfigurationView["rulesChannel"]> {
+  return {
+    channelId,
+    direct: true,
+    everyoneCanSend,
+    everyoneCanView: true,
+    exists: true,
+    parentId: null,
+    type: DISCORD_CHANNEL_TYPES.text,
+    unknownPermissionBitsPresent: false,
+  }
+}
+
+function guildCommunityConfiguration(
+  request: GuildCommunityChangeRequest | null,
+  enabled: boolean,
+): GuildCommunityConfigurationView {
+  const publicUpdatesChannelId = enabled
+    ? request?.publicUpdatesChannelId ?? GUILD_COMMUNITY_UPDATES_CHANNEL_ID
+    : null
+  const rulesChannelId = enabled
+    ? request?.rulesChannelId ?? GUILD_COMMUNITY_RULES_CHANNEL_ID
+    : null
+  const safetyAlertsChannelId = enabled
+    ? request?.safetyAlertsChannelId ?? GUILD_COMMUNITY_SAFETY_CHANNEL_ID
+    : null
+  return {
+    communityEnabled: enabled,
+    featureCount: enabled ? 3 : 2,
+    featureDigest: `sha256:${(enabled ? "e" : "d").repeat(64)}`,
+    issues: [],
+    publicUpdatesChannel: publicUpdatesChannelId === null
+      ? null
+      : guildCommunityChannelReference(publicUpdatesChannelId, true),
+    publicUpdatesChannelId,
+    rulesChannel: rulesChannelId === null
+      ? null
+      : guildCommunityChannelReference(rulesChannelId, false),
+    rulesChannelId,
+    safetyAlertsChannel: safetyAlertsChannelId === null
+      ? null
+      : guildCommunityChannelReference(safetyAlertsChannelId, true),
+    safetyAlertsChannelId,
+    stateDigest: `sha256:${(enabled ? "f" : "c").repeat(64)}`,
+  }
+}
+
+function guildCommunityLocalConstraints(): GuildCommunityAuditResult["localConstraints"] {
+  return {
+    channelTypes: [
+      DISCORD_CHANNEL_TYPES.text,
+      DISCORD_CHANNEL_TYPES.announcement,
+    ],
+    communityDisablement: false,
+    featureEditing: "add-community-only",
+    guildAllowlist: 100,
+    requiredAcknowledgement: true,
+    rulesAndPublicUpdatesMustDiffer: true,
+    supportedFields: [...GUILD_COMMUNITY_CHANGE_FIELDS],
+  }
+}
+
+function guildCommunityAudit(): GuildCommunityAuditResult {
+  return {
+    access: guildCommunityAccess(),
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: guildCommunityConfiguration(null, false),
+    guildId: GUILD_ID,
+    inventory: guildSettingsInventory(),
+    localConstraints: guildCommunityLocalConstraints(),
+    privacy: guildCommunityPrivacy(),
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {
+      automaticRetry: false,
+      featureRemoval: false,
+      freshApiReadback: true,
+      gatewayLayoutContinuity: true,
+      mutationResponse: true,
+      rollback: "not-automatic",
+    },
+    warnings: ["Community is not enabled"],
+  }
+}
+
+function guildCommunityPlan(
+  request: GuildCommunityChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): GuildCommunityChangePlan {
+  const changed = effect === "change"
+  const desired = guildCommunityConfiguration(request, true)
+  const current = changed
+    ? guildCommunityConfiguration(null, false)
+    : desired
+  return {
+    access: guildCommunityAccess(),
+    acknowledgeCommunityEnablement: true,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    changedFields: changed ? [...GUILD_COMMUNITY_CHANGE_FIELDS] : [],
+    createdAt: "2026-08-24T00:00:00.000Z",
+    current,
+    desired,
+    digest,
+    enablementRequired: changed,
+    guildId: request.guildId,
+    inventory: guildSettingsInventory(),
+    localConstraints: guildCommunityLocalConstraints(),
+    operationKeyHash: OPERATION_KEY_HASH,
+    preservedFeatureCount: current.featureCount,
+    preservedFeatureDigest: current.featureDigest,
+    privacy: guildCommunityPrivacy(),
+    requiredPermission: changed ? "ADMINISTRATOR" : "MANAGE_GUILD",
+    risks: changed ? ["community-enablement", "public-routing-change"] : [],
+    schemaVersion: 1,
+    status: changed ? "planned" : "already-current",
+    verificationBoundary: guildCommunityAudit().verificationBoundary,
+    warnings: changed
+      ? ["The Community feature will be added without removing existing features"]
+      : ["The complete desired Community state already matches Discord"],
     writeRequired: changed,
   }
 }
@@ -7777,6 +7965,9 @@ function fixturePolicy(): PolicyDescription {
     guildPruneIncludeRoleIds: [],
     guildPruneMaxMembers: 0,
     guildPrunesEnabled: false,
+    guildCommunityAuditEnabled: false,
+    guildCommunityChangesEnabled: false,
+    guildCommunityGuildIds: [],
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -8057,6 +8248,9 @@ function serviceFixture(overrides: {
   guildSettingsEffect?: "change" | "none"
   guildSettingsError?: Error
   guildSettingsPlanDigest?: string
+  guildCommunityEffect?: "change" | "none"
+  guildCommunityError?: Error
+  guildCommunityPlanDigest?: string
   guildIncidentEffect?: "change" | "none"
   guildIncidentError?: Error
   guildIncidentPlanDigest?: string
@@ -8124,6 +8318,11 @@ function serviceFixture(overrides: {
     plan: 0,
   }
   const guildSettingsCalls = {
+    execute: 0,
+    get: 0,
+    plan: 0,
+  }
+  const guildCommunityCalls = {
     execute: 0,
     get: 0,
     plan: 0,
@@ -9462,6 +9661,27 @@ function serviceFixture(overrides: {
         warnings: planned.warnings,
       }
     },
+    async executeGuildCommunityChange(request, planDigest) {
+      if (overrides.guildCommunityError) throw overrides.guildCommunityError
+      guildCommunityCalls.execute += 1
+      const planned = guildCommunityPlan(
+        request,
+        planDigest,
+        overrides.guildCommunityEffect,
+      )
+      return {
+        activityId: planned.writeRequired ? "activity-guild-community" : null,
+        changedFields: planned.changedFields,
+        enablementRequired: planned.enablementRequired,
+        guildId: request.guildId,
+        operationKeyHash: OPERATION_KEY_HASH,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.writeRequired ? "completed" : "already-current",
+        verification: planned.writeRequired ? "match" : "not-required",
+        warnings: planned.warnings,
+      }
+    },
     async executeGuildIncidentActionChange(request, planDigest) {
       if (overrides.guildIncidentError) throw overrides.guildIncidentError
       guildIncidentCalls.execute += 1
@@ -9520,6 +9740,10 @@ function serviceFixture(overrides: {
       guildSettingsCalls.get += 1
       return guildSettingsAudit()
     },
+    async getGuildCommunity() {
+      guildCommunityCalls.get += 1
+      return guildCommunityAudit()
+    },
     async getGuildIncidentActions() {
       guildIncidentCalls.get += 1
       return guildIncidentAudit()
@@ -9558,6 +9782,14 @@ function serviceFixture(overrides: {
         request,
         overrides.guildSettingsPlanDigest || DIGEST,
         overrides.guildSettingsEffect,
+      )
+    },
+    async planGuildCommunityChange(request) {
+      guildCommunityCalls.plan += 1
+      return guildCommunityPlan(
+        request,
+        overrides.guildCommunityPlanDigest || DIGEST,
+        overrides.guildCommunityEffect,
       )
     },
     async planGuildIncidentActionChange(request) {
@@ -12248,6 +12480,7 @@ function serviceFixture(overrides: {
     applicationMonetizationCalls,
     calls,
     guildBlueprintCaptureCalls,
+    guildCommunityCalls,
     guildIncidentCalls,
     guildProfileCalls,
     guildApplicationCommandCalls,
@@ -12699,6 +12932,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_welcome_screen",
       "get_guild_widget_settings",
       "get_guild_settings",
+      "audit_guild_community",
       "get_guild_incident_actions",
       "get_guild_profile",
       "list_guild_audit_entries",
@@ -12794,6 +13028,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_widget_settings_change",
       "plan_guild_settings_change",
       "execute_guild_settings_change",
+      "plan_guild_community_change",
+      "execute_guild_community_change",
       "plan_guild_incident_action_change",
       "execute_guild_incident_action_change",
       "plan_guild_profile_change",
@@ -12927,6 +13163,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildSettings = result.tools.find((tool) => (
     tool.name === "execute_guild_settings_change"
   ))
+  const guildCommunity = result.tools.find((tool) => (
+    tool.name === "execute_guild_community_change"
+  ))
   const guildIncident = result.tools.find((tool) => (
     tool.name === "execute_guild_incident_action_change"
   ))
@@ -13016,6 +13255,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     onboarding,
     widgetSettings,
     guildSettings,
+    guildCommunity,
     guildIncident,
     guildExpression,
     applicationEmoji,
@@ -13251,6 +13491,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_onboarding_change",
     "plan_guild_widget_settings_change",
     "plan_guild_settings_change",
+    "audit_guild_community",
+    "plan_guild_community_change",
     "plan_guild_expression_change",
     "plan_application_emoji_change",
     "plan_application_intent_enablement",
@@ -23309,6 +23551,258 @@ test("MCP guild-settings execution exposes uncertainty and content-free conflict
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(GUILD_SETTINGS_OPERATION_KEY))
+})
+
+test("MCP guild Community audit exposes only privacy-minimized state", async (context) => {
+  const { client, guildCommunityCalls } = await connectedFixture(context)
+  const audited = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "audit_guild_community",
+  })
+  const invalid = await client.callTool({
+    arguments: { guildId: "invalid" },
+    name: "audit_guild_community",
+  })
+
+  const content = structuredContent(audited)
+  const configuration = content.configuration as Record<string, unknown>
+  const privacy = content.privacy as Record<string, unknown>
+  assert.equal(configuration.communityEnabled, false)
+  assert.equal(configuration.featureCount, 2)
+  assert.match(String(configuration.featureDigest), /^sha256:[a-f0-9]{64}$/u)
+  assert.equal(privacy.featureValues, "digests-only")
+  assert.equal(privacy.channelNamesAndTopics, "omitted")
+  assert.equal(privacy.rawPayloads, "omitted")
+  assert.equal("features" in configuration, false)
+  assert.equal("name" in content, false)
+  assert.doesNotMatch(JSON.stringify(audited), /private-channel|"features"/u)
+  assert.equal(invalid.isError, true)
+  assert.equal(guildCommunityCalls.get, 1)
+})
+
+test("MCP guild Community plans require complete exact monotonic intent", async (context) => {
+  const { client, guildCommunityCalls } = await connectedFixture(context)
+  const request = guildCommunityRequest()
+  const planned = await client.callTool({
+    arguments: { ...request },
+    name: "plan_guild_community_change",
+  })
+  const missingAcknowledgement = await client.callTool({
+    arguments: {
+      auditReason: request.auditReason,
+      guildId: request.guildId,
+      operationKey: request.operationKey,
+      publicUpdatesChannelId: request.publicUpdatesChannelId,
+      rulesChannelId: request.rulesChannelId,
+      safetyAlertsChannelId: request.safetyAlertsChannelId,
+    },
+    name: "plan_guild_community_change",
+  })
+  const sharedRoutingChannel = await client.callTool({
+    arguments: {
+      ...request,
+      publicUpdatesChannelId: request.rulesChannelId,
+    },
+    name: "plan_guild_community_change",
+  })
+  const arbitraryFeatures = await client.callTool({
+    arguments: { ...request, features: ["COMMUNITY", "DISCOVERABLE"] },
+    name: "plan_guild_community_change",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal(content.enablementRequired, true)
+  assert.equal(content.requiredPermission, "ADMINISTRATOR")
+  assert.equal(content.operationKeyHash, OPERATION_KEY_HASH)
+  assert.deepEqual(content.changedFields, [...GUILD_COMMUNITY_CHANGE_FIELDS])
+  assert.equal(
+    (content.desired as Record<string, unknown>).rulesChannelId,
+    GUILD_COMMUNITY_RULES_CHANNEL_ID,
+  )
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(GUILD_COMMUNITY_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(planned), /DISCOVERABLE/u)
+  assert.equal(missingAcknowledgement.isError, true)
+  assert.equal(sharedRoutingChannel.isError, true)
+  assert.equal(arbitraryFeatures.isError, true)
+  assert.equal(guildCommunityCalls.plan, 1)
+})
+
+test("MCP guild Community execution binds approval to exact reviewed state", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client, guildCommunityCalls } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: { ...guildCommunityRequest(), planDigest: DIGEST },
+    name: "execute_guild_community_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(guildCommunityCalls.plan, 1)
+  assert.equal(guildCommunityCalls.execute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    GUILD_COMMUNITY_RULES_CHANNEL_ID,
+    GUILD_COMMUNITY_UPDATES_CHANNEL_ID,
+    OPERATION_KEY_HASH,
+    AUDIT_REASON,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Enablement required: true/u)
+  assert.match(confirmationMessage, /Required permission: ADMINISTRATOR/u)
+  assert.match(confirmationMessage, /Preserved feature digest/u)
+  assert.match(confirmationMessage, /cannot remove any feature/u)
+  assert.match(confirmationMessage, /untrusted data/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_COMMUNITY_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_COMMUNITY_OPERATION_KEY),
+  )
+})
+
+test("MCP guild Community execution stops on no-op, refusal, drift, or changed signed intent", async (context) => {
+  const argumentsValue = {
+    ...guildCommunityRequest(),
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildCommunityEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_community_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.guildCommunityCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_community_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.guildCommunityCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildCommunityPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_community_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.guildCommunityCalls.execute, 0)
+
+  const signed = await connectedModernStdioFixture(context)
+  const initial = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: argumentsValue,
+      name: "execute_guild_community_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(initial.resultType, "input_required")
+  const changed = await signed.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...argumentsValue,
+        safetyAlertsChannelId: null,
+      },
+      inputResponses: {
+        confirm_guild_community_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_guild_community_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(changed).status, "confirmation-invalid")
+  assert.equal(changed.isError, true)
+  assert.equal(signed.guildCommunityCalls.execute, 0)
+})
+
+test("MCP guild Community execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    ...guildCommunityRequest(),
+    planDigest: DIGEST,
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildCommunityError: new GuildCommunityExecutionError(
+        "Discord guild Community outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_community_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-community",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed" as const,
+    timestamp: "2026-08-24T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildCommunityError: new GuildCommunityOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_community_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(GUILD_COMMUNITY_OPERATION_KEY),
+  )
 })
 
 test("MCP guild incident audit exposes privacy-minimized action state", async (context) => {

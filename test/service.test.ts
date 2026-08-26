@@ -355,6 +355,7 @@ function serviceFixture(overrides: {
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildBlueprintOptions?: ConnectorServiceOptions["guildBlueprintOptions"]
+  guildCommunityOptions?: ConnectorServiceOptions["guildCommunityOptions"]
   guildIncidentOptions?: ConnectorServiceOptions["guildIncidentOptions"]
   guildProfileOptions?: ConnectorServiceOptions["guildProfileOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
@@ -856,6 +857,9 @@ function serviceFixture(overrides: {
     async modifyGuildWidgetSettings() {
       throw new Error("Unexpected widget-settings change")
     },
+    async modifyGuildCommunity() {
+      throw new Error("Unexpected guild Community change")
+    },
     async modifyGuildSettings() {
       throw new Error("Unexpected guild-settings change")
     },
@@ -1135,6 +1139,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.guildSettingsOptions
         ? { guildSettingsOptions: overrides.guildSettingsOptions }
+        : {}),
+      ...(overrides.guildCommunityOptions
+        ? { guildCommunityOptions: overrides.guildCommunityOptions }
         : {}),
       ...(overrides.guildIncidentOptions
         ? { guildIncidentOptions: overrides.guildIncidentOptions }
@@ -2280,6 +2287,8 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         interactions: true,
         integrationAudit: true,
         integrationDeletions: true,
+        guildCommunityAudit: true,
+        guildCommunityChanges: true,
         inviteCreation: true,
         inviteRoleAssignment: true,
         roleDeletionAudit: true,
@@ -2314,6 +2323,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         channelOrderingGuildIds: [GUILD_ID],
         integrationGuildIds: [GUILD_ID],
         integrationIds: [INTEGRATION_ID],
+        guildCommunityGuildIds: [GUILD_ID],
         interactionChannelIds: [CHANNEL_ID],
         inviteCreationChannelIds: [CHANNEL_ID],
         inviteRoleIds: [CREATED_ROLE_ID],
@@ -2475,6 +2485,15 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     guildId: GUILD_ID,
     operationKey,
     verificationLevel: "high",
+  }, digest))
+  await captured(() => service.executeGuildCommunityChange({
+    acknowledgeCommunityEnablement: true,
+    auditReason: "reviewed",
+    guildId: GUILD_ID,
+    operationKey,
+    publicUpdatesChannelId: OTHER_CHANNEL_ID,
+    rulesChannelId: CHANNEL_ID,
+    safetyAlertsChannelId: null,
   }, digest))
   await captured(() => service.executeGuildTemplateChange({
     action: "delete",
@@ -2753,7 +2772,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   }, digest))
 
   const byKind = new Map(writeCoordinator.intents.map((entry) => [entry.kind, entry]))
-  assert.equal(byKind.size, 47)
+  assert.equal(byKind.size, 48)
   assert.deepEqual(
     Object.fromEntries([...byKind].map(([kind, entry]) => [kind, entry.targets])),
     {
@@ -2821,6 +2840,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       }],
       "guild-profile-change": [{
         collection: "guild-settings",
+        guildId: GUILD_ID,
+        kind: "guild-collection",
+      }],
+      "guild-community-change": [{
+        collection: "community",
         guildId: GUILD_ID,
         kind: "guild-collection",
       }],
@@ -3003,7 +3027,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     }, "invalid"),
     /reviewed-write plan digest is invalid/,
   )
-  assert.equal(writeCoordinator.intents.length, 47)
+  assert.equal(writeCoordinator.intents.length, 48)
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
@@ -4350,6 +4374,118 @@ test("service pins identity through reviewed guild settings", async () => {
   assert.equal(result.verification, "not-required")
   assert.equal(guildSettingsReads, 3)
   assert.equal(guildSettingsWrites, 0)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(calls.activityEntries.length, 0)
+  assert.equal(operationStore.receipt, undefined)
+})
+
+test("service pins identity through reviewed guild Community state", async () => {
+  const operationStore = new MemoryOperationStore()
+  let communityReads = 0
+  let communityWrites = 0
+  const rulesChannel = channel({
+    id: CHANNEL_ID,
+    parent_id: null,
+    permission_overwrites: [],
+  })
+  const updatesChannel = channel({
+    id: OTHER_CHANNEL_ID,
+    parent_id: null,
+    permission_overwrites: [],
+  })
+  const communityGuild = {
+    features: ["COMMUNITY", "NEWS"],
+    id: GUILD_ID,
+    name: "Private Community Guild",
+    owner_id: "700000000000000001",
+    public_updates_channel_id: OTHER_CHANNEL_ID,
+    rules_channel_id: CHANNEL_ID,
+    safety_alerts_channel_id: null,
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        communityReads += 1
+        return communityGuild
+      },
+      async getGuildMember() {
+        return { pending: false, roles: [], user: bot() }
+      },
+      async getGuildChannels() {
+        return [rulesChannel, updatesChannel]
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.MANAGE_GUILD
+            | DISCORD_PERMISSIONS.SEND_MESSAGES
+            | DISCORD_PERMISSIONS.VIEW_CHANNEL,
+          "@everyone",
+        )]
+      },
+      async modifyGuildCommunity() {
+        communityWrites += 1
+        throw new Error("Unexpected guild Community change")
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        guildCommunityAudit: true,
+        guildCommunityChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildCommunityGuildIds: [GUILD_ID],
+      },
+    },
+    gateway: completeChannelGateway([rulesChannel, updatesChannel]),
+    guildCommunityOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(59),
+      randomId: () => "activity-guild-community",
+    },
+    operationStore,
+  })
+  const request = {
+    acknowledgeCommunityEnablement: true as const,
+    auditReason: "Reviewed Community routing",
+    guildId: GUILD_ID,
+    operationKey: "guild-community-service-attempt-0001",
+    publicUpdatesChannelId: OTHER_CHANNEL_ID,
+    rulesChannelId: CHANNEL_ID,
+    safetyAlertsChannelId: null,
+  }
+
+  await assert.rejects(
+    () => service.getGuildCommunity("bad"),
+    /guild Community guild ID/u,
+  )
+  await assert.rejects(
+    () => service.planGuildCommunityChange({ ...request, guildId: "bad" }),
+    /guild Community guild ID/u,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+
+  const audit = await service.getGuildCommunity(GUILD_ID)
+  const plan = await service.planGuildCommunityChange(request)
+  const result = await service.executeGuildCommunityChange(request, plan.digest)
+
+  assert.equal(audit.configuration.communityEnabled, true)
+  assert.equal(audit.configuration.featureCount, 2)
+  assert.match(audit.configuration.featureDigest, /^sha256:[a-f0-9]{64}$/u)
+  assert.equal("features" in audit.configuration, false)
+  assert.equal(audit.privacy.featureValues, "digests-only")
+  assert.equal(plan.status, "already-current")
+  assert.equal(plan.writeRequired, false)
+  assert.equal(plan.requiredPermission, "MANAGE_GUILD")
+  assert.equal(result.status, "already-current")
+  assert.equal(result.verification, "not-required")
+  assert.equal(communityReads, 3)
+  assert.equal(communityWrites, 0)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.activityEntries.length, 0)

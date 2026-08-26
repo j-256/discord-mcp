@@ -614,6 +614,13 @@ export interface ModifyGuildSettingsInput {
   verificationLevel?: 0 | 1 | 2 | 3 | 4
 }
 
+export interface ModifyGuildCommunityInput {
+  features: readonly string[]
+  publicUpdatesChannelId: string
+  rulesChannelId: string
+  safetyAlertsChannelId: string | null
+}
+
 export interface ModifyGuildProfileInput {
   description?: string | null
   name?: string
@@ -2767,6 +2774,13 @@ const GUILD_SETTINGS_INPUT_KEYS = [
   "systemChannelId",
   "verificationLevel",
 ] as const
+const GUILD_COMMUNITY_INPUT_KEYS = [
+  "features",
+  "publicUpdatesChannelId",
+  "rulesChannelId",
+  "safetyAlertsChannelId",
+] as const
+const GUILD_FEATURE_PATTERN = /^[A-Z0-9_]+$/u
 const GUILD_PROFILE_INPUT_KEYS = [
   "description",
   "name",
@@ -3091,6 +3105,60 @@ function guildSettingsBody(input: ModifyGuildSettingsInput): Record<string, unkn
     ...(Object.hasOwn(input, "verificationLevel")
       ? { verification_level: input.verificationLevel }
       : {}),
+  }
+}
+
+function assertModifyGuildCommunityInput(
+  value: unknown,
+): asserts value is ModifyGuildCommunityInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord guild Community input must be an exact object")
+  }
+  const input = value as Record<string, unknown>
+  if (
+    !hasOnlyKeys(input, GUILD_COMMUNITY_INPUT_KEYS)
+    || !Array.isArray(input.features)
+    || input.features.length < 1
+    || input.features.length > DISCORD_LIMITS.guildFeatures
+    || input.features.some((feature) => (
+      typeof feature !== "string"
+      || feature.length < 1
+      || feature.length > DISCORD_LIMITS.guildFeatureCharacters
+      || !GUILD_FEATURE_PATTERN.test(feature)
+    ))
+    || new Set(input.features).size !== input.features.length
+    || JSON.stringify(input.features) !== JSON.stringify([...input.features].sort())
+    || !input.features.includes("COMMUNITY")
+    || typeof input.rulesChannelId !== "string"
+    || typeof input.publicUpdatesChannelId !== "string"
+    || !(input.safetyAlertsChannelId === null || typeof input.safetyAlertsChannelId === "string")
+  ) {
+    throw new RangeError("Discord guild Community input is invalid")
+  }
+  assertPositiveSnowflake(input.rulesChannelId, "Discord guild Community rules channel ID")
+  assertPositiveSnowflake(
+    input.publicUpdatesChannelId,
+    "Discord guild Community public-updates channel ID",
+  )
+  if (input.safetyAlertsChannelId !== null) {
+    assertPositiveSnowflake(
+      input.safetyAlertsChannelId,
+      "Discord guild Community safety-alerts channel ID",
+    )
+  }
+  if (input.rulesChannelId === input.publicUpdatesChannelId) {
+    throw new RangeError(
+      "Discord guild Community rules and public-updates channels must be distinct",
+    )
+  }
+}
+
+function guildCommunityBody(input: ModifyGuildCommunityInput): Record<string, unknown> {
+  return {
+    features: [...input.features],
+    public_updates_channel_id: input.publicUpdatesChannelId,
+    rules_channel_id: input.rulesChannelId,
+    safety_alerts_channel_id: input.safetyAlertsChannelId,
   }
 }
 
@@ -9523,6 +9591,27 @@ export class DiscordClient {
       auditReason,
       automaticRateLimitRetry: false,
       body: guildSettingsBody(input),
+      suppressFailureCause: true,
+    })
+  }
+
+  async modifyGuildCommunity(
+    guildId: string,
+    input: ModifyGuildCommunityInput,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuild> {
+    assertPositiveSnowflake(guildId, "Discord guild Community guild ID")
+    assertModifyGuildCommunityInput(input)
+    if (typeof auditReason !== "string") {
+      throw new RangeError("Discord guild Community audit reason must be a string")
+    }
+    encodeDiscordAuditReason(auditReason)
+    return this.#request("modify_guild_community", `/guilds/${guildId}`, {
+      ...options,
+      auditReason,
+      automaticRateLimitRetry: false,
+      body: guildCommunityBody(input),
       suppressFailureCause: true,
     })
   }

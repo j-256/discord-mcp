@@ -82,6 +82,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildWelcomeScreen, "guildId", "welcomeScreenGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildWidgetSettings, "guildId", "widgetSettingsGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildSettings, "guildId", "guildSettingsGuildIds"),
+  resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildCommunity, "guildId", "guildCommunityGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildIncidentActions, "guildId", "guildIncidentGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildProfile, "guildId", "guildProfileGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildScheduledEvents, "guildId", "scheduledEventGuildIds"),

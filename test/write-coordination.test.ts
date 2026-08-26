@@ -197,6 +197,7 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   const integration = writeResourceTarget("integration", MESSAGE_ID)
   const integrations = writeGuildCollectionTarget("integrations", GUILD_ID)
   const incidentActions = writeGuildCollectionTarget("incident-actions", GUILD_ID)
+  const community = writeGuildCollectionTarget("community", GUILD_ID)
   const webhooks = writeGuildCollectionTarget("webhooks", GUILD_ID)
   const applicationEmojis = writeApplicationCollectionTarget(
     "emojis",
@@ -217,6 +218,11 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   })
   assert.deepEqual(incidentActions, {
     collection: "incident-actions",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  })
+  assert.deepEqual(community, {
+    collection: "community",
     guildId: GUILD_ID,
     kind: "guild-collection",
   })
@@ -247,6 +253,38 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   assert.throws(
     () => writeApplicationCollectionTarget("emojis", "invalid"),
     /target is invalid/,
+  )
+})
+
+test("coordination isolates guild Community changes to the exact collection", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const community = writeGuildCollectionTarget("community", GUILD_ID)
+  const result = await coordinator.run({
+    kind: "guild-community-change",
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    targets: [community],
+  }, async () => (await claimFiles(directory)).length)
+
+  assert.equal(result, 1)
+  assert.deepEqual(await claimFiles(directory), [])
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-community-change",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [writeGuildCollectionTarget("guild-settings", GUILD_ID)],
+    }, async () => "unsafe"),
+    /requires the exact Community collection target/u,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "guild-community-change",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [writeResourceTarget("channel", CHANNEL_ID)],
+    }, async () => "unsafe"),
+    /requires the exact Community collection target/u,
   )
 })
 

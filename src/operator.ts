@@ -209,6 +209,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   widgetPublicExposurePolicy: "widget-public-exposure-policy",
   widgetSettingsAuditPolicy: "widget-settings-audit-policy",
   widgetSettingsChangePolicy: "widget-settings-change-policy",
+  guildCommunityAuditPolicy: "guild-community-audit-policy",
+  guildCommunityChangePolicy: "guild-community-change-policy",
   guildSettingsAuditPolicy: "guild-settings-audit-policy",
   guildSettingsChangePolicy: "guild-settings-change-policy",
   observability: "observability",
@@ -735,6 +737,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowGuildSettingsChanges && config.guildSettingsGuildIds.size === 0) {
     warnings.push("The guild-settings change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
   }
+  if (config.allowGuildCommunityAudit && config.guildCommunityGuildIds.size === 0) {
+    warnings.push("The guild Community audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
+  }
+  if (config.allowGuildCommunityChanges && config.guildCommunityGuildIds.size === 0) {
+    warnings.push("The guild Community change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
   if (config.allowGuildIncidentAudit && config.guildIncidentGuildIds.size === 0) {
     warnings.push("The guild incident-action audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
   }
@@ -999,6 +1007,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowGuildSettingsAudit || config.allowGuildSettingsChanges,
       "guild-settings",
       "Guild-settings audit and reviewed changes",
+    ],
+    [
+      config.allowGuildCommunityAudit || config.allowGuildCommunityChanges,
+      "guild-community",
+      "Guild Community audit and reviewed monotonic changes",
     ],
     [
       config.allowGuildIncidentAudit || config.allowGuildIncidentChanges,
@@ -2641,6 +2654,44 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.guildSettingsChangePolicy,
         "pass",
         `Reviewed guild-settings changes are constrained to ${config.guildSettingsGuildIds.size} exact guilds with sparse named-field review, signed approval, one-shot execution, and authoritative response plus API readback`,
+      ))
+    }
+    if (!config.allowGuildCommunityAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildCommunityAuditPolicy,
+        "pass",
+        "Privacy-minimized guild Community audit is disabled",
+      ))
+    } else if (config.guildCommunityGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildCommunityAuditPolicy,
+        "warn",
+        "Guild Community audit is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildCommunityAuditPolicy,
+        "pass",
+        `Guild Community audit is constrained to ${config.guildCommunityGuildIds.size} exact guilds with verified identity, complete permission and continuity-safe channel evidence, content-free feature digests, and exact routing IDs`,
+      ))
+    }
+    if (!config.allowGuildCommunityChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildCommunityChangePolicy,
+        "pass",
+        "Reviewed guild Community changes are disabled",
+      ))
+    } else if (config.guildCommunityGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildCommunityChangePolicy,
+        "warn",
+        "Guild Community changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildCommunityChangePolicy,
+        "pass",
+        `Reviewed guild Community changes are constrained to ${config.guildCommunityGuildIds.size} exact guilds with monotonic feature preservation, dynamic ADMINISTRATOR or MANAGE_GUILD authority, signed approval, one-shot execution, and authoritative response plus API readback`,
       ))
     }
     if (!config.allowGuildIncidentAudit) {

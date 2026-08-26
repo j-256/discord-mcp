@@ -48,6 +48,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
   "application-commands",
   "automod",
   "channels",
+  "community",
   "emojis",
   "guild-settings",
   "incident-actions",
@@ -439,6 +440,19 @@ function normalizeTargets(
   ) {
     throw new WriteCoordinationStateError(
       "Discord linked-role metadata coordination requires the role-connection-metadata collection target",
+    )
+  }
+  const guildTarget = [...byDescriptor.values()][0]
+  if (
+    kind === "guild-community-change"
+    && (
+      byDescriptor.size !== 1
+      || guildTarget?.kind !== "guild-collection"
+      || guildTarget.collection !== "community"
+    )
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord guild Community coordination requires the exact Community collection target",
     )
   }
   return [...byDescriptor.entries()]

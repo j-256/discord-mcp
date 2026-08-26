@@ -164,6 +164,8 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "forumTagChanges",
   "guildExpressionAudit",
   "guildExpressionChanges",
+  "guildCommunityAudit",
+  "guildCommunityChanges",
   "guildIncidentAudit",
   "guildIncidentChanges",
   "guildProfileAudit",
@@ -261,6 +263,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "forumPostChannelIds",
   "forumTagChannelIds",
   "guildScaffoldGuildIds",
+  "guildCommunityGuildIds",
   "guildExpressionGuildIds",
   "guildIncidentGuildIds",
   "guildProfileGuildIds",
@@ -456,8 +459,17 @@ const APPLICATION_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION = "Exact guild beneficiary
 const APPLICATION_ENTITLEMENT_USER_SCOPE_DESCRIPTION = "Exact user beneficiary ID allowlist for application entitlement audit"
 const APPLICATION_MONETIZATION_SKU_SCOPE_DESCRIPTION = "Exact current-application SKU ID allowlist for entitlement and subscription audit"
 const APPLICATION_SUBSCRIPTION_USER_SCOPE_DESCRIPTION = "Exact user ID allowlist for application subscription lifecycle audit"
+const GUILD_COMMUNITY_AUDIT_CAPABILITY_DESCRIPTION = "Enable privacy-minimized Discord Community routing and authority audits"
+const GUILD_COMMUNITY_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed monotonic Community enablement and exact routing changes"
+const GUILD_COMMUNITY_SCOPE_DESCRIPTION = "Exact guild ID allowlist for Discord Community audit and reviewed changes"
 
 function capabilityDescription(documentKey: string): string {
+  if (documentKey === "guildCommunityAudit") {
+    return GUILD_COMMUNITY_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "guildCommunityChanges") {
+    return GUILD_COMMUNITY_CHANGES_CAPABILITY_DESCRIPTION
+  }
   if (documentKey === "applicationMonetizationAudit") {
     return APPLICATION_MONETIZATION_AUDIT_CAPABILITY_DESCRIPTION
   }
@@ -525,6 +537,9 @@ function capabilityDescription(documentKey: string): string {
 }
 
 function scopeDescription(documentKey: string): string {
+  if (documentKey === "guildCommunityGuildIds") {
+    return GUILD_COMMUNITY_SCOPE_DESCRIPTION
+  }
   if (documentKey === "applicationEntitlementGuildIds") {
     return APPLICATION_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION
   }

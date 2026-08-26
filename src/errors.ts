@@ -1555,6 +1555,42 @@ export class GuildSettingsEvidenceError extends Error {
   override name = "GuildSettingsEvidenceError"
 }
 
+export class GuildCommunityPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild Community snapshot does not match the reviewed plan")
+    this.name = "GuildCommunityPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildCommunityOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild Community operation key has already been reserved")
+    this.name = "GuildCommunityOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildCommunityExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildCommunityExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildCommunityEvidenceError extends Error {
+  override name = "GuildCommunityEvidenceError"
+}
+
 export class GuildProfilePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

@@ -35,6 +35,7 @@ import {
   type ForumTagActivity,
   type GuildApplicationCommandActivity,
   type GuildExpressionActivity,
+  type GuildCommunityActivity,
   type GuildIncidentActivity,
   type GuildProfileActivity,
   type GuildPruneActivity,
@@ -1298,6 +1299,36 @@ function guildSettingsChange(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function guildCommunityChange(
+  id: string,
+  status: GuildCommunityActivity["status"],
+): GuildCommunityActivity {
+  return {
+    changedFields: [
+      "communityEnabled",
+      "publicUpdatesChannelId",
+      "rulesChannelId",
+    ],
+    enablementRequired: true,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "guild-community-change",
+    operationKeyHash: `sha256:${"1".repeat(64)}`,
+    planDigest: `hmac-sha256:${"2".repeat(64)}`,
+    publicUpdatesChannelId: "201",
+    rulesChannelId: "202",
+    safetyAlertsChannelId: null,
+    schemaVersion: 1,
+    stateDigest: `sha256:${"3".repeat(64)}`,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -3972,6 +4003,67 @@ test("JSONL activity log accepts only exact content-free guild-settings evidence
     ],
   )
   assert.doesNotMatch(persisted, /private-audit-reason|private-channel-id|private-setting-value/)
+})
+
+test("JSONL activity log accepts only exact content-free guild Community evidence", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append(guildCommunityChange("1", "pending"))
+  await store.append(guildCommunityChange("2", "completed"))
+  await assert.rejects(
+    store.append({
+      ...guildCommunityChange("3", "completed"),
+      auditReason: "private-audit-reason",
+      channelName: "private-channel-name",
+      features: ["COMMUNITY", "private-feature"],
+      operationKey: "private-operation-key",
+    } as GuildCommunityActivity),
+    /invalid content-free shape/u,
+  )
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildCommunityChange("4", "completed"),
+      changedFields: ["rulesChannelId", "communityEnabled"],
+    })}\n${JSON.stringify({
+      ...guildCommunityChange("5", "completed"),
+      changedFields: ["privateFutureField"],
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 2)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "changedFields",
+      "enablementRequired",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "publicUpdatesChannelId",
+      "rulesChannelId",
+      "safetyAlertsChannelId",
+      "schemaVersion",
+      "stateDigest",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  assert.doesNotMatch(
+    persisted,
+    /private-audit-reason|private-channel-name|private-feature|private-operation-key/u,
+  )
 })
 
 test("JSONL activity log accepts only exact content-free guild-incident evidence", async (context) => {

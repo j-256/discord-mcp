@@ -289,6 +289,9 @@ function status(
       guildPruneIncludeRoleIds: [],
       guildPruneMaxMembers: 0,
       guildPrunesEnabled: false,
+      guildCommunityAuditEnabled: false,
+      guildCommunityChangesEnabled: false,
+      guildCommunityGuildIds: [],
       guildSettingsAuditEnabled: false,
       guildSettingsChangesEnabled: false,
       guildSettingsGuildIds: [],
@@ -482,6 +485,7 @@ function toolService(
     executeWelcomeScreenChange: unexpected,
     executeWidgetSettingsChange: unexpected,
     executeGuildSettingsChange: unexpected,
+    executeGuildCommunityChange: unexpected,
     executeGuildIncidentActionChange: unexpected,
     executeGuildProfileChange: unexpected,
     executePollCreation: unexpected,
@@ -519,6 +523,7 @@ function toolService(
     getGuildWelcomeScreen: unexpected,
     getGuildWidgetSettings: unexpected,
     getGuildSettings: unexpected,
+    getGuildCommunity: unexpected,
     getGuildIncidentActions: unexpected,
     getGuildProfile: unexpected,
     listChannelWebhooks: unexpected,
@@ -549,6 +554,7 @@ function toolService(
     planWelcomeScreenChange: unexpected,
     planWidgetSettingsChange: unexpected,
     planGuildSettingsChange: unexpected,
+    planGuildCommunityChange: unexpected,
     planGuildIncidentActionChange: unexpected,
     planGuildProfileChange: unexpected,
     planGuildExpressionChange: unexpected,
@@ -2809,6 +2815,67 @@ test("doctor and setup explain privacy-minimized reviewed guild settings", async
   assert.match(omitted.warnings.join("\n"), /guild-settings toolset/)
   assertDefaultSecretForwarding(setup)
   assert.doesNotMatch(JSON.stringify(enabled), /guild name|channel name|audit reason/u)
+})
+
+test("doctor and setup explain reviewed monotonic guild Community changes", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      guildCommunityAudit: true,
+      guildCommunityChanges: true,
+    },
+    scopes: {
+      guildCommunityGuildIds: [GUILD_ID],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    configOverrides: enabledPolicy,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildCommunityAuditPolicy,
+  )
+  const change = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildCommunityChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /verified identity/u)
+  assert.match(audit?.summary || "", /content-free feature digests/u)
+  assert.match(audit?.summary || "", /exact routing IDs/u)
+  assert.equal(change?.status, "pass")
+  assert.match(change?.summary || "", /monotonic feature preservation/u)
+  assert.match(change?.summary || "", /ADMINISTRATOR or MANAGE_GUILD/u)
+  assert.match(change?.summary || "", /signed approval/u)
+  assert.match(change?.summary || "", /authoritative response plus API readback/u)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.guildCommunityAuditPolicy,
+    )?.summary || "",
+    /audit is disabled/u,
+  )
+  assert.match(omitted.warnings.join("\n"), /guild-community toolset/u)
+  assertDefaultSecretForwarding(setup)
+  assert.doesNotMatch(
+    JSON.stringify(enabled),
+    /guild name|channel name|feature value|audit reason/u,
+  )
 })
 
 test("doctor and setup explain privacy-minimized reviewed guild incident actions", async () => {
@@ -5673,6 +5740,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_forum_tag_change",
     "review_guild_application_command_change",
     "review_guild_blueprint",
+    "review_guild_community_change",
     "review_guild_expression_change",
     "review_guild_incident_action_change",
     "review_guild_integration_deletion",
@@ -5747,6 +5815,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://guilds/{guildId}/channels/{channelId}/deletion-readiness",
     "discord://guilds/{guildId}/channels/{channelId}/stage-instance",
     "discord://guilds/{guildId}/channels/{channelId}/voice-status",
+    "discord://guilds/{guildId}/community",
     "discord://guilds/{guildId}/emojis",
     "discord://guilds/{guildId}/incident-actions",
     "discord://guilds/{guildId}/integrations",
@@ -5794,6 +5863,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_forum_tag_change",
     "execute_guild_application_command_change",
     "execute_guild_blueprint",
+    "execute_guild_community_change",
     "execute_guild_expression_change",
     "execute_guild_incident_action_change",
     "execute_guild_integration_deletion",

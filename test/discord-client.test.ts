@@ -5445,6 +5445,140 @@ test("Discord client rejects invalid guild-settings inputs before fetching", asy
   assert.equal(requests, 0)
 })
 
+test("Discord client sends one exact non-retried guild Community PATCH", async () => {
+  let requests = 0
+  let requestBody: unknown
+  let requestUrl = ""
+  let method = ""
+  let auditReason = ""
+  const records: RecordedObservation[] = []
+  const response = {
+    features: ["COMMUNITY", "NEWS"],
+    id: "100",
+    name: "Private Guild",
+    owner_id: "200",
+    public_updates_channel_id: "301",
+    rules_channel_id: "300",
+    safety_alerts_channel_id: "301",
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests += 1
+      requestUrl = String(input)
+      method = init?.method || "GET"
+      auditReason = new Headers(init?.headers).get("X-Audit-Log-Reason") || ""
+      requestBody = JSON.parse(String(init?.body))
+      return jsonResponse(response)
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.modifyGuildCommunity("100", {
+    features: ["COMMUNITY", "NEWS"],
+    publicUpdatesChannelId: "301",
+    rulesChannelId: "300",
+    safetyAlertsChannelId: "301",
+  }, "Reviewed Community / routing")
+
+  assert.equal(requests, 1)
+  assert.equal(requestUrl, `${API_BASE_URL}/guilds/100`)
+  assert.equal(method, "PATCH")
+  assert.equal(auditReason, "Reviewed%20Community%20%2F%20routing")
+  assert.deepEqual(requestBody, {
+    features: ["COMMUNITY", "NEWS"],
+    public_updates_channel_id: "301",
+    rules_channel_id: "300",
+    safety_alerts_channel_id: "301",
+  })
+  assert.deepEqual(result, response)
+  assert.equal(records[0]?.operation, "modify_guild_community")
+
+  let sleeps = 0
+  requests = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({
+        code: 20_016,
+        message: "rate limited",
+        retry_after: 0,
+      }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.modifyGuildCommunity("100", {
+      features: ["COMMUNITY"],
+      publicUpdatesChannelId: "301",
+      rulesChannelId: "300",
+      safetyAlertsChannelId: null,
+    }, "Reviewed"),
+    DiscordApiError,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
+test("Discord client rejects unsafe guild Community inputs before fetching", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({})
+    },
+    token: TOKEN,
+  })
+  const valid = {
+    features: ["COMMUNITY"],
+    publicUpdatesChannelId: "301",
+    rulesChannelId: "300",
+    safetyAlertsChannelId: null,
+  } as const
+  await assert.rejects(
+    client.modifyGuildCommunity("bad", valid, "Reviewed"),
+    /guild ID/,
+  )
+  await assert.rejects(
+    client.modifyGuildCommunity("100", { ...valid, features: ["NEWS"] }, "Reviewed"),
+    /input is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildCommunity("100", {
+      ...valid,
+      features: ["NEWS", "COMMUNITY"],
+    }, "Reviewed"),
+    /input is invalid/,
+  )
+  await assert.rejects(
+    client.modifyGuildCommunity("100", {
+      ...valid,
+      publicUpdatesChannelId: "300",
+    }, "Reviewed"),
+    /must be distinct/,
+  )
+  await assert.rejects(
+    client.modifyGuildCommunity("100", {
+      ...valid,
+      safetyAlertsChannelId: "bad",
+    }, "Reviewed"),
+    /safety-alerts channel ID/,
+  )
+  await assert.rejects(
+    client.modifyGuildCommunity("100", { ...valid, future: true } as never, "Reviewed"),
+    /input is invalid/,
+  )
+  assert.equal(requests, 0)
+})
+
 test("Discord client never retries a rate-limited role configuration", async () => {
   let requests = 0
   let sleeps = 0

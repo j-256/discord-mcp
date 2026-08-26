@@ -90,6 +90,7 @@ export const MCP_TOOLSET_NAMES = [
   "forum-tags",
   "gateway",
   "guild-blueprints",
+  "guild-community",
   "guild-expressions",
   "guild-incidents",
   "guild-profile",
@@ -152,6 +153,16 @@ export const GUILD_SETTINGS_FIELDS = [
 ] as const
 
 export type GuildSettingsField = typeof GUILD_SETTINGS_FIELDS[number]
+
+export const GUILD_COMMUNITY_CHANGE_FIELDS = [
+  "communityEnabled",
+  "publicUpdatesChannelId",
+  "rulesChannelId",
+  "safetyAlertsChannelId",
+] as const
+
+export type GuildCommunityChangeField =
+  typeof GUILD_COMMUNITY_CHANGE_FIELDS[number]
 
 export const GUILD_INCIDENT_ACTION_FIELDS = [
   "directMessages",
@@ -501,6 +512,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   gatewayCursorCharacters: 128,
   gatewayEventBufferSize: 1_000,
   gatewayEventPage: 100,
+  guildCommunityGuildAllowlist: 100,
   guildProfileGuildAllowlist: 100,
   guildPruneIncludeRoles: 5,
   guildPruneMaximumMembers: 250,

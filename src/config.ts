@@ -85,6 +85,8 @@ export interface ConnectorConfig {
   allowGateway: boolean
   allowGuildExpressionAudit: boolean
   allowGuildExpressionChanges: boolean
+  allowGuildCommunityAudit: boolean
+  allowGuildCommunityChanges: boolean
   allowGuildIncidentAudit: boolean
   allowGuildIncidentChanges: boolean
   allowGuildProfileAudit: boolean
@@ -182,6 +184,7 @@ export interface ConnectorConfig {
   forumTagChannelIds: ReadonlySet<string>
   gatewayEventBufferSize: number
   guildScaffoldGuildIds: ReadonlySet<string>
+  guildCommunityGuildIds: ReadonlySet<string>
   guildExpressionGuildIds: ReadonlySet<string>
   guildExpressionRoots: readonly string[]
   guildIncidentGuildIds: ReadonlySet<string>
@@ -588,6 +591,11 @@ export function loadConnectorConfigDocument(
     CONNECTOR_LIMITS.roleOrderingGuildAllowlist,
   )
   const guildScaffoldGuildIds = configScope(document, "guildScaffoldGuildIds")
+  const guildCommunityGuildIds = configScope(
+    document,
+    "guildCommunityGuildIds",
+    CONNECTOR_LIMITS.guildCommunityGuildAllowlist,
+  )
   const guildExpressionGuildIds = configScope(document, "guildExpressionGuildIds")
   const guildIncidentGuildIds = configScope(
     document,
@@ -637,6 +645,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("channelCloneGuildIds"), channelCloneGuildIds],
     [configPolicyPath("channelOrderingGuildIds"), channelOrderingGuildIds],
     [configPolicyPath("guildScaffoldGuildIds"), guildScaffoldGuildIds],
+    [configPolicyPath("guildCommunityGuildIds"), guildCommunityGuildIds],
     [configPolicyPath("guildExpressionGuildIds"), guildExpressionGuildIds],
     [configPolicyPath("guildIncidentGuildIds"), guildIncidentGuildIds],
     [configPolicyPath("guildProfileGuildIds"), guildProfileGuildIds],
@@ -1069,6 +1078,18 @@ export function loadConnectorConfigDocument(
       `${configPolicyPath("allowGuildTemplateChanges")} requires ${configPolicyPath("allowGuildTemplateAudit")}`,
     )
   }
+  const allowGuildCommunityAudit = configCapability(document, "guildCommunityAudit")
+  const allowGuildCommunityChanges = configCapability(document, "guildCommunityChanges")
+  if (allowGuildCommunityChanges && !allowGuildCommunityAudit) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildCommunityChanges")} requires ${configPolicyPath("allowGuildCommunityAudit")}`,
+    )
+  }
+  if (allowGuildCommunityAudit && guildCommunityGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildCommunityAudit")} requires ${configPolicyPath("guildCommunityGuildIds")}`,
+    )
+  }
   const allowGuildSettingsAudit = configCapability(document, "guildSettingsAudit")
   const allowGuildSettingsChanges = configCapability(document, "guildSettingsChanges")
   if (allowGuildSettingsChanges && !allowGuildSettingsAudit) {
@@ -1237,6 +1258,8 @@ export function loadConnectorConfigDocument(
     allowDirectMessageEditing,
     allowEmbedMessages,
     allowGateway,
+    allowGuildCommunityAudit,
+    allowGuildCommunityChanges,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
     allowGuildIncidentAudit,
@@ -1350,6 +1373,7 @@ export function loadConnectorConfigDocument(
     forumTagChannelIds,
     gatewayEventBufferSize: document.gateway.eventBufferSize,
     guildScaffoldGuildIds,
+    guildCommunityGuildIds,
     guildExpressionGuildIds,
     guildExpressionRoots: parseOwnedRoots(
       document.storage.guildExpressionRoots,

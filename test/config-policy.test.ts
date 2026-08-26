@@ -285,6 +285,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildPruneIncludeRoleIds: [],
     guildPruneMaxMembers: 25,
     guildPrunesEnabled: false,
+    guildCommunityAuditEnabled: false,
+    guildCommunityChangesEnabled: false,
+    guildCommunityGuildIds: [],
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -1562,6 +1565,9 @@ test("configuration and policy require an exact administration guild and protect
     guildPruneIncludeRoleIds: [],
     guildPruneMaxMembers: 25,
     guildPrunesEnabled: false,
+    guildCommunityAuditEnabled: false,
+    guildCommunityChangesEnabled: false,
+    guildCommunityGuildIds: [],
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -2693,6 +2699,114 @@ test("configuration and policy isolate reviewed guild settings", () => {
       },
     }, { homeDirectory: "/test/home" }),
     /at most 100 unique IDs/,
+  )
+})
+
+test("configuration and policy isolate reviewed guild Community changes", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      guildCommunityAudit: true,
+      guildCommunityChanges: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    },
+    scopes: {
+      guildCommunityGuildIds: [GUILD_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowGuildCommunityAudit, true)
+  assert.equal(config.allowGuildCommunityChanges, true)
+  assert.deepEqual([...config.guildCommunityGuildIds], [GUILD_ID])
+  assert.equal(policy.describe().guildCommunityAuditEnabled, true)
+  assert.equal(policy.describe().guildCommunityChangesEnabled, true)
+  assert.deepEqual(policy.describe().guildCommunityGuildIds, [GUILD_ID])
+  assert.doesNotThrow(() => policy.assertGuildCommunityAuditable(GUILD_ID))
+  assert.doesNotThrow(() => policy.assertGuildCommunityChangeable(GUILD_ID))
+  assert.throws(
+    () => policy.assertGuildCommunityAuditable(OTHER_GUILD_ID),
+    /outside the guild Community scope/u,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildCommunityAuditable(GUILD_ID),
+    /guild Community audit is disabled/u,
+  )
+
+  const auditOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      guildCommunityAudit: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    scopes: {
+      guildCommunityGuildIds: [GUILD_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  assert.doesNotThrow(() => auditOnly.assertGuildCommunityAuditable(GUILD_ID))
+  assert.throws(
+    () => auditOnly.assertGuildCommunityChangeable(GUILD_ID),
+    /guild Community changes are disabled/u,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        guildCommunityChanges: true,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.capabilities\.guildCommunityAudit/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        guildCommunityAudit: true,
+      },
+      identity: {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.scopes\.guildCommunityGuildIds/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildCommunityGuildIds: [OTHER_GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.guildCommunityGuildIds must be a subset/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      scopes: {
+        guildCommunityGuildIds: Array.from(
+          { length: 101 },
+          (_, index) => (515_000_000_000_000_000n + BigInt(index)).toString(),
+        ),
+      },
+    }, { homeDirectory: "/test/home" }),
+    /at most 100 unique IDs/u,
   )
 })
 
@@ -5234,6 +5348,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildPruneIncludeRoleIds: [],
     guildPruneMaxMembers: 25,
     guildPrunesEnabled: false,
+    guildCommunityAuditEnabled: false,
+    guildCommunityChangesEnabled: false,
+    guildCommunityGuildIds: [],
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],

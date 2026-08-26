@@ -20,6 +20,8 @@ import {
   GUILD_INCIDENT_ACTION_FIELDS,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
+  GUILD_COMMUNITY_CHANGE_FIELDS,
+  type GuildCommunityChangeField,
   GUILD_TEMPLATE_REFERENCE_PATTERN,
   INVITE_REFERENCE_PATTERN,
   MEMBER_ROLE_ACTIONS,
@@ -87,6 +89,24 @@ const GUILD_SETTINGS_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "planDigest",
   "requestedFields",
   "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+])
+const GUILD_COMMUNITY_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "changedFields",
+  "enablementRequired",
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "publicUpdatesChannelId",
+  "rulesChannelId",
+  "safetyAlertsChannelId",
+  "schemaVersion",
+  "stateDigest",
   "status",
   "timestamp",
   "verification",
@@ -1252,6 +1272,31 @@ export interface GuildSettingsActivity {
   verification: "drift" | "match" | null
 }
 
+export type GuildCommunityActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildCommunityActivity {
+  changedFields: GuildCommunityChangeField[]
+  enablementRequired: boolean
+  error: string | null
+  guildId: string
+  id: string
+  kind: "guild-community-change"
+  operationKeyHash: string
+  planDigest: string
+  publicUpdatesChannelId: string
+  rulesChannelId: string
+  safetyAlertsChannelId: string | null
+  schemaVersion: number
+  stateDigest: string
+  status: GuildCommunityActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type GuildProfileActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1556,6 +1601,7 @@ export type ActivityEntry =
   | ForumPostActivity
   | ForumTagActivity
   | GuildApplicationCommandActivity
+  | GuildCommunityActivity
   | GuildExpressionActivity
   | GuildIncidentActivity
   | GuildProfileActivity
@@ -5317,6 +5363,83 @@ function parseGuildSettingsActivity(
   }
 }
 
+function parseGuildCommunityActivity(
+  value: unknown,
+): GuildCommunityActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const fields = Array.isArray(record.changedFields) ? record.changedFields : []
+  const status = String(record.status)
+  if (
+    Object.keys(record).length !== GUILD_COMMUNITY_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !GUILD_COMMUNITY_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-community-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(status)
+    || typeof record.guildId !== "string"
+    || !positiveActivitySnowflake(record.guildId)
+    || typeof record.rulesChannelId !== "string"
+    || !positiveActivitySnowflake(record.rulesChannelId)
+    || typeof record.publicUpdatesChannelId !== "string"
+    || !positiveActivitySnowflake(record.publicUpdatesChannelId)
+    || !(record.safetyAlertsChannelId === null || (
+      typeof record.safetyAlertsChannelId === "string"
+      && positiveActivitySnowflake(record.safetyAlertsChannelId)
+    ))
+    || typeof record.enablementRequired !== "boolean"
+    || fields.length < 1
+    || fields.length > GUILD_COMMUNITY_CHANGE_FIELDS.length
+    || fields.some((field) => (
+      typeof field !== "string"
+      || !(GUILD_COMMUNITY_CHANGE_FIELDS as readonly string[]).includes(field)
+    ))
+    || new Set(fields).size !== fields.length
+    || JSON.stringify(fields) !== JSON.stringify([...fields].sort())
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || typeof record.stateDigest !== "string"
+    || !/^sha256:[a-f0-9]{64}$/.test(record.stateDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    changedFields: fields as GuildCommunityChangeField[],
+    enablementRequired: record.enablementRequired,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "guild-community-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    publicUpdatesChannelId: record.publicUpdatesChannelId,
+    rulesChannelId: record.rulesChannelId,
+    safetyAlertsChannelId: record.safetyAlertsChannelId as string | null,
+    schemaVersion: SCHEMA_VERSION,
+    stateDigest: record.stateDigest,
+    status: record.status as GuildCommunityActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseGuildProfileActivity(
   value: unknown,
 ): GuildProfileActivity | undefined {
@@ -6161,6 +6284,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseGuildIncidentActivity(value)
     || parseGuildProfileActivity(value)
     || parseGuildSettingsActivity(value)
+    || parseGuildCommunityActivity(value)
     || parseWidgetSettingsActivity(value)
     || parseWebhookCreationActivity(value)
     || parseWebhookChangeActivity(value)
