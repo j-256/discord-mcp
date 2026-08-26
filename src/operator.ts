@@ -166,6 +166,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   directMessageDeletionPolicy: "direct-message-deletion-policy",
   directMessageDeliveryPolicy: "direct-message-delivery-policy",
   directMessageEditingPolicy: "direct-message-editing-policy",
+  embedMessagePolicy: "embed-message-policy",
   forumPostPolicy: "forum-post-policy",
   forumTagAuditPolicy: "forum-tag-audit-policy",
   forumTagChangePolicy: "forum-tag-change-policy",
@@ -679,6 +680,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowInteractions && config.interactionChannelIds.size === 0) {
     warnings.push("The interaction toggle is enabled but interactions remain blocked because no interaction-channel allowlist is configured")
   }
+  if (config.allowEmbedMessages && config.embedMessageChannelIds.size === 0) {
+    warnings.push("The embed-message capability is enabled but static rich-embed messages remain blocked because no exact channel allowlist is configured")
+  }
   if (config.allowMemberDirectory && config.memberDirectoryGuildIds.size === 0) {
     warnings.push("The member-directory toggle is enabled but member lookup remains blocked because an exact guild allowlist is required")
   }
@@ -898,6 +902,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Reviewed application linked-role metadata changes",
     ],
     [config.allowAttachments, "attachments", "Attachment messages"],
+    [config.allowEmbedMessages, "embed-messages", "Static rich-embed messages"],
     [
       config.allowAutomodAudit || config.allowAutomodChanges,
       "automod",
@@ -2341,6 +2346,25 @@ export async function diagnoseConnector(
         `Message interactions and reviewed static component messages are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
       ))
     }
+    if (!config.allowEmbedMessages) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.embedMessagePolicy,
+        "pass",
+        "Reviewed static rich-embed messages are disabled",
+      ))
+    } else if (config.embedMessageChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.embedMessagePolicy,
+        "warn",
+        "Embed-message capability is enabled, but the required exact channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.embedMessagePolicy,
+        "pass",
+        `Reviewed static rich-embed messages are constrained to ${config.embedMessageChannelIds.size} channels with ${config.mentionUserIds.size} notification users and the shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
+      ))
+    }
     if (!config.allowMemberDirectory) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberDirectoryPolicy,
@@ -3518,12 +3542,15 @@ export async function diagnoseConnector(
           && config.announcementCrosspostChannelIds.size > 0
         const componentMessagesConfigured = config.allowInteractions
           && config.interactionChannelIds.size > 0
+        const embedMessagesConfigured = config.allowEmbedMessages
+          && config.embedMessageChannelIds.size > 0
         const messageForwardingConfigured = config.allowMessageForwarding
           && config.messageForwardSourceChannelIds.size > 0
           && config.messageForwardTargetChannelIds.size > 0
         const contentDependentWrites = [
           ...(announcementCrosspostsConfigured ? ["announcement crossposts"] : []),
           ...(componentMessagesConfigured ? ["static component messages"] : []),
+          ...(embedMessagesConfigured ? ["static rich-embed messages"] : []),
           ...(messageForwardingConfigured ? ["message forwarding"] : []),
         ]
         checks.push(posture.privilegedIntents.messageContent === "enabled"
@@ -3913,6 +3940,11 @@ export async function prepareSetup(
       && config.mcpToolsets.has("interactions")
       ? ["static component messages"]
       : []),
+    ...(config.allowEmbedMessages
+      && config.embedMessageChannelIds.size > 0
+      && config.mcpToolsets.has("embed-messages")
+      ? ["static rich-embed messages"]
+      : []),
   ]
   return {
     applicationId: status.application.id,
@@ -4201,6 +4233,20 @@ async function inspectSmokeClient(
       || tool.annotations.readOnlyHint !== false
     ) {
       throw new Error("MCP smoke check found invalid execute_component_message annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_embed_message")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_embed_message"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== true
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_embed_message annotations")
     }
   }
   if (selectedToolNames.includes("execute_forum_post")) {

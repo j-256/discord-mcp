@@ -344,6 +344,7 @@ function serviceFixture(overrides: {
   config?: ConnectorConfig
   configOverrides?: FixtureConfigOverrides
   componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
+  embedMessageOptions?: ConnectorServiceOptions["embedMessageOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
   currentUser?: DiscordUser
@@ -392,11 +393,13 @@ function serviceFixture(overrides: {
     createAttachment: 0,
     createChannel: 0,
     createComponentMessage: 0,
+    createEmbedMessage: 0,
     createForumPost: 0,
     createMessage: 0,
     createRole: 0,
     editMessage: 0,
     editComponentMessage: 0,
+    editEmbedMessage: 0,
     getRole: 0,
     guildAuditLog: 0,
     guilds: 0,
@@ -461,6 +464,10 @@ function serviceFixture(overrides: {
     async createComponentMessage() {
       calls.createComponentMessage += 1
       throw new Error("Unexpected component-message creation")
+    },
+    async createEmbedMessage() {
+      calls.createEmbedMessage += 1
+      throw new Error("Unexpected embed-message creation")
     },
     async createChannelInvite() {
       throw new Error("Unexpected invite creation")
@@ -585,6 +592,10 @@ function serviceFixture(overrides: {
     async editComponentMessage() {
       calls.editComponentMessage += 1
       throw new Error("Unexpected component-message edit")
+    },
+    async editEmbedMessage() {
+      calls.editEmbedMessage += 1
+      throw new Error("Unexpected embed-message edit")
     },
     async editMessage(_channelId, _messageId, input) {
       calls.editMessage += 1
@@ -1044,6 +1055,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.componentMessageOptions
         ? { componentMessageOptions: overrides.componentMessageOptions }
+        : {}),
+      ...(overrides.embedMessageOptions
+        ? { embedMessageOptions: overrides.embedMessageOptions }
         : {}),
       ...(overrides.attachmentMessageOptions
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
@@ -6053,6 +6067,141 @@ test("service verifies component messages and shares the interaction limiter", a
   assert.equal(restarted.calls.activityAppends, 0)
   assert.equal(restarted.calls.createComponentMessage, 0)
   assert.equal(restarted.calls.editComponentMessage, 0)
+})
+
+test("service verifies static embed messages and shares the interaction limiter", async () => {
+  const operationStore = new MemoryOperationStore()
+  let created: DiscordMessage | undefined
+  const configOverrides = {
+    capabilities: {
+      embedMessages: true,
+      interactions: true,
+    },
+    limits: {
+      interactionMaxWritesPerMinute: 1,
+      interactionMinWriteIntervalMs: 0,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      embedMessageChannelIds: [CHANNEL_ID],
+      interactionChannelIds: [CHANNEL_ID],
+    },
+  }
+  const permissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.EMBED_LINKS
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  const { calls, service } = serviceFixture({
+    client: {
+      async createEmbedMessage(channelId, input) {
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(input.content, "Reviewed release")
+        assert.deepEqual(input.embeds, [{
+          color: 0x58_65_F2,
+          description: "Production deployment is ready",
+          fields: [{ inline: true, name: "Status", value: "Ready" }],
+          title: "Release",
+        }])
+        calls.createEmbedMessage += 1
+        created = message({
+          attachments: [],
+          author: bot(),
+          channel_id: CHANNEL_ID,
+          components: [],
+          content: input.content ?? "",
+          edited_timestamp: null,
+          embeds: input.embeds.map((embed) => ({ ...embed, type: "rich" })),
+          flags: 0,
+          mention_everyone: false,
+          mention_roles: [],
+          mentions: [],
+          nonce: input.nonce,
+          pinned: false,
+          sticker_items: [],
+          tts: false,
+          type: 0,
+        })
+        return created
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, permissions, "@everyone")]
+      },
+      async getMessage() {
+        assert.ok(created)
+        return created
+      },
+    },
+    configOverrides,
+    embedMessageOptions: {
+      clock: () => new Date("2026-08-26T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(14),
+      randomId: () => "activity-embed-create",
+    },
+    operationStore,
+  })
+  const request = {
+    action: "create" as const,
+    channelId: CHANNEL_ID,
+    content: "Reviewed release",
+    embeds: [{
+      color: 0x58_65_F2,
+      description: "Production deployment is ready",
+      fields: [{ inline: true, name: "Status", value: "Ready" }],
+      title: "Release",
+    }],
+    operationKey: "embed-service-attempt-0001",
+  }
+
+  const plan = await service.planEmbedMessage(request)
+  const result = await service.executeEmbedMessage(request, plan.digest)
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.messageId, MESSAGE_ID)
+  assert.equal(calls.createEmbedMessage, 1)
+  assert.equal(operationStore.receipt?.kind, "embed-message")
+  assert.equal(operationStore.receipt?.status, "completed")
+  await assert.rejects(
+    service.sendMessage({
+      channelId: CHANNEL_ID,
+      content: "Should share the embed-message limiter",
+      idempotencyKey: "shared-embed-limit-attempt-0001",
+    }),
+    InteractionRateLimitError,
+  )
+  assert.equal(calls.createMessage, 0)
+  const persisted = JSON.stringify(operationStore.receipt)
+  assert.equal(persisted.includes(request.operationKey), false)
+  assert.equal(persisted.includes("Reviewed release"), false)
+  assert.equal(persisted.includes("Production deployment is ready"), false)
+
+  const restarted = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(GUILD_ID, permissions, "@everyone")]
+      },
+      async getMessage() {
+        assert.ok(created)
+        return created
+      },
+    },
+    configOverrides,
+    operationStore,
+  })
+  const verification = await restarted.service.verifyEmbedMessage(request)
+  assert.equal(verification.status, "verified")
+  assert.equal(verification.messageId, MESSAGE_ID)
+  assert.equal(restarted.calls.activityAppends, 0)
+  assert.equal(restarted.calls.createEmbedMessage, 0)
+  assert.equal(restarted.calls.editEmbedMessage, 0)
 })
 
 test("service coordinates component edits only when the exact message changes", async () => {

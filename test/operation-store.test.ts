@@ -22,6 +22,7 @@ import {
   type AutoModerationOperationReceipt,
   type ComponentMessageOperationReceipt,
   type DirectMessageOperationReceipt,
+  type EmbedMessageOperationReceipt,
   type OperationReceipt,
   type StandardOperationReceipt,
 } from "../src/operation-store.js"
@@ -64,6 +65,17 @@ function componentReceipt(
   return {
     ...receipt(status),
     kind: "component-message",
+    requestDigest: REQUEST_DIGEST,
+    schemaVersion: 2,
+  }
+}
+
+function embedReceipt(
+  status: OperationReceipt["status"] = "pending",
+): EmbedMessageOperationReceipt {
+  return {
+    ...receipt(status),
+    kind: "embed-message",
     requestDigest: REQUEST_DIGEST,
     schemaVersion: 2,
   }
@@ -286,6 +298,56 @@ test("component-message receipts strictly bind a content-free keyed request dige
       ...receipt(),
       requestDigest: REQUEST_DIGEST,
     } as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+})
+
+test("embed-message receipts strictly bind a content-free keyed request digest", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-embed-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = embedReceipt()
+
+  assert.deepEqual(await store.reserve(pending), {
+    created: true,
+    receipt: pending,
+  })
+  await assert.rejects(
+    store.finish({
+      ...embedReceipt("completed"),
+      requestDigest: `hmac-sha256:${"c".repeat(64)}`,
+    }),
+    /changed reserved identity/,
+  )
+  await store.finish(embedReceipt("completed"))
+  assert.deepEqual(
+    await store.get("embed-message", pending.operationKeyHash),
+    embedReceipt("completed"),
+  )
+
+  const operationDirectory = join(directory, (await readdir(directory))[0] as string)
+  const durableText = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.match(durableText, new RegExp(REQUEST_DIGEST))
+  assert.doesNotMatch(
+    durableText,
+    /private message content|private embed text|remote URL|raw operation key/,
+  )
+
+  const malformedStore = new FileOperationStore(join(root, "malformed"))
+  await assert.rejects(
+    malformedStore.reserve({
+      ...embedReceipt(),
+      schemaVersion: 1,
+    } as unknown as OperationReceipt),
+    /invalid shape/,
+  )
+  const { requestDigest: _requestDigest, ...missingDigest } = embedReceipt()
+  await assert.rejects(
+    malformedStore.reserve(missingDigest as unknown as OperationReceipt),
     /invalid shape/,
   )
 })

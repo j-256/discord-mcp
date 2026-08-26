@@ -5606,6 +5606,92 @@ test("Discord client sends exact non-retried static component-message contracts"
   }])
 })
 
+test("Discord client sends exact non-retried static embed-message contracts", async () => {
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null
+      requests.push({ body, method: init?.method || "GET", url: String(input) })
+      return jsonResponse({
+        author: { bot: true, id: "400", username: "bot" },
+        channel_id: "200",
+        content: body.content ?? "",
+        embeds: body.embeds,
+        id: "300",
+        nonce: body.nonce,
+        timestamp: "2026-08-22T00:00:00.000Z",
+        type: 0,
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+  const embeds = [{
+    author: { name: "Release bot" },
+    color: 0x12_AB_34,
+    fields: [{ inline: true, name: "Status", value: "Ready" }],
+    footer: { text: "Deployment" },
+    timestamp: "2026-08-22T00:00:00.000Z",
+    title: "Release",
+  }]
+
+  await client.createEmbedMessage("200", {
+    allowedMentions: { parse: [], replied_user: false },
+    content: "hello <@401>",
+    embeds,
+    nonce: "embed-nonce",
+    reply: { guildId: "100", messageId: "299" },
+  })
+  await client.editEmbedMessage("200", "300", {
+    allowedMentions: { replied_user: false, users: ["401"] },
+    content: "",
+    embeds,
+  })
+
+  assert.deepEqual(requests, [
+    {
+      body: {
+        allowed_mentions: { parse: [], replied_user: false },
+        content: "hello <@401>",
+        embeds,
+        enforce_nonce: true,
+        message_reference: {
+          channel_id: "200",
+          fail_if_not_exists: true,
+          guild_id: "100",
+          message_id: "299",
+          type: 0,
+        },
+        nonce: "embed-nonce",
+      },
+      method: "POST",
+      url: `${API_BASE_URL}/channels/200/messages`,
+    },
+    {
+      body: {
+        allowed_mentions: { replied_user: false, users: ["401"] },
+        content: "",
+        embeds,
+      },
+      method: "PATCH",
+      url: `${API_BASE_URL}/channels/200/messages/300`,
+    },
+  ])
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "create_embed_message",
+    retries: 0,
+    runs: 1,
+  }, {
+    completions: [{ outcome: "ok" }],
+    operation: "edit_embed_message",
+    retries: 0,
+    runs: 1,
+  }])
+})
+
 test("Discord client keeps component content out of API and transport errors", async () => {
   const privateText = "private component text"
   const components = [{ content: privateText, type: 10 as const }]

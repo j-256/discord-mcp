@@ -243,6 +243,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     directMessageDeliveryEnabled: false,
     directMessageEditingEnabled: false,
     directMessageUserIds: [],
+    embedMessageChannelIds: [],
+    embedMessagesEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,
@@ -1365,6 +1367,8 @@ test("configuration and policy require an exact administration guild and protect
     directMessageDeliveryEnabled: false,
     directMessageEditingEnabled: false,
     directMessageUserIds: [],
+    embedMessageChannelIds: [],
+    embedMessagesEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,
@@ -4846,6 +4850,62 @@ test("configuration rejects interaction channels outside exact read scope and in
   )
 })
 
+test("configuration and policy isolate static embed messages to an exact channel scope", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      embedMessages: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      embedMessageChannelIds: [CHANNEL_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowEmbedMessages, true)
+  assert.deepEqual([...config.embedMessageChannelIds], [CHANNEL_ID])
+  assert.equal(policy.describe().embedMessagesEnabled, true)
+  assert.deepEqual(policy.describe().embedMessageChannelIds, [CHANNEL_ID])
+  assert.equal(policy.assertChannelEmbedMessageAllowed(channel()), GUILD_ID)
+  assert.throws(
+    () => policy.assertChannelEmbedMessageAllowed(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the embed-message scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertChannelEmbedMessageAllowed(channel()),
+    /embed messages are disabled/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        embedMessages: true,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /requires .*embedMessageChannelIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: {
+        channelIds: [CHANNEL_ID],
+      },
+      scopes: {
+        embedMessageChannelIds: [OTHER_CHANNEL_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+})
+
 test("configuration rejects ambiguous deletion toggles and malformed IDs", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -4974,6 +5034,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     directMessageDeliveryEnabled: false,
     directMessageEditingEnabled: false,
     directMessageUserIds: [],
+    embedMessageChannelIds: [],
+    embedMessagesEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,

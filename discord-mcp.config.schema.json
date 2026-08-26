@@ -127,6 +127,10 @@
           "type": "boolean",
           "description": "Enable reviewed edits of exact connector-authored direct messages"
         },
+        "embedMessages": {
+          "type": "boolean",
+          "description": "Enable reviewed remote-free static rich-embed message creation and exact bot-owned replacement"
+        },
         "forumPosts": {
           "type": "boolean",
           "description": "Enable forum posts policy"
@@ -976,6 +980,16 @@
           },
           "description": "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access"
         },
+        "embedMessageChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact Discord channel or thread ID allowlist for reviewed static rich-embed messages"
+        },
         "forumPostChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1573,7 +1587,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 62,
+          "maxItems": 63,
           "type": "array",
           "items": {
             "type": "string",
@@ -1597,6 +1611,7 @@
               "connector",
               "deletion",
               "direct-messages",
+              "embed-messages",
               "forum-posts",
               "forum-tags",
               "gateway",

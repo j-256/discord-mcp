@@ -100,6 +100,11 @@ import {
   type ComponentLayoutInput,
   type ComponentLayoutReview,
 } from "./component-layout.js"
+import {
+  reviewEmbedPresentation,
+  type EmbedLayoutInput,
+  type EmbedPresentationReview,
+} from "./embed-layout.js"
 import type {
   ComponentMessagePlan,
   ComponentMessageRequest,
@@ -111,6 +116,17 @@ import {
   componentMessageVerificationKey,
   ComponentMessageService,
 } from "./component-message-service.js"
+import type {
+  EmbedMessagePlan,
+  EmbedMessageRequest,
+  EmbedMessageResult,
+  EmbedMessageServiceOptions,
+  EmbedMessageVerificationResult,
+} from "./embed-message-service.js"
+import {
+  embedMessageVerificationKey,
+  EmbedMessageService,
+} from "./embed-message-service.js"
 import type {
   AutoModerationChangeRequest,
   AutoModerationInventoryResult,
@@ -276,6 +292,7 @@ import {
   ChannelOrderingPlanChangedError,
   ConfigurationError,
   ComponentMessagePlanChangedError,
+  EmbedMessagePlanChangedError,
   DeletionPlanChangedError,
   GuildApplicationCommandPlanChangedError,
   GuildPrunePlanChangedError,
@@ -784,6 +801,7 @@ export interface DiscordServiceClient {
   createForumPost: DiscordClient["createForumPost"]
   createAttachmentMessage: DiscordClient["createAttachmentMessage"]
   createComponentMessage: DiscordClient["createComponentMessage"]
+  createEmbedMessage: DiscordClient["createEmbedMessage"]
   createMessage: DiscordClient["createMessage"]
   createMessageForward: DiscordClient["createMessageForward"]
   createDirectAttachmentMessage?: DiscordClient["createDirectAttachmentMessage"]
@@ -818,6 +836,7 @@ export interface DiscordServiceClient {
   endPoll: DiscordClient["endPoll"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
   editComponentMessage: DiscordClient["editComponentMessage"]
+  editEmbedMessage: DiscordClient["editEmbedMessage"]
   editMessage: DiscordClient["editMessage"]
   editDirectComponentMessage?: DiscordClient["editDirectComponentMessage"]
   editDirectMessage?: DiscordClient["editDirectMessage"]
@@ -990,6 +1009,10 @@ export interface ConnectorServiceOptions {
   >
   componentMessageOptions?: Pick<
     ComponentMessageServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  embedMessageOptions?: Pick<
+    EmbedMessageServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   automodOptions?: Pick<
@@ -1367,6 +1390,7 @@ export class ConnectorService {
   readonly #applicationSkuAuditService: ApplicationSkuAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
+  readonly #embedMessageService: EmbedMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
   readonly #bulkGuildBanService: BulkGuildBanService
@@ -1648,6 +1672,15 @@ export class ConnectorService {
       policy: this.#policy,
       ...options.componentMessageOptions,
       verificationKey: componentMessageVerificationKey(options.config.token),
+    })
+    this.#embedMessageService = new EmbedMessageService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.embedMessageOptions,
+      verificationKey: embedMessageVerificationKey(options.config.token),
     })
     this.#automodService = new AutoModerationService({
       activityStore: this.#activityStore,
@@ -4201,6 +4234,44 @@ export class ConnectorService {
     )
   }
 
+  previewEmbedMessage(
+    presentation: {
+      content?: string
+      embeds: readonly EmbedLayoutInput[]
+    },
+    notifyUserIds?: readonly string[],
+  ): EmbedPresentationReview {
+    return reviewEmbedPresentation(presentation, notifyUserIds)
+  }
+
+  async planEmbedMessage(
+    request: EmbedMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<EmbedMessagePlan> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#embedMessageService.plan(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
+  async verifyEmbedMessage(
+    request: EmbedMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<EmbedMessageVerificationResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#embedMessageService.verify(
+      identity.application.id,
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      request,
+      options,
+    )
+  }
+
   async executeChannelCreation(
     request: ChannelCreationRequest,
     planDigest: string,
@@ -5003,6 +5074,47 @@ export class ConnectorService {
       : writeResourceTarget("message", request.messageId as string)
     return this.#coordinateWrite(
       "component-message",
+      request.operationKey,
+      planDigest,
+      [target],
+      execute,
+    )
+  }
+
+  async executeEmbedMessage(
+    request: EmbedMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<EmbedMessageResult> {
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord embed-message plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const intent = applicationMessageContentIntent(identity.application)
+    const coordinationPlan = await this.#embedMessageService.plan(
+      identity.application.id,
+      identity.bot.id,
+      intent,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new EmbedMessagePlanChangedError(planDigest, coordinationPlan.digest)
+    }
+    const execute = () => this.#embedMessageService.execute(
+      identity.application.id,
+      identity.bot.id,
+      intent,
+      request,
+      planDigest,
+      options,
+    )
+    if (!coordinationPlan.writeRequired) return execute()
+    const target = request.action === "create"
+      ? writeResourceTarget("channel", request.channelId)
+      : writeResourceTarget("message", request.messageId as string)
+    return this.#coordinateWrite(
+      "embed-message",
       request.operationKey,
       planDigest,
       [target],

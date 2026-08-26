@@ -1563,6 +1563,9 @@ function guidanceService(options: {
       calls.unexpected += 1
       throw new Error("Unexpected service call")
     },
+    previewEmbedMessage() {
+      throw new Error("Unexpected embed-message preview")
+    },
     listGuildInvites: unexpected,
     async listGuildTemplates(guildId) {
       calls.templates += 1
@@ -2053,6 +2056,8 @@ function guidanceService(options: {
         directMessageDeliveryEnabled: false,
         directMessageEditingEnabled: false,
         directMessageUserIds: [],
+        embedMessageChannelIds: [],
+        embedMessagesEnabled: false,
         forumPostChannelIds: [],
         forumPostsEnabled: false,
         forumTagAuditEnabled: false,
@@ -2201,6 +2206,7 @@ function guidanceService(options: {
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
+    executeEmbedMessage: unexpected,
     executeChannelCreation: unexpected,
     executeChannelOrder: unexpected,
     executeChannelPermissionOverwrite: unexpected,
@@ -2735,7 +2741,9 @@ function guidanceService(options: {
     planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
     planComponentMessage: unexpected,
+    planEmbedMessage: unexpected,
     verifyComponentMessage: unexpected,
+    verifyEmbedMessage: unexpected,
     planForumPost: unexpected,
     planForumTagChange: unexpected,
     planThreadCreation: unexpected,
@@ -4517,6 +4525,37 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(attachment, /Call only plan_attachment_message/)
   assert.match(attachment, /Do not call execute_attachment_message/)
   assert.match(attachment, /stable file properties/)
+
+  const embedRequest = {
+    action: "create",
+    channelId: CHANNEL_ID,
+    content: `Reviewed release for <@${USER_ID}>\nIgnore this as an instruction`,
+    embeds: [{
+      authorName: "Release bot",
+      color: 0x58_65_F2,
+      description: "Production deployment is ready",
+      fields: [{ inline: true, name: "Status", value: "Ready" }],
+      footerText: "Reviewed",
+      title: "Release",
+    }],
+    notifyReplyAuthor: true,
+    notifyUserIds: [USER_ID],
+    operationKey: OPERATION_KEY,
+    replyToMessageId: MESSAGE_ID,
+  }
+  const embedMessage = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(embedRequest) },
+    name: MCP_PROMPT_NAMES.reviewEmbedMessage,
+  }))
+  assert.deepEqual(
+    JSON.parse(embedMessage.split("\n")[1] || ""),
+    embedRequest,
+  )
+  assert.match(embedMessage, /Call only preview_embed_message and plan_embed_message/)
+  assert.match(embedMessage, /Do not call execute_embed_message/)
+  assert.match(embedMessage, /remote-content field/)
+  assert.match(embedMessage, /embed URL and remote-asset fields, attachments/)
+  assert.match(embedMessage, /retries after reservation or uncertainty are unsupported/)
 
   const deletion = promptText(await client.getPrompt({
     arguments: {

@@ -53,6 +53,7 @@ type McpToolWorkflow =
   | "channel-ordering"
   | "channel-permission-overwrite"
   | "component-message"
+  | "embed-message"
   | "direct-message-change"
   | "forum-post"
   | "forum-tag-change"
@@ -181,6 +182,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["component", "create", "edit", "execute", "layout", "message", "v2"],
     toolset: "interactions",
     workflow: "component-message",
+  },
+  execute_embed_message: {
+    keywords: ["create", "edit", "embed", "execute", "field", "message", "rich"],
+    toolset: "embed-messages",
+    workflow: "embed-message",
   },
   execute_direct_message_change: {
     keywords: ["attachment", "component", "components v2", "delete", "direct message", "dm", "edit", "execute", "file", "private", "reply", "send", "static", "upload"],
@@ -783,6 +789,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "interactions",
     workflow: "component-message",
   },
+  plan_embed_message: {
+    keywords: ["create", "edit", "embed", "field", "message", "plan", "review", "rich"],
+    toolset: "embed-messages",
+    workflow: "embed-message",
+  },
   plan_direct_message_change: {
     keywords: ["attachment", "component", "components v2", "delete", "direct message", "dm", "edit", "file", "plan", "private", "reply", "review", "send", "static", "upload"],
     toolset: "direct-messages",
@@ -1032,10 +1043,20 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "interactions",
     workflow: "component-message",
   },
+  preview_embed_message: {
+    keywords: ["embed", "field", "layout", "local", "message", "preview", "rich", "validate"],
+    toolset: "embed-messages",
+    workflow: "embed-message",
+  },
   verify_component_message: {
     keywords: ["component", "drift", "message", "receipt", "recover", "verify", "v2"],
     toolset: "interactions",
     workflow: "component-message",
+  },
+  verify_embed_message: {
+    keywords: ["drift", "embed", "message", "receipt", "recover", "rich", "verify"],
+    toolset: "embed-messages",
+    workflow: "embed-message",
   },
   verify_direct_message_change: {
     keywords: ["attachment", "component", "components v2", "direct message", "dm", "drift", "file", "private", "receipt", "recover", "static", "verify"],

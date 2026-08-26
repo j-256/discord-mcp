@@ -157,6 +157,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "directMessageDeletion",
   "directMessageDelivery",
   "directMessageEditing",
+  "embedMessages",
   "forumPosts",
   "forumTagAudit",
   "forumTagChanges",
@@ -251,6 +252,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "channelOrderingGuildIds",
   "deleteChannelIds",
   "directMessageUserIds",
+  "embedMessageChannelIds",
   "forumPostChannelIds",
   "forumTagChannelIds",
   "guildScaffoldGuildIds",
@@ -442,6 +444,8 @@ const DIRECT_MESSAGE_DELETION_CAPABILITY_DESCRIPTION = "Enable reviewed deletion
 const DIRECT_MESSAGE_DELIVERY_CAPABILITY_DESCRIPTION = "Enable reviewed plain-text direct-message sends and replies"
 const DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION = "Enable reviewed edits of exact connector-authored direct messages"
 const DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION = "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access"
+const EMBED_MESSAGE_CAPABILITY_DESCRIPTION = "Enable reviewed remote-free static rich-embed message creation and exact bot-owned replacement"
+const EMBED_MESSAGE_SCOPE_DESCRIPTION = "Exact Discord channel or thread ID allowlist for reviewed static rich-embed messages"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "applicationCommandChanges") {
@@ -501,6 +505,9 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "directMessageEditing") {
     return DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "embedMessages") {
+    return EMBED_MESSAGE_CAPABILITY_DESCRIPTION
+  }
   return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
@@ -531,6 +538,9 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "directMessageUserIds") {
     return DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "embedMessageChannelIds") {
+    return EMBED_MESSAGE_SCOPE_DESCRIPTION
   }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }

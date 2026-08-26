@@ -34,6 +34,10 @@ import {
   type DiscordStaticComponent,
 } from "./component-layout.js"
 import {
+  assertCompiledEmbedLayout,
+  type DiscordStaticEmbed,
+} from "./embed-layout.js"
+import {
   ApplicationEmojiEvidenceError,
   AutoModerationEvidenceError,
   ChannelMetadataEvidenceError,
@@ -1156,6 +1160,17 @@ export interface CreateComponentMessageInput {
   }
 }
 
+export interface CreateEmbedMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  content?: string
+  embeds: readonly DiscordStaticEmbed[]
+  nonce: string
+  reply?: {
+    guildId: string
+    messageId: string
+  }
+}
+
 export interface CreatePollInput {
   allowMultiselect: boolean
   answers: ReadonlyArray<{
@@ -1346,6 +1361,12 @@ export interface EditComponentMessageInput {
   allowedMentions: DiscordAllowedMentions
   components: readonly DiscordStaticComponent[]
   flags: number
+}
+
+export interface EditEmbedMessageInput {
+  allowedMentions: DiscordAllowedMentions
+  content: string
+  embeds: readonly DiscordStaticEmbed[]
 }
 
 export interface EditDirectComponentMessageInput {
@@ -12557,6 +12578,51 @@ export class DiscordClient {
     )
   }
 
+  createEmbedMessage(
+    channelId: string,
+    input: CreateEmbedMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord embed-message channel ID")
+    assertCompiledEmbedLayout(input.embeds)
+    if (input.content !== undefined) assertMessageContent(input.content)
+    if (!input.nonce || input.nonce.length > DISCORD_LIMITS.messageNonceCharacters) {
+      throw new RangeError(
+        `Discord message nonce must contain between 1 and ${DISCORD_LIMITS.messageNonceCharacters} characters`,
+      )
+    }
+    assertAllowedMentions(input.allowedMentions)
+    if (input.reply) {
+      assertSearchSnowflake(input.reply.guildId, "Discord embed-message reply guild ID")
+      assertSearchSnowflake(input.reply.messageId, "Discord embed-message reply message ID")
+    }
+    const messageReference = input.reply
+      ? {
+          channel_id: channelId,
+          fail_if_not_exists: true,
+          guild_id: input.reply.guildId,
+          message_id: input.reply.messageId,
+          type: DISCORD_MESSAGE_REFERENCE_TYPES.default,
+        }
+      : undefined
+    return this.#request(
+      "create_embed_message",
+      `/channels/${channelId}/messages`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: input.allowedMentions,
+          ...(input.content === undefined ? {} : { content: input.content }),
+          embeds: input.embeds,
+          enforce_nonce: true,
+          ...(messageReference ? { message_reference: messageReference } : {}),
+          nonce: input.nonce,
+        },
+      },
+    )
+  }
+
   createPoll(
     channelId: string,
     input: CreatePollInput,
@@ -12784,6 +12850,32 @@ export class DiscordClient {
           allowed_mentions: input.allowedMentions,
           components: input.components,
           flags: input.flags,
+        },
+      },
+    )
+  }
+
+  editEmbedMessage(
+    channelId: string,
+    messageId: string,
+    input: EditEmbedMessageInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(channelId, "Discord embed-message channel ID")
+    assertSearchSnowflake(messageId, "Discord embed-message message ID")
+    assertCompiledEmbedLayout(input.embeds)
+    if (input.content) assertMessageContent(input.content)
+    assertAllowedMentions(input.allowedMentions)
+    return this.#request(
+      "edit_embed_message",
+      `/channels/${channelId}/messages/${messageId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: input.allowedMentions,
+          content: input.content,
+          embeds: input.embeds,
         },
       },
     )

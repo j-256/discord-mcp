@@ -257,6 +257,8 @@ function status(
       directMessageDeliveryEnabled: false,
       directMessageEditingEnabled: false,
       directMessageUserIds: [],
+      embedMessageChannelIds: [],
+      embedMessagesEnabled: false,
       forumPostChannelIds: [],
       forumPostsEnabled: false,
       forumTagAuditEnabled: false,
@@ -531,6 +533,9 @@ function toolService(
     previewComponentLayout() {
       throw new Error("Unexpected smoke service call")
     },
+    previewEmbedMessage() {
+      throw new Error("Unexpected embed-message preview")
+    },
     planInviteCreation: unexpected,
     planInviteDeletion: unexpected,
     planOnboardingChange: unexpected,
@@ -560,6 +565,7 @@ function toolService(
     editOwnMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
+    executeEmbedMessage: unexpected,
     executeChannelCreation: unexpected,
     executeChannelDeletion: unexpected,
     executeChannelClone: unexpected,
@@ -612,7 +618,9 @@ function toolService(
     planReactionModeration: unexpected,
     planAttachmentMessage: unexpected,
     planComponentMessage: unexpected,
+    planEmbedMessage: unexpected,
     verifyComponentMessage: unexpected,
+    verifyEmbedMessage: unexpected,
     planChannelCreation: unexpected,
     planChannelDeletion: unexpected,
     planChannelClone: unexpected,
@@ -1109,6 +1117,81 @@ test("doctor and setup explain effective interaction policy without Discord writ
     "fail",
   )
   assert.match(missingIntentSetup.warnings.join("\n"), /component messages are blocked/)
+})
+
+test("doctor and setup explain reviewed static embed-message policy", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      embedMessages: true,
+    },
+    limits: {
+      interactionMaxWritesPerMinute: 12,
+    },
+    scopes: {
+      embedMessageChannelIds: [CHANNEL_ID],
+    },
+  })
+  const report = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: fixturePolicy({
+      capabilities: {
+        embedMessages: true,
+      },
+      scopes: {
+        embedMessageChannelIds: [CHANNEL_ID],
+      },
+      tools: {
+        toolsets: ["connector"],
+      },
+    }),
+    service: statusProvider(),
+  })
+  const missingIntent = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+    online: true,
+    service: {
+      async getStatus() {
+        return status(1, "disabled")
+      },
+    },
+  })
+  const missingIntentSetup = await prepareSetup({
+    configOverrides: enabledPolicy,
+    service: {
+      async getStatus() {
+        return status(1, "unknown")
+      },
+    },
+  })
+
+  const embedMessage = report.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.embedMessagePolicy,
+  )
+  assert.equal(embedMessage?.status, "pass")
+  assert.match(embedMessage?.summary || "", /1 channels/)
+  assert.match(embedMessage?.summary || "", /shared 12-write rolling budget/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.embedMessagePolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+  assert.match(omitted.warnings.join("\n"), /embed-messages toolset/)
+  assert.equal(
+    missingIntent.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.messageContentIntent,
+    )?.status,
+    "fail",
+  )
+  assert.match(missingIntentSetup.warnings.join("\n"), /rich-embed messages are blocked/)
 })
 
 test("doctor and setup explain exact-user private-message boundaries without contact", async () => {
@@ -5526,6 +5609,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_channel_order",
     "review_channel_permission_overwrite",
     "review_direct_message_change",
+    "review_embed_message",
     "review_forum_post",
     "review_forum_tag_change",
     "review_guild_application_command_change",
@@ -5647,6 +5731,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_permission_overwrite",
     "execute_component_message",
     "execute_direct_message_change",
+    "execute_embed_message",
     "execute_forum_tag_change",
     "execute_guild_application_command_change",
     "execute_guild_blueprint",
@@ -5706,6 +5791,9 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("plan_attachment_message"), true)
   assert.equal(report.readOnlyTools.includes("preview_component_layout"), true)
   assert.equal(report.readOnlyTools.includes("plan_component_message"), true)
+  assert.equal(report.readOnlyTools.includes("preview_embed_message"), true)
+  assert.equal(report.readOnlyTools.includes("plan_embed_message"), true)
+  assert.equal(report.readOnlyTools.includes("verify_embed_message"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_role_change"), true)
   assert.equal(report.readOnlyTools.includes("get_member_voice_state"), true)
   assert.equal(report.readOnlyTools.includes("plan_member_voice_change"), true)

@@ -99,6 +99,14 @@ import type {
   ComponentMessageRequest,
 } from "../src/component-message-service.js"
 import {
+  reviewEmbedPresentation,
+  type EmbedLayoutInput,
+} from "../src/embed-layout.js"
+import type {
+  EmbedMessagePlan,
+  EmbedMessageRequest,
+} from "../src/embed-message-service.js"
+import {
   normalizeAutoModerationChangeRequest,
   type AutoModerationChangeRequest,
   type AutoModerationPlan,
@@ -352,6 +360,8 @@ import {
   DirectMessageExecutionError,
   DirectMessageOperationConflictError,
   DiscordApiError,
+  EmbedMessageExecutionError,
+  EmbedMessageOperationConflictError,
   ForumPostExecutionError,
   ForumPostOperationConflictError,
   ForumTagExecutionError,
@@ -684,6 +694,7 @@ const CHANNEL_CLONE_OPERATION_KEY = "channel-clone-attempt-0001"
 const CHANNEL_CLONE_CREATED_ID = "200000000000000006"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
 const COMPONENT_MESSAGE_OPERATION_KEY = "component-message-attempt-0001"
+const EMBED_MESSAGE_OPERATION_KEY = "embed-message-attempt-0001"
 const FORUM_POST_OPERATION_KEY = "forum-post-attempt-0001"
 const FORUM_TAG_OPERATION_KEY = "forum-tag-attempt-0001"
 const FORUM_TAG_ID = "385000000000000001"
@@ -794,6 +805,15 @@ const COMPONENT_LAYOUT: ComponentLayoutInput[] = [{
   components: [{ content: `Reviewed component for <@${USER_ID}>`, kind: "text" as const }],
   kind: "container" as const,
   spoiler: false,
+}]
+const EMBED_CONTENT = `Reviewed release for <@${USER_ID}>`
+const EMBED_LAYOUT: EmbedLayoutInput[] = [{
+  authorName: "Release bot",
+  color: 0x58_65_F2,
+  description: "Production deployment is ready",
+  fields: [{ inline: true, name: "Status", value: "Ready" }],
+  footerText: "Reviewed",
+  title: "Release",
 }]
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
@@ -5263,6 +5283,113 @@ function componentMessagePlan(
   }
 }
 
+function embedMessagePlan(
+  request: EmbedMessageRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): EmbedMessagePlan {
+  const review = reviewEmbedPresentation({
+    ...(request.content === undefined ? {} : { content: request.content }),
+    embeds: request.embeds,
+  }, request.notifyUserIds)
+  const currentReview = writeRequired
+    ? reviewEmbedPresentation({
+        content: "Before",
+        embeds: [{ title: "Before" }],
+      }, [])
+    : review
+  return {
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      parentId: null,
+      type: 0,
+    },
+    createdAt: "2026-08-26T00:00:00.000Z",
+    current: request.action === "edit"
+      ? {
+          flags: 0,
+          messageId: request.messageId as string,
+          parsedUserMentionIds: [],
+          pinned: false,
+          presentation: currentReview.presentation,
+          preview: currentReview.preview,
+          timestamp: "2026-08-26T00:00:00.000Z",
+        }
+      : null,
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    messageContentIntent: "enabled",
+    notificationUserIds: review.notificationUserIds,
+    notifyReplyAuthor: request.notifyReplyAuthor ?? false,
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      appliedRoleIds: [GUILD_ID],
+      canReadMessages: true,
+      confidence: "complete",
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "SEND_MESSAGES",
+        "EMBED_LINKS",
+        "READ_MESSAGE_HISTORY",
+      ],
+      effectivePermissions: (
+        DISCORD_PERMISSIONS.VIEW_CHANNEL
+        | DISCORD_PERMISSIONS.SEND_MESSAGES
+        | DISCORD_PERMISSIONS.EMBED_LINKS
+        | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+      ).toString(),
+      permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "EMBED_LINKS",
+        "SEND_MESSAGES",
+      ],
+    },
+    privacy: {
+      durableRecords: "content-free",
+      omittedFields: [
+        "attachmentUrls",
+        "embedLayouts",
+        "embedText",
+        "messageContent",
+        "mentionProfiles",
+        "nonce",
+        "notificationUserIds",
+        "parsedUserMentionIds",
+        "rawOperationKey",
+        "rawPayloads",
+        "replyAuthorId",
+      ],
+      planPersistence: "none",
+      rawPayloads: "omitted",
+    },
+    reply: request.replyToMessageId
+      ? { authorId: USER_ID, messageId: request.replyToMessageId, type: 0 }
+      : null,
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    target: {
+      aggregateCharacters: review.aggregateCharacters,
+      contentCharacters: review.contentCharacters,
+      counts: review.counts,
+      messageId: request.messageId ?? null,
+      presentation: review.presentation,
+      preview: review.preview,
+      requestBytes: review.requestBytes,
+      suppressedUserMentionIds: review.suppressedUserMentionIds,
+    },
+    warnings: review.warnings,
+    writeRequired,
+  }
+}
+
 function channelPlan(
   request: ChannelCreationRequest,
   digest = DIGEST,
@@ -7611,6 +7738,8 @@ function fixturePolicy(): PolicyDescription {
     directMessageDeliveryEnabled: false,
     directMessageEditingEnabled: false,
     directMessageUserIds: [],
+    embedMessageChannelIds: [],
+    embedMessagesEnabled: false,
     forumPostChannelIds: [],
     forumPostsEnabled: false,
     forumTagAuditEnabled: false,
@@ -7839,6 +7968,11 @@ function serviceFixture(overrides: {
   componentMessageVerificationError?: Error
   componentMessageVerificationStatus?: "blocked" | "drifted" | "not-found" | "verified"
   componentMessageWriteRequired?: boolean
+  embedMessageError?: Error
+  embedMessagePlanDigest?: string
+  embedMessageVerificationError?: Error
+  embedMessageVerificationStatus?: "blocked" | "drifted" | "not-found" | "verified"
+  embedMessageWriteRequired?: boolean
   deletionError?: Error
   directMessageError?: Error
   directMessagePlanDigest?: string
@@ -8052,6 +8186,10 @@ function serviceFixture(overrides: {
     componentMessagePlan: 0,
     componentMessagePreview: 0,
     componentMessageVerify: 0,
+    embedMessageExecute: 0,
+    embedMessagePlan: 0,
+    embedMessagePreview: 0,
+    embedMessageVerify: 0,
     delete: 0,
     directMessageExecute: 0,
     directMessageGet: 0,
@@ -10322,6 +10460,26 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId ?? MESSAGE_ID}`,
       }
     },
+    async executeEmbedMessage(request, planDigest) {
+      if (overrides.embedMessageError) throw overrides.embedMessageError
+      calls.embedMessageExecute += 1
+      const writeRequired = overrides.embedMessageWriteRequired ?? true
+      const planned = embedMessagePlan(request, planDigest, writeRequired)
+      return {
+        action: request.action,
+        activityId: writeRequired ? "activity-embed-message" : null,
+        channelId: request.channelId,
+        guildId: GUILD_ID,
+        messageId: request.messageId ?? MESSAGE_ID,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: writeRequired ? "completed" : "already-current",
+        url: `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${request.messageId ?? MESSAGE_ID}`,
+      }
+    },
     async executeChannelCreation(request, planDigest) {
       if (overrides.channelCreationError) throw overrides.channelCreationError
       calls.channelCreationExecute += 1
@@ -11593,6 +11751,14 @@ function serviceFixture(overrides: {
         overrides.componentMessageWriteRequired ?? true,
       )
     },
+    async planEmbedMessage(request) {
+      calls.embedMessagePlan += 1
+      return embedMessagePlan(
+        request,
+        overrides.embedMessagePlanDigest || DIGEST,
+        overrides.embedMessageWriteRequired ?? true,
+      )
+    },
     async verifyComponentMessage(request) {
       if (overrides.componentMessageVerificationError) {
         throw overrides.componentMessageVerificationError
@@ -11626,9 +11792,46 @@ function serviceFixture(overrides: {
           : null,
       }
     },
+    async verifyEmbedMessage(request) {
+      if (overrides.embedMessageVerificationError) {
+        throw overrides.embedMessageVerificationError
+      }
+      calls.embedMessageVerify += 1
+      const status = overrides.embedMessageVerificationStatus ?? "verified"
+      const messageId = request.messageId ?? MESSAGE_ID
+      return {
+        action: request.action,
+        activityId: status === "not-found" ? null : "activity-embed-message",
+        channelId: request.channelId,
+        guildId: status === "not-found" ? null : GUILD_ID,
+        messageId: status === "not-found" ? null : messageId,
+        operationKeyHash: operationKeyHash(request.operationKey),
+        planDigest: status === "not-found" ? null : DIGEST,
+        readbackMatched: status === "verified",
+        reason: status === "verified"
+          ? null
+          : status === "not-found"
+            ? "operation-not-found" as const
+            : status === "drifted"
+              ? "message-state-mismatch" as const
+              : "operation-uncertain" as const,
+        receiptStatus: status === "not-found" ? null : "completed" as const,
+        requestMatched: !["blocked", "not-found"].includes(status),
+        schemaVersion: 1,
+        status,
+        timestamp: status === "not-found" ? null : "2026-08-26T00:00:00.000Z",
+        url: status === "verified"
+          ? `https://discord.com/channels/${GUILD_ID}/${request.channelId}/${messageId}`
+          : null,
+      }
+    },
     previewComponentLayout(components, notifyUserIds) {
       calls.componentMessagePreview += 1
       return reviewComponentLayout(components, notifyUserIds)
+    },
+    previewEmbedMessage(presentation, notifyUserIds) {
+      calls.embedMessagePreview += 1
+      return reviewEmbedPresentation(presentation, notifyUserIds)
     },
     async planChannelCreation(request) {
       calls.channelCreationPlan += 1
@@ -12571,6 +12774,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_component_message",
       "verify_component_message",
       "execute_component_message",
+      "preview_embed_message",
+      "plan_embed_message",
+      "verify_embed_message",
+      "execute_embed_message",
       "plan_attachment_message",
       "execute_attachment_message",
       "capture_guild_blueprint",
@@ -12730,6 +12937,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const componentMessage = result.tools.find((tool) => (
     tool.name === "execute_component_message"
   ))
+  const embedMessage = result.tools.find((tool) => (
+    tool.name === "execute_embed_message"
+  ))
   const guildBlueprint = result.tools.find((tool) => (
     tool.name === "execute_guild_blueprint"
   ))
@@ -12813,6 +13023,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     readOnlyHint: false,
   })
   assert.deepEqual(componentMessage?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.deepEqual(embedMessage?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
     openWorldHint: true,
@@ -12963,6 +13179,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_thread_creation",
     "plan_component_message",
     "verify_component_message",
+    "plan_embed_message",
+    "verify_embed_message",
     "plan_member_role_change",
     "plan_webhook_change",
     "plan_webhook_creation",
@@ -13135,6 +13353,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   })
   assert.deepEqual(
     listedTool(result.tools, "preview_component_layout").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "preview_embed_message").annotations,
     {
       destructiveHint: false,
       idempotentHint: true,
@@ -14944,6 +15171,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     componentMessagePlan: 0,
     componentMessagePreview: 0,
     componentMessageVerify: 0,
+    embedMessageExecute: 0,
+    embedMessagePlan: 0,
+    embedMessagePreview: 0,
+    embedMessageVerify: 0,
     delete: 0,
     directMessageExecute: 0,
     directMessageGet: 0,
@@ -17510,6 +17741,334 @@ test("MCP component messages stop on declined approval, changed plans, and safe 
       planDigest: DIGEST,
     },
     name: "execute_component_message",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+})
+
+test("MCP static embed preview is local and rejects remote-content surfaces", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const preview = await client.callTool({
+    arguments: {
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyUserIds: [USER_ID],
+    },
+    name: "preview_embed_message",
+  })
+  const remoteUrl = await client.callTool({
+    arguments: {
+      embeds: [{ title: "Remote", url: "https://example.com/unsafe" }],
+    },
+    name: "preview_embed_message",
+  })
+  const remoteImage = await client.callTool({
+    arguments: {
+      embeds: [{ image: { url: "https://example.com/unsafe.png" }, title: "Remote" }],
+    },
+    name: "preview_embed_message",
+  })
+
+  assert.equal(structuredContent(preview).status, "ok")
+  assert.equal(
+    (structuredContent(preview).presentation as Record<string, unknown>).content,
+    EMBED_CONTENT,
+  )
+  assert.equal(
+    (structuredContent(preview).counts as Record<string, unknown>).embeds,
+    1,
+  )
+  assert.equal(
+    (structuredContent(preview).counts as Record<string, unknown>).fields,
+    1,
+  )
+  assert.equal(remoteUrl.isError, true)
+  assert.equal(remoteImage.isError, true)
+  assert.equal(calls.embedMessagePreview, 1)
+})
+
+test("MCP embed-message planning enforces exact create and edit shapes", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const create = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_embed_message",
+  })
+  const edit = await client.callTool({
+    arguments: {
+      action: "edit",
+      channelId: CHANNEL_ID,
+      embeds: EMBED_LAYOUT,
+      messageId: MESSAGE_ID,
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_embed_message",
+  })
+  const mixedCreate = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      embeds: EMBED_LAYOUT,
+      messageId: MESSAGE_ID,
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_embed_message",
+  })
+  const mixedEdit = await client.callTool({
+    arguments: {
+      action: "edit",
+      channelId: CHANNEL_ID,
+      embeds: EMBED_LAYOUT,
+      messageId: MESSAGE_ID,
+      notifyReplyAuthor: true,
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: "plan_embed_message",
+  })
+
+  assert.equal(structuredContent(create).status, "planned")
+  assert.equal(structuredContent(edit).status, "planned")
+  assert.equal(mixedCreate.isError, true)
+  assert.equal(mixedEdit.isError, true)
+  assert.equal(calls.embedMessagePlan, 2)
+})
+
+test("MCP embed-message verification is read-only and request-bound", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+  })
+  const argumentsValue = {
+    action: "create" as const,
+    channelId: CHANNEL_ID,
+    content: EMBED_CONTENT,
+    embeds: EMBED_LAYOUT,
+    notifyReplyAuthor: true,
+    notifyUserIds: [USER_ID],
+    operationKey: EMBED_MESSAGE_OPERATION_KEY,
+    replyToMessageId: MESSAGE_ID,
+  }
+  const verified = await client.callTool({
+    arguments: argumentsValue,
+    name: "verify_embed_message",
+  })
+  const extraPlanDigest = await client.callTool({
+    arguments: { ...argumentsValue, planDigest: DIGEST },
+    name: "verify_embed_message",
+  })
+
+  assert.equal(structuredContent(verified).status, "verified")
+  assert.equal(structuredContent(verified).messageId, MESSAGE_ID)
+  assert.equal(extraPlanDigest.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(calls.embedMessageVerify, 1)
+  assert.equal(calls.embedMessagePlan, 0)
+  assert.equal(calls.embedMessageExecute, 0)
+
+  const drifted = await connectedFixture(context, {
+    serviceOverrides: { embedMessageVerificationStatus: "drifted" },
+  })
+  const driftResult = await drifted.client.callTool({
+    arguments: argumentsValue,
+    name: "verify_embed_message",
+  })
+  assert.equal(structuredContent(driftResult).status, "drifted")
+  assert.equal(structuredContent(driftResult).reason, "message-state-mismatch")
+  assert.equal(driftResult.isError, undefined)
+})
+
+test("MCP embed messages bind signed approval to the exact static presentation", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyReplyAuthor: true,
+      notifyUserIds: [USER_ID],
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: "execute_embed_message",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.embedMessagePlan, 1)
+  assert.equal(calls.embedMessageExecute, 1)
+  assert.match(confirmationMessage, /static Discord embed-message create/)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, /Reviewed release/)
+  assert.match(confirmationMessage, /Release bot/)
+  assert.match(confirmationMessage, /Production deployment is ready/)
+  assert.match(confirmationMessage, /EMBED_LINKS/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(EMBED_MESSAGE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(EMBED_MESSAGE_OPERATION_KEY),
+  )
+})
+
+test("MCP embed messages skip approval for exact notification-free edit no-ops", async (context) => {
+  let confirmations = 0
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { embedMessageWriteRequired: false },
+  })
+  const result = await client.callTool({
+    arguments: {
+      action: "edit",
+      channelId: CHANNEL_ID,
+      embeds: EMBED_LAYOUT,
+      messageId: MESSAGE_ID,
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_embed_message",
+  })
+
+  assert.equal(structuredContent(result).status, "already-current")
+  assert.equal(confirmations, 0)
+  assert.equal(calls.embedMessagePlan, 1)
+  assert.equal(calls.embedMessageExecute, 1)
+})
+
+test("MCP embed messages stop on declined approval, changed plans, and safe conflicts", async (context) => {
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_embed_message",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.embedMessageExecute, 0)
+
+  let confirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { embedMessagePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_embed_message",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.embedMessageExecute, 0)
+
+  const receipt = {
+    activityId: "activity-embed-1",
+    error: null,
+    guildId: GUILD_ID,
+    messageId: MESSAGE_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-26T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept" as const,
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      embedMessageError: new EmbedMessageOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_embed_message",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(EMBED_MESSAGE_OPERATION_KEY),
+  )
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept" as const,
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      embedMessageError: new EmbedMessageExecutionError(
+        "Discord embed-message outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      content: EMBED_CONTENT,
+      embeds: EMBED_LAYOUT,
+      notifyUserIds: [USER_ID],
+      operationKey: EMBED_MESSAGE_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_embed_message",
   })
   assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
 })

@@ -84,6 +84,7 @@ export const MCP_TOOLSET_NAMES = [
   "connector",
   "deletion",
   "direct-messages",
+  "embed-messages",
   "forum-posts",
   "forum-tags",
   "gateway",

@@ -30,6 +30,7 @@ import {
   type ComponentMessageActivity,
   type DeletionActivity,
   type DirectMessageActivity,
+  type EmbedMessageActivity,
   type ForumPostActivity,
   type ForumTagActivity,
   type GuildApplicationCommandActivity,
@@ -111,6 +112,28 @@ function componentMessage(
     schemaVersion: 1,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function embedMessage(
+  id: string,
+  status: EmbedMessageActivity["status"],
+  kind: EmbedMessageActivity["kind"] = "embed-message-create",
+): EmbedMessageActivity {
+  return {
+    channelId: "200",
+    error: ["failed", "uncertain"].includes(status) ? "DiscordApiError.500.unknown" : null,
+    guildId: "100",
+    id,
+    kind,
+    messageId: ["completed", "uncertain"].includes(status) ? "300" : null,
+    operationKeyHash: `sha256:${"c".repeat(64)}`,
+    planDigest: `hmac-sha256:${"d".repeat(64)}`,
+    replyToMessageId: kind === "embed-message-create" ? "400" : null,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-26T00:00:0${id}.000Z`,
     verification: status === "completed" ? "match" : null,
   }
 }
@@ -2787,6 +2810,45 @@ test("JSONL activity log strips component layouts and rejects edit replies", asy
   assert.doesNotMatch(
     JSON.stringify(result),
     /private component|private deterministic|private-operation|components|notifyUserIds|nonce/,
+  )
+})
+
+test("JSONL activity log strips embed presentations and rejects edit replies", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...embedMessage("1", "pending"),
+    content: "must never reach disk",
+    embeds: [{ description: "must-not-persist", title: "Private title" }],
+    notifyUserIds: ["private user"],
+  } as EmbedMessageActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...embedMessage("2", "completed", "embed-message-edit"),
+      content: "private message content",
+      embeds: [{ title: "private embed text" }],
+      nonce: "private deterministic nonce",
+      operationKey: "private-operation-key",
+    })}\n${JSON.stringify({
+      ...embedMessage("3", "completed", "embed-message-edit"),
+      replyToMessageId: "400",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist|private user/)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.equal(result.entries[0]?.kind, "embed-message-edit")
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private message|private embed|private deterministic|private-operation|embeds|notifyUserIds|nonce/,
   )
 })
 

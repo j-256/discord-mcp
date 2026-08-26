@@ -363,6 +363,42 @@ export class ComponentMessageExecutionError extends Error {
   }
 }
 
+export class EmbedMessageEvidenceError extends Error {
+  override name = "EmbedMessageEvidenceError"
+}
+
+export class EmbedMessagePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord embed-message snapshot does not match the reviewed plan")
+    this.name = "EmbedMessagePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class EmbedMessageOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord embed-message operation key has already been reserved")
+    this.name = "EmbedMessageOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class EmbedMessageExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "EmbedMessageExecutionError"
+    this.result = result
+  }
+}
+
 export class ChannelCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

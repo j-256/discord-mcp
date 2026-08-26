@@ -43,6 +43,7 @@ export const OPERATION_KINDS = [
   "channel-ordering",
   "channel-permission-overwrite",
   "component-message",
+  "embed-message",
   "direct-message-change",
   "forum-post",
   "forum-tag-change",
@@ -101,7 +102,7 @@ export type GuildOperationKind = Exclude<
 >
 export type StandardGuildOperationKind = Exclude<
   GuildOperationKind,
-  "automod-change" | "component-message"
+  "automod-change" | "component-message" | "embed-message"
 >
 export type OperationReceiptStatus = "completed" | "failed" | "pending" | "uncertain"
 export type OperationVerification = "drift" | "match" | null
@@ -129,6 +130,12 @@ export interface ComponentMessageOperationReceipt extends OperationReceiptFields
   schemaVersion: 2
 }
 
+export interface EmbedMessageOperationReceipt extends OperationReceiptFields {
+  kind: "embed-message"
+  requestDigest: string
+  schemaVersion: 2
+}
+
 export interface AutoModerationOperationReceipt extends OperationReceiptFields {
   kind: "automod-change"
   requestDigest: string
@@ -138,6 +145,7 @@ export interface AutoModerationOperationReceipt extends OperationReceiptFields {
 export type OperationReceipt =
   | AutoModerationOperationReceipt
   | ComponentMessageOperationReceipt
+  | EmbedMessageOperationReceipt
   | StandardOperationReceipt
 
 export interface ApplicationOperationReceipt {
@@ -350,7 +358,7 @@ function parseReceipt(value: unknown): OperationReceipt {
     throw new OperationStoreError("Discord operation receipt is not an object")
   }
   const record = value as Record<string, unknown>
-  const requestBound = ["automod-change", "component-message"].includes(
+  const requestBound = ["automod-change", "component-message", "embed-message"].includes(
     String(record.kind),
   )
   const expectedKeys = requestBound
@@ -422,6 +430,7 @@ function parseReceipt(value: unknown): OperationReceipt {
     [
       "attachment-message",
       "component-message",
+      "embed-message",
       "webhook-message-edit",
       "webhook-message-send",
     ].includes(record.kind as string)
@@ -444,6 +453,14 @@ function parseReceipt(value: unknown): OperationReceipt {
     return {
       ...common,
       kind: "component-message",
+      requestDigest: record.requestDigest as string,
+      schemaVersion: REQUEST_BOUND_RECEIPT_SCHEMA_VERSION,
+    }
+  }
+  if (record.kind === "embed-message") {
+    return {
+      ...common,
+      kind: "embed-message",
       requestDigest: record.requestDigest as string,
       schemaVersion: REQUEST_BOUND_RECEIPT_SCHEMA_VERSION,
     }

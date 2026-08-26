@@ -77,6 +77,7 @@ export interface ConnectorConfig {
   allowDirectMessageDeletion: boolean
   allowDirectMessageDelivery: boolean
   allowDirectMessageEditing: boolean
+  allowEmbedMessages: boolean
   allowForumPosts: boolean
   allowForumTagAudit: boolean
   allowForumTagChanges: boolean
@@ -169,6 +170,7 @@ export interface ConnectorConfig {
   channelOrderingGuildIds: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   directMessageUserIds: ReadonlySet<string>
+  embedMessageChannelIds: ReadonlySet<string>
   expectedApplicationId: string | undefined
   expectedBotId: string | undefined
   forumPostChannelIds: ReadonlySet<string>
@@ -502,6 +504,7 @@ export function loadConnectorConfigDocument(
     "directMessageUserIds",
     CONNECTOR_LIMITS.directMessageUserAllowlist,
   )
+  const embedMessageChannelIds = configScope(document, "embedMessageChannelIds")
   const interactionChannelIds = configScope(document, "interactionChannelIds")
   const inviteCreationChannelIds = configScope(document, "inviteCreationChannelIds")
   const inviteRoleIds = configScope(document, "inviteRoleIds")
@@ -646,6 +649,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("channelDeletionIds"), channelDeletionIds],
     [configPolicyPath("channelCloneSourceIds"), channelCloneSourceIds],
     [configPolicyPath("deleteChannelIds"), deleteChannelIds],
+    [configPolicyPath("embedMessageChannelIds"), embedMessageChannelIds],
     [configPolicyPath("forumPostChannelIds"), forumPostChannelIds],
     [configPolicyPath("forumTagChannelIds"), forumTagChannelIds],
     [configPolicyPath("interactionChannelIds"), interactionChannelIds],
@@ -716,6 +720,12 @@ export function loadConnectorConfigDocument(
   if (allowDirectMessageAttachments && !allowDirectMessageDelivery) {
     throw new ConfigurationError(
       `${configPolicyPath("allowDirectMessageAttachments")} requires ${configPolicyPath("allowDirectMessageDelivery")}`,
+    )
+  }
+  const allowEmbedMessages = configCapability(document, "embedMessages")
+  if (allowEmbedMessages && embedMessageChannelIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowEmbedMessages")} requires ${configPolicyPath("embedMessageChannelIds")}`,
     )
   }
   if (
@@ -1177,6 +1187,7 @@ export function loadConnectorConfigDocument(
     allowDirectMessageDeletion,
     allowDirectMessageDelivery,
     allowDirectMessageEditing,
+    allowEmbedMessages,
     allowGateway,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
@@ -1280,6 +1291,7 @@ export function loadConnectorConfigDocument(
     channelOrderingGuildIds,
     deleteChannelIds,
     directMessageUserIds,
+    embedMessageChannelIds,
     expectedApplicationId,
     expectedBotId,
     forumPostChannelIds,

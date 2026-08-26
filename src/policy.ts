@@ -64,6 +64,8 @@ export interface PolicyDescription {
   directMessageDeliveryEnabled: boolean
   directMessageEditingEnabled: boolean
   directMessageUserIds: string[]
+  embedMessageChannelIds: string[]
+  embedMessagesEnabled: boolean
   forumPostChannelIds: string[]
   forumPostsEnabled: boolean
   forumTagAuditEnabled: boolean
@@ -256,6 +258,7 @@ export class ScopePolicy {
   readonly #allowDirectMessageDeletion: boolean
   readonly #allowDirectMessageDelivery: boolean
   readonly #allowDirectMessageEditing: boolean
+  readonly #allowEmbedMessages: boolean
   readonly #allowInteractions: boolean
   readonly #allowInviteAudit: boolean
   readonly #allowInviteCreation: boolean
@@ -332,6 +335,7 @@ export class ScopePolicy {
   readonly #allowWidgetSettingsChanges: boolean
   readonly #deleteChannelIds: ReadonlySet<string>
   readonly #directMessageUserIds: ReadonlySet<string>
+  readonly #embedMessageChannelIds: ReadonlySet<string>
   readonly #announcementCrosspostChannelIds: ReadonlySet<string>
   readonly #announcementSubscriptionSourceChannelIds: ReadonlySet<string>
   readonly #announcementSubscriptionTargetChannelIds: ReadonlySet<string>
@@ -438,6 +442,7 @@ export class ScopePolicy {
     | "allowDirectMessageDeletion"
     | "allowDirectMessageDelivery"
     | "allowDirectMessageEditing"
+    | "allowEmbedMessages"
     | "allowApplicationEmojiAudit"
     | "allowApplicationEmojiChanges"
     | "allowApplicationIntentChanges"
@@ -533,6 +538,7 @@ export class ScopePolicy {
     | "allowWidgetSettingsChanges"
     | "channelCreationGuildIds"
     | "directMessageUserIds"
+    | "embedMessageChannelIds"
     | "channelDeletionIds"
     | "channelCloneGuildIds"
     | "channelCloneSourceIds"
@@ -645,6 +651,7 @@ export class ScopePolicy {
     this.#allowDirectMessageDeletion = config.allowDirectMessageDeletion ?? false
     this.#allowDirectMessageDelivery = config.allowDirectMessageDelivery ?? false
     this.#allowDirectMessageEditing = config.allowDirectMessageEditing ?? false
+    this.#allowEmbedMessages = config.allowEmbedMessages ?? false
     this.#allowInteractions = config.allowInteractions
     this.#allowInviteAudit = config.allowInviteAudit ?? false
     this.#allowInviteCreation = config.allowInviteCreation ?? false
@@ -722,6 +729,7 @@ export class ScopePolicy {
     this.#allowWidgetSettingsChanges = config.allowWidgetSettingsChanges ?? false
     this.#deleteChannelIds = config.deleteChannelIds
     this.#directMessageUserIds = config.directMessageUserIds ?? new Set()
+    this.#embedMessageChannelIds = config.embedMessageChannelIds ?? new Set()
     this.#announcementCrosspostChannelIds = config.announcementCrosspostChannelIds ?? new Set()
     this.#announcementSubscriptionSourceChannelIds = config
       .announcementSubscriptionSourceChannelIds ?? new Set()
@@ -905,6 +913,9 @@ export class ScopePolicy {
       directMessageEditingEnabled: this.#allowDirectMessageEditing
         && this.#directMessageUserIds.size > 0,
       directMessageUserIds: [...this.#directMessageUserIds].sort(),
+      embedMessageChannelIds: [...this.#embedMessageChannelIds].sort(),
+      embedMessagesEnabled: this.#allowEmbedMessages
+        && this.#embedMessageChannelIds.size > 0,
       gatewayEnabled: this.#allowGateway,
       gatewayEventBufferSize: this.#gatewayEventBufferSize,
       guildScaffoldGuildIds: [...this.#guildScaffoldGuildIds].sort(),
@@ -2214,6 +2225,22 @@ export class ScopePolicy {
     }
     if (!this.#interactionChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the interaction scope`)
+    }
+    return guildId
+  }
+
+  assertChannelEmbedMessageAllowed(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowEmbedMessages) {
+      throw new PolicyError("Discord embed messages are disabled by connector configuration")
+    }
+    if (this.#embedMessageChannelIds.size === 0) {
+      throw new PolicyError(
+        "Discord embed messages require an explicit embed-message channel allowlist",
+      )
+    }
+    if (!this.#embedMessageChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the embed-message scope`)
     }
     return guildId
   }

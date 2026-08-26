@@ -115,9 +115,19 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   )
 
   const channelPublisher = getConfigRecipe("channel-publisher")
-  assert.deepEqual(channelPublisher.toolsets, ["interactions", "messages"])
+  assert.deepEqual(channelPublisher.toolsets, [
+    "embed-messages",
+    "interactions",
+    "messages",
+  ])
   assert.equal(channelPublisher.toolNames.includes("send_message"), true)
   assert.equal(channelPublisher.toolNames.includes("execute_component_message"), true)
+  assert.equal(channelPublisher.toolNames.includes("execute_embed_message"), true)
+  assert.deepEqual(channelPublisher.capabilities, ["embedMessages", "interactions"])
+  assert.deepEqual(channelPublisher.requirements.scope.targets, [
+    "$.scopes.embedMessageChannelIds",
+    "$.scopes.interactionChannelIds",
+  ])
   assert.deepEqual(channelPublisher.requirements.privilegedIntents, [{
     name: "MESSAGE_CONTENT",
     status: "required",
@@ -362,9 +372,11 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
     name: "channel-publisher",
   })
   assert.equal(plan.status, "planned")
+  assert.deepEqual(plan.proposedDocument.scopes.embedMessageChannelIds, [OTHER_CHANNEL_ID])
   assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [OTHER_CHANNEL_ID])
   assert.deepEqual(plan.proposedDocument.tools.toolsets, [
     "connector",
+    "embed-messages",
     "interactions",
     "messages",
   ])
