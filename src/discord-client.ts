@@ -93,6 +93,11 @@ import {
   type ModifyGuildIncidentActionsInput,
 } from "./guild-incident.js"
 import {
+  applicationRoleConnectionMetadataSchemaBody,
+  projectApplicationRoleConnectionMetadataSchema,
+  type DiscordApplicationRoleConnectionMetadataBody,
+} from "./application-role-connection-metadata-definition.js"
+import {
   guildApplicationCommandApiBody,
   type GuildApplicationCommandDefinition,
 } from "./guild-application-command-definition.js"
@@ -1584,6 +1589,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_role_positions",
   "modify_guild_welcome_screen",
   "modify_channel_metadata",
+  "replace_application_role_connection_metadata",
   "delete_invite",
   "search_guild_members",
   "search_guild_messages",
@@ -8629,6 +8635,38 @@ export class DiscordClient {
       {
         ...options,
         diagnosticRoute: "/applications/{application.id}/role-connections/metadata",
+        maxResponseBytes: DISCORD_LIMITS.applicationRoleConnectionMetadataResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  replaceApplicationRoleConnectionMetadata(
+    applicationId: string,
+    input: readonly DiscordApplicationRoleConnectionMetadataBody[],
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationRoleConnectionMetadata[]> {
+    assertSearchSnowflake(
+      applicationId,
+      "Discord application role-connection metadata application ID",
+    )
+    let body: DiscordApplicationRoleConnectionMetadataBody[]
+    try {
+      body = applicationRoleConnectionMetadataSchemaBody(
+        projectApplicationRoleConnectionMetadataSchema(input),
+      )
+    } catch {
+      throw new RangeError("Discord application role-connection metadata input is invalid")
+    }
+    return this.#request(
+      "replace_application_role_connection_metadata",
+      `/applications/${applicationId}/role-connections/metadata`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body,
+        diagnosticRoute: "/applications/{application.id}/role-connections/metadata",
+        expectedSuccessStatus: 200,
         maxResponseBytes: DISCORD_LIMITS.applicationRoleConnectionMetadataResponseBytes,
         suppressFailureCause: true,
       },

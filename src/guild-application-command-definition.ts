@@ -2,9 +2,11 @@ import { createHash } from "node:crypto"
 
 import {
   CHANNEL_TYPE_NAMES,
+  DISCORD_LOCALES,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
+  type DiscordLocale,
 } from "./constants.js"
 import { stableString } from "./normalize.js"
 import {
@@ -46,43 +48,9 @@ export const GUILD_APPLICATION_COMMAND_OPTION_TYPES = Object.freeze([
 export type GuildApplicationCommandOptionType =
   typeof GUILD_APPLICATION_COMMAND_OPTION_TYPES[number]
 
-export const DISCORD_APPLICATION_COMMAND_LOCALES = Object.freeze([
-  "id",
-  "da",
-  "de",
-  "en-GB",
-  "en-US",
-  "es-ES",
-  "es-419",
-  "fr",
-  "hr",
-  "it",
-  "lt",
-  "hu",
-  "nl",
-  "no",
-  "pl",
-  "pt-BR",
-  "ro",
-  "fi",
-  "sv-SE",
-  "vi",
-  "tr",
-  "cs",
-  "el",
-  "bg",
-  "ru",
-  "uk",
-  "hi",
-  "th",
-  "zh-CN",
-  "ja",
-  "zh-TW",
-  "ko",
-] as const)
+export const DISCORD_APPLICATION_COMMAND_LOCALES = DISCORD_LOCALES
 
-export type DiscordApplicationCommandLocale =
-  typeof DISCORD_APPLICATION_COMMAND_LOCALES[number]
+export type DiscordApplicationCommandLocale = DiscordLocale
 
 export const GUILD_APPLICATION_COMMAND_CHANNEL_TYPES = Object.freeze([
   "guild-text",

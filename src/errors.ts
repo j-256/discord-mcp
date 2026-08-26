@@ -533,6 +533,38 @@ export class ApplicationRoleConnectionMetadataEvidenceError extends Error {
   override name = "ApplicationRoleConnectionMetadataEvidenceError"
 }
 
+export class ApplicationRoleConnectionMetadataPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord linked-role metadata snapshot does not match the reviewed plan")
+    this.name = "ApplicationRoleConnectionMetadataPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ApplicationRoleConnectionMetadataOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord linked-role metadata operation key has already been reserved")
+    this.name = "ApplicationRoleConnectionMetadataOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ApplicationRoleConnectionMetadataExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ApplicationRoleConnectionMetadataExecutionError"
+    this.result = result
+  }
+}
+
 export class ApplicationSkuEvidenceError extends Error {
   override name = "ApplicationSkuEvidenceError"
 }

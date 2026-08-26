@@ -73,6 +73,7 @@ import {
 } from "../src/service.js"
 import type {
   DiscordApplication,
+  DiscordApplicationRoleConnectionMetadata,
   DiscordChannel,
   DiscordGuild,
   DiscordGuildMember,
@@ -327,6 +328,8 @@ function serviceFixture(overrides: {
   application?: DiscordApplication
   applicationEmojiOptions?: ConnectorServiceOptions["applicationEmojiOptions"]
   applicationIntentOptions?: ConnectorServiceOptions["applicationIntentOptions"]
+  applicationRoleConnectionMetadataOptions?:
+    ConnectorServiceOptions["applicationRoleConnectionMetadataOptions"]
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
@@ -806,6 +809,9 @@ function serviceFixture(overrides: {
     async listApplicationRoleConnectionMetadata() {
       return []
     },
+    async replaceApplicationRoleConnectionMetadata() {
+      throw new Error("Unexpected linked-role metadata replacement")
+    },
     async listApplicationSkus() {
       return []
     },
@@ -1041,6 +1047,12 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.applicationIntentOptions
         ? { applicationIntentOptions: overrides.applicationIntentOptions }
+        : {}),
+      ...(overrides.applicationRoleConnectionMetadataOptions
+        ? {
+            applicationRoleConnectionMetadataOptions:
+              overrides.applicationRoleConnectionMetadataOptions,
+          }
         : {}),
       ...(overrides.automodOptions
         ? { automodOptions: overrides.automodOptions }
@@ -5002,6 +5014,122 @@ test("service pins application emoji scope to verified identity and coordinates 
   assert.equal(operationStore.applicationReceipt?.kind, "application-emoji-change")
   assert.equal(operationStore.applicationReceipt?.applicationId, APPLICATION_ID)
   assert.equal(operationStore.applicationReceipt?.resourceId, emojiId)
+})
+
+test("service coordinates reviewed complete linked-role metadata replacement", async () => {
+  const operationStore = new MemoryApplicationOperationStore()
+  const coordinationIntents: WriteCoordinationIntent[] = []
+  const writeCoordinator: WriteCoordinator = {
+    run(intent, operation) {
+      coordinationIntents.push(intent)
+      return operation()
+    },
+  }
+  let metadata: DiscordApplicationRoleConnectionMetadata[] = [{
+    description: "Private current trust description",
+    description_localizations: null,
+    key: "trust_level",
+    name: "Private current trust name",
+    name_localizations: null,
+    type: 2,
+  }]
+  let inventoryCalls = 0
+  let replacementCalls = 0
+  const { calls, service } = serviceFixture({
+    application: {
+      ...application(),
+      role_connections_verification_url:
+        "https://private.example.test/linked-role-verification",
+    },
+    applicationRoleConnectionMetadataOptions: {
+      clock: () => new Date("2026-08-25T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(51),
+      randomId: () => "activity-application-role-connection-metadata",
+    },
+    client: {
+      async listApplicationRoleConnectionMetadata(applicationId) {
+        assert.equal(applicationId, APPLICATION_ID)
+        inventoryCalls += 1
+        return structuredClone(metadata)
+      },
+      async replaceApplicationRoleConnectionMetadata(applicationId, input) {
+        assert.equal(applicationId, APPLICATION_ID)
+        replacementCalls += 1
+        metadata = input.map((record) => structuredClone(record))
+        return structuredClone(metadata)
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        applicationRoleConnectionMetadataChanges: true,
+      },
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeGlobalReplacement: true as const,
+    action: "replace" as const,
+    operationKey: "linked-role-metadata-service-attempt-0001",
+    records: [{
+      description: "Private desired trust description",
+      descriptionLocalizations: [{
+        locale: "de" as const,
+        value: "Private lokalisierte Beschreibung",
+      }],
+      key: "trust_level",
+      name: "Private desired trust name",
+      nameLocalizations: [{
+        locale: "de" as const,
+        value: "Private Vertrauensstufe",
+      }],
+      type: "integer-greater-than-or-equal" as const,
+    }],
+  }
+
+  const plan = await service.planApplicationRoleConnectionMetadataChange(request)
+  const result = await service.executeApplicationRoleConnectionMetadataChange(
+    request,
+    plan.digest,
+  )
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.applicationId, APPLICATION_ID)
+  assert.equal(plan.botId, BOT_ID)
+  assert.equal(plan.verificationEndpointConfigured, true)
+  assert.deepEqual(plan.diff, {
+    added: 0,
+    changed: 1,
+    removed: 0,
+    reordered: false,
+    unchanged: 0,
+  })
+  assert.equal(result.status, "completed")
+  assert.deepEqual(result.observed, request.records)
+  assert.equal(replacementCalls, 1)
+  assert.equal(inventoryCalls, 3)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(coordinationIntents, [{
+    kind: "application-role-connection-metadata-change",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [{
+      applicationId: APPLICATION_ID,
+      collection: "role-connection-metadata",
+      kind: "application-collection",
+    }],
+  }])
+  assert.equal(calls.activityEntries.length, 2)
+  assert.doesNotMatch(
+    JSON.stringify(calls.activityEntries),
+    /Private|trust_level|lokalisierte|Vertrauensstufe/,
+  )
+  assert.equal(
+    operationStore.applicationReceipt?.kind,
+    "application-role-connection-metadata-change",
+  )
+  assert.equal(operationStore.applicationReceipt?.resourceId, APPLICATION_ID)
 })
 
 test("service coordinates reviewed application intents and invalidates changed identity evidence", async () => {

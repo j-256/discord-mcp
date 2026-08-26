@@ -129,6 +129,8 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   inspectGuildBan: "inspect_guild_ban",
   reviewApplicationCommands: "review_application_commands",
   reviewApplicationRoleConnectionMetadata: "review_application_role_connection_metadata",
+  reviewApplicationRoleConnectionMetadataChange:
+    "review_application_role_connection_metadata_change",
   reviewApplicationSkus: "review_application_skus",
   reviewAnnouncementCrosspost: "review_announcement_crosspost",
   reviewAnnouncementSubscription: "review_announcement_subscription",
@@ -201,6 +203,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewApplicationEmojiChange]: "application-emojis",
   [MCP_PROMPT_NAMES.reviewApplicationCommands]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationRoleConnectionMetadata]: "connector",
+  [MCP_PROMPT_NAMES.reviewApplicationRoleConnectionMetadataChange]: "linked-roles",
   [MCP_PROMPT_NAMES.reviewApplicationSkus]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationIntentEnablement]: "application-security",
   [MCP_PROMPT_NAMES.reviewInviteCreation]: "invites",

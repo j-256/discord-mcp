@@ -1120,6 +1120,33 @@ export interface ApplicationIntentActivity {
   verification: "match" | null
 }
 
+export type ApplicationRoleConnectionMetadataActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ApplicationRoleConnectionMetadataActivity {
+  action: "clear" | "replace"
+  addedRecordCount: number
+  applicationId: string
+  botId: string
+  changedRecordCount: number
+  currentRecordCount: number
+  desiredRecordCount: number
+  error: string | null
+  id: string
+  kind: "application-role-connection-metadata-change"
+  operationKeyHash: string
+  planDigest: string
+  removedRecordCount: number
+  reordered: boolean
+  schemaVersion: number
+  status: ApplicationRoleConnectionMetadataActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type SoundboardActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1490,6 +1517,7 @@ export type ActivityEntry =
   | AnnouncementSubscriptionActivity
   | ApplicationEmojiActivity
   | ApplicationIntentActivity
+  | ApplicationRoleConnectionMetadataActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
   | BulkGuildBanActivity
@@ -4822,6 +4850,102 @@ function parseApplicationIntentActivity(
   }
 }
 
+function parseApplicationRoleConnectionMetadataActivity(
+  value: unknown,
+): ApplicationRoleConnectionMetadataActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const counts = [
+    record.addedRecordCount,
+    record.changedRecordCount,
+    record.currentRecordCount,
+    record.desiredRecordCount,
+    record.removedRecordCount,
+  ]
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "application-role-connection-metadata-change"
+    || !["clear", "replace"].includes(String(record.action))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.botId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.botId)
+    || counts.some((count) => (
+      !Number.isInteger(count)
+      || (count as number) < 0
+      || (count as number) > DISCORD_LIMITS.applicationRoleConnectionMetadataRecords
+    ))
+    || (record.addedRecordCount as number) > (record.desiredRecordCount as number)
+    || (record.changedRecordCount as number) > Math.min(
+      record.currentRecordCount as number,
+      record.desiredRecordCount as number,
+    )
+    || (record.removedRecordCount as number) > (record.currentRecordCount as number)
+    || (record.changedRecordCount as number) > (
+      (record.currentRecordCount as number) - (record.removedRecordCount as number)
+    )
+    || (record.changedRecordCount as number) > (
+      (record.desiredRecordCount as number) - (record.addedRecordCount as number)
+    )
+    || (
+      (record.currentRecordCount as number) - (record.removedRecordCount as number)
+      !== (record.desiredRecordCount as number) - (record.addedRecordCount as number)
+    )
+    || typeof record.reordered !== "boolean"
+    || (record.action === "clear" && (
+      record.desiredRecordCount !== 0
+      || record.addedRecordCount !== 0
+      || record.changedRecordCount !== 0
+      || record.removedRecordCount !== record.currentRecordCount
+      || record.reordered
+    ))
+    || (record.action === "replace" && record.desiredRecordCount === 0)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    action: record.action as ApplicationRoleConnectionMetadataActivity["action"],
+    addedRecordCount: record.addedRecordCount as number,
+    applicationId: record.applicationId,
+    botId: record.botId,
+    changedRecordCount: record.changedRecordCount as number,
+    currentRecordCount: record.currentRecordCount as number,
+    desiredRecordCount: record.desiredRecordCount as number,
+    error: record.error,
+    id: record.id,
+    kind: "application-role-connection-metadata-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    removedRecordCount: record.removedRecordCount as number,
+    reordered: record.reordered,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ApplicationRoleConnectionMetadataActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseScheduledEventActivity(
   value: unknown,
 ): ScheduledEventActivity | undefined {
@@ -5931,6 +6055,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseMessagePinActivity(value)
     || parseApplicationEmojiActivity(value)
     || parseApplicationIntentActivity(value)
+    || parseApplicationRoleConnectionMetadataActivity(value)
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)

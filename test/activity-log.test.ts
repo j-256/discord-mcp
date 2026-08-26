@@ -16,6 +16,7 @@ import {
   type AnnouncementSubscriptionActivity,
   type ApplicationEmojiActivity,
   type ApplicationIntentActivity,
+  type ApplicationRoleConnectionMetadataActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
   type BulkGuildBanActivity,
@@ -1403,6 +1404,34 @@ function applicationIntent(
     schemaVersion: 1,
     status,
     timestamp: `2026-08-24T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function applicationRoleConnectionMetadata(
+  id: string,
+  status: ApplicationRoleConnectionMetadataActivity["status"],
+): ApplicationRoleConnectionMetadataActivity {
+  return {
+    action: "replace",
+    addedRecordCount: 1,
+    applicationId: "100",
+    botId: "200",
+    changedRecordCount: 0,
+    currentRecordCount: 0,
+    desiredRecordCount: 1,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    id,
+    kind: "application-role-connection-metadata-change",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
+    removedRecordCount: 0,
+    reordered: false,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-25T00:00:0${id}.000Z`,
     verification: status === "completed" ? "match" : null,
   }
 }
@@ -4277,6 +4306,86 @@ test("JSONL activity log keeps application intent evidence content-free", async 
     "kind",
     "operationKeyHash",
     "planDigest",
+    "schemaVersion",
+    "status",
+    "timestamp",
+    "verification",
+  ])
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps linked-role metadata lifecycle evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-metadata-key",
+    "private-metadata-name",
+    "private-metadata-description",
+    "private-localization-value",
+    "private-verification-url",
+    "private-operation-key",
+  ]
+
+  await store.append(applicationRoleConnectionMetadata("1", "pending"))
+  await store.append({
+    ...applicationRoleConnectionMetadata("2", "completed"),
+    metadataDescription: privateValues[2],
+    metadataKey: privateValues[0],
+    metadataName: privateValues[1],
+    localizationValue: privateValues[3],
+    operationKey: privateValues[5],
+    verificationUrl: privateValues[4],
+  } as ApplicationRoleConnectionMetadataActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...applicationRoleConnectionMetadata("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...applicationRoleConnectionMetadata("4", "completed"),
+      addedRecordCount: 2,
+      desiredRecordCount: 1,
+    })}\n`,
+    "utf8",
+  )
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...applicationRoleConnectionMetadata("5", "completed"),
+      currentRecordCount: 1,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 3)
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "action",
+    "addedRecordCount",
+    "applicationId",
+    "botId",
+    "changedRecordCount",
+    "currentRecordCount",
+    "desiredRecordCount",
+    "error",
+    "id",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "removedRecordCount",
+    "reordered",
     "schemaVersion",
     "status",
     "timestamp",

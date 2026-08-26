@@ -68,6 +68,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
 export const WRITE_COORDINATION_APPLICATION_COLLECTIONS = [
   "emojis",
   "privileged-intents",
+  "role-connection-metadata",
 ] as const
 
 export type WriteCoordinationResourceKind =
@@ -429,6 +430,15 @@ function normalizeTargets(
   ) {
     throw new WriteCoordinationStateError(
       "Discord application intent coordination requires the privileged-intents collection target",
+    )
+  }
+  if (
+    kind === "application-role-connection-metadata-change"
+    && applicationTarget?.kind === "application-collection"
+    && applicationTarget.collection !== "role-connection-metadata"
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord linked-role metadata coordination requires the role-connection-metadata collection target",
     )
   }
   return [...byDescriptor.entries()]

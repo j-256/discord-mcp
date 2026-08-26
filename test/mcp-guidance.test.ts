@@ -722,6 +722,7 @@ function guidanceService(options: {
     executeAnnouncementSubscription: unexpected,
     executeApplicationEmojiChange: unexpected,
     executeApplicationIntentEnablement: unexpected,
+    executeApplicationRoleConnectionMetadataChange: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeGuildApplicationCommandChange: unexpected,
@@ -1982,6 +1983,7 @@ function guidanceService(options: {
     planGuildExpressionChange: unexpected,
     planApplicationEmojiChange: unexpected,
     planApplicationIntentEnablement: unexpected,
+    planApplicationRoleConnectionMetadataChange: unexpected,
     planSoundboardChange: unexpected,
     planChannelMetadataChange: unexpected,
     planVoiceChannelStatusChange: unexpected,
@@ -2006,6 +2008,7 @@ function guidanceService(options: {
         applicationEmojiCreationEnabled: false,
         applicationEmojiRootCount: 0,
         applicationIntentChangesEnabled: false,
+        applicationRoleConnectionMetadataChangesEnabled: false,
         announcementCrosspostChannelIds: [],
         announcementCrosspostsEnabled: false,
         announcementSubscriptionAuditEnabled: false,
@@ -5094,6 +5097,41 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(applicationIntent, /authoritative named current state/)
   assert.match(applicationIntent, /raw flags/)
   assert.match(applicationIntent, /uncertain same-application predecessor/)
+
+  const applicationRoleConnectionMetadataRequest = {
+    acknowledgeGlobalReplacement: true,
+    action: "replace",
+    operationKey: OPERATION_KEY,
+    records: [{
+      description: "Reached the reviewed trust threshold",
+      descriptionLocalizations: [],
+      key: "trust_level",
+      name: "Trust level",
+      nameLocalizations: [],
+      type: "integer-greater-than-or-equal",
+    }],
+  }
+  const applicationRoleConnectionMetadata = promptText(await client.getPrompt({
+    arguments: {
+      requestJson: JSON.stringify(applicationRoleConnectionMetadataRequest),
+    },
+    name: MCP_PROMPT_NAMES.reviewApplicationRoleConnectionMetadataChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(applicationRoleConnectionMetadata.split("\n")[1] || ""),
+    applicationRoleConnectionMetadataRequest,
+  )
+  assert.match(
+    applicationRoleConnectionMetadata,
+    /Call only plan_application_role_connection_metadata_change/,
+  )
+  assert.match(
+    applicationRoleConnectionMetadata,
+    /Do not call execute_application_role_connection_metadata_change/,
+  )
+  assert.match(applicationRoleConnectionMetadata, /complete ordered current and desired definitions/)
+  assert.match(applicationRoleConnectionMetadata, /contains no metadata labels or localization values/)
+  assert.match(applicationRoleConnectionMetadata, /guild role configuration and user role-connection values are unavailable/)
 
   const guildExpression = promptText(await client.getPrompt({
     arguments: {

@@ -2252,6 +2252,111 @@ test("Discord client bounds and protects linked-role metadata inventories", asyn
   )
 })
 
+test("Discord client replaces linked-role metadata once through an exact bounded contract", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    url: string
+  }> = []
+  const record = {
+    description: "Minimum review level",
+    description_localizations: { de: "Mindestpruefungsstufe" },
+    key: "review_level",
+    name: "Review level",
+    name_localizations: { de: "Pruefungsstufe" },
+    type: 2,
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)),
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      return jsonResponse([record], 200)
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.replaceApplicationRoleConnectionMetadata("100", [record]),
+    [record],
+  )
+  assert.deepEqual(requests, [{
+    body: [record],
+    method: "PUT",
+    url: `${API_BASE_URL}/applications/100/role-connections/metadata`,
+  }])
+
+  assert.throws(
+    () => client.replaceApplicationRoleConnectionMetadata("invalid", []),
+    /role-connection metadata application ID/u,
+  )
+  assert.throws(
+    () => client.replaceApplicationRoleConnectionMetadata("100", [{
+      ...record,
+      future: true,
+    }] as never),
+    /input is invalid/u,
+  )
+})
+
+test("Discord client never retries or leaks failed linked-role metadata writes", async () => {
+  const privateMarker = "private-linked-role-write"
+  let attempts = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      attempts += 1
+      return jsonResponse({ message: privateMarker, retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => undefined,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.replaceApplicationRoleConnectionMetadata("100", []),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.status === 429
+      && error.cause === undefined
+      && !error.message.includes(privateMarker)
+    ),
+  )
+  assert.equal(attempts, 1)
+
+  const wrongStatus = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse([], 201),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    wrongStatus.replaceApplicationRoleConnectionMetadata("100", []),
+    (error: unknown) => (
+      error instanceof Error
+      && error.cause === undefined
+      && /unexpected success status/u.test(error.message)
+    ),
+  )
+
+  const transport = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateMarker)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    transport.replaceApplicationRoleConnectionMetadata("100", []),
+    (error: unknown) => (
+      error instanceof Error
+      && error.cause === undefined
+      && !error.message.includes(privateMarker)
+    ),
+  )
+})
+
 test("Discord client bounds and protects current-application SKU inventories", async () => {
   const requests: Array<{ method: string; url: string }> = []
   const record = {

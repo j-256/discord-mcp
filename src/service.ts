@@ -11,6 +11,16 @@ import {
   ApplicationRoleConnectionMetadataAuditService,
   type ApplicationRoleConnectionMetadataAuditResult,
 } from "./application-role-connection-metadata-audit-service.js"
+import type {
+  ApplicationRoleConnectionMetadataChangeRequest,
+  ApplicationRoleConnectionMetadataPlan,
+  ApplicationRoleConnectionMetadataResult,
+  ApplicationRoleConnectionMetadataServiceOptions,
+} from "./application-role-connection-metadata-service.js"
+import {
+  ApplicationRoleConnectionMetadataService,
+  normalizeApplicationRoleConnectionMetadataChangeRequest,
+} from "./application-role-connection-metadata-service.js"
 import {
   ApplicationSkuAuditService,
   type ApplicationSkuAuditResult,
@@ -855,6 +865,7 @@ export interface DiscordServiceClient {
   listActiveGuildThreads: DiscordClient["listActiveGuildThreads"]
   listApplicationEmojis: DiscordClient["listApplicationEmojis"]
   listApplicationRoleConnectionMetadata: DiscordClient["listApplicationRoleConnectionMetadata"]
+  replaceApplicationRoleConnectionMetadata: DiscordClient["replaceApplicationRoleConnectionMetadata"]
   listApplicationSkus: DiscordClient["listApplicationSkus"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
@@ -955,6 +966,10 @@ export interface ConnectorServiceOptions {
   >
   applicationIntentOptions?: Pick<
     ApplicationIntentServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  applicationRoleConnectionMetadataOptions?: Pick<
+    ApplicationRoleConnectionMetadataServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   guildApplicationCommandOptions?: Pick<
@@ -1337,6 +1352,7 @@ export class ConnectorService {
   readonly #applicationCommandAuditService: ApplicationCommandAuditService
   readonly #guildApplicationCommandService: GuildApplicationCommandService
   readonly #applicationRoleConnectionMetadataAuditService: ApplicationRoleConnectionMetadataAuditService
+  readonly #applicationRoleConnectionMetadataService: ApplicationRoleConnectionMetadataService
   readonly #applicationSkuAuditService: ApplicationSkuAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
@@ -1479,6 +1495,13 @@ export class ConnectorService {
     })
     this.#applicationRoleConnectionMetadataAuditService = new ApplicationRoleConnectionMetadataAuditService({
       client: this.#client,
+    })
+    this.#applicationRoleConnectionMetadataService = new ApplicationRoleConnectionMetadataService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.applicationRoleConnectionMetadataOptions,
     })
     this.#applicationSkuAuditService = new ApplicationSkuAuditService({
       client: this.#client,
@@ -3617,6 +3640,20 @@ export class ConnectorService {
     const identity = await this.#verifyIdentity(options)
     return this.#applicationEmojiService.plan(
       identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planApplicationRoleConnectionMetadataChange(
+    request: ApplicationRoleConnectionMetadataChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ApplicationRoleConnectionMetadataPlan> {
+    normalizeApplicationRoleConnectionMetadataChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationRoleConnectionMetadataService.plan(
+      identity.application,
       identity.bot.id,
       request,
       options,
@@ -5825,6 +5862,34 @@ export class ConnectorService {
       [writeApplicationCollectionTarget("emojis", identity.application.id)],
       () => this.#applicationEmojiService.execute(
         identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeApplicationRoleConnectionMetadataChange(
+    request: ApplicationRoleConnectionMetadataChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationRoleConnectionMetadataResult> {
+    normalizeApplicationRoleConnectionMetadataChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord linked-role metadata plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "application-role-connection-metadata-change",
+      request.operationKey,
+      planDigest,
+      [writeApplicationCollectionTarget(
+        "role-connection-metadata",
+        identity.application.id,
+      )],
+      () => this.#applicationRoleConnectionMetadataService.execute(
+        identity.application,
         identity.bot.id,
         request,
         planDigest,

@@ -406,6 +406,64 @@ test("application intent claims use the exact application-wide security target",
   )
 })
 
+test("linked-role metadata claims use the exact application-wide schema target", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-linked-role-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "coordination")
+  const operationStore = new FileOperationStore(join(root, "operations"))
+  const coordinator = new FileWriteCoordinator(directory, operationStore)
+  const target = writeApplicationCollectionTarget(
+    "role-connection-metadata",
+    APPLICATION_ID,
+  )
+  const operationKeyHashValue = operationKeyHash(OPERATION_KEY)
+
+  await assert.rejects(
+    () => coordinator.run(intent([
+      writeApplicationCollectionTarget("privileged-intents", APPLICATION_ID),
+    ], {
+      kind: "application-role-connection-metadata-change",
+    }), async () => "unsafe"),
+    /role-connection-metadata collection target/u,
+  )
+
+  const result = await coordinator.run(intent([target], {
+    kind: "application-role-connection-metadata-change",
+  }), async () => {
+    const pending = {
+      activityId: "application-role-connection-metadata-activity-0001",
+      applicationId: APPLICATION_ID,
+      error: null,
+      kind: "application-role-connection-metadata-change" as const,
+      operationKeyHash: operationKeyHashValue,
+      planDigest: PLAN_DIGEST,
+      resourceId: null,
+      schemaVersion: 1 as const,
+      status: "pending" as const,
+      timestamp: "2026-08-25T00:00:00.000Z",
+      verification: null,
+    }
+    await operationStore.reserveApplication(pending)
+    await operationStore.finishApplication({
+      ...pending,
+      resourceId: APPLICATION_ID,
+      status: "completed",
+      timestamp: "2026-08-25T00:00:01.000Z",
+      verification: "match",
+    })
+    return "linked-role-schema"
+  })
+
+  assert.equal(result, "linked-role-schema")
+  assert.deepEqual(await claimFiles(directory), [])
+  assert.notEqual(
+    writeCoordinationTargetHash(target),
+    writeCoordinationTargetHash(
+      writeApplicationCollectionTarget("privileged-intents", APPLICATION_ID),
+    ),
+  )
+})
+
 test("coordination accepts one exact maximum-size deletion batch and rejects expansion", async (context) => {
   const { coordinator, directory } = await fixture(context)
   const messageTargets = Array.from(

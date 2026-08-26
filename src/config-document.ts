@@ -133,6 +133,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "applicationEmojiAudit",
   "applicationEmojiChanges",
   "applicationIntentChanges",
+  "applicationRoleConnectionMetadataChanges",
   "announcementCrossposts",
   "announcementSubscriptionAudit",
   "announcementSubscriptionChanges",
@@ -418,6 +419,7 @@ const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for ex
 const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed additive application privileged-intent enablement"
 const APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-guild application-command creation, complete-state update, and exact-ID deletion"
 const APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed application-command changes"
+const APPLICATION_ROLE_CONNECTION_METADATA_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed complete current-application linked-role metadata replacement and clearance"
 const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
 const BULK_BANS_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban execution"
 const BULK_BAN_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
@@ -443,6 +445,9 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "applicationIntentChanges") {
     return APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "applicationRoleConnectionMetadataChanges") {
+    return APPLICATION_ROLE_CONNECTION_METADATA_CHANGES_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "channelMetadataChanges") {
     return CHANNEL_METADATA_CAPABILITY_DESCRIPTION

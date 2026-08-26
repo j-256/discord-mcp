@@ -83,7 +83,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 30
+export const OPERATOR_REPORT_SCHEMA_VERSION = 31
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -100,6 +100,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   applicationEmojiChangePolicy: "application-emoji-change-policy",
   applicationCommandChangePolicy: "application-command-change-policy",
   applicationIntentChangePolicy: "application-intent-change-policy",
+  applicationRoleConnectionMetadataChangePolicy:
+    "application-role-connection-metadata-change-policy",
   applicationBotVisibility: "application-bot-visibility",
   applicationDefaultPermissions: "application-default-permissions",
   applicationEventWebhooks: "application-event-webhooks",
@@ -846,6 +848,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowApplicationIntentChanges,
       "application-security",
       "Reviewed application privileged-intent enablement",
+    ],
+    [
+      config.allowApplicationRoleConnectionMetadataChanges,
+      "linked-roles",
+      "Reviewed application linked-role metadata changes",
     ],
     [config.allowAttachments, "attachments", "Attachment messages"],
     [
@@ -3029,6 +3036,17 @@ export async function diagnoseConnector(
         `Reviewed application privileged-intent enablement is limited to ${applicationIntentTargets.join(" and ")}, additive-only, policy-justified, application-wide coordinated, one-shot, content-free audited, and exact-readback verified`,
       ))
     }
+    checks.push(config.allowApplicationRoleConnectionMetadataChanges
+      ? check(
+        DOCTOR_CHECK_IDS.applicationRoleConnectionMetadataChangePolicy,
+        "pass",
+        "Reviewed linked-role metadata changes are bound to the verified pinned current application, strict complete maximum-five-record schemas, explicit global replacement or clearance acknowledgement, label-free signed approval state, application-wide coordination, one non-retried PUT, content-free lifecycle records, and exact response plus independent readback verification",
+      )
+      : check(
+        DOCTOR_CHECK_IDS.applicationRoleConnectionMetadataChangePolicy,
+        "pass",
+        "Reviewed application linked-role metadata changes are disabled",
+      ))
     if (!config.allowGuildExpressionChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.guildExpressionChangePolicy,

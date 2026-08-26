@@ -41,6 +41,7 @@ type McpToolWorkflow =
   | "announcement-subscription"
   | "application-emoji-change"
   | "application-intent-enablement"
+  | "application-role-connection-metadata-change"
   | "attachment-message"
   | "automod-change"
   | "bulk-guild-ban"
@@ -210,6 +211,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "enable", "execute", "guild members", "intent", "message content", "privileged"],
     toolset: "application-security",
     workflow: "application-intent-enablement",
+  },
+  execute_application_role_connection_metadata_change: {
+    keywords: ["application", "clear", "execute", "linked", "metadata", "replace", "role", "schema"],
+    toolset: "linked-roles",
+    workflow: "application-role-connection-metadata-change",
   },
   execute_message_forward: {
     keywords: ["copy", "execute", "forward", "message", "snapshot"],
@@ -831,6 +837,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "enable", "guild members", "intent", "message content", "plan", "privileged", "review"],
     toolset: "application-security",
     workflow: "application-intent-enablement",
+  },
+  plan_application_role_connection_metadata_change: {
+    keywords: ["application", "clear", "linked", "metadata", "plan", "replace", "review", "role", "schema"],
+    toolset: "linked-roles",
+    workflow: "application-role-connection-metadata-change",
   },
   plan_forum_post: {
     keywords: ["create", "forum", "plan", "post", "review", "thread"],

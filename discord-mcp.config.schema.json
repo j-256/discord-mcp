@@ -31,6 +31,10 @@
           "type": "boolean",
           "description": "Enable reviewed additive application privileged-intent enablement"
         },
+        "applicationRoleConnectionMetadataChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed complete current-application linked-role metadata replacement and clearance"
+        },
         "announcementCrossposts": {
           "type": "boolean",
           "description": "Enable announcement crossposts policy"
@@ -1555,7 +1559,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 61,
+          "maxItems": 62,
           "type": "array",
           "items": {
             "type": "string",
@@ -1594,6 +1598,7 @@
               "integrations",
               "interactions",
               "invites",
+              "linked-roles",
               "member-nicknames",
               "member-roles",
               "members",

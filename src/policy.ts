@@ -20,6 +20,7 @@ export interface PolicyDescription {
   applicationEmojiCreationEnabled: boolean
   applicationEmojiRootCount: number
   applicationIntentChangesEnabled: boolean
+  applicationRoleConnectionMetadataChangesEnabled: boolean
   announcementCrosspostChannelIds: string[]
   announcementCrosspostsEnabled: boolean
   announcementSubscriptionAuditEnabled: boolean
@@ -229,6 +230,7 @@ export class ScopePolicy {
   readonly #allowApplicationEmojiAudit: boolean
   readonly #allowApplicationEmojiChanges: boolean
   readonly #allowApplicationIntentChanges: boolean
+  readonly #allowApplicationRoleConnectionMetadataChanges: boolean
   readonly #allowAnnouncementCrossposts: boolean
   readonly #allowAnnouncementSubscriptionAudit: boolean
   readonly #allowAnnouncementSubscriptionChanges: boolean
@@ -435,6 +437,7 @@ export class ScopePolicy {
     | "allowApplicationEmojiAudit"
     | "allowApplicationEmojiChanges"
     | "allowApplicationIntentChanges"
+    | "allowApplicationRoleConnectionMetadataChanges"
     | "allowAnnouncementSubscriptionAudit"
     | "allowAnnouncementSubscriptionChanges"
     | "allowAttachments"
@@ -609,6 +612,8 @@ export class ScopePolicy {
     this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
     this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
     this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
+    this.#allowApplicationRoleConnectionMetadataChanges =
+      config.allowApplicationRoleConnectionMetadataChanges ?? false
     this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
     this.#allowAnnouncementSubscriptionAudit = config.allowAnnouncementSubscriptionAudit
       ?? false
@@ -812,6 +817,8 @@ export class ScopePolicy {
         && this.#applicationEmojiRoots.length > 0,
       applicationEmojiRootCount: this.#applicationEmojiRoots.length,
       applicationIntentChangesEnabled: this.#allowApplicationIntentChanges,
+      applicationRoleConnectionMetadataChangesEnabled:
+        this.#allowApplicationRoleConnectionMetadataChanges,
       announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
       announcementCrosspostsEnabled: this.#allowAnnouncementCrossposts
         && this.#announcementCrosspostChannelIds.size > 0,
@@ -1895,6 +1902,14 @@ export class ScopePolicy {
     if (!this.#allowApplicationIntentChanges) {
       throw new PolicyError(
         "Discord application privileged-intent changes are disabled by connector configuration",
+      )
+    }
+  }
+
+  assertApplicationRoleConnectionMetadataChangeAllowed(): void {
+    if (!this.#allowApplicationRoleConnectionMetadataChanges) {
+      throw new PolicyError(
+        "Discord linked-role metadata changes are disabled by connector configuration",
       )
     }
   }

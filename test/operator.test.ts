@@ -208,6 +208,7 @@ function status(
       applicationEmojiCreationEnabled: false,
       applicationEmojiRootCount: 0,
       applicationIntentChangesEnabled: false,
+      applicationRoleConnectionMetadataChangesEnabled: false,
       announcementCrosspostChannelIds: [],
       announcementCrosspostsEnabled: false,
       announcementSubscriptionAuditEnabled: false,
@@ -440,6 +441,7 @@ function toolService(): DiscordToolService {
     executeAnnouncementSubscription: unexpected,
     executeApplicationEmojiChange: unexpected,
     executeApplicationIntentEnablement: unexpected,
+    executeApplicationRoleConnectionMetadataChange: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeGuildApplicationCommandChange: unexpected,
@@ -530,6 +532,7 @@ function toolService(): DiscordToolService {
     planGuildExpressionChange: unexpected,
     planApplicationEmojiChange: unexpected,
     planApplicationIntentEnablement: unexpected,
+    planApplicationRoleConnectionMetadataChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
     planSoundboardChange: unexpected,
@@ -3093,6 +3096,50 @@ test("doctor and setup explain reviewed guild application-command scope", async 
   )
 })
 
+test("doctor and setup explain reviewed application linked-role metadata changes", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      applicationRoleConnectionMetadataChanges: true,
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const check = enabled.checks.find(
+    (entry) => entry.id
+      === DOCTOR_CHECK_IDS.applicationRoleConnectionMetadataChangePolicy,
+  )
+  assert.equal(check?.status, "pass")
+  assert.match(check?.summary || "", /verified pinned current application/)
+  assert.match(check?.summary || "", /maximum-five-record schemas/)
+  assert.match(check?.summary || "", /label-free signed approval state/)
+  assert.match(check?.summary || "", /one non-retried PUT/)
+  assert.match(check?.summary || "", /independent readback verification/)
+  assert.match(omitted.warnings.join("\n"), /linked-roles toolset/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id
+        === DOCTOR_CHECK_IDS.applicationRoleConnectionMetadataChangePolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+})
+
 test("doctor and setup explain reviewed application privileged-intent enablement", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5444,6 +5491,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_application_emoji_change",
     "review_application_intent_enablement",
     "review_application_role_connection_metadata",
+    "review_application_role_connection_metadata_change",
     "review_application_skus",
     "review_attachment_message",
     "review_automod_change",
@@ -5566,6 +5614,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_announcement_subscription",
     "execute_application_emoji_change",
     "execute_application_intent_enablement",
+    "execute_application_role_connection_metadata_change",
     "execute_automod_change",
     "execute_bulk_guild_ban",
     "execute_channel_clone",

@@ -12,6 +12,43 @@ export const GUILD_SCAFFOLD_SYMBOL_PATTERN = /^[a-z][a-z0-9_-]*$/
 export const CONTENT_FREE_ERROR_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/
 export const CONTENT_FREE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
+export const DISCORD_LOCALES = Object.freeze([
+  "id",
+  "da",
+  "de",
+  "en-GB",
+  "en-US",
+  "es-ES",
+  "es-419",
+  "fr",
+  "hr",
+  "it",
+  "lt",
+  "hu",
+  "nl",
+  "no",
+  "pl",
+  "pt-BR",
+  "ro",
+  "fi",
+  "sv-SE",
+  "vi",
+  "tr",
+  "cs",
+  "el",
+  "bg",
+  "ru",
+  "uk",
+  "hi",
+  "th",
+  "zh-CN",
+  "ja",
+  "zh-TW",
+  "ko",
+] as const)
+
+export type DiscordLocale = typeof DISCORD_LOCALES[number]
+
 export const MCP_DISCOVERY_TOOL_NAME = "discover_discord_tools"
 
 export const MCP_TOOL_SURFACES = [
@@ -56,6 +93,7 @@ export const MCP_TOOLSET_NAMES = [
   "integrations",
   "interactions",
   "invites",
+  "linked-roles",
   "member-nicknames",
   "member-roles",
   "members",
@@ -201,6 +239,7 @@ export const DISCORD_LIMITS = Object.freeze({
   applicationRoleConnectionMetadataLocalizations: 64,
   applicationRoleConnectionMetadataNameCharacters: 100,
   applicationRoleConnectionMetadataRecords: 5,
+  applicationRoleConnectionMetadataRequestBytes: 65_536,
   applicationRoleConnectionMetadataResponseBytes: 524_288,
   applicationSkuFields: 32,
   applicationSkuNameCharacters: 80,

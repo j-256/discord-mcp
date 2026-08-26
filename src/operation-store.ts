@@ -32,6 +32,7 @@ export const OPERATION_KINDS = [
   "announcement-subscription",
   "application-emoji-change",
   "application-intent-enablement",
+  "application-role-connection-metadata-change",
   "attachment-message",
   "automod-change",
   "bulk-guild-ban",
@@ -92,6 +93,7 @@ export type OperationKind = typeof OPERATION_KINDS[number]
 export type ApplicationOperationKind =
   | "application-emoji-change"
   | "application-intent-enablement"
+  | "application-role-connection-metadata-change"
 export type DirectMessageOperationKind = "direct-message-change"
 export type GuildOperationKind = Exclude<
   OperationKind,
@@ -257,6 +259,7 @@ export interface DirectMessageOperationStore extends OperationStore {
 const APPLICATION_OPERATION_KINDS: readonly ApplicationOperationKind[] = [
   "application-emoji-change",
   "application-intent-enablement",
+  "application-role-connection-metadata-change",
 ]
 
 export function isApplicationOperationKind(

@@ -66,6 +66,14 @@ import type {
   ApplicationIntentEnablementPlan,
   ApplicationIntentEnablementRequest,
 } from "../src/application-intent-service.js"
+import {
+  applicationRoleConnectionMetadataSchemaDigest,
+  type ApplicationRoleConnectionMetadataDefinition,
+} from "../src/application-role-connection-metadata-definition.js"
+import type {
+  ApplicationRoleConnectionMetadataChangeRequest,
+  ApplicationRoleConnectionMetadataPlan,
+} from "../src/application-role-connection-metadata-service.js"
 import { projectApplicationPosture } from "../src/application-posture.js"
 import type {
   AttachmentMessagePlan,
@@ -306,6 +314,8 @@ import {
   ApplicationEmojiOperationConflictError,
   ApplicationIntentExecutionError,
   ApplicationIntentOperationConflictError,
+  ApplicationRoleConnectionMetadataExecutionError,
+  ApplicationRoleConnectionMetadataOperationConflictError,
   AttachmentMessageExecutionError,
   AttachmentMessageOperationConflictError,
   AutoModerationExecutionError,
@@ -710,6 +720,19 @@ const APPLICATION_EMOJI_OPERATION_KEY = "application-emoji-attempt-0001"
 const APPLICATION_EMOJI_PATH = "/test/discord-mcp/reviewed-application-emoji.png"
 const APPLICATION_INTENT_OPERATION_KEY = "application-intent-attempt-0001"
 const APPLICATION_INTENT_REVIEW_REASON = "Enable the schema-v2 member directory"
+const APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY =
+  "linked-role-metadata-attempt-0001"
+const APPLICATION_ROLE_CONNECTION_METADATA_RECORD = Object.freeze({
+  description: "Reached the reviewed trust threshold",
+  descriptionLocalizations: [{
+    locale: "de",
+    value: "Hat die geprufte Vertrauensschwelle erreicht",
+  }],
+  key: "trust_level",
+  name: "Trust level",
+  nameLocalizations: [{ locale: "de", value: "Vertrauensstufe" }],
+  type: "integer-greater-than-or-equal",
+} satisfies ApplicationRoleConnectionMetadataDefinition)
 const SOUNDBOARD_SOUND_ID = "391000000000000001"
 const SOUNDBOARD_OPERATION_KEY = "soundboard-change-attempt-0001"
 const SOUNDBOARD_PATH = "/test/discord-mcp/reviewed-sound.mp3"
@@ -3904,6 +3927,76 @@ function applicationIntentPlan(
     warnings: [
       "Review reason is ephemeral",
       "Raw flags and operation key are private",
+    ],
+    writeRequired: effect === "change",
+  }
+}
+
+function applicationRoleConnectionMetadataPlan(
+  request: ApplicationRoleConnectionMetadataChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ApplicationRoleConnectionMetadataPlan {
+  const desired = request.action === "clear"
+    ? []
+    : structuredClone(request.records)
+  const current = effect === "none"
+    ? structuredClone(desired)
+    : request.action === "clear"
+      ? [structuredClone(APPLICATION_ROLE_CONNECTION_METADATA_RECORD)]
+      : []
+  return {
+    acknowledgement: request.action === "clear"
+      ? "complete-schema-clearance"
+      : "application-wide-replacement",
+    action: request.action,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    createdAt: "2026-08-25T00:00:00.000Z",
+    current,
+    currentSchemaDigest: applicationRoleConnectionMetadataSchemaDigest(current),
+    desired,
+    desiredSchemaDigest: applicationRoleConnectionMetadataSchemaDigest(desired),
+    diff: {
+      added: effect === "change" && request.action === "replace" ? desired.length : 0,
+      changed: 0,
+      removed: effect === "change" && request.action === "clear" ? current.length : 0,
+      reordered: false,
+      unchanged: effect === "none" ? desired.length : 0,
+    },
+    digest,
+    effect,
+    operationKeyHash: operationKeyHash(request.operationKey),
+    privacy: {
+      definitionsPersisted: false,
+      omitted: [
+        "guild-role-configuration",
+        "raw-discord-payloads",
+        "user-role-connection-values",
+        "verification-endpoint-url",
+      ],
+      text: "transient-untrusted",
+    },
+    risks: [
+      "Application-wide complete-schema replacement",
+      "Omitted criteria may invalidate guild role conditions",
+      "No conditional update or audit-log reason",
+      "One-shot operation key",
+    ],
+    schemaVersion: 1,
+    status: effect === "change"
+      ? "planned"
+      : request.action === "clear" ? "already-empty" : "already-current",
+    verification: {
+      applicationIdentity: "exact",
+      independentReadback: true,
+      requestRetries: false,
+      response: "exact-complete-schema",
+    },
+    verificationEndpointConfigured: true,
+    warnings: [
+      "Metadata labels and localization values are transient untrusted data",
+      "Guild role configuration and user values are unavailable",
     ],
     writeRequired: effect === "change",
   }
@@ -7366,6 +7459,7 @@ function fixturePolicy(): PolicyDescription {
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
     applicationIntentChangesEnabled: false,
+    applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
     announcementSubscriptionAuditEnabled: false,
@@ -7595,6 +7689,9 @@ function serviceFixture(overrides: {
   applicationIntentEffect?: "change" | "none"
   applicationIntentError?: Error
   applicationIntentPlanDigest?: string
+  applicationRoleConnectionMetadataChangeEffect?: "change" | "none"
+  applicationRoleConnectionMetadataChangeError?: Error
+  applicationRoleConnectionMetadataChangePlanDigest?: string
   applicationRoleConnectionMetadataError?: Error
   applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
   applicationSkuError?: Error
@@ -7814,6 +7911,8 @@ function serviceFixture(overrides: {
     applicationEmojiPlan: 0,
     applicationIntentExecute: 0,
     applicationIntentPlan: 0,
+    applicationRoleConnectionMetadataExecute: 0,
+    applicationRoleConnectionMetadataPlan: 0,
     autoModerationExecute: 0,
     autoModerationGet: 0,
     autoModerationList: 0,
@@ -8509,6 +8608,33 @@ function serviceFixture(overrides: {
         status: planned.effect === "none" ? "already-current" : "completed",
       }
     },
+    async executeApplicationRoleConnectionMetadataChange(request, planDigest) {
+      if (overrides.applicationRoleConnectionMetadataChangeError) {
+        throw overrides.applicationRoleConnectionMetadataChangeError
+      }
+      calls.applicationRoleConnectionMetadataExecute += 1
+      const planned = applicationRoleConnectionMetadataPlan(
+        request,
+        planDigest,
+        overrides.applicationRoleConnectionMetadataChangeEffect,
+      )
+      return {
+        action: request.action,
+        activityId: planned.effect === "none"
+          ? null
+          : "activity-application-role-connection-metadata",
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        observed: structuredClone(planned.desired),
+        observedSchemaDigest: planned.desiredSchemaDigest,
+        operationKeyHash: operationKeyHash(request.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: planned.effect === "none"
+          ? request.action === "clear" ? "already-empty" : "already-current"
+          : "completed",
+      }
+    },
     async getApplicationEmoji(emojiId) {
       calls.applicationEmojiGet += 1
       return {
@@ -8548,6 +8674,14 @@ function serviceFixture(overrides: {
         request,
         overrides.applicationIntentPlanDigest || DIGEST,
         overrides.applicationIntentEffect,
+      )
+    },
+    async planApplicationRoleConnectionMetadataChange(request) {
+      calls.applicationRoleConnectionMetadataPlan += 1
+      return applicationRoleConnectionMetadataPlan(
+        request,
+        overrides.applicationRoleConnectionMetadataChangePlanDigest || DIGEST,
+        overrides.applicationRoleConnectionMetadataChangeEffect,
       )
     },
     async auditChannelOrder(guildId) {
@@ -12091,6 +12225,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_application_emoji_change",
       "plan_application_intent_enablement",
       "execute_application_intent_enablement",
+      "plan_application_role_connection_metadata_change",
+      "execute_application_role_connection_metadata_change",
       "execute_guild_expression_change",
       "plan_guild_soundboard_change",
       "execute_guild_soundboard_change",
@@ -12221,6 +12357,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const applicationIntent = result.tools.find((tool) => (
     tool.name === "execute_application_intent_enablement"
   ))
+  const applicationRoleConnectionMetadata = result.tools.find((tool) => (
+    tool.name === "execute_application_role_connection_metadata_change"
+  ))
   const soundboard = result.tools.find((tool) => (
     tool.name === "execute_guild_soundboard_change"
   ))
@@ -12296,6 +12435,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     guildExpression,
     applicationEmoji,
     applicationIntent,
+    applicationRoleConnectionMetadata,
     soundboard,
     scheduledEvent,
     channelMetadata,
@@ -12521,6 +12661,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_guild_expression_change",
     "plan_application_emoji_change",
     "plan_application_intent_enablement",
+    "plan_application_role_connection_metadata_change",
     "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
     "plan_role_configuration",
@@ -14014,6 +14155,32 @@ test("progressive discovery enables the complete reviewed guild application-comm
   )
 })
 
+test("progressive discovery enables the complete reviewed linked-role metadata workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: {
+      query: "execute_application_role_connection_metadata_change",
+    },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_application_role_connection_metadata_change",
+    "plan_application_role_connection_metadata_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_application_role_connection_metadata_change",
+      "execute_application_role_connection_metadata_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed soundboard workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
@@ -14351,6 +14518,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     applicationEmojiPlan: 0,
     applicationIntentExecute: 0,
     applicationIntentPlan: 0,
+    applicationRoleConnectionMetadataExecute: 0,
+    applicationRoleConnectionMetadataPlan: 0,
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
@@ -23560,6 +23729,305 @@ test("MCP application intent execution exposes uncertain and one-shot conflict o
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(APPLICATION_INTENT_REVIEW_REASON),
+  )
+})
+
+test("MCP linked-role metadata planning accepts only strict complete schemas", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const replace = {
+    acknowledgeGlobalReplacement: true,
+    action: "replace",
+    operationKey: APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+    records: [structuredClone(APPLICATION_ROLE_CONNECTION_METADATA_RECORD)],
+  }
+  const clear = {
+    acknowledgeSchemaClearance: true,
+    action: "clear",
+    operationKey: APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+  }
+  for (const request of [replace, clear]) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_application_role_connection_metadata_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+    assert.equal(structuredContent(result).action, request.action)
+    assert.equal(
+      structuredContent(result).acknowledgement,
+      request.action === "clear"
+        ? "complete-schema-clearance"
+        : "application-wide-replacement",
+    )
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      new RegExp(APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY),
+    )
+  }
+
+  const invalidRequests = [
+    { ...replace, acknowledgeGlobalReplacement: false },
+    { ...replace, applicationId: APPLICATION_ID },
+    { ...replace, records: [] },
+    {
+      ...replace,
+      records: [{ ...replace.records[0], key: "TrustLevel" }],
+    },
+    {
+      ...replace,
+      records: [{ ...replace.records[0], type: 2 }],
+    },
+    {
+      ...replace,
+      records: [{
+        ...replace.records[0],
+        nameLocalizations: [
+          { locale: "de", value: "Vertrauensstufe" },
+          { locale: "de", value: "Doppelt" },
+        ],
+      }],
+    },
+    { ...clear, acknowledgeSchemaClearance: false },
+    { ...clear, records: [] },
+    { ...clear, operationKey: "short" },
+  ]
+  for (const request of invalidRequests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_application_role_connection_metadata_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.applicationRoleConnectionMetadataPlan, 2)
+})
+
+test("MCP linked-role metadata execution reviews the complete schema and binds approval", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeGlobalReplacement: true,
+      action: "replace",
+      operationKey: APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+      planDigest: DIGEST,
+      records: [structuredClone(APPLICATION_ROLE_CONNECTION_METADATA_RECORD)],
+    },
+    name: "execute_application_role_connection_metadata_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+  assert.equal(calls.applicationRoleConnectionMetadataPlan, 1)
+  assert.equal(calls.applicationRoleConnectionMetadataExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    APPLICATION_ROLE_CONNECTION_METADATA_RECORD.name,
+    APPLICATION_ROLE_CONNECTION_METADATA_RECORD.description,
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Current complete schema:/)
+  assert.match(confirmationMessage, /Desired complete schema:/)
+  assert.match(confirmationMessage, /Count-only diff:/)
+  assert.match(confirmationMessage, /Acknowledgement: application-wide-replacement/)
+  assert.match(confirmationMessage, /transient untrusted data/)
+  assert.match(confirmationMessage, /one non-retried PUT/)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY),
+  )
+})
+
+test("MCP linked-role metadata execution skips no-ops and stops on refusal or drift", async (context) => {
+  const argumentsValue = {
+    acknowledgeGlobalReplacement: true,
+    action: "replace",
+    operationKey: APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+    planDigest: DIGEST,
+    records: [structuredClone(APPLICATION_ROLE_CONNECTION_METADATA_RECORD)],
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      applicationRoleConnectionMetadataChangeEffect: "none",
+    },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_role_connection_metadata_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.applicationRoleConnectionMetadataExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_role_connection_metadata_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.applicationRoleConnectionMetadataExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      applicationRoleConnectionMetadataChangePlanDigest: DIFFERENT_DIGEST,
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_role_connection_metadata_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.applicationRoleConnectionMetadataExecute, 0)
+})
+
+test("MCP linked-role metadata signed state hashes schema text and rejects changed intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    acknowledgeGlobalReplacement: true,
+    action: "replace" as const,
+    operationKey: APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+    planDigest: DIGEST,
+    records: [structuredClone(APPLICATION_ROLE_CONNECTION_METADATA_RECORD)],
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_application_role_connection_metadata_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  if (typeof initial.requestState !== "string") {
+    throw new TypeError("Expected signed linked-role metadata request state")
+  }
+  assert.doesNotMatch(
+    initial.requestState,
+    new RegExp(APPLICATION_ROLE_CONNECTION_METADATA_RECORD.name),
+  )
+  for (const changed of [
+    {
+      ...request,
+      records: [{ ...request.records[0], name: "Changed trust level" }],
+    },
+    {
+      ...request,
+      operationKey: "linked-role-metadata-attempt-0002",
+    },
+    {
+      acknowledgeSchemaClearance: true,
+      action: "clear",
+      operationKey: request.operationKey,
+      planDigest: request.planDigest,
+    },
+  ] as Record<string, unknown>[]) {
+    const result: Awaited<ReturnType<typeof fixture.client.callTool>> =
+      await fixture.client.request({
+        method: "tools/call",
+        params: {
+          arguments: changed,
+          inputResponses: {
+            confirm_application_role_connection_metadata_change: {
+              action: "accept",
+              content: { approve: true },
+            },
+          },
+          name: "execute_application_role_connection_metadata_change",
+          requestState: initial.requestState,
+        },
+      }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.applicationRoleConnectionMetadataExecute, 0)
+})
+
+test("MCP linked-role metadata execution exposes uncertainty and content-free conflicts", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    acknowledgeGlobalReplacement: true,
+    action: "replace",
+    operationKey: APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+    planDigest: DIGEST,
+    records: [structuredClone(APPLICATION_ROLE_CONNECTION_METADATA_RECORD)],
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationRoleConnectionMetadataChangeError:
+        new ApplicationRoleConnectionMetadataExecutionError(
+          `Discord linked-role metadata outcome is uncertain: ${TOKEN}`,
+          { error: TOKEN, status: "uncertain" },
+        ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_role_connection_metadata_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.doesNotMatch(JSON.stringify(uncertainResult), new RegExp(TOKEN))
+
+  const receipt = {
+    activityId: "activity-application-role-connection-metadata",
+    applicationId: APPLICATION_ID,
+    error: null,
+    operationKeyHash: operationKeyHash(
+      APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY,
+    ),
+    status: "completed" as const,
+    timestamp: "2026-08-25T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationRoleConnectionMetadataChangeError:
+        new ApplicationRoleConnectionMetadataOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_application_role_connection_metadata_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(APPLICATION_ROLE_CONNECTION_METADATA_RECORD.name),
   )
 })
 
