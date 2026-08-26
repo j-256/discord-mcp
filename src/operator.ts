@@ -2,6 +2,10 @@ import {
   Client,
   InMemoryTransport,
 } from "@modelcontextprotocol/client"
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from "@modelcontextprotocol/client/stdio"
 import { existsSync } from "node:fs"
 import {
   basename,
@@ -83,13 +87,19 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 31
+export const OPERATOR_REPORT_SCHEMA_VERSION = 32
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
 const SETUP_BOOTSTRAP_BOT_ID = "900000000000000002"
 const DOCTOR_DIAGNOSTIC_CREDENTIAL_VARIABLE_PREFIX = "DISCORD_MCP_DOCTOR"
 const DOCTOR_DIAGNOSTIC_CREDENTIAL_VALUE = "credential-unavailable"
+const SMOKE_PROTOCOL_VERSION = "2026-07-28"
+const STDIO_SMOKE_STDERR_CAPTURE_BYTES = 16 * 1024
+const STDIO_SMOKE_STDERR_REPORT_BYTES = 8 * 1024
+
+// A subclass keeps modern discovery on the observed process so startup stderr remains available
+class SmokeStdioClientTransport extends StdioClientTransport {}
 
 export const DOCTOR_CHECK_IDS = Object.freeze({
   administrationPolicy: "administration-policy",
@@ -293,14 +303,18 @@ export interface StdioLaunchDescriptor {
 export interface SmokeReport extends IdentitySummary {
   destructiveTools: string[]
   promptNames: string[]
+  protocolVersion: string
   readOnlyTools: string[]
   resourceTemplateUris: string[]
   resourceUris: string[]
   schemaVersion: number
+  serverName: string
+  serverVersion: string
   status: "ok"
   toolCount: number
   toolsets: McpToolsetName[]
   toolSurface: McpToolSurface
+  transport: "in-memory" | "stdio"
 }
 
 type ConnectorStatus = Awaited<ReturnType<ConnectorService["getStatus"]>>
@@ -338,6 +352,10 @@ export interface SetupOptions {
 export interface SmokeOptions {
   config?: ConnectorConfig
   environment?: NodeJS.ProcessEnv
+  launch?: {
+    args: readonly string[]
+    command: string
+  }
   service?: DiscordToolService
 }
 
@@ -3961,15 +3979,381 @@ function smokeGateway(config: ConnectorConfig): GatewayRuntime | undefined {
   })
 }
 
-export async function smokeConnector(
-  options: SmokeOptions = {},
+function createSmokeClient(pinModern = false): Client {
+  return new Client(
+    { name: `${CONNECTOR_NAME}-smoke`, version: CONNECTOR_VERSION },
+    {
+      capabilities: {},
+      ...(pinModern
+        ? { versionNegotiation: { mode: { pin: SMOKE_PROTOCOL_VERSION } } }
+        : {}),
+    },
+  )
+}
+
+async function inspectSmokeClient(
+  client: Client,
+  config: ConnectorConfig,
+  service: DiscordToolService,
+  transport: SmokeReport["transport"],
 ): Promise<SmokeReport> {
-  const environment = options.environment || process.env
-  const config = options.config || loadConnectorConfig(environment)
-  const service = options.service || new ConnectorService({ config })
-  const gateway = smokeGateway(config)
   const selectedToolNames = selectedCanonicalMcpToolNames(config.mcpToolsets)
   const expectedToolNames = [...selectedToolNames, MCP_DISCOVERY_TOOL_NAME]
+  const protocolVersion = client.getNegotiatedProtocolVersion()
+  const server = client.getServerVersion()
+  if (!protocolVersion || !server?.name || !server.version) {
+    throw new Error("MCP smoke check found incomplete negotiated server identity")
+  }
+  let listed = await client.listTools()
+  if (config.mcpToolSurface === "progressive") {
+    assertExactCatalog(
+      listed.tools.map(({ name }) => name),
+      [MCP_DISCOVERY_TOOL_NAME],
+      "initial progressive tool",
+    )
+  }
+  const discoveryProbe = await client.callTool({
+    arguments: {},
+    name: MCP_DISCOVERY_TOOL_NAME,
+  })
+  const discoveryProbeContent = objectValue(discoveryProbe.structuredContent)
+  if (discoveryProbe.isError || discoveryProbeContent?.status !== "ok") {
+    throw new Error("MCP tool discovery smoke call failed")
+  }
+  if (config.mcpToolSurface === "progressive") {
+    for (const toolset of selectedMcpToolsets(config.mcpToolsets)) {
+      const discovered = await client.callTool({
+        arguments: {
+          detail: "full",
+          limit: CONNECTOR_LIMITS.toolDiscoveryMatches,
+          toolset,
+        },
+        name: MCP_DISCOVERY_TOOL_NAME,
+      })
+      const discoveredContent = objectValue(discovered.structuredContent)
+      if (discovered.isError || discoveredContent?.status !== "ok") {
+        throw new Error(`MCP ${toolset} toolset discovery smoke call failed`)
+      }
+    }
+    listed = await client.listTools()
+  }
+  assertExactCatalog(
+    listed.tools.map(({ name }) => name),
+    expectedToolNames,
+    "tool",
+  )
+  const [listedPrompts, listedResources, listedTemplates] = await Promise.all([
+    client.listPrompts(),
+    client.listResources(),
+    client.listResourceTemplates(),
+  ])
+  const promptNames = listedPrompts.prompts.map((prompt) => prompt.name)
+  const resourceUris = listedResources.resources.map((resource) => resource.uri)
+  const resourceTemplateUris = listedTemplates.resourceTemplates
+    .map((template) => template.uriTemplate)
+  assertExactCatalog(
+    promptNames,
+    selectedMcpPromptNames(config.mcpToolsets),
+    "prompt",
+  )
+  assertExactCatalog(resourceUris, Object.values(MCP_RESOURCE_URIS), "resource")
+  assertExactCatalog(
+    resourceTemplateUris,
+    Object.values(MCP_RESOURCE_TEMPLATE_URIS),
+    "resource-template",
+  )
+  if (listed.tools.some((tool) => (
+    typeof tool.annotations?.destructiveHint !== "boolean"
+    || typeof tool.annotations.idempotentHint !== "boolean"
+    || typeof tool.annotations.openWorldHint !== "boolean"
+    || typeof tool.annotations.readOnlyHint !== "boolean"
+  ))) {
+    throw new Error("MCP smoke check found a tool without complete risk annotations")
+  }
+  for (const name of [
+    "delete_messages",
+    "execute_bulk_guild_ban",
+    "execute_member_moderation",
+    "execute_poll_end",
+  ] as const) {
+    if (!selectedToolNames.includes(name)) continue
+    const tool = listed.tools.find((entry) => entry.name === name)
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== true
+      || tool.annotations.idempotentHint !== true
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error(`MCP smoke check found invalid ${name} annotations`)
+    }
+  }
+  if (selectedToolNames.includes("execute_channel_creation")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_channel_creation"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== false
+      || tool.annotations.idempotentHint !== true
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_channel_creation annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_role_creation")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_role_creation"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== false
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_role_creation annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_attachment_message")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_attachment_message"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== false
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_attachment_message annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_component_message")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_component_message"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== true
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_component_message annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_forum_post")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_forum_post"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== false
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_forum_post annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_thread_creation")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_thread_creation"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== false
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_thread_creation annotations")
+    }
+  }
+  if (selectedToolNames.includes("execute_poll_creation")) {
+    const tool = listed.tools.find((entry) => (
+      entry.name === "execute_poll_creation"
+    ))
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== false
+      || tool.annotations.idempotentHint !== false
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error("MCP smoke check found invalid execute_poll_creation annotations")
+    }
+  }
+  const interactionAnnotations = [
+    ["send_message", false],
+    ["add_reaction", false],
+    ["edit_own_message", true],
+    ["remove_own_reaction", true],
+  ] as const
+  for (const [name, destructiveHint] of interactionAnnotations) {
+    if (!selectedToolNames.includes(name)) continue
+    const tool = listed.tools.find((entry) => entry.name === name)
+    if (
+      !tool
+      || tool.annotations?.destructiveHint !== destructiveHint
+      || tool.annotations.idempotentHint !== true
+      || tool.annotations.openWorldHint !== true
+      || tool.annotations.readOnlyHint !== false
+    ) {
+      throw new Error(`MCP smoke check found invalid ${name} annotations`)
+    }
+  }
+  let structured: Record<string, unknown> | undefined
+  if (config.mcpToolsets.has("connector")) {
+    const result = await client.callTool({
+      arguments: {},
+      name: "get_connector_status",
+    })
+    structured = objectValue(result.structuredContent)
+    if (result.isError || structured?.status !== "ok") {
+      throw new Error("MCP get_connector_status smoke call failed")
+    }
+  } else {
+    structured = objectValue(await service.getStatus())
+    if (structured?.status !== "ok") {
+      throw new Error("Discord connector identity smoke call failed")
+    }
+  }
+  const applicationId = stringProperty(structured.application, "id")
+  const botId = stringProperty(structured.bot, "id")
+  const guildsAccessible = numberProperty(structured.guildPage, "accessible")
+  const guildsInScope = numberProperty(structured.guildPage, "inScope")
+  if (
+    !applicationId
+    || !botId
+    || guildsAccessible === undefined
+    || guildsInScope === undefined
+  ) {
+    throw new Error("MCP get_connector_status returned an invalid identity report")
+  }
+  if (guildsInScope < 1) {
+    throw new Error("MCP get_connector_status found no accessible guilds inside local scope")
+  }
+  return {
+    applicationId,
+    botId,
+    destructiveTools: listed.tools
+      .filter((tool) => tool.annotations?.destructiveHint === true)
+      .map((tool) => tool.name)
+      .sort(),
+    guildsAccessibleOnFirstPage: guildsAccessible,
+    guildsInScopeOnFirstPage: guildsInScope,
+    promptNames: promptNames.sort(),
+    protocolVersion,
+    readOnlyTools: listed.tools
+      .filter((tool) => tool.annotations?.readOnlyHint === true)
+      .map((tool) => tool.name)
+      .sort(),
+    resourceTemplateUris: resourceTemplateUris.sort(),
+    resourceUris: resourceUris.sort(),
+    schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
+    serverName: server.name,
+    serverVersion: server.version,
+    status: "ok",
+    toolCount: listed.tools.length,
+    toolsets: selectedMcpToolsets(config.mcpToolsets),
+    toolSurface: config.mcpToolSurface,
+    transport,
+  }
+}
+
+function stdioSmokeEnvironment(
+  config: ConnectorConfig,
+  environment: NodeJS.ProcessEnv,
+): Record<string, string> {
+  const child = getDefaultEnvironment()
+  const configFile = environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]
+  if (configFile !== undefined) {
+    child[CONFIG_FILE_ENVIRONMENT_VARIABLE] = configFile
+  }
+  for (const name of config.secretEnvironmentVariables) {
+    const value = environment[name]
+    if (value !== undefined) child[name] = value
+  }
+  return child
+}
+
+function appendStdioSmokeStderr(
+  current: Buffer<ArrayBufferLike>,
+  chunk: unknown,
+): Buffer<ArrayBufferLike> {
+  const addition = Buffer.isBuffer(chunk)
+    ? chunk
+    : Buffer.from(String(chunk), "utf8")
+  const retainedAddition = addition.length > STDIO_SMOKE_STDERR_CAPTURE_BYTES
+    ? addition.subarray(addition.length - STDIO_SMOKE_STDERR_CAPTURE_BYTES)
+    : addition
+  const remaining = STDIO_SMOKE_STDERR_CAPTURE_BYTES - retainedAddition.length
+  const retainedCurrent = current.length > remaining
+    ? current.subarray(current.length - remaining)
+    : current
+  return Buffer.concat([retainedCurrent, retainedAddition])
+}
+
+function safeStdioSmokeDiagnostic(
+  value: string,
+  secrets: readonly string[],
+): string {
+  return redactText(value, secrets)
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "?")
+    .trim()
+    .slice(-STDIO_SMOKE_STDERR_REPORT_BYTES)
+}
+
+function stdioSmokeFailure(
+  error: unknown,
+  stderr: Buffer<ArrayBufferLike>,
+  config: ConnectorConfig,
+  environment: NodeJS.ProcessEnv,
+): ConfigurationError {
+  const secrets = [
+    config.token,
+    ...[...config.secretEnvironmentVariables]
+      .map((name) => environment[name])
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  ]
+  const primary = safeStdioSmokeDiagnostic(errorMessage(error), secrets)
+  const child = safeStdioSmokeDiagnostic(stderr.toString("utf8"), secrets)
+  return new ConfigurationError(
+    `Spawned stdio MCP smoke failed: ${primary || "Unknown child failure"}`
+    + (child ? `; child diagnostics: ${child}` : ""),
+    { cause: error },
+  )
+}
+
+async function closeStdioSmoke(
+  client: Client,
+  transport: StdioClientTransport,
+): Promise<void> {
+  try {
+    await client.close()
+  } catch (error) {
+    try {
+      await transport.close()
+    } catch (transportError) {
+      throw new AggregateError(
+        [error, transportError],
+        "Unable to close the spawned stdio MCP smoke process",
+      )
+    }
+  }
+}
+
+async function smokeLinkedConnector(
+  config: ConnectorConfig,
+  environment: NodeJS.ProcessEnv,
+  service: DiscordToolService,
+): Promise<SmokeReport> {
+  const gateway = smokeGateway(config)
   const server = createDiscordMcpServer({
     config,
     environment,
@@ -3977,270 +4361,71 @@ export async function smokeConnector(
     service,
   })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-  const client = new Client(
-    { name: `${CONNECTOR_NAME}-smoke`, version: CONNECTOR_VERSION },
-    { capabilities: {} },
-  )
-
+  const client = createSmokeClient()
   try {
     await server.connect(serverTransport)
-    await client.connect(clientTransport)
-    let listed = await client.listTools()
-    if (config.mcpToolSurface === "progressive") {
-      assertExactCatalog(
-        listed.tools.map(({ name }) => name),
-        [MCP_DISCOVERY_TOOL_NAME],
-        "initial progressive tool",
-      )
-    }
-    const discoveryProbe = await client.callTool({
-      arguments: {},
-      name: MCP_DISCOVERY_TOOL_NAME,
+    await client.connect(clientTransport, {
+      timeout: STARTUP_TIMEOUT_SECONDS * 1_000,
     })
-    const discoveryProbeContent = objectValue(discoveryProbe.structuredContent)
-    if (discoveryProbe.isError || discoveryProbeContent?.status !== "ok") {
-      throw new Error("MCP tool discovery smoke call failed")
-    }
-    if (config.mcpToolSurface === "progressive") {
-      for (const toolset of selectedMcpToolsets(config.mcpToolsets)) {
-        const discovered = await client.callTool({
-          arguments: {
-            detail: "full",
-            limit: CONNECTOR_LIMITS.toolDiscoveryMatches,
-            toolset,
-          },
-          name: MCP_DISCOVERY_TOOL_NAME,
-        })
-        const discoveredContent = objectValue(discovered.structuredContent)
-        if (discovered.isError || discoveredContent?.status !== "ok") {
-          throw new Error(`MCP ${toolset} toolset discovery smoke call failed`)
-        }
-      }
-      listed = await client.listTools()
-    }
-    assertExactCatalog(
-      listed.tools.map(({ name }) => name),
-      expectedToolNames,
-      "tool",
-    )
-    const [listedPrompts, listedResources, listedTemplates] = await Promise.all([
-      client.listPrompts(),
-      client.listResources(),
-      client.listResourceTemplates(),
-    ])
-    const promptNames = listedPrompts.prompts.map((prompt) => prompt.name)
-    const resourceUris = listedResources.resources.map((resource) => resource.uri)
-    const resourceTemplateUris = listedTemplates.resourceTemplates
-      .map((template) => template.uriTemplate)
-    assertExactCatalog(
-      promptNames,
-      selectedMcpPromptNames(config.mcpToolsets),
-      "prompt",
-    )
-    assertExactCatalog(resourceUris, Object.values(MCP_RESOURCE_URIS), "resource")
-    assertExactCatalog(
-      resourceTemplateUris,
-      Object.values(MCP_RESOURCE_TEMPLATE_URIS),
-      "resource-template",
-    )
-    if (listed.tools.some((tool) => (
-      typeof tool.annotations?.destructiveHint !== "boolean"
-      || typeof tool.annotations.idempotentHint !== "boolean"
-      || typeof tool.annotations.openWorldHint !== "boolean"
-      || typeof tool.annotations.readOnlyHint !== "boolean"
-    ))) {
-      throw new Error("MCP smoke check found a tool without complete risk annotations")
-    }
-    for (const name of [
-      "delete_messages",
-      "execute_bulk_guild_ban",
-      "execute_member_moderation",
-      "execute_poll_end",
-    ] as const) {
-      if (!selectedToolNames.includes(name)) continue
-      const tool = listed.tools.find((entry) => entry.name === name)
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== true
-        || tool.annotations.idempotentHint !== true
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error(`MCP smoke check found invalid ${name} annotations`)
-      }
-    }
-    if (selectedToolNames.includes("execute_channel_creation")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_channel_creation"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== false
-        || tool.annotations.idempotentHint !== true
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_channel_creation annotations")
-      }
-    }
-    if (selectedToolNames.includes("execute_role_creation")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_role_creation"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== false
-        || tool.annotations.idempotentHint !== false
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_role_creation annotations")
-      }
-    }
-    if (selectedToolNames.includes("execute_attachment_message")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_attachment_message"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== false
-        || tool.annotations.idempotentHint !== false
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_attachment_message annotations")
-      }
-    }
-    if (selectedToolNames.includes("execute_component_message")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_component_message"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== true
-        || tool.annotations.idempotentHint !== false
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_component_message annotations")
-      }
-    }
-    if (selectedToolNames.includes("execute_forum_post")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_forum_post"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== false
-        || tool.annotations.idempotentHint !== false
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_forum_post annotations")
-      }
-    }
-    if (selectedToolNames.includes("execute_thread_creation")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_thread_creation"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== false
-        || tool.annotations.idempotentHint !== false
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_thread_creation annotations")
-      }
-    }
-    if (selectedToolNames.includes("execute_poll_creation")) {
-      const tool = listed.tools.find((entry) => (
-        entry.name === "execute_poll_creation"
-      ))
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== false
-        || tool.annotations.idempotentHint !== false
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error("MCP smoke check found invalid execute_poll_creation annotations")
-      }
-    }
-    const interactionAnnotations = [
-      ["send_message", false],
-      ["add_reaction", false],
-      ["edit_own_message", true],
-      ["remove_own_reaction", true],
-    ] as const
-    for (const [name, destructiveHint] of interactionAnnotations) {
-      if (!selectedToolNames.includes(name)) continue
-      const tool = listed.tools.find((entry) => entry.name === name)
-      if (
-        !tool
-        || tool.annotations?.destructiveHint !== destructiveHint
-        || tool.annotations.idempotentHint !== true
-        || tool.annotations.openWorldHint !== true
-        || tool.annotations.readOnlyHint !== false
-      ) {
-        throw new Error(`MCP smoke check found invalid ${name} annotations`)
-      }
-    }
-    let structured: Record<string, unknown> | undefined
-    if (config.mcpToolsets.has("connector")) {
-      const result = await client.callTool({
-        arguments: {},
-        name: "get_connector_status",
-      })
-      structured = objectValue(result.structuredContent)
-      if (result.isError || structured?.status !== "ok") {
-        throw new Error("MCP get_connector_status smoke call failed")
-      }
-    } else {
-      structured = objectValue(await service.getStatus())
-      if (structured?.status !== "ok") {
-        throw new Error("Discord connector identity smoke call failed")
-      }
-    }
-    const applicationId = stringProperty(structured.application, "id")
-    const botId = stringProperty(structured.bot, "id")
-    const guildsAccessible = numberProperty(structured.guildPage, "accessible")
-    const guildsInScope = numberProperty(structured.guildPage, "inScope")
-    if (
-      !applicationId
-      || !botId
-      || guildsAccessible === undefined
-      || guildsInScope === undefined
-    ) {
-      throw new Error("MCP get_connector_status returned an invalid identity report")
-    }
-    if (guildsInScope < 1) {
-      throw new Error("MCP get_connector_status found no accessible guilds inside local scope")
-    }
-    return {
-      applicationId,
-      botId,
-      destructiveTools: listed.tools
-        .filter((tool) => tool.annotations?.destructiveHint === true)
-        .map((tool) => tool.name)
-        .sort(),
-      guildsAccessibleOnFirstPage: guildsAccessible,
-      guildsInScopeOnFirstPage: guildsInScope,
-      promptNames: promptNames.sort(),
-      readOnlyTools: listed.tools
-        .filter((tool) => tool.annotations?.readOnlyHint === true)
-        .map((tool) => tool.name)
-        .sort(),
-      resourceTemplateUris: resourceTemplateUris.sort(),
-      resourceUris: resourceUris.sort(),
-      schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
-      status: "ok",
-      toolCount: listed.tools.length,
-      toolsets: selectedMcpToolsets(config.mcpToolsets),
-      toolSurface: config.mcpToolSurface,
-    }
+    return await inspectSmokeClient(client, config, service, "in-memory")
   } finally {
     await client.close().catch(() => undefined)
     await server.close().catch(() => undefined)
   }
+}
+
+async function smokeStdioConnector(
+  config: ConnectorConfig,
+  environment: NodeJS.ProcessEnv,
+  service: DiscordToolService,
+  launch: NonNullable<SmokeOptions["launch"]>,
+): Promise<SmokeReport> {
+  const command = launch.command.trim()
+  if (!command || command.includes("\0")) {
+    throw new ConfigurationError("Spawned stdio MCP smoke command is invalid")
+  }
+  const args = [...launch.args]
+  if (args.some((argument) => !argument.trim() || argument.includes("\0"))) {
+    throw new ConfigurationError("Spawned stdio MCP smoke arguments are invalid")
+  }
+  const transport = new SmokeStdioClientTransport({
+    args,
+    command,
+    env: stdioSmokeEnvironment(config, environment),
+    stderr: "pipe",
+  })
+  const client = createSmokeClient(true)
+  let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0)
+  transport.stderr?.on("data", (chunk) => {
+    stderr = appendStdioSmokeStderr(stderr, chunk)
+  })
+
+  let report: SmokeReport
+  try {
+    await client.connect(transport, {
+      timeout: STARTUP_TIMEOUT_SECONDS * 1_000,
+    })
+    report = await inspectSmokeClient(client, config, service, "stdio")
+  } catch (error) {
+    await closeStdioSmoke(client, transport).catch(() => undefined)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    throw stdioSmokeFailure(error, stderr, config, environment)
+  }
+  try {
+    await closeStdioSmoke(client, transport)
+  } catch (error) {
+    throw stdioSmokeFailure(error, stderr, config, environment)
+  }
+  return report
+}
+
+export async function smokeConnector(
+  options: SmokeOptions = {},
+): Promise<SmokeReport> {
+  const environment = options.environment || process.env
+  const config = options.config || loadConnectorConfig(environment)
+  const service = options.service || new ConnectorService({ config })
+  return options.launch
+    ? smokeStdioConnector(config, environment, service, options.launch)
+    : smokeLinkedConnector(config, environment, service)
 }

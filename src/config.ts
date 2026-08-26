@@ -222,6 +222,7 @@ export interface ConnectorConfig {
   roleOrderingGuildIds: ReadonlySet<string>
   scheduledEventGuildIds: ReadonlySet<string>
   scheduledEventRoots: readonly string[]
+  secretEnvironmentVariables: ReadonlySet<string>
   soundboardGuildIds: ReadonlySet<string>
   soundboardRoots: readonly string[]
   stageChannelIds: ReadonlySet<string>
@@ -1362,6 +1363,9 @@ export function loadConnectorConfigDocument(
     scheduledEventRoots: parseOwnedRoots(
       document.storage.scheduledEventRoots,
       "$.storage.scheduledEventRoots",
+    ),
+    secretEnvironmentVariables: new Set(
+      connectorConfigSecretEnvironmentNames(document),
     ),
     soundboardGuildIds,
     soundboardRoots: parseOwnedRoots(

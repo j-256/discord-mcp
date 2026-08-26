@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import test from "node:test"
 
 import {
@@ -15,6 +15,9 @@ import {
   projectApplicationPosture,
   type ApplicationPostureResult,
 } from "../src/application-posture.js"
+import {
+  loadConnectorConfigDocument,
+} from "../src/config.js"
 import {
   createConnectorConfigDocument,
   loadConnectorConfigDocumentFile,
@@ -56,6 +59,7 @@ const ROLE_ID = "500000000000000001"
 const INTEGRATION_ID = "600000000000000001"
 const USER_ID = "700000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
+const SPAWNED_SMOKE_TOKEN_VARIABLE = "DISCORD_SMOKE_TOKEN"
 const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
 
 function fixturePolicy(
@@ -5477,6 +5481,10 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   })
 
   assert.equal(report.status, "ok")
+  assert.equal(report.transport, "in-memory")
+  assert.match(report.protocolVersion, /^2025-/)
+  assert.equal(report.serverName, "discord-mcp")
+  assert.equal(report.serverVersion, "0.1.0")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.toolCount, Object.keys(MCP_TOOL_CATALOG).length + 1)
@@ -5708,6 +5716,85 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
       service: toolServiceWithoutScopedGuilds(),
     }),
     /no accessible guilds/,
+  )
+})
+
+test("MCP smoke negotiates the stable protocol through a minimized spawned stdio process", async () => {
+  const token = "spawned-stdio-smoke-token"
+  const environment = {
+    [SPAWNED_SMOKE_TOKEN_VARIABLE]: token,
+    UNRELATED_PRIVATE_VALUE: "must-not-reach-child",
+  }
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    credentialVariable: SPAWNED_SMOKE_TOKEN_VARIABLE,
+    guildIds: [GUILD_ID],
+    name: "spawned-smoke",
+    toolsets: ["connector"],
+    toolSurface: "full",
+  })
+  const config = loadConnectorConfigDocument(document, environment)
+  const report = await smokeNativeConnector({
+    config,
+    environment,
+    launch: {
+      args: [
+        "--import",
+        "tsx",
+        resolve("test/fixtures/stdio-smoke-server.ts"),
+      ],
+      command: process.execPath,
+    },
+  })
+
+  assert.equal(report.status, "ok")
+  assert.equal(report.transport, "stdio")
+  assert.equal(report.protocolVersion, "2026-07-28")
+  assert.equal(report.serverName, "discord-mcp")
+  assert.equal(report.serverVersion, "0.1.0")
+  assert.equal(report.applicationId, APPLICATION_ID)
+  assert.equal(report.botId, BOT_ID)
+  assert.equal(report.toolsets.includes("connector"), true)
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(token))
+  assert.doesNotMatch(JSON.stringify(report), /must-not-reach-child/)
+})
+
+test("Spawned MCP smoke bounds and redacts startup failure diagnostics", async () => {
+  const token = "spawned-stdio-private-token"
+  const environment = { [SPAWNED_SMOKE_TOKEN_VARIABLE]: token }
+  const document = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    credentialVariable: SPAWNED_SMOKE_TOKEN_VARIABLE,
+    guildIds: [GUILD_ID],
+    name: "spawned-smoke-failure",
+    toolsets: ["connector"],
+    toolSurface: "full",
+  })
+  const config = loadConnectorConfigDocument(document, environment)
+
+  await assert.rejects(
+    () => smokeNativeConnector({
+      config,
+      environment,
+      launch: {
+        args: [
+          "--import",
+          "tsx",
+          resolve("test/fixtures/stdio-smoke-server.ts"),
+        ],
+        command: process.execPath,
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /Spawned stdio MCP smoke failed/)
+      assert.match(error.message, /\[redacted\]/)
+      assert.doesNotMatch(error.message, new RegExp(token))
+      assert.ok(Buffer.byteLength(error.message, "utf8") < 9_000)
+      return true
+    },
   )
 })
 

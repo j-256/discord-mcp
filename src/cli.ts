@@ -1329,7 +1329,7 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor."
   }
   if (topic === "smoke") {
-    return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nNegotiate through the MCP adapter, validate tool, resource, and prompt contracts, and call only the read-only connector status tool. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
+    return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
   }
   if (topic === "serve") {
     return "Usage: discord-mcp serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
@@ -1387,7 +1387,7 @@ function helpText(topic: CliCommand | undefined): string {
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
     "  recipe   Review and add a bounded workflow to an existing policy",
     "  doctor   Diagnose a selected policy and optional Discord access",
-    "  smoke    Verify the read-only MCP path end to end",
+    "  smoke    Verify real stdio startup and the read-only MCP path",
     "  version  Print the package version",
     "  help     Show command help",
   ].join("\n")
@@ -2050,6 +2050,9 @@ function renderConfigChange(
 function renderSmoke(report: SmokeReport): string {
   return [
     "Discord MCP smoke: ok",
+    `Transport: ${report.transport}`,
+    `Protocol: ${report.protocolVersion}`,
+    `Server: ${report.serverName} ${report.serverVersion}`,
     `Application: ${report.applicationId}`,
     `Bot: ${report.botId}`,
     `Tool surface: ${report.toolSurface}`,
@@ -2076,6 +2079,22 @@ function safeWrite(
 
 function jsonReport(value: object): string {
   return JSON.stringify(value, null, 2)
+}
+
+function currentEntrypointLaunch(options: CliOptions): {
+  args: string[]
+  command: string
+} {
+  const entrypointPath = options.entrypointPath || process.argv[1]
+  return entrypointPath
+    ? {
+        args: [entrypointPath, "serve"],
+        command: options.executablePath || process.execPath,
+      }
+    : {
+        args: ["serve"],
+        command: CONNECTOR_NAME,
+      }
 }
 
 function configSelectionEnvironment(
@@ -2542,16 +2561,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         })
         return CLI_EXIT_CODES.success
       case "setup": {
-        const entrypointPath = options.entrypointPath || process.argv[1]
-        const defaultLauncher = entrypointPath
-          ? {
-            args: [entrypointPath, "serve"],
-            command: options.executablePath || process.execPath,
-          }
-          : {
-            args: ["serve"],
-            command: CONNECTOR_NAME,
-          }
+        const defaultLauncher = currentEntrypointLaunch(options)
         const report = await dependencies.prepareSetup({
           args: parsed.launcherCommand ? ["serve"] : defaultLauncher.args,
           command: parsed.launcherCommand || defaultLauncher.command,
@@ -2583,9 +2593,23 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           environment,
           dependencies,
         )
+        const launch = currentEntrypointLaunch(options)
+        if (parsed.configFile) {
+          const configFile = runtime.environment[CONFIG_FILE_ENVIRONMENT_VARIABLE]
+          if (!configFile) {
+            throw new RuntimeConfigurationRequiredError(
+              CONFIG_SELECTION_REQUIRED_MESSAGE,
+            )
+          }
+          launch.args.push("--config", configFile)
+        }
+        if (parsed.profileName) {
+          launch.args.push("--profile", parsed.profileName)
+        }
         const report = await dependencies.smoke({
           config: runtime.config,
           environment: runtime.environment,
+          launch,
         })
         safeWrite(
           stdout,

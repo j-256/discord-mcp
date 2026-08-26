@@ -194,14 +194,18 @@ function smokeReport(): SmokeReport {
     guildsAccessibleOnFirstPage: 1,
     guildsInScopeOnFirstPage: 1,
     promptNames: ["summarize_channel"],
+    protocolVersion: "2026-07-28",
     readOnlyTools: ["get_connector_status"],
     resourceTemplateUris: ["discord://channels/{channelId}/access"],
     resourceUris: ["discord://connector/safety"],
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
+    serverName: "discord-mcp",
+    serverVersion: "0.1.0",
     status: "ok",
     toolCount: 12,
     toolsets: ["connector", "messages"],
     toolSurface: "full",
+    transport: "stdio",
   }
 }
 
@@ -2463,6 +2467,15 @@ test("CLI inspects profiles without activation for doctor while serve and smoke 
       events.push("smoke")
       assert.equal(options.environment, source)
       assert.equal(options.config, config)
+      assert.deepEqual(options.launch, {
+        args: [
+          "/srv/discord-mcp/dist/cli.js",
+          "serve",
+          "--profile",
+          "support-bot",
+        ],
+        command: "/usr/bin/node",
+      })
       return smokeReport()
     },
   })
@@ -2481,7 +2494,9 @@ test("CLI inspects profiles without activation for doctor while serve and smoke 
   assert.equal(await runCli({
     args: ["smoke", "--profile", "support-bot"],
     dependencies: profiledDependencies,
+    entrypointPath: "/srv/discord-mcp/dist/cli.js",
     environment: source,
+    executablePath: "/usr/bin/node",
     stdout: outputStream().stream,
   }), 0)
 
@@ -2522,6 +2537,15 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
     async smoke(options) {
       events.push("smoke")
       assert.equal(options.environment?.[CONFIG_FILE_ENVIRONMENT_VARIABLE], file)
+      assert.deepEqual(options.launch, {
+        args: [
+          "/srv/discord-mcp/dist/cli.js",
+          "serve",
+          "--config",
+          file,
+        ],
+        command: "/usr/bin/node",
+      })
       return smokeReport()
     },
   })
@@ -2540,7 +2564,9 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
   assert.equal(await runCli({
     args: ["smoke", "--config", file],
     dependencies: configDependencies,
+    entrypointPath: "/srv/discord-mcp/dist/cli.js",
     environment: source,
+    executablePath: "/usr/bin/node",
     stdout: outputStream().stream,
   }), 0)
 
@@ -2882,6 +2908,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const catalogHelpOutput = outputStream()
   const configHelpOutput = outputStream()
   const recipeHelpOutput = outputStream()
+  const smokeHelpOutput = outputStream()
   const versionOutput = outputStream()
 
   assert.equal(await runCli({
@@ -2915,12 +2942,20 @@ test("CLI renders smoke, help, and version output", async () => {
     stdout: recipeHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
+    args: ["smoke", "--help"],
+    dependencies: dependencies(),
+    stdout: smokeHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
     args: ["--version"],
     dependencies: dependencies(),
     stdout: versionOutput.stream,
   }), 0)
 
   assert.match(smokeOutput.value(), /Discord MCP smoke: ok/)
+  assert.match(smokeOutput.value(), /Transport: stdio/)
+  assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
+  assert.match(smokeOutput.value(), /Server: discord-mcp 0\.1\.0/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
@@ -2929,6 +2964,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(activityHelpOutput.value(), /Exit status is 0 when clear, 1 when evidence needs attention/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\] \[--html FILE\]/)
   assert.match(catalogHelpOutput.value(), /without replacing an existing file/)
+  assert.match(smokeHelpOutput.value(), /serve entrypoint as a child/)
+  assert.match(smokeHelpOutput.value(), /stable MCP 2026-07-28 over stdio/)
+  assert.match(smokeHelpOutput.value(), /Normal configured runtimes start and shut down/)
   assert.doesNotMatch(configHelpOutput.value(), /migrate FILE/)
   assert.match(configHelpOutput.value(), /explain \[PATH\] \[--json\]/)
   assert.match(configHelpOutput.value(), /workbench ACTIVE_FILE --html OUTPUT_FILE \[--json\]/)

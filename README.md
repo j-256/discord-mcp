@@ -187,7 +187,7 @@ npx --yes @j-256/discord-mcp@0.1.0 recipe apply direct-messenger ./discord-mcp.j
 
 Planning prints the complete proposed non-secret document, exact field changes, permissions, intents, risks, warnings, and a path-bound digest without resolving a secret or contacting Discord. Application recomputes that plan, requires the exact digest and recipe-name confirmation, rejects a concurrent source change, preserves a recoverable backup, and still grants no Discord authority by itself. Run the printed offline validation, online doctor, and smoke checks after applying. Recipes add policy only; they never remove an existing capability, scope, or toolset.
 
-The online doctor verifies identity, the bounded guild-membership page, and a privacy-safe application security posture covering installation settings, privileged intents, Interaction delivery, event webhooks, and least-privilege fit. The smoke command verifies the real MCP path without listing channels, reading messages, opening the Gateway, exporting telemetry, or writing to Discord.
+Online doctor verifies identity, bounded guild membership, and application posture. Smoke launches the selected policy through the real `serve` entrypoint, negotiates stable MCP over stdio, validates catalogs, annotations, and read-only status, and writes nothing to Discord. Configured optional runtimes start and stop with the child; see the [operator reference](docs/reference.md#operator-cli).
 
 ### Build from source
 
@@ -262,7 +262,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |
 | `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, and bounded guild membership | Read-only |
-| `discord-mcp smoke --config FILE` | Real MCP negotiation, annotations, discovery, static guidance, and connector identity through the selected policy | Read-only |
+| `discord-mcp smoke --config FILE` | Spawned stdio negotiation, discovery, annotations, and connector identity through the selected policy | Read-only |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
