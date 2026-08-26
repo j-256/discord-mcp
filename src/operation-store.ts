@@ -47,6 +47,7 @@ export const OPERATION_KINDS = [
   "direct-message-change",
   "forum-post",
   "forum-tag-change",
+  "global-application-command-change",
   "guild-application-command-change",
   "guild-community-change",
   "guild-expression-change",
@@ -96,6 +97,7 @@ export type ApplicationOperationKind =
   | "application-emoji-change"
   | "application-intent-enablement"
   | "application-role-connection-metadata-change"
+  | "global-application-command-change"
 export type DirectMessageOperationKind = "direct-message-change"
 export type GuildOperationKind = Exclude<
   OperationKind,
@@ -269,6 +271,7 @@ const APPLICATION_OPERATION_KINDS: readonly ApplicationOperationKind[] = [
   "application-emoji-change",
   "application-intent-enablement",
   "application-role-connection-metadata-change",
+  "global-application-command-change",
 ]
 
 export function isApplicationOperationKind(

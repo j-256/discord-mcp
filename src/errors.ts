@@ -1081,6 +1081,42 @@ export class GuildApplicationCommandEvidenceError extends Error {
   override name = "GuildApplicationCommandEvidenceError"
 }
 
+export class GlobalApplicationCommandPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord global application-command state does not match the reviewed plan")
+    this.name = "GlobalApplicationCommandPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GlobalApplicationCommandOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord global application-command operation key has already been reserved")
+    this.name = "GlobalApplicationCommandOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GlobalApplicationCommandExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GlobalApplicationCommandExecutionError"
+    this.result = result
+  }
+}
+
+export class GlobalApplicationCommandEvidenceError extends Error {
+  override name = "GlobalApplicationCommandEvidenceError"
+}
+
 export class NativeInteractionResponseError extends Error {
   readonly result: unknown
 

@@ -15,6 +15,7 @@ export interface PolicyDescription {
   administrationGuildIds: string[]
   applicationCommandChangesEnabled: boolean
   applicationCommandGuildIds: string[]
+  globalApplicationCommandChangesEnabled: boolean
   applicationEmojiAuditEnabled: boolean
   applicationEmojiChangesEnabled: boolean
   applicationEmojiCreationEnabled: boolean
@@ -239,6 +240,7 @@ export class ScopePolicy {
   readonly #allowedGuildIds: ReadonlySet<string>
   readonly #allowAdministration: boolean
   readonly #allowApplicationCommandChanges: boolean
+  readonly #allowGlobalApplicationCommandChanges: boolean
   readonly #allowApplicationEmojiAudit: boolean
   readonly #allowApplicationEmojiChanges: boolean
   readonly #allowApplicationIntentChanges: boolean
@@ -453,6 +455,7 @@ export class ScopePolicy {
     ConnectorConfig,
     | "allowAnnouncementCrossposts"
     | "allowApplicationCommandChanges"
+    | "allowGlobalApplicationCommandChanges"
     | "allowDirectMessageAudit"
     | "allowDirectMessageAttachments"
     | "allowDirectMessageDeletion"
@@ -645,6 +648,8 @@ export class ScopePolicy {
     this.#allowedGuildIds = config.allowedGuildIds
     this.#allowAdministration = config.allowAdministration
     this.#allowApplicationCommandChanges = config.allowApplicationCommandChanges ?? false
+    this.#allowGlobalApplicationCommandChanges =
+      config.allowGlobalApplicationCommandChanges ?? false
     this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
     this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
     this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
@@ -857,6 +862,7 @@ export class ScopePolicy {
       applicationCommandChangesEnabled: this.#allowApplicationCommandChanges
         && this.#applicationCommandGuildIds.size > 0,
       applicationCommandGuildIds: [...this.#applicationCommandGuildIds].sort(),
+      globalApplicationCommandChangesEnabled: this.#allowGlobalApplicationCommandChanges,
       applicationEmojiAuditEnabled: this.#allowApplicationEmojiAudit,
       applicationEmojiChangesEnabled: this.#allowApplicationEmojiAudit
         && this.#allowApplicationEmojiChanges,
@@ -1334,6 +1340,14 @@ export class ScopePolicy {
     if (!this.#applicationCommandGuildIds.has(guildId)) {
       throw new PolicyError(
         `Discord guild ${guildId} is outside the application-command change scope`,
+      )
+    }
+  }
+
+  assertGlobalApplicationCommandChangeAllowed(): void {
+    if (!this.#allowGlobalApplicationCommandChanges) {
+      throw new PolicyError(
+        "Discord global application-command changes are disabled by connector configuration",
       )
     }
   }

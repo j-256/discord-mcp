@@ -33,6 +33,7 @@ import {
   type EmbedMessageActivity,
   type ForumPostActivity,
   type ForumTagActivity,
+  type GlobalApplicationCommandActivity,
   type GuildApplicationCommandActivity,
   type GuildExpressionActivity,
   type GuildCommunityActivity,
@@ -966,6 +967,33 @@ function guildApplicationCommand(
     kind: "guild-application-command-change",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     permissionDigest: `sha256:${"6".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function globalApplicationCommand(
+  id: string,
+  status: GlobalApplicationCommandActivity["status"],
+): GlobalApplicationCommandActivity {
+  return {
+    action: "create",
+    applicationId: "500",
+    botId: "600",
+    commandId: status === "completed" ? "300" : null,
+    commandType: "primary-entry-point",
+    desiredDefinitionDigest: `sha256:${"4".repeat(64)}`,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    existingDefinitionDigest: null,
+    id,
+    inventoryDigest: `sha256:${"5".repeat(64)}`,
+    kind: "global-application-command-change",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
     schemaVersion: 1,
     status,
@@ -3276,6 +3304,44 @@ test("JSONL activity log keeps guild application-command definitions content-fre
     assert.equal(result.entries.some((entry) => JSON.stringify(entry).includes(value)), false)
   }
   assert.equal(persisted.includes(privateValues[0] as string), false)
+})
+
+test("JSONL activity log keeps global application-command definitions content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-global-command-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const rejectedPrivateValue = "private-global-command-description"
+  const malformedPrivateValue = "private-global-command-handler"
+
+  await store.append(globalApplicationCommand("1", "pending"))
+  await store.append(globalApplicationCommand("1", "completed"))
+  await assert.rejects(
+    store.append({
+      ...globalApplicationCommand("2", "pending"),
+      description: rejectedPrivateValue,
+    } as GlobalApplicationCommandActivity),
+    /invalid content-free shape/,
+  )
+  await appendFile(file, `${JSON.stringify({
+    ...globalApplicationCommand("3", "completed"),
+    handlerName: malformedPrivateValue,
+  })}\n`, "utf8")
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.equal(result.entries.length, 2)
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(result.entries.map(({ kind, status }) => ({ kind, status })), [{
+    kind: "global-application-command-change",
+    status: "completed",
+  }, {
+    kind: "global-application-command-change",
+    status: "pending",
+  }])
+  assert.equal(JSON.stringify(result).includes(rejectedPrivateValue), false)
+  assert.equal(JSON.stringify(result).includes(malformedPrivateValue), false)
+  assert.equal(persisted.includes(rejectedPrivateValue), false)
 })
 
 test("JSONL activity log keeps permission-overwrite evidence content-free", async (context) => {

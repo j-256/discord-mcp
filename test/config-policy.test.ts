@@ -197,6 +197,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     administrationGuildIds: [],
     applicationCommandChangesEnabled: false,
     applicationCommandGuildIds: [],
+    globalApplicationCommandChangesEnabled: false,
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
@@ -786,6 +787,26 @@ test("configuration and policy isolate reviewed guild application-command change
   assert.throws(
     () => disabled.assertGuildApplicationCommandChangeAllowed(GUILD_ID),
     /changes are disabled/,
+  )
+})
+
+test("configuration and policy isolate reviewed global application-command changes", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { globalApplicationCommandChanges: true },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowGlobalApplicationCommandChanges, true)
+  assert.equal(policy.describe().globalApplicationCommandChangesEnabled, true)
+  assert.doesNotThrow(() => policy.assertGlobalApplicationCommandChangeAllowed())
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGlobalApplicationCommandChangeAllowed(),
+    /global application-command changes are disabled/,
   )
 })
 
@@ -1477,6 +1498,7 @@ test("configuration and policy require an exact administration guild and protect
     administrationGuildIds: [GUILD_ID],
     applicationCommandChangesEnabled: false,
     applicationCommandGuildIds: [],
+    globalApplicationCommandChangesEnabled: false,
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
@@ -5260,6 +5282,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     administrationGuildIds: [],
     applicationCommandChangesEnabled: false,
     applicationCommandGuildIds: [],
+    globalApplicationCommandChangesEnabled: false,
     applicationEmojiAuditEnabled: false,
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,

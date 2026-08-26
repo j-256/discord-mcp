@@ -208,6 +208,7 @@ function status(
       administrationGuildIds: [],
       applicationCommandChangesEnabled: false,
       applicationCommandGuildIds: [],
+      globalApplicationCommandChangesEnabled: false,
       applicationEmojiAuditEnabled: false,
       applicationEmojiChangesEnabled: false,
       applicationEmojiCreationEnabled: false,

@@ -130,6 +130,7 @@ function humanizeConfigKey(value: string): string {
 export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "administration",
   "applicationCommandChanges",
+  "globalApplicationCommandChanges",
   "applicationEmojiAudit",
   "applicationEmojiChanges",
   "applicationMonetizationAudit",
@@ -432,6 +433,7 @@ const INVITE_ROLE_SCOPE_DESCRIPTION = "Exact role ID allowlist for reviewed pers
 const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for exclusive private invite capability files"
 const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed additive application privileged-intent enablement"
 const APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-guild application-command creation, complete-state update, and exact-ID deletion"
+const GLOBAL_APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed application-wide global command creation, complete-state update, and exact-ID deletion"
 const APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed application-command changes"
 const APPLICATION_ROLE_CONNECTION_METADATA_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed complete current-application linked-role metadata replacement and clearance"
 const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
@@ -475,6 +477,9 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "applicationCommandChanges") {
     return APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "globalApplicationCommandChanges") {
+    return GLOBAL_APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "applicationIntentChanges") {
     return APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION

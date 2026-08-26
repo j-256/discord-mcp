@@ -50,6 +50,7 @@ export interface ConnectorConfig {
   allowedGuildIds: ReadonlySet<string>
   allowAdministration: boolean
   allowApplicationCommandChanges: boolean
+  allowGlobalApplicationCommandChanges: boolean
   allowApplicationEmojiAudit: boolean
   allowApplicationEmojiChanges: boolean
   allowApplicationIntentChanges: boolean
@@ -725,6 +726,10 @@ export function loadConnectorConfigDocument(
     document,
     "applicationCommandChanges",
   )
+  const allowGlobalApplicationCommandChanges = configCapability(
+    document,
+    "globalApplicationCommandChanges",
+  )
   if (allowApplicationCommandChanges && applicationCommandGuildIds.size === 0) {
     throw new ConfigurationError(
       `${configPolicyPath("allowApplicationCommandChanges")} requires ${configPolicyPath("applicationCommandGuildIds")}`,
@@ -1221,6 +1226,7 @@ export function loadConnectorConfigDocument(
   return {
     adminGuildIds,
     allowApplicationCommandChanges,
+    allowGlobalApplicationCommandChanges,
     allowApplicationEmojiAudit,
     allowApplicationEmojiChanges,
     allowApplicationIntentChanges,

@@ -51,6 +51,10 @@ import {
   type GuildApplicationCommandType,
 } from "./guild-application-command-definition.js"
 import {
+  GLOBAL_APPLICATION_COMMAND_TYPES,
+  type GlobalApplicationCommandType,
+} from "./global-application-command-definition.js"
+import {
   DIRECT_MESSAGE_ACTIONS,
   DIRECT_MESSAGE_FORMATS,
   OPERATION_KEY_HASH_PATTERN,
@@ -158,6 +162,25 @@ const GUILD_APPLICATION_COMMAND_ACTIVITY_KEYS = [
   "kind",
   "operationKeyHash",
   "permissionDigest",
+  "planDigest",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+].sort()
+const GLOBAL_APPLICATION_COMMAND_ACTIVITY_KEYS = [
+  "action",
+  "applicationId",
+  "botId",
+  "commandId",
+  "commandType",
+  "desiredDefinitionDigest",
+  "error",
+  "existingDefinitionDigest",
+  "id",
+  "inventoryDigest",
+  "kind",
+  "operationKeyHash",
   "planDigest",
   "schemaVersion",
   "status",
@@ -861,6 +884,32 @@ export interface GuildApplicationCommandActivity {
   planDigest: string
   schemaVersion: number
   status: GuildApplicationCommandActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
+export type GlobalApplicationCommandActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GlobalApplicationCommandActivity {
+  action: "create" | "delete" | "update"
+  applicationId: string
+  botId: string
+  commandId: string | null
+  commandType: GlobalApplicationCommandType
+  desiredDefinitionDigest: string | null
+  error: string | null
+  existingDefinitionDigest: string | null
+  id: string
+  inventoryDigest: string
+  kind: "global-application-command-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: GlobalApplicationCommandActivityStatus
   timestamp: string
   verification: "match" | null
 }
@@ -1600,6 +1649,7 @@ export type ActivityEntry =
   | DirectMessageActivity
   | ForumPostActivity
   | ForumTagActivity
+  | GlobalApplicationCommandActivity
   | GuildApplicationCommandActivity
   | GuildCommunityActivity
   | GuildExpressionActivity
@@ -3254,6 +3304,105 @@ function parseGuildApplicationCommandActivity(
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
     status: record.status as GuildApplicationCommandActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
+function parseGlobalApplicationCommandActivity(
+  value: unknown,
+): GlobalApplicationCommandActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  const action = record.action as "create" | "delete" | "update"
+  if (
+    keys.length !== GLOBAL_APPLICATION_COMMAND_ACTIVITY_KEYS.length
+    || keys.some((key, index) => key !== GLOBAL_APPLICATION_COMMAND_ACTIVITY_KEYS[index])
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "global-application-command-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["create", "delete", "update"].includes(action)
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.applicationId !== "string"
+    || !positiveActivitySnowflake(record.applicationId)
+    || typeof record.botId !== "string"
+    || !positiveActivitySnowflake(record.botId)
+    || !(record.commandId === null || (
+      typeof record.commandId === "string"
+      && positiveActivitySnowflake(record.commandId)
+    ))
+    || !GLOBAL_APPLICATION_COMMAND_TYPES.includes(
+      record.commandType as GlobalApplicationCommandType,
+    )
+    || typeof record.inventoryDigest !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.inventoryDigest)
+    || !(record.existingDefinitionDigest === null || (
+      typeof record.existingDefinitionDigest === "string"
+      && OPERATION_KEY_HASH_PATTERN.test(record.existingDefinitionDigest)
+    ))
+    || !(record.desiredDefinitionDigest === null || (
+      typeof record.desiredDefinitionDigest === "string"
+      && OPERATION_KEY_HASH_PATTERN.test(record.desiredDefinitionDigest)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (action === "create" && (
+      record.existingDefinitionDigest !== null
+      || record.desiredDefinitionDigest === null
+    ))
+    || (action === "update" && (
+      record.commandId === null
+      || record.existingDefinitionDigest === null
+      || record.desiredDefinitionDigest === null
+    ))
+    || (action === "delete" && (
+      record.commandId === null
+      || record.existingDefinitionDigest === null
+      || record.desiredDefinitionDigest !== null
+    ))
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.commandId === null
+      || record.error !== null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    action,
+    applicationId: record.applicationId,
+    botId: record.botId,
+    commandId: record.commandId as string | null,
+    commandType: record.commandType as GlobalApplicationCommandType,
+    desiredDefinitionDigest: record.desiredDefinitionDigest as string | null,
+    error: record.error,
+    existingDefinitionDigest: record.existingDefinitionDigest as string | null,
+    id: record.id,
+    inventoryDigest: record.inventoryDigest,
+    kind: "global-application-command-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GlobalApplicationCommandActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "match" | null,
   }
@@ -6252,6 +6401,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseGuildPruneActivity(value)
     || parseMessageForwardActivity(value)
     || parseAnnouncementSubscriptionActivity(value)
+    || parseGlobalApplicationCommandActivity(value)
     || parseGuildApplicationCommandActivity(value)
     || parseNativeInteractionCommandActivity(value)
     || parseGuildTemplateActivity(value)
