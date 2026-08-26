@@ -2045,6 +2045,99 @@ test("Discord client uses full-localization reviewed command routes and exact su
   })
 })
 
+test("Discord client uses full-localization reviewed global command routes", async () => {
+  const definition = {
+    contexts: ["guild" as const, "bot-dm" as const],
+    defaultMemberPermissions: ["MANAGE_GUILD" as const],
+    description: "Review exact global command evidence",
+    descriptionLocalizations: [{ locale: "de" as const, value: "Globale Belege pruefen" }],
+    integrationTypes: ["guild-install" as const],
+    name: "review-global",
+    nameLocalizations: [{ locale: "de" as const, value: "global-pruefen" }],
+    nsfw: false,
+    options: [],
+    type: "chat-input" as const,
+  }
+  const command = {
+    application_id: "100",
+    contexts: [0, 1],
+    default_member_permissions: "32",
+    description: definition.description,
+    description_localizations: { de: "Globale Belege pruefen" },
+    id: "300",
+    integration_types: [0],
+    name: definition.name,
+    name_localizations: { de: "global-pruefen" },
+    nsfw: false,
+    options: [],
+    type: 1,
+    version: "301",
+  }
+  const requests: Array<{ body: unknown; method: string; url: string }> = []
+  const responses = [
+    jsonResponse([command]),
+    jsonResponse(command, 201),
+    jsonResponse({ ...command, version: "302" }),
+    new Response(null, { status: 204 }),
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      const response = responses.shift()
+      if (!response) throw new Error("Unexpected request")
+      return response
+    },
+    token: TOKEN,
+  })
+
+  await client.listGlobalApplicationCommandsWithLocalizations("100")
+  await client.createGlobalApplicationCommand("100", definition)
+  await client.editGlobalApplicationCommand("100", "300", definition)
+  await client.deleteGlobalApplicationCommand("100", "300")
+
+  assert.deepEqual(requests.map(({ method, url }) => ({ method, url })), [{
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/commands?with_localizations=true`,
+  }, {
+    method: "POST",
+    url: `${API_BASE_URL}/applications/100/commands`,
+  }, {
+    method: "PATCH",
+    url: `${API_BASE_URL}/applications/100/commands/300`,
+  }, {
+    method: "DELETE",
+    url: `${API_BASE_URL}/applications/100/commands/300`,
+  }])
+  assert.deepEqual(requests[1]?.body, {
+    contexts: [0, 1],
+    default_member_permissions: "32",
+    description: definition.description,
+    description_localizations: { de: "Globale Belege pruefen" },
+    integration_types: [0],
+    name: definition.name,
+    name_localizations: { de: "global-pruefen" },
+    nsfw: false,
+    options: [],
+    type: 1,
+  })
+  assert.deepEqual(requests[2]?.body, {
+    contexts: [0, 1],
+    default_member_permissions: "32",
+    description: definition.description,
+    description_localizations: { de: "Globale Belege pruefen" },
+    integration_types: [0],
+    name: definition.name,
+    name_localizations: { de: "global-pruefen" },
+    nsfw: false,
+    options: [],
+  })
+})
+
 test("Discord client rejects command upserts and never retries reviewed writes", async () => {
   const definition = {
     defaultMemberPermissions: null,
@@ -2107,6 +2200,31 @@ test("Discord client rejects command upserts and never retries reviewed writes",
     wrongDeleteStatus.deleteGuildApplicationCommand("100", "200", "300"),
     /unexpected success status/,
   )
+
+  calls = 0
+  const unsafeGlobalUpsert = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      return jsonResponse({ message: privateMarker }, 200)
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    unsafeGlobalUpsert.createGlobalApplicationCommand("100", {
+      contexts: ["guild"],
+      ...definition,
+      integrationTypes: ["guild-install"],
+    }),
+    (error: unknown) => (
+      error instanceof Error
+      && error.name === "DiscordTransportError"
+      && /unexpected success status/.test(error.message)
+      && !error.message.includes(privateMarker)
+    ),
+  )
+  assert.equal(calls, 1)
 })
 
 test("Discord client bounds and protects application-command inventories", async () => {

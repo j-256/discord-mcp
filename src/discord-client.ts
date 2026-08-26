@@ -107,6 +107,10 @@ import {
   type GuildApplicationCommandDefinition,
 } from "./guild-application-command-definition.js"
 import {
+  globalApplicationCommandApiBody,
+  type GlobalApplicationCommandDefinition,
+} from "./global-application-command-definition.js"
+import {
   normalizeDesiredMemberNickname,
   projectMemberNickname,
 } from "./member-nickname.js"
@@ -171,6 +175,8 @@ export interface DiscordClientOptions {
 
 export type CreateGuildApplicationCommandInput = GuildApplicationCommandDefinition
 export type EditGuildApplicationCommandInput = GuildApplicationCommandDefinition
+export type CreateGlobalApplicationCommandInput = GlobalApplicationCommandDefinition
+export type EditGlobalApplicationCommandInput = GlobalApplicationCommandDefinition
 
 export interface GuildPageOptions extends RequestOptions {
   after?: string
@@ -8943,6 +8949,89 @@ export class DiscordClient {
         ...options,
         diagnosticRoute: "/applications/{application.id}/commands",
         maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+      },
+    )
+  }
+
+  listGlobalApplicationCommandsWithLocalizations(
+    applicationId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand[]> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    return this.#request(
+      "list_global_application_commands",
+      `/applications/${applicationId}/commands?with_localizations=true`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/commands",
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  createGlobalApplicationCommand(
+    applicationId: string,
+    input: CreateGlobalApplicationCommandInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    const body = globalApplicationCommandApiBody(input)
+    return this.#request(
+      "create_global_application_command",
+      `/applications/${applicationId}/commands`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body,
+        diagnosticRoute: "/applications/{application.id}/commands",
+        expectedSuccessStatus: 201,
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  editGlobalApplicationCommand(
+    applicationId: string,
+    commandId: string,
+    input: EditGlobalApplicationCommandInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationCommand> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(commandId, "Discord application-command ID")
+    const { type: _type, ...body } = globalApplicationCommandApiBody(input)
+    return this.#request(
+      "edit_global_application_command",
+      `/applications/${applicationId}/commands/${commandId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body,
+        diagnosticRoute: "/applications/{application.id}/commands/{command.id}",
+        expectedSuccessStatus: 200,
+        maxResponseBytes: DISCORD_LIMITS.applicationCommandInventoryResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async deleteGlobalApplicationCommand(
+    applicationId: string,
+    commandId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(applicationId, "Discord application-command application ID")
+    assertSearchSnowflake(commandId, "Discord application-command ID")
+    await this.#request<void>(
+      "delete_global_application_command",
+      `/applications/${applicationId}/commands/${commandId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/applications/{application.id}/commands/{command.id}",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
       },
     )
   }
