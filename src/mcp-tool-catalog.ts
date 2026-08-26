@@ -60,6 +60,7 @@ type McpToolWorkflow =
   | "guild-blueprint"
   | "guild-community-change"
   | "guild-application-command-change"
+  | "global-application-command-change"
   | "guild-scaffold"
   | "guild-expression-change"
   | "guild-incident-action-change"
@@ -431,6 +432,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "command", "create", "delete", "execute", "localization", "permission", "slash", "update"],
     toolset: "application-commands",
     workflow: "guild-application-command-change",
+  },
+  execute_global_application_command_change: {
+    keywords: ["application", "command", "context", "create", "delete", "execute", "global", "install", "localization", "permission", "primary entry point", "slash", "update"],
+    toolset: "application-commands",
+    workflow: "global-application-command-change",
   },
   execute_role_creation: {
     keywords: ["create", "execute", "permission", "role"],
@@ -1011,6 +1017,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "command", "create", "delete", "localization", "permission", "plan", "review", "slash", "update"],
     toolset: "application-commands",
     workflow: "guild-application-command-change",
+  },
+  plan_global_application_command_change: {
+    keywords: ["application", "command", "context", "create", "delete", "global", "install", "localization", "permission", "plan", "primary entry point", "review", "slash", "update"],
+    toolset: "application-commands",
+    workflow: "global-application-command-change",
   },
   plan_role_creation: {
     keywords: ["create", "permission", "plan", "review", "role"],

@@ -203,6 +203,10 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
     "emojis",
     APPLICATION_ID,
   )
+  const globalApplicationCommands = writeApplicationCollectionTarget(
+    "global-application-commands",
+    APPLICATION_ID,
+  )
 
   assert.deepEqual(channel, { id: CHANNEL_ID, kind: "channel" })
   assert.deepEqual(collection, {
@@ -234,6 +238,11 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   assert.deepEqual(applicationEmojis, {
     applicationId: APPLICATION_ID,
     collection: "emojis",
+    kind: "application-collection",
+  })
+  assert.deepEqual(globalApplicationCommands, {
+    applicationId: APPLICATION_ID,
+    collection: "global-application-commands",
     kind: "application-collection",
   })
   assert.match(writeCoordinationTargetHash(channel), /^[a-f0-9]{64}$/)
@@ -498,6 +507,64 @@ test("linked-role metadata claims use the exact application-wide schema target",
     writeCoordinationTargetHash(target),
     writeCoordinationTargetHash(
       writeApplicationCollectionTarget("privileged-intents", APPLICATION_ID),
+    ),
+  )
+})
+
+test("global command claims use the exact application-wide command target", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-global-command-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "coordination")
+  const operationStore = new FileOperationStore(join(root, "operations"))
+  const coordinator = new FileWriteCoordinator(directory, operationStore)
+  const target = writeApplicationCollectionTarget(
+    "global-application-commands",
+    APPLICATION_ID,
+  )
+  const operationKeyHashValue = operationKeyHash(OPERATION_KEY)
+
+  await assert.rejects(
+    () => coordinator.run(intent([
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ], {
+      kind: "global-application-command-change",
+    }), async () => "unsafe"),
+    /global-application-commands collection target/u,
+  )
+
+  const result = await coordinator.run(intent([target], {
+    kind: "global-application-command-change",
+  }), async () => {
+    const pending = {
+      activityId: "global-application-command-activity-0001",
+      applicationId: APPLICATION_ID,
+      error: null,
+      kind: "global-application-command-change" as const,
+      operationKeyHash: operationKeyHashValue,
+      planDigest: PLAN_DIGEST,
+      resourceId: null,
+      schemaVersion: 1 as const,
+      status: "pending" as const,
+      timestamp: "2026-08-26T00:00:00.000Z",
+      verification: null,
+    }
+    await operationStore.reserveApplication(pending)
+    await operationStore.finishApplication({
+      ...pending,
+      resourceId: MESSAGE_ID,
+      status: "completed",
+      timestamp: "2026-08-26T00:00:01.000Z",
+      verification: "match",
+    })
+    return "global-commands"
+  })
+
+  assert.equal(result, "global-commands")
+  assert.deepEqual(await claimFiles(directory), [])
+  assert.notEqual(
+    writeCoordinationTargetHash(target),
+    writeCoordinationTargetHash(
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
     ),
   )
 })

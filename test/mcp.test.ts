@@ -446,6 +446,8 @@ import {
   GuildSettingsOperationConflictError,
   GuildIncidentExecutionError,
   GuildIncidentOperationConflictError,
+  GlobalApplicationCommandExecutionError,
+  GlobalApplicationCommandOperationConflictError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
   WriteCoordinationStateError,
@@ -474,6 +476,14 @@ import type {
   GuildApplicationCommandChangeRequest,
   GuildApplicationCommandPlan,
 } from "../src/guild-application-command-service.js"
+import {
+  globalApplicationCommandDefinitionDigest,
+  type GlobalApplicationCommandDefinition,
+} from "../src/global-application-command-definition.js"
+import type {
+  GlobalApplicationCommandChangeRequest,
+  GlobalApplicationCommandPlan,
+} from "../src/global-application-command-service.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_TEMPLATE_NAMES,
@@ -730,6 +740,7 @@ const ANNOUNCEMENT_SOURCE_CHANNEL_ID = "200000000000000003"
 const ANNOUNCEMENT_SUBSCRIPTION_WEBHOOK_ID = "370000000000000002"
 const NATIVE_INTERACTION_COMMAND_OPERATION_KEY = "native-command-attempt-0001"
 const GUILD_APPLICATION_COMMAND_OPERATION_KEY = "guild-application-command-attempt-0001"
+const GLOBAL_APPLICATION_COMMAND_OPERATION_KEY = "global-application-command-attempt-0001"
 const POLL_CREATION_OPERATION_KEY = "poll-create-attempt-0001"
 const POLL_END_OPERATION_KEY = "poll-end-attempt-0001"
 const POLL_QUESTION = "Which release theme should we choose?"
@@ -1449,6 +1460,133 @@ function guildApplicationCommandPlan(
       retriesAfterReservation: false,
     },
     warnings: ["Command text is transient untrusted evidence"],
+    writeRequired,
+  }
+}
+
+function globalApplicationCommandDefinition(
+  overrides: Partial<Extract<GlobalApplicationCommandDefinition, { type: "chat-input" }>> = {},
+): Extract<GlobalApplicationCommandDefinition, { type: "chat-input" }> {
+  return {
+    contexts: ["guild", "bot-dm"],
+    defaultMemberPermissions: ["MANAGE_GUILD"],
+    description: "Deploy one reviewed global release",
+    descriptionLocalizations: [{ locale: "de", value: "Eine globale Version bereitstellen" }],
+    integrationTypes: ["guild-install"],
+    name: "deploy-global",
+    nameLocalizations: [{ locale: "de", value: "global-bereitstellen" }],
+    nsfw: false,
+    options: [],
+    type: "chat-input",
+    ...overrides,
+  }
+}
+
+function globalApplicationCommandPlan(
+  request: GlobalApplicationCommandChangeRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): GlobalApplicationCommandPlan {
+  const baseline = globalApplicationCommandDefinition({
+    description: request.action === "update"
+      && request.definition.type === "chat-input"
+      && !writeRequired
+      ? request.definition.description
+      : "Previously deployed global release",
+    name: request.action === "update" && !writeRequired
+      ? request.definition.name
+      : "deploy-global",
+    nameLocalizations: request.action === "update" && !writeRequired
+      ? request.definition.nameLocalizations
+      : [],
+  })
+  const existing = request.action === "create"
+    || request.action === "delete" && !writeRequired
+    ? null
+    : baseline
+  const desired = request.action === "delete" ? null : request.definition
+  const commandId = request.action === "create" ? null : request.commandId
+  const commandType = request.action === "create"
+    ? request.definition.type
+    : existing?.type ?? null
+  const existingDefinitionDigest = existing
+    ? globalApplicationCommandDefinitionDigest(existing)
+    : null
+  const desiredDefinitionDigest = desired
+    ? globalApplicationCommandDefinitionDigest(desired)
+    : null
+  const renamed = request.action === "update"
+    && existing !== null
+    && existing.name !== request.definition.name
+  const permissionEffect = existing !== null
+    && (request.action === "delete" || renamed)
+    ? "all-guild-overwrites-cleared-by-discord" as const
+    : "none" as const
+  return {
+    action: request.action,
+    application: {
+      embedded: false,
+      installationTypes: ["guild-install", "user-install"],
+      installationTypesComplete: true,
+    },
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    commandId,
+    commandType,
+    createdAt: "2026-08-26T00:00:00.000Z",
+    desiredDefinition: desired,
+    desiredDefinitionDigest,
+    digest,
+    effect: writeRequired ? "change" : "none",
+    existingDefinition: existing,
+    existingDefinitionDigest,
+    inventory: {
+      counts: {
+        "chat-input": existing ? 1 : 0,
+        message: 0,
+        "primary-entry-point": 0,
+        user: 0,
+      },
+      digest: OPERATION_KEY_HASH,
+      entries: existing && commandId
+        ? [{
+            commandId,
+            definitionDigest: existingDefinitionDigest!,
+            name: existing.name,
+            type: existing.type,
+            version: "730000000000000001",
+          }]
+        : [],
+      limits: {
+        "chat-input": 100,
+        message: 15,
+        "primary-entry-point": 1,
+        user: 15,
+      },
+      returned: existing ? 1 : 0,
+      totalLimit: 131,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permissionEffect,
+    privacy: {
+      definitionsPersisted: false,
+      namesPersisted: false,
+      permissionTargetsEnumerated: false,
+      planTextTransient: true,
+    },
+    risks: permissionEffect === "none"
+      ? ["One non-retried exact global command write"]
+      : ["Renaming or deleting permanently clears permissions across every guild"],
+    schemaVersion: 1,
+    status: writeRequired
+      ? "planned"
+      : request.action === "delete" ? "already-absent" : "already-current",
+    verification: {
+      commandInventory: "exact-full-localization-api-readback",
+      clientPropagation: "discord-read-repair",
+      retriesAfterReservation: false,
+    },
+    warnings: ["Global command text is transient untrusted evidence"],
     writeRequired,
   }
 }
@@ -8312,6 +8450,9 @@ function serviceFixture(overrides: {
   guildApplicationCommandError?: Error
   guildApplicationCommandPlanDigest?: string
   guildApplicationCommandWriteRequired?: boolean
+  globalApplicationCommandError?: Error
+  globalApplicationCommandPlanDigest?: string
+  globalApplicationCommandWriteRequired?: boolean
   onboardingEffect?: "change" | "none"
   onboardingError?: Error
   onboardingPlanDigest?: string
@@ -8419,6 +8560,10 @@ function serviceFixture(overrides: {
     plan: 0,
   }
   const guildApplicationCommandCalls = {
+    execute: 0,
+    plan: 0,
+  }
+  const globalApplicationCommandCalls = {
     execute: 0,
     plan: 0,
   }
@@ -9453,6 +9598,38 @@ function serviceFixture(overrides: {
         observed: null,
         observedInventoryDigest: planned.inventory.digest,
         observedPermissionDigest: planned.permissions.digest,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        readbackMatched: true,
+        schemaVersion: 1,
+        status: planned.writeRequired
+          ? "completed"
+          : request.action === "delete" ? "already-absent" : "already-current",
+      }
+    },
+    async executeGlobalApplicationCommandChange(request, planDigest) {
+      if (overrides.globalApplicationCommandError) {
+        throw overrides.globalApplicationCommandError
+      }
+      globalApplicationCommandCalls.execute += 1
+      const planned = globalApplicationCommandPlan(
+        request,
+        planDigest,
+        overrides.globalApplicationCommandWriteRequired ?? true,
+      )
+      const commandId = request.action === "create"
+        ? "740000000000000001"
+        : request.commandId
+      return {
+        action: request.action,
+        activityId: planned.writeRequired
+          ? "activity-global-application-command"
+          : null,
+        applicationId: APPLICATION_ID,
+        commandId,
+        commandType: planned.commandType,
+        observed: null,
+        observedInventoryDigest: planned.inventory.digest,
         operationKeyHash: planned.operationKeyHash,
         planDigest,
         readbackMatched: true,
@@ -12400,6 +12577,14 @@ function serviceFixture(overrides: {
         overrides.guildApplicationCommandWriteRequired ?? true,
       )
     },
+    async planGlobalApplicationCommandChange(request) {
+      globalApplicationCommandCalls.plan += 1
+      return globalApplicationCommandPlan(
+        request,
+        overrides.globalApplicationCommandPlanDigest || DIGEST,
+        overrides.globalApplicationCommandWriteRequired ?? true,
+      )
+    },
     async planPollCreation(request) {
       calls.pollCreationPlan += 1
       return pollCreationPlan(
@@ -12563,6 +12748,7 @@ function serviceFixture(overrides: {
     guildIncidentCalls,
     guildProfileCalls,
     guildApplicationCommandCalls,
+    globalApplicationCommandCalls,
     nativeInteractionCommandCalls,
     service,
     welcomeScreenCalls,
@@ -13080,6 +13266,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_native_interaction_command",
       "plan_guild_application_command_change",
       "execute_guild_application_command_change",
+      "plan_global_application_command_change",
+      "execute_global_application_command_change",
       "plan_guild_template_change",
       "execute_guild_template_change",
       "get_webhook_message",
@@ -13216,6 +13404,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   ))
   const guildTemplateChange = result.tools.find((tool) => (
     tool.name === "execute_guild_template_change"
+  ))
+  const globalApplicationCommand = result.tools.find((tool) => (
+    tool.name === "execute_global_application_command_change"
   ))
   const directMessageChange = result.tools.find((tool) => (
     tool.name === "execute_direct_message_change"
@@ -13394,6 +13585,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     openWorldHint: true,
     readOnlyHint: false,
   })
+  assert.deepEqual(globalApplicationCommand?.annotations, {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
   assert.deepEqual(forumTagChange?.annotations, {
     destructiveHint: true,
     idempotentHint: false,
@@ -13552,6 +13749,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_announcement_crosspost",
     "plan_message_forward",
     "plan_native_interaction_command",
+    "plan_global_application_command_change",
     "plan_poll_creation",
     "plan_poll_end",
     "plan_thread_creation",
@@ -15152,6 +15350,30 @@ test("progressive discovery enables the complete reviewed guild application-comm
     [
       "plan_guild_application_command_change",
       "execute_guild_application_command_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed global application-command workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_global_application_command_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_global_application_command_change",
+    "plan_global_application_command_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_global_application_command_change",
+      "execute_global_application_command_change",
       "discover_discord_tools",
     ],
   )
@@ -20069,6 +20291,281 @@ test("MCP guild application-command execution skips no-ops and stops on refusal 
     name: "execute_guild_application_command_change",
   })
   assert.equal(invalidDeletion.isError, true)
+})
+
+test("MCP global application-command planning binds exposure, installation, and complete evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const setup = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const definition = globalApplicationCommandDefinition()
+  const input = {
+    acknowledgeGlobalExposure: true as const,
+    action: "create" as const,
+    definition,
+    operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+  }
+  const planned = await setup.client.callTool({
+    arguments: input,
+    name: "plan_global_application_command_change",
+  })
+  assert.equal(structuredContent(planned).commandType, "chat-input")
+  assert.equal(structuredContent(planned).effect, "change")
+  assert.deepEqual(
+    (structuredContent(planned).application as { installationTypes: string[] })
+      .installationTypes,
+    ["guild-install", "user-install"],
+  )
+  assert.equal(setup.globalApplicationCommandCalls.plan, 1)
+
+  const result = await setup.client.callTool({
+    arguments: { ...input, planDigest: DIGEST },
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(setup.globalApplicationCommandCalls.plan, 2)
+  assert.equal(setup.globalApplicationCommandCalls.execute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, /Installation types: guild-install, user-install/)
+  assert.match(confirmationMessage, /Desired complete definition:/)
+  assert.match(confirmationMessage, /Deploy one reviewed global release/)
+  assert.match(confirmationMessage, /global-bereitstellen/)
+  assert.match(confirmationMessage, /Cross-guild permission effect:/)
+  assert.match(confirmationMessage, /Primary Entry Point capacity: 0\/1/)
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(GLOBAL_APPLICATION_COMMAND_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GLOBAL_APPLICATION_COMMAND_OPERATION_KEY),
+  )
+})
+
+test("MCP global application-command execution skips no-ops and stops on refusal or drift", async (context) => {
+  const definition = globalApplicationCommandDefinition()
+  const updateInput = {
+    acknowledgeGlobalExposure: true as const,
+    action: "update" as const,
+    commandId: "740000000000000001",
+    definition,
+    operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { globalApplicationCommandWriteRequired: false },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: updateInput,
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.globalApplicationCommandCalls.execute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      acknowledgeGlobalExposure: true,
+      action: "create",
+      definition,
+      operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.globalApplicationCommandCalls.execute, 0)
+
+  let driftConfirmations = 0
+  const drift = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { globalApplicationCommandPlanDigest: DIFFERENT_DIGEST },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: {
+      acknowledgeGlobalExposure: true,
+      action: "create",
+      definition,
+      operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "plan-changed")
+  assert.equal(driftResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(drift.globalApplicationCommandCalls.execute, 0)
+
+  const invalidDeletion = await drift.client.callTool({
+    arguments: {
+      acknowledgeGlobalDeletion: true,
+      acknowledgePermissionResetAcrossGuilds: false,
+      action: "delete",
+      commandId: "740000000000000001",
+      operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(invalidDeletion.isError, true)
+})
+
+test("MCP global application-command signed state rejects changed scope and intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const definition = globalApplicationCommandDefinition()
+  const request = {
+    acknowledgeGlobalExposure: true,
+    action: "create" as const,
+    definition,
+    operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_global_application_command_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  if (typeof initial.requestState !== "string") {
+    throw new TypeError("Expected signed global application-command request state")
+  }
+  assert.doesNotMatch(initial.requestState, new RegExp(definition.description))
+  assert.doesNotMatch(
+    initial.requestState,
+    new RegExp(GLOBAL_APPLICATION_COMMAND_OPERATION_KEY),
+  )
+  for (const changed of [
+    {
+      ...request,
+      definition: {
+        ...definition,
+        description: "Changed global command definition",
+      },
+    },
+    {
+      ...request,
+      definition: {
+        ...definition,
+        integrationTypes: ["guild-install", "user-install"],
+      },
+    },
+    {
+      ...request,
+      operationKey: "global-application-command-attempt-0002",
+    },
+    {
+      acknowledgeGlobalExposure: true,
+      action: "update",
+      commandId: "740000000000000001",
+      definition,
+      operationKey: request.operationKey,
+      planDigest: request.planDigest,
+    },
+  ] as Record<string, unknown>[]) {
+    const result: Awaited<ReturnType<typeof fixture.client.callTool>> =
+      await fixture.client.request({
+        method: "tools/call",
+        params: {
+          arguments: changed,
+          inputResponses: {
+            confirm_global_application_command_change: {
+              action: "accept",
+              content: { approve: true },
+            },
+          },
+          name: "execute_global_application_command_change",
+          requestState: initial.requestState,
+        },
+      }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.globalApplicationCommandCalls.execute, 0)
+})
+
+test("MCP global application-command execution exposes typed safe failures", async (context) => {
+  const definition = globalApplicationCommandDefinition()
+  const argumentsValue = {
+    acknowledgeGlobalExposure: true,
+    action: "create",
+    definition,
+    operationKey: GLOBAL_APPLICATION_COMMAND_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      globalApplicationCommandError: new GlobalApplicationCommandExecutionError(
+        `Discord global application-command outcome is uncertain: ${TOKEN}`,
+        { error: TOKEN, status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.doesNotMatch(JSON.stringify(uncertainResult), new RegExp(TOKEN))
+
+  const receipt = {
+    activityId: "activity-global-application-command",
+    applicationId: APPLICATION_ID,
+    error: null,
+    operationKeyHash: OPERATION_KEY_HASH,
+    resourceId: "740000000000000001",
+    status: "completed" as const,
+    timestamp: "2026-08-26T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      globalApplicationCommandError:
+        new GlobalApplicationCommandOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_global_application_command_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(GLOBAL_APPLICATION_COMMAND_OPERATION_KEY),
+  )
 })
 
 test("MCP poll reads preserve exact answer IDs and return voter IDs only", async (context) => {

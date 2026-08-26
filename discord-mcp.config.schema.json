@@ -19,6 +19,10 @@
           "type": "boolean",
           "description": "Enable reviewed exact-guild application-command creation, complete-state update, and exact-ID deletion"
         },
+        "globalApplicationCommandChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed application-wide global command creation, complete-state update, and exact-ID deletion"
+        },
         "applicationEmojiAudit": {
           "type": "boolean",
           "description": "Enable application emoji audit policy"

@@ -68,6 +68,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
 
 export const WRITE_COORDINATION_APPLICATION_COLLECTIONS = [
   "emojis",
+  "global-application-commands",
   "privileged-intents",
   "role-connection-metadata",
 ] as const
@@ -431,6 +432,15 @@ function normalizeTargets(
   ) {
     throw new WriteCoordinationStateError(
       "Discord application intent coordination requires the privileged-intents collection target",
+    )
+  }
+  if (
+    kind === "global-application-command-change"
+    && applicationTarget?.kind === "application-collection"
+    && applicationTarget.collection !== "global-application-commands"
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord global application-command coordination requires the global-application-commands collection target",
     )
   }
   if (

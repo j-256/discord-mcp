@@ -134,6 +134,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   applicationEmojiAuditPolicy: "application-emoji-audit-policy",
   applicationEmojiChangePolicy: "application-emoji-change-policy",
   applicationCommandChangePolicy: "application-command-change-policy",
+  globalApplicationCommandChangePolicy: "global-application-command-change-policy",
   applicationIntentChangePolicy: "application-intent-change-policy",
   applicationMonetizationAuditPolicy: "application-monetization-audit-policy",
   applicationRoleConnectionMetadataChangePolicy:
@@ -899,6 +900,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowApplicationCommandChanges,
       "application-commands",
       "Reviewed guild application-command changes",
+    ],
+    [
+      config.allowGlobalApplicationCommandChanges,
+      "application-commands",
+      "Reviewed global application-command changes",
     ],
     [
       config.allowApplicationIntentChanges,
@@ -3145,6 +3151,17 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.applicationCommandChangePolicy,
         "pass",
         "Reviewed guild application-command changes are disabled",
+      ))
+    checks.push(config.allowGlobalApplicationCommandChanges
+      ? check(
+        DOCTOR_CHECK_IDS.globalApplicationCommandChangePolicy,
+        "pass",
+        "Reviewed global application-command changes are bound to the verified pinned current application with explicit installation contexts, complete localized inventory review, signed approval, application-wide coordination, one non-retried write, and exact survivor readback",
+      )
+      : check(
+        DOCTOR_CHECK_IDS.globalApplicationCommandChangePolicy,
+        "pass",
+        "Reviewed global application-command changes are disabled",
       ))
     const applicationIntentRequirements = applicationPostureRequirementsForConfig(config)
     const applicationIntentTargets = [

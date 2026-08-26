@@ -302,6 +302,7 @@ import {
   ComponentMessagePlanChangedError,
   EmbedMessagePlanChangedError,
   DeletionPlanChangedError,
+  GlobalApplicationCommandPlanChangedError,
   GuildApplicationCommandPlanChangedError,
   GuildPrunePlanChangedError,
   GuildScaffoldPlanChangedError,
@@ -477,6 +478,16 @@ import {
   GuildApplicationCommandService,
   normalizeGuildApplicationCommandChangeRequest,
 } from "./guild-application-command-service.js"
+import type {
+  GlobalApplicationCommandChangeRequest,
+  GlobalApplicationCommandPlan,
+  GlobalApplicationCommandResult,
+  GlobalApplicationCommandServiceOptions,
+} from "./global-application-command-service.js"
+import {
+  GlobalApplicationCommandService,
+  normalizeGlobalApplicationCommandChangeRequest,
+} from "./global-application-command-service.js"
 import type {
   MemberDirectoryListOptions,
   MemberDirectorySearchOptions,
@@ -810,6 +821,9 @@ export interface DiscordServiceClient {
   createGuildApplicationCommand: DiscordClient["createGuildApplicationCommand"]
   editGuildApplicationCommand: DiscordClient["editGuildApplicationCommand"]
   deleteGuildApplicationCommand: DiscordClient["deleteGuildApplicationCommand"]
+  createGlobalApplicationCommand: DiscordClient["createGlobalApplicationCommand"]
+  editGlobalApplicationCommand: DiscordClient["editGlobalApplicationCommand"]
+  deleteGlobalApplicationCommand: DiscordClient["deleteGlobalApplicationCommand"]
   deleteApplicationEmoji: DiscordClient["deleteApplicationEmoji"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
@@ -914,6 +928,7 @@ export interface DiscordServiceClient {
   listGuildApplicationCommandsWithLocalizations: DiscordClient["listGuildApplicationCommandsWithLocalizations"]
   listGuildApplicationCommandPermissions: DiscordClient["listGuildApplicationCommandPermissions"]
   listGlobalApplicationCommands: DiscordClient["listGlobalApplicationCommands"]
+  listGlobalApplicationCommandsWithLocalizations: DiscordClient["listGlobalApplicationCommandsWithLocalizations"]
   listGuildBans: DiscordClient["listGuildBans"]
   listGuildInvites: DiscordClient["listGuildInvites"]
   listGuildIntegrations: DiscordClient["listGuildIntegrations"]
@@ -1016,6 +1031,10 @@ export interface ConnectorServiceOptions {
   >
   guildApplicationCommandOptions?: Pick<
     GuildApplicationCommandServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  globalApplicationCommandOptions?: Pick<
+    GlobalApplicationCommandServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   announcementCrosspostOptions?: Pick<
@@ -1412,6 +1431,7 @@ export class ConnectorService {
   readonly #applicationEmojiService: ApplicationEmojiService
   readonly #applicationCommandAuditService: ApplicationCommandAuditService
   readonly #guildApplicationCommandService: GuildApplicationCommandService
+  readonly #globalApplicationCommandService: GlobalApplicationCommandService
   readonly #applicationRoleConnectionMetadataAuditService: ApplicationRoleConnectionMetadataAuditService
   readonly #applicationRoleConnectionMetadataService: ApplicationRoleConnectionMetadataService
   readonly #applicationSkuAuditService: ApplicationSkuAuditService
@@ -1556,6 +1576,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.guildApplicationCommandOptions,
+    })
+    this.#globalApplicationCommandService = new GlobalApplicationCommandService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.globalApplicationCommandOptions,
     })
     this.#applicationRoleConnectionMetadataAuditService = new ApplicationRoleConnectionMetadataAuditService({
       client: this.#client,
@@ -3213,6 +3240,20 @@ export class ConnectorService {
     const identity = await this.#verifyIdentity(options)
     return this.#guildApplicationCommandService.plan(
       identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGlobalApplicationCommandChange(
+    request: GlobalApplicationCommandChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GlobalApplicationCommandPlan> {
+    normalizeGlobalApplicationCommandChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#globalApplicationCommandService.plan(
+      identity.application,
       identity.bot.id,
       request,
       options,
@@ -5617,6 +5658,55 @@ export class ConnectorService {
       [writeGuildCollectionTarget("application-commands", normalized.guildId)],
       () => this.#guildApplicationCommandService.execute(
         identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGlobalApplicationCommandChange(
+    request: GlobalApplicationCommandChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GlobalApplicationCommandResult> {
+    normalizeGlobalApplicationCommandChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord global application-command plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#globalApplicationCommandService.plan(
+      identity.application,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new GlobalApplicationCommandPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    if (!coordinationPlan.writeRequired) {
+      return this.#globalApplicationCommandService.execute(
+        identity.application,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      )
+    }
+    return this.#coordinateWrite(
+      "global-application-command-change",
+      request.operationKey,
+      planDigest,
+      [writeApplicationCollectionTarget(
+        "global-application-commands",
+        identity.application.id,
+      )],
+      () => this.#globalApplicationCommandService.execute(
+        identity.application,
         identity.bot.id,
         request,
         planDigest,

@@ -738,6 +738,7 @@ function guidanceService(options: {
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeGuildApplicationCommandChange: unexpected,
+    executeGlobalApplicationCommandChange: unexpected,
     executeMemberRoleChange: unexpected,
     executeMemberNicknameChange: unexpected,
     executeMemberVoiceChange: unexpected,
@@ -774,6 +775,7 @@ function guidanceService(options: {
     planChannelClone: unexpected,
     planNativeInteractionCommand: unexpected,
     planGuildApplicationCommandChange: unexpected,
+    planGlobalApplicationCommandChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
     getApplicationEmoji: unexpected,
@@ -5582,6 +5584,44 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildApplicationCommand, /permanently clear the target's command permissions/)
   assert.match(guildApplicationCommand, /newly created command rather than an upsert/)
 
+  const globalApplicationCommandRequest = {
+    acknowledgeGlobalExposure: true,
+    action: "create",
+    definition: {
+      contexts: ["guild", "bot-dm"],
+      defaultMemberPermissions: ["MANAGE_GUILD"],
+      description: "Deploy one reviewed global release",
+      descriptionLocalizations: [],
+      integrationTypes: ["guild-install"],
+      name: "deploy-global",
+      nameLocalizations: [],
+      nsfw: false,
+      options: [],
+      type: "chat-input",
+    },
+    operationKey: OPERATION_KEY,
+  }
+  const globalApplicationCommand = promptText(await client.getPrompt({
+    arguments: { requestJson: JSON.stringify(globalApplicationCommandRequest) },
+    name: MCP_PROMPT_NAMES.reviewGlobalApplicationCommandChange,
+  }))
+  assert.deepEqual(
+    JSON.parse(globalApplicationCommand.split("\n")[1] || ""),
+    globalApplicationCommandRequest,
+  )
+  assert.match(
+    globalApplicationCommand,
+    /Call only plan_global_application_command_change/,
+  )
+  assert.match(
+    globalApplicationCommand,
+    /Do not call execute_global_application_command_change/,
+  )
+  assert.match(globalApplicationCommand, /supported installation types and EMBEDDED evidence/)
+  assert.match(globalApplicationCommand, /full-localization global inventory/)
+  assert.match(globalApplicationCommand, /permissions across every guild/)
+  assert.match(globalApplicationCommand, /client propagation uses Discord read-repair/)
+
   const applicationIntent = promptText(await client.getPrompt({
     arguments: {
       acknowledgePrivilegeExpansion: "true",
@@ -7053,6 +7093,17 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         }),
       },
       name: MCP_PROMPT_NAMES.reviewGuildApplicationCommandChange,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          acknowledgeGlobalDeletion: true,
+          action: "delete",
+          commandId: APPLICATION_EMOJI_ID,
+          operationKey: OPERATION_KEY,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.reviewGlobalApplicationCommandChange,
     },
     {
       arguments: {

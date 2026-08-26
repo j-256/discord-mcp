@@ -468,6 +468,7 @@ function toolService(
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeGuildApplicationCommandChange: unexpected,
+    executeGlobalApplicationCommandChange: unexpected,
     executeRoleOrder: unexpected,
     executeMemberNicknameChange: unexpected,
     executeMemberRoleChange: unexpected,
@@ -503,6 +504,7 @@ function toolService(
     planMessageForward: unexpected,
     planNativeInteractionCommand: unexpected,
     planGuildApplicationCommandChange: unexpected,
+    planGlobalApplicationCommandChange: unexpected,
     getThreadMembership: unexpected,
     getThreadState: unexpected,
     planThreadChange: unexpected,
@@ -3323,6 +3325,49 @@ test("doctor and setup explain reviewed guild application-command scope", async 
   )
 })
 
+test("doctor and setup explain reviewed global application-command scope", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      globalApplicationCommandChanges: true,
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const check = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.globalApplicationCommandChangePolicy,
+  )
+  assert.equal(check?.status, "pass")
+  assert.match(check?.summary || "", /verified pinned current application/)
+  assert.match(check?.summary || "", /explicit installation contexts/)
+  assert.match(check?.summary || "", /complete localized inventory review/)
+  assert.match(check?.summary || "", /application-wide coordination/)
+  assert.match(check?.summary || "", /one non-retried write/)
+  assert.match(check?.summary || "", /exact survivor readback/)
+  assert.match(omitted.warnings.join("\n"), /application-commands toolset/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.globalApplicationCommandChangePolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+})
+
 test("doctor and setup explain reviewed application linked-role metadata changes", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5739,6 +5784,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_embed_message",
     "review_forum_post",
     "review_forum_tag_change",
+    "review_global_application_command_change",
     "review_guild_application_command_change",
     "review_guild_blueprint",
     "review_guild_community_change",
@@ -5862,6 +5908,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_direct_message_change",
     "execute_embed_message",
     "execute_forum_tag_change",
+    "execute_global_application_command_change",
     "execute_guild_application_command_change",
     "execute_guild_blueprint",
     "execute_guild_community_change",

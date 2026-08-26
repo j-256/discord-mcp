@@ -440,6 +440,9 @@ function serviceFixture(overrides: {
     async createGuildApplicationCommand() {
       throw new Error("Unexpected application-command creation")
     },
+    async createGlobalApplicationCommand() {
+      throw new Error("Unexpected global application-command creation")
+    },
     async createApplicationEmoji() {
       throw new Error("Unexpected application emoji creation")
     },
@@ -524,8 +527,14 @@ function serviceFixture(overrides: {
     async deleteGuildApplicationCommand() {
       throw new Error("Unexpected application-command deletion")
     },
+    async deleteGlobalApplicationCommand() {
+      throw new Error("Unexpected global application-command deletion")
+    },
     async editGuildApplicationCommand() {
       throw new Error("Unexpected application-command update")
+    },
+    async editGlobalApplicationCommand() {
+      throw new Error("Unexpected global application-command update")
     },
     async deleteGuildTemplate() {
       throw new Error("Unexpected guild-template deletion")
@@ -784,6 +793,9 @@ function serviceFixture(overrides: {
     },
     async listGlobalApplicationCommands() {
       throw new Error("Unexpected global application-command listing")
+    },
+    async listGlobalApplicationCommandsWithLocalizations() {
+      throw new Error("Unexpected localized global application-command listing")
     },
     async listGuildApplicationCommands() {
       throw new Error("Unexpected application-command listing")
@@ -3028,6 +3040,57 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     /reviewed-write plan digest is invalid/,
   )
   assert.equal(writeCoordinator.intents.length, 48)
+})
+
+test("service coordinates global application commands by the exact application-wide collection", async () => {
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const { service } = serviceFixture({
+    client: {
+      async listGlobalApplicationCommandsWithLocalizations() {
+        return []
+      },
+    },
+    configOverrides: {
+      capabilities: { globalApplicationCommandChanges: true },
+    },
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeGlobalExposure: true as const,
+    action: "create" as const,
+    definition: {
+      contexts: ["guild" as const],
+      defaultMemberPermissions: ["MANAGE_GUILD" as const],
+      description: "Deploy one reviewed global release",
+      descriptionLocalizations: [],
+      integrationTypes: ["guild-install" as const],
+      name: "deploy-global",
+      nameLocalizations: [],
+      nsfw: false,
+      options: [],
+      type: "chat-input" as const,
+    },
+    operationKey: "global-command-coordination-0001",
+  }
+
+  const plan = await service.planGlobalApplicationCommandChange(request)
+  assert.equal(plan.effect, "change")
+  assert.deepEqual(plan.application.installationTypes, ["guild-install"])
+  await assert.rejects(
+    service.executeGlobalApplicationCommandChange(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+  assert.equal(writeCoordinator.intents.length, 1)
+  assert.deepEqual(writeCoordinator.intents[0], {
+    kind: "global-application-command-change",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [{
+      applicationId: APPLICATION_ID,
+      collection: "global-application-commands",
+      kind: "application-collection",
+    }],
+  })
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
