@@ -303,6 +303,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    inviteRoleAssignmentEnabled: false,
+    inviteRoleIds: [],
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],
@@ -1423,6 +1425,8 @@ test("configuration and policy require an exact administration guild and protect
     inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    inviteRoleAssignmentEnabled: false,
+    inviteRoleIds: [],
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],
@@ -2007,6 +2011,77 @@ test("configuration and policy isolate finite private-file invite creation", asy
     /not group or world writable/,
   )
   await chmod(capabilityRoot, 0o700)
+})
+
+test("configuration and policy separately gate persistent invite role assignment", async (context) => {
+  const capabilityRoot = await realpath(
+    await mkdtemp(join(tmpdir(), "discord-mcp-invite-role-policy-")),
+  )
+  context.after(() => rm(capabilityRoot, { recursive: true, force: true }))
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      inviteCreation: true,
+      inviteRoleAssignment: true,
+    },
+    gateway: { enabled: true },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      inviteCreationChannelIds: [CHANNEL_ID],
+      inviteRoleIds: [ROLE_ID],
+    },
+    storage: { inviteCapabilityRoots: [capabilityRoot] },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowInviteRoleAssignment, true)
+  assert.deepEqual([...config.inviteRoleIds], [ROLE_ID])
+  assert.equal(policy.describe().inviteRoleAssignmentEnabled, true)
+  assert.deepEqual(policy.describe().inviteRoleIds, [ROLE_ID])
+  assert.doesNotThrow(() => policy.assertInviteRoleAssignmentAllowed([ROLE_ID]))
+  assert.throws(
+    () => policy.assertInviteRoleAssignmentAllowed(["350000000000000002"]),
+    /outside the invite role-assignment scope/,
+  )
+
+  for (const [document, expected] of [
+    [{
+      capabilities: { inviteRoleAssignment: true },
+      scopes: { inviteRoleIds: [ROLE_ID] },
+    }, /requires \$\.capabilities\.inviteCreation/],
+    [{
+      capabilities: { inviteCreation: true, inviteRoleAssignment: true },
+      scopes: { inviteCreationChannelIds: [CHANNEL_ID] },
+      storage: { inviteCapabilityRoots: [capabilityRoot] },
+    }, /requires \$\.scopes\.inviteRoleIds/],
+    [{
+      capabilities: { inviteCreation: true, inviteRoleAssignment: true },
+      scopes: {
+        inviteCreationChannelIds: [CHANNEL_ID],
+        inviteRoleIds: [ROLE_ID],
+      },
+      storage: { inviteCapabilityRoots: [capabilityRoot] },
+    }, /requires \$\.gateway\.enabled/],
+  ] as const) {
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        readScope: {
+          channelIds: [CHANNEL_ID],
+          guildIds: [GUILD_ID],
+        },
+        ...document,
+      }, { homeDirectory: "/test/home" }),
+      expected,
+    )
+  }
 })
 
 test("configuration and policy isolate reviewed guild onboarding", () => {
@@ -4959,6 +5034,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    inviteRoleAssignmentEnabled: false,
+    inviteRoleIds: [],
     onboardingAuditEnabled: false,
     onboardingChangesEnabled: false,
     onboardingGuildIds: [],

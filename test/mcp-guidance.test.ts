@@ -2113,6 +2113,8 @@ function guidanceService(options: {
         inviteCreationEnabled: false,
         inviteDeletionsEnabled: false,
         inviteGuildIds: [],
+        inviteRoleAssignmentEnabled: false,
+        inviteRoleIds: [],
         memberDirectoryEnabled: true,
         memberDirectoryGuildIds: [GUILD_ID],
         nicknameChangesEnabled: false,
@@ -3428,6 +3430,11 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   )
   assert.match(safety.text, /Guild invite audit requires separate audit and exact-guild scope/)
   assert.match(safety.text, /Raw invite codes and URLs are bearer capabilities/)
+  assert.match(safety.text, /Persistent role assignment has another disabled capability/)
+  assert.match(safety.text, /minimum new-member impact review/)
+  assert.match(safety.text, /assigned roles survive invite expiry or deletion/)
+  assert.match(safety.text, /point-in-time snapshot/)
+  assert.match(safety.text, /durably excludes the channel, guild invite collection, and every selected role/)
   assert.match(safety.text, /full-inventory absence readback/)
   assert.match(safety.text, /Guild Template audit requires separate audit and exact-guild scope/)
   assert.match(safety.text, /process-keyed opaque references/)
@@ -4799,6 +4806,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     arguments: {
       acceptanceKind: "exact-users",
       acknowledgeBearerCapability: "true",
+      acknowledgePersistentGrants: "false",
       auditReason: "Reviewed invite creation",
       channelId: CHANNEL_ID,
       guildId: GUILD_ID,
@@ -4806,6 +4814,8 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       maxUses: "1",
       operationKey: OPERATION_KEY,
       outputFile: "/private/invite.json",
+      roleAssignmentKind: "none",
+      roleIds: "",
       targetUserIds: `${USER_ID},500000000000000002`,
       temporaryMembership: "false",
     },
@@ -4824,6 +4834,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     maxUses: 1,
     operationKey: OPERATION_KEY,
     outputFile: "/private/invite.json",
+    roleAssignment: { kind: "none" },
     temporaryMembership: false,
   })
   assert.match(inviteCreation, /Call only plan_invite_creation/)
@@ -4832,6 +4843,68 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(inviteCreation, /private file/)
   assert.match(inviteCreation, /target-user CSV/)
   assert.doesNotMatch(inviteCreation, new RegExp(PRIVATE_INVITE_CODE))
+
+  const roleInviteCreation = promptText(await client.getPrompt({
+    arguments: {
+      acceptanceKind: "bearer",
+      acknowledgeBearerCapability: "true",
+      acknowledgePersistentGrants: "true",
+      auditReason: "Reviewed persistent invite roles",
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      maxAgeSeconds: "3600",
+      maxUses: "1",
+      operationKey: OPERATION_KEY,
+      outputFile: "/private/role-invite.json",
+      roleAssignmentKind: "grant",
+      roleIds: ROLE_ID,
+      targetUserIds: "",
+      temporaryMembership: "false",
+    },
+    name: MCP_PROMPT_NAMES.reviewInviteCreation,
+  }))
+  assert.deepEqual(JSON.parse(roleInviteCreation.split("\n")[1] || ""), {
+    acceptance: { kind: "bearer" },
+    acknowledgeBearerCapability: true,
+    auditReason: "Reviewed persistent invite roles",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey: OPERATION_KEY,
+    outputFile: "/private/role-invite.json",
+    roleAssignment: {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [ROLE_ID],
+    },
+    temporaryMembership: false,
+  })
+  assert.match(roleInviteCreation, /persistent role IDs and permissions/)
+  assert.match(roleInviteCreation, /conditional MANAGE_GUILD and MANAGE_ROLES/)
+  assert.match(roleInviteCreation, /remain after invite expiry or deletion/)
+  await assert.rejects(
+    () => client.getPrompt({
+      arguments: {
+        acceptanceKind: "bearer",
+        acknowledgeBearerCapability: "true",
+        acknowledgePersistentGrants: "true",
+        auditReason: "Reviewed contradictory invite",
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        maxAgeSeconds: "3600",
+        maxUses: "1",
+        operationKey: OPERATION_KEY,
+        outputFile: "/private/role-invite.json",
+        roleAssignmentKind: "grant",
+        roleIds: ROLE_ID,
+        targetUserIds: "",
+        temporaryMembership: "true",
+      },
+      name: MCP_PROMPT_NAMES.reviewInviteCreation,
+    }),
+    /temporaryMembership must be false/,
+  )
 
   const inviteDeletion = promptText(await client.getPrompt({
     arguments: {

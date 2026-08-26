@@ -440,6 +440,7 @@ export interface DiscordInviteIdentitySummary {
   channelId: string | null
   code: string
   guildId: string | null
+  roleIds: string[]
   type: number
 }
 
@@ -448,6 +449,7 @@ export type DiscordDeletedInviteSummary = DiscordInviteIdentitySummary
 export interface CreateChannelInviteInput {
   maxAgeSeconds: number
   maxUses: number
+  roleIds: readonly string[]
   targetUserIds: readonly string[] | null
   temporaryMembership: boolean
 }
@@ -1845,6 +1847,18 @@ function inviteCode(record: Record<string, unknown>): string {
   return record.code
 }
 
+function projectInviteRoleIds(value: unknown): string[] {
+  const roles = value ?? []
+  if (!Array.isArray(roles) || roles.length > INVITE_LIMITS.roleIds) {
+    throw inviteEvidenceError()
+  }
+  const roleIds = roles.map(projectedInviteId)
+  if (roleIds.some((roleId) => roleId === null)) throw inviteEvidenceError()
+  const exactRoleIds = roleIds as string[]
+  if (new Set(exactRoleIds).size !== exactRoleIds.length) throw inviteEvidenceError()
+  return exactRoleIds.sort(compareDiscordSnowflakes)
+}
+
 function projectInviteIdentity(value: unknown): DiscordInviteIdentitySummary {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw inviteEvidenceError()
@@ -1854,6 +1868,7 @@ function projectInviteIdentity(value: unknown): DiscordInviteIdentitySummary {
     channelId: projectedInviteId(record.channel),
     code: inviteCode(record),
     guildId: projectedInviteId(record.guild),
+    roleIds: projectInviteRoleIds(record.roles),
     type: inviteInteger(record.type),
   }
 }
@@ -1930,9 +1945,26 @@ function projectInviteTargetUserIds(value: string): string[] {
 const CREATE_CHANNEL_INVITE_INPUT_KEYS: ReadonlySet<string> = new Set([
   "maxAgeSeconds",
   "maxUses",
+  "roleIds",
   "targetUserIds",
   "temporaryMembership",
 ])
+
+function canonicalInviteRoleIds(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > INVITE_LIMITS.roleIds) return false
+  try {
+    for (const id of value) {
+      assertPositiveSnowflake(id, "Discord invite role ID")
+      if (BigInt(id).toString() !== id) return false
+    }
+  } catch {
+    return false
+  }
+  if (new Set(value).size !== value.length) return false
+  return value.every((id, index) => (
+    index === 0 || compareDiscordSnowflakes(value[index - 1] as string, id) < 0
+  ))
+}
 
 function canonicalInviteTargetUserIds(value: unknown): boolean {
   if (value === null) return true
@@ -1970,11 +2002,12 @@ function assertCreateChannelInviteInput(input: CreateChannelInviteInput): void {
     || !Number.isInteger(input.maxUses)
     || input.maxUses < 1
     || input.maxUses > INVITE_LIMITS.maxUses
+    || !canonicalInviteRoleIds(input.roleIds)
     || !canonicalInviteTargetUserIds(input.targetUserIds)
     || typeof input.temporaryMembership !== "boolean"
   ) {
     throw new RangeError(
-      "Discord invite creation requires finite age, finite uses, canonical acceptance, and explicit temporary membership",
+      "Discord invite creation requires finite age, finite uses, canonical acceptance, canonical role assignment, and explicit temporary membership",
     )
   }
 }
@@ -2010,14 +2043,10 @@ function projectInvite(value: unknown): DiscordInviteSummary {
   ) {
     throw inviteEvidenceError()
   }
-  const roles = record.roles ?? []
-  if (!Array.isArray(roles) || roles.length > INVITE_LIMITS.roleIds) {
-    throw inviteEvidenceError()
-  }
-  const roleIds = roles.map(projectedInviteId)
-  if (roleIds.some((roleId) => roleId === null)) throw inviteEvidenceError()
-  const exactRoleIds = roleIds as string[]
-  if (new Set(exactRoleIds).size !== exactRoleIds.length) throw inviteEvidenceError()
+  const rolesValue = record.roles ?? []
+  const exactRoleIds = projectInviteRoleIds(rolesValue)
+  if (!Array.isArray(rolesValue)) throw inviteEvidenceError()
+  const roles = rolesValue
   const unknownFieldCount = countUnknownFields(record, [...INVITE_RESPONSE_KEYS])
     + roles.reduce((total, role) => {
         if (!role || typeof role !== "object" || Array.isArray(role)) {
@@ -10914,12 +10943,13 @@ export class DiscordClient {
     assertPositiveSnowflake(channelId, "Discord invite-creation channel ID")
     assertCreateChannelInviteInput(input)
     encodeDiscordAuditReason(auditReason)
-    const payload = {
+    const payload: Record<string, unknown> = {
       max_age: input.maxAgeSeconds,
       max_uses: input.maxUses,
       temporary: input.temporaryMembership,
       unique: true,
     }
+    if (input.roleIds.length > 0) payload.role_ids = [...input.roleIds]
     let multipartBody: FormData | undefined
     if (input.targetUserIds !== null) {
       multipartBody = new FormData()

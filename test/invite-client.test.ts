@@ -107,6 +107,7 @@ test("Discord client deletes an invite once with a secret-safe diagnostic route"
     channelId: "200",
     code: PRIVATE_CODE,
     guildId: "100",
+    roleIds: [],
     type: 0,
   })
   assert.deepEqual(requests, [{
@@ -158,6 +159,7 @@ test("Discord client creates one unique finite invite without automatic retry", 
     {
       maxAgeSeconds: 3_600,
       maxUses: 2,
+      roleIds: [],
       targetUserIds: null,
       temporaryMembership: true,
     },
@@ -178,6 +180,53 @@ test("Discord client creates one unique finite invite without automatic retry", 
     reason: "Reviewed%20temporary%20access",
     url: `${API_BASE_URL}/channels/200/invites`,
   }])
+})
+
+test("Discord client sends exact persistent invite roles in a JSON body", async () => {
+  let body: unknown
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as unknown
+      return jsonResponse({
+        channel: { id: "200" },
+        code: PRIVATE_CODE,
+        created_at: "2026-08-21T12:00:00.000Z",
+        expires_at: "2026-08-21T13:00:00.000Z",
+        flags: 0,
+        guild: { id: "100" },
+        inviter: { id: "300" },
+        max_age: 3_600,
+        max_uses: 2,
+        roles: [{ id: "400" }, { id: "401" }],
+        temporary: false,
+        type: 0,
+        uses: 0,
+      })
+    },
+    token: TOKEN,
+  })
+
+  const created = await client.createChannelInvite(
+    "200",
+    {
+      maxAgeSeconds: 3_600,
+      maxUses: 2,
+      roleIds: ["400", "401"],
+      targetUserIds: null,
+      temporaryMembership: false,
+    },
+    "Reviewed persistent role access",
+  )
+
+  assert.deepEqual(body, {
+    max_age: 3_600,
+    max_uses: 2,
+    role_ids: ["400", "401"],
+    temporary: false,
+    unique: true,
+  })
+  assert.deepEqual(created.roleIds, ["400", "401"])
 })
 
 test("Discord client creates exact-user invites from generated multipart data", async () => {
@@ -214,7 +263,7 @@ test("Discord client creates exact-user invites from generated multipart data", 
         inviter: { id: "300" },
         max_age: 3_600,
         max_uses: 2,
-        roles: [],
+        roles: [{ id: "400" }, { id: "401" }],
         temporary: false,
         type: 0,
         uses: 0,
@@ -228,6 +277,7 @@ test("Discord client creates exact-user invites from generated multipart data", 
     {
       maxAgeSeconds: 3_600,
       maxUses: 2,
+      roleIds: ["400", "401"],
       targetUserIds: ["301", "302"],
       temporaryMembership: false,
     },
@@ -241,6 +291,7 @@ test("Discord client creates exact-user invites from generated multipart data", 
     payload: {
       max_age: 3_600,
       max_uses: 2,
+      role_ids: ["400", "401"],
       temporary: false,
       unique: true,
     },
@@ -317,6 +368,7 @@ test("Discord client verifies an exact invite without sending bot authentication
         channel: { id: "200" },
         code: PRIVATE_CODE,
         guild: { id: "100" },
+        roles: [{ id: "401" }, { id: "400" }],
         type: 0,
       })
     },
@@ -329,6 +381,7 @@ test("Discord client verifies an exact invite without sending bot authentication
     channelId: "200",
     code: PRIVATE_CODE,
     guildId: "100",
+    roleIds: ["400", "401"],
     type: 0,
   })
   assert.deepEqual(requests, [{
@@ -473,6 +526,7 @@ test("Discord client never exposes an invite code through invite failures", asyn
       {
         maxAgeSeconds: 60,
         maxUses: 1,
+        roleIds: [],
         targetUserIds: null,
         temporaryMembership: false,
       },
@@ -511,6 +565,7 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
       {
         maxAgeSeconds: 0,
         maxUses: 1,
+        roleIds: [],
         targetUserIds: null,
         temporaryMembership: false,
       },
@@ -524,6 +579,7 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
       {
         maxAgeSeconds: 60,
         maxUses: 0,
+        roleIds: [],
         targetUserIds: null,
         temporaryMembership: false,
       },
@@ -537,6 +593,7 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
       {
         maxAgeSeconds: 60,
         maxUses: 1,
+        roleIds: [],
         targetUserIds: ["302", "301"],
         temporaryMembership: false,
       },
@@ -550,6 +607,7 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
       {
         maxAgeSeconds: 60,
         maxUses: 1,
+        roleIds: [],
         targetUserIds: ["0301"],
         temporaryMembership: false,
       },
@@ -563,6 +621,7 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
       {
         maxAgeSeconds: 60,
         maxUses: 1,
+        roleIds: [],
         targetUserIds: ["301", "301"],
         temporaryMembership: false,
       },
@@ -570,6 +629,26 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
     ),
     /canonical acceptance/,
   )
+  for (const roleIds of [
+    ["401", "400"],
+    ["0400"],
+    ["400", "400"],
+  ]) {
+    await assert.rejects(
+      () => client.createChannelInvite(
+        "200",
+        {
+          maxAgeSeconds: 60,
+          maxUses: 1,
+          roleIds,
+          targetUserIds: null,
+          temporaryMembership: false,
+        },
+        "Reviewed access",
+      ),
+      /canonical role assignment/,
+    )
+  }
   assert.equal(requests, 1)
 
   for (const overrides of [
@@ -616,6 +695,28 @@ test("Discord client rejects malformed invite evidence and inputs", async () => 
     })
     await assert.rejects(
       () => malformedClient.getInviteTargetUsersJobStatus(PRIVATE_CODE),
+      /invalid guild invite inventory/,
+    )
+  }
+
+  for (const roles of [
+    "not-an-array",
+    [{ id: "400" }, { id: "400" }],
+    [{ id: "0" }],
+  ]) {
+    const malformedClient = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse({
+        channel: { id: "200" },
+        code: PRIVATE_CODE,
+        guild: { id: "100" },
+        roles,
+        type: 0,
+      }),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      () => malformedClient.getInvite(PRIVATE_CODE),
       /invalid guild invite inventory/,
     )
   }

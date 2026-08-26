@@ -3518,6 +3518,9 @@ test("JSONL activity log keeps invite creation evidence capability- and path-fre
     "https://discord.gg/private-invite-code",
     "/private/capabilities/invite.json",
     "private-operation-key",
+    "private-role-name",
+    "private-role-permissions",
+    "private-channel-impact",
   ]
 
   await store.append(inviteCreation("1", "pending"))
@@ -3530,6 +3533,9 @@ test("JSONL activity log keeps invite creation evidence capability- and path-fre
       url: privateValues[2],
       outputFile: privateValues[3],
       operationKey: privateValues[4],
+      roleName: privateValues[5],
+      rolePermissions: privateValues[6],
+      channelImpact: privateValues[7],
     } as InviteCreationActivity),
     /invalid content-free shape/,
   )

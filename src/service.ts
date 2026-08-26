@@ -1674,6 +1674,7 @@ export class ConnectorService {
       activityStore: this.#activityStore,
       capabilityRoots: options.config.inviteCapabilityRoots,
       client: this.#client,
+      layoutSource: gateway,
       operationStore,
       policy: this.#policy,
       ...options.inviteOptions,
@@ -5656,7 +5657,7 @@ export class ConnectorService {
     planDigest: string,
     options: RequestOptions = {},
   ): Promise<InviteCreationResult> {
-    normalizeInviteCreationRequest(request)
+    const normalized = normalizeInviteCreationRequest(request)
     if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
       throw new RangeError("Discord invite-creation plan digest is invalid")
     }
@@ -5669,6 +5670,11 @@ export class ConnectorService {
       [
         writeResourceTarget("channel", request.channelId),
         writeGuildCollectionTarget("invites", request.guildId),
+        ...(normalized.roleAssignment.kind === "grant"
+          ? normalized.roleAssignment.roleIds.map((roleId) => (
+              writeResourceTarget("role", roleId)
+            ))
+          : []),
       ],
       () => this.#inviteService.executeCreation(
         identity.application.id,

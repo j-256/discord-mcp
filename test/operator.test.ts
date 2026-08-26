@@ -317,6 +317,8 @@ function status(
       inviteCreationEnabled: false,
       inviteDeletionsEnabled: false,
       inviteGuildIds: [],
+      inviteRoleAssignmentEnabled: false,
+      inviteRoleIds: [],
       memberDirectoryEnabled: false,
       memberDirectoryGuildIds: [],
       nicknameChangesEnabled: false,
@@ -2365,10 +2367,13 @@ test("doctor and setup explain capability-safe invite creation, audit, and revoc
       inviteAudit: true,
       inviteCreation: true,
       inviteDeletions: true,
+      inviteRoleAssignment: true,
     },
+    gateway: { enabled: true },
     scopes: {
       inviteCreationChannelIds: [CHANNEL_ID],
       inviteGuildIds: [GUILD_ID],
+      inviteRoleIds: [ROLE_ID],
     },
     storage: {
       inviteCapabilityRoots: [capabilityRoot],
@@ -2425,6 +2430,11 @@ test("doctor and setup explain capability-safe invite creation, audit, and revoc
   assert.match(creation?.summary || "", /delivery after verification/)
   assert.match(creation?.summary || "", /exclusive 0600 delivery/)
   assert.match(creation?.summary || "", /no invite capability in MCP results or lifecycle records/)
+  assert.match(creation?.summary || "", /1 exact roles/)
+  assert.match(creation?.summary || "", /complete Gateway channel evidence/)
+  assert.match(creation?.summary || "", /MANAGE_ROLES/)
+  assert.match(creation?.summary || "", /minimum new-member impact review/)
+  assert.match(creation?.summary || "", /persistence acknowledgement/)
   assert.equal(
     warning.checks.find(
       (entry) => entry.id === DOCTOR_CHECK_IDS.inviteAuditPolicy,

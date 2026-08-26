@@ -211,6 +211,10 @@
           "type": "boolean",
           "description": "Enable reviewed finite invite creation with private-file capability delivery"
         },
+        "inviteRoleAssignment": {
+          "type": "boolean",
+          "description": "Enable reviewed persistent role assignment through finite privately delivered invites"
+        },
         "inviteDeletions": {
           "type": "boolean",
           "description": "Enable invite deletions policy"
@@ -1111,6 +1115,16 @@
             "pattern": "^[0-9]{1,20}$"
           },
           "description": "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
+        },
+        "inviteRoleIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact role ID allowlist for reviewed persistent invite role assignment"
         },
         "inviteGuildIds": {
           "minItems": 0,

@@ -17,6 +17,7 @@ import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import {
   DISCORD_CHANNEL_TYPES,
   INVITE_REFERENCE_PATTERN,
+  SCHEMA_VERSION,
 } from "../src/constants.js"
 import type {
   CreateChannelInviteInput,
@@ -38,6 +39,10 @@ import {
   type InviteServiceOptions,
 } from "../src/invite-service.js"
 import type {
+  GatewayChannelLayoutListener,
+  GatewayChannelLayoutSource,
+} from "../src/gateway-channel-layout.js"
+import type {
   OperationReceipt,
   OperationReservation,
   OperationStore,
@@ -55,6 +60,8 @@ const GUILD_ID = "200000000000000001"
 const BOT_ID = "300000000000000001"
 const OWNER_ID = "300000000000000002"
 const BOT_ROLE_ID = "400000000000000001"
+const GRANTED_ROLE_ID = "400000000000000002"
+const OTHER_GRANTED_ROLE_ID = "400000000000000003"
 const CHANNEL_ID = "500000000000000001"
 const PRIVATE_CODE = "private-created-invite"
 const AUDIT_REASON = "Reviewed temporary access / case 17"
@@ -93,12 +100,18 @@ class MemoryOperationStore implements OperationStore {
 
 interface FixtureState {
   activityFailureAt: number | null
+  allowInviteRoleAssignment: boolean
   channel: DiscordChannel
   createError: unknown
   created: DiscordInviteSummary
   inventoryVerification: DiscordInviteSummary[]
   inventoryVerificationError: unknown
+  inviteRoleIds: string[]
+  layoutComplete: boolean
+  layoutObfuscated: boolean
+  layoutState: "ready" | "invalidated"
   member: DiscordGuildMember
+  provideLayoutSource: boolean
   roles: DiscordRole[]
   targetUserIds: string[]
   targetUserJobStatuses: DiscordInviteTargetUsersJobStatus[]
@@ -123,6 +136,7 @@ function channel(): DiscordChannel {
     id: CHANNEL_ID,
     name: "private-invite-channel",
     permission_overwrites: [],
+    position: 0,
     type: DISCORD_CHANNEL_TYPES.text,
   }
 }
@@ -149,6 +163,39 @@ function createdInvite(overrides: Partial<DiscordInviteSummary> = {}): DiscordIn
   }
 }
 
+function roleGrantState(
+  overrides: Partial<FixtureState> = {},
+): Partial<FixtureState> {
+  const grantedPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  return {
+    allowInviteRoleAssignment: true,
+    created: createdInvite({ roleIds: [GRANTED_ROLE_ID] }),
+    inventoryVerification: [createdInvite({ roleIds: [GRANTED_ROLE_ID] })],
+    inviteRoleIds: [GRANTED_ROLE_ID],
+    provideLayoutSource: true,
+    roles: [
+      role(GUILD_ID, 0n, 0),
+      role(
+        BOT_ROLE_ID,
+        grantedPermissions
+          | DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE
+          | DISCORD_PERMISSIONS.MANAGE_ROLES,
+        10,
+      ),
+      role(GRANTED_ROLE_ID, grantedPermissions, 5),
+    ],
+    verification: {
+      channelId: CHANNEL_ID,
+      code: PRIVATE_CODE,
+      guildId: GUILD_ID,
+      roleIds: [GRANTED_ROLE_ID],
+      type: 0,
+    },
+    ...overrides,
+  }
+}
+
 async function fixture(
   context: test.TestContext,
   overrides: Partial<FixtureState> = {},
@@ -163,11 +210,16 @@ async function fixture(
   const outputFile = join(root, "invite.json")
   const state: FixtureState = {
     activityFailureAt: null,
+    allowInviteRoleAssignment: false,
     channel: channel(),
     createError: undefined,
     created: createdInvite(),
     inventoryVerification: [createdInvite()],
     inventoryVerificationError: undefined,
+    inviteRoleIds: [],
+    layoutComplete: true,
+    layoutObfuscated: false,
+    layoutState: "ready",
     member: {
       roles: [BOT_ROLE_ID],
       user: { bot: true, id: BOT_ID, username: "connector" },
@@ -181,6 +233,7 @@ async function fixture(
         10,
       ),
     ],
+    provideLayoutSource: false,
     targetUserIds: ["600000000000000001", "600000000000000002"],
     targetUserJobStatuses: [{
       completedAt: "2026-08-24T00:00:01.000Z",
@@ -196,6 +249,7 @@ async function fixture(
       channelId: CHANNEL_ID,
       code: PRIVATE_CODE,
       guildId: GUILD_ID,
+      roleIds: [],
       type: 0,
     },
     verificationError: undefined,
@@ -204,6 +258,7 @@ async function fixture(
   const activities: ActivityEntry[] = []
   const events: string[] = []
   const operationStore = new MemoryOperationStore(events)
+  const createInputs: CreateChannelInviteInput[] = []
   let activityCalls = 0
   const activityStore: ActivityStore = {
     async append(entry) {
@@ -224,12 +279,14 @@ async function fixture(
     allowDeletions: false,
     allowInteractions: false,
     allowInviteCreation: true,
+    allowInviteRoleAssignment: state.allowInviteRoleAssignment,
     deleteChannelIds: new Set(),
     interactionChannelIds: new Set(),
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 0,
     inviteCapabilityRoots: [root],
     inviteCreationChannelIds: new Set([CHANNEL_ID]),
+    inviteRoleIds: new Set(state.inviteRoleIds),
     mentionUserIds: new Set(),
     protectedUserIds: new Set(),
   })
@@ -239,6 +296,11 @@ async function fixture(
       input: CreateChannelInviteInput,
       auditReason: string,
     ) {
+      createInputs.push({
+        ...input,
+        roleIds: [...input.roleIds],
+        targetUserIds: input.targetUserIds === null ? null : [...input.targetUserIds],
+      })
       events.push(
         `write:create:${channelId}:${input.maxAgeSeconds}:${input.targetUserIds?.join(",") ?? "bearer"}:${auditReason}`,
       )
@@ -290,11 +352,56 @@ async function fixture(
       return state.inventoryVerification
     },
   }
+  const layoutSource: GatewayChannelLayoutSource = {
+    layoutEnabled: true,
+    getChannelLayout(guildId) {
+      return {
+        channels: [{
+          channelId: state.channel.id,
+          obfuscated: state.layoutObfuscated,
+          parentChannelId: state.channel.parent_id ?? null,
+          position: state.channel.position ?? 0,
+          type: state.channel.type,
+        }],
+        complete: state.layoutComplete,
+        guildId,
+        reason: state.layoutState === "ready" ? null : "connection-gap",
+        revision: 1,
+        schemaVersion: SCHEMA_VERSION,
+        state: state.layoutState,
+        updatedAt: CREATED_AT,
+      }
+    },
+    getChannelLayoutStatus() {
+      return {
+        channels: {
+          obfuscated: state.layoutObfuscated ? 1 : 0,
+          retained: 1,
+        },
+        enabled: true,
+        guilds: {
+          invalidated: state.layoutState === "invalidated" ? 1 : 0,
+          pending: 0,
+          ready: state.layoutState === "ready" ? 1 : 0,
+          resuming: 0,
+          scoped: 1,
+          unavailable: 0,
+        },
+        invalidations: state.layoutState === "invalidated" ? 1 : 0,
+        schemaVersion: SCHEMA_VERSION,
+        updates: 1,
+      }
+    },
+    subscribeChannelLayouts(_listener: GatewayChannelLayoutListener) {
+      return () => undefined
+    },
+  }
   const service = new InviteService({
     activityStore,
     capabilityRoots: [root],
     client,
     clock: () => new Date(CREATED_AT),
+    ...(state.provideLayoutSource ? { layoutSource } : {}),
     operationStore,
     planKey: new Uint8Array(32).fill(17),
     policy,
@@ -305,6 +412,7 @@ async function fixture(
   })
   return {
     activities,
+    createInputs,
     events,
     operationStore,
     outputFile,
@@ -314,7 +422,10 @@ async function fixture(
   }
 }
 
-function request(outputFile: string, overrides: Partial<InviteCreationRequest> = {}) {
+function request(
+  outputFile: string,
+  overrides: Partial<InviteCreationRequest> = {},
+): InviteCreationRequest {
   return {
     acceptance: { kind: "bearer" } as const,
     acknowledgeBearerCapability: true as const,
@@ -325,6 +436,7 @@ function request(outputFile: string, overrides: Partial<InviteCreationRequest> =
     maxUses: 1,
     operationKey: OPERATION_KEY,
     outputFile,
+    roleAssignment: { kind: "none" },
     temporaryMembership: false,
     ...overrides,
   }
@@ -359,13 +471,14 @@ test("invite creation plans and delivers one finite capability only through a pr
     "CREATE_INSTANT_INVITE",
     "VIEW_CHANNEL",
   ])
-  assert.equal(plan.delivery.format, "discord-invite-capability.v2")
+  assert.equal(plan.delivery.format, "discord-invite-capability.v3")
   assert.equal(plan.delivery.outputFile, outputFile)
   assert.equal(plan.delivery.review.fileMode, "0600")
   assert.deepEqual(plan.intent, {
     acceptance: { kind: "bearer" },
     maxAgeSeconds: 3_600,
     maxUses: 1,
+    roleAssignment: { kind: "none" },
     temporaryMembership: false,
     unique: true,
   })
@@ -384,7 +497,8 @@ test("invite creation plans and delivers one finite capability only through a pr
     kind: "discord-invite-capability",
     maxAgeSeconds: 3_600,
     maxUses: 1,
-    schemaVersion: 2,
+    roleAssignment: { kind: "none", roleCount: 0 },
+    schemaVersion: 3,
     temporaryMembership: false,
     url: `https://discord.gg/${PRIVATE_CODE}`,
   })
@@ -493,6 +607,89 @@ test("invite creation withholds exact-user capability until job and CSV verifica
   )
 })
 
+test("invite creation reviews and privately delivers persistent role grants", async (context) => {
+  const setup = await fixture(context, roleGrantState())
+  const input = request(setup.outputFile, {
+    roleAssignment: {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [GRANTED_ROLE_ID],
+    },
+  })
+
+  const plan = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+  const result = await setup.service.executeCreation(
+    APPLICATION_ID,
+    BOT_ID,
+    input,
+    plan.digest,
+  )
+
+  assert.equal(plan.access.manageRoles, true)
+  assert.deepEqual(plan.access.requiredPermissions, [
+    "CREATE_INSTANT_INVITE",
+    "VIEW_CHANNEL",
+    "MANAGE_ROLES",
+  ])
+  assert.equal(plan.roleAssignment.kind, "grant")
+  if (plan.roleAssignment.kind !== "grant") throw new Error("Expected role grant review")
+  assert.deepEqual(plan.roleAssignment.roleIds, [GRANTED_ROLE_ID])
+  assert.equal(plan.roleAssignment.persistence, "manual-removal-required")
+  assert.deepEqual(plan.roleAssignment.assignedRoles, [{
+    highRiskPermissions: [],
+    id: GRANTED_ROLE_ID,
+    name: "connector-role",
+    permissionNames: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+    permissions: (
+      DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.SEND_MESSAGES
+    ).toString(),
+    position: 5,
+  }])
+  assert.deepEqual(plan.roleAssignment.channelEvidence, {
+    gatewayChannelCount: 1,
+    httpChannelCount: 1,
+    httpMode: "complete",
+    layoutRevision: 1,
+    layoutUpdatedAt: CREATED_AT,
+    metadataCoverage: "complete",
+    obfuscatedChannelCount: 0,
+    trustedMetadataCount: 1,
+  })
+  assert.equal(plan.roleAssignment.impact.projection, "minimum-new-member")
+  assert.deepEqual(plan.roleAssignment.impact.guildPermissions.added, [
+    "VIEW_CHANNEL",
+    "SEND_MESSAGES",
+  ])
+  assert.equal(plan.roleAssignment.impact.evaluatedChannels, 1)
+  assert.equal(plan.roleAssignment.impact.changedChannels, 1)
+  assert.match(plan.warnings.join(" "), /persist after the invite expires or is deleted/)
+  assert.match(plan.warnings.join(" "), /point-in-time snapshot/)
+  assert.deepEqual(setup.createInputs, [{
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    roleIds: [GRANTED_ROLE_ID],
+    targetUserIds: null,
+    temporaryMembership: false,
+  }])
+  assert.deepEqual(result.roleAssignment, {
+    kind: "grant",
+    roleCount: 1,
+    roleIds: [GRANTED_ROLE_ID],
+  })
+  const capability = JSON.parse(
+    await readFile(setup.outputFile, "utf8"),
+  ) as Record<string, unknown>
+  assert.deepEqual(capability.roleAssignment, {
+    kind: "grant",
+    roleCount: 1,
+    roleIds: [GRANTED_ROLE_ID],
+  })
+  assert.match(String(capability.persistentRoleWarning), /remain after the invite expires/)
+  assert.match(String(capability.persistentRoleWarning), /channel overwrites can change/)
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(PRIVATE_CODE))
+  assert.doesNotMatch(JSON.stringify(setup.activities), /connector-role|private-created-invite/)
+})
+
 test("invite creation normalizes exact finite acknowledged intent", () => {
   const valid = request("/private/invite.json")
   assert.match(normalizeInviteCreationRequest(valid).operationKeyHash, /^sha256:/)
@@ -505,6 +702,18 @@ test("invite creation normalizes exact finite acknowledged intent", () => {
   }).acceptance, {
     kind: "exact-users",
     userIds: ["600000000000000001", "600000000000000002"],
+  })
+  assert.deepEqual(normalizeInviteCreationRequest({
+    ...valid,
+    roleAssignment: {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [OTHER_GRANTED_ROLE_ID, GRANTED_ROLE_ID],
+    },
+  }).roleAssignment, {
+    acknowledgePersistentGrants: true,
+    kind: "grant",
+    roleIds: [GRANTED_ROLE_ID, OTHER_GRANTED_ROLE_ID],
   })
   assert.throws(
     () => normalizeInviteCreationRequest({
@@ -550,6 +759,217 @@ test("invite creation normalizes exact finite acknowledged intent", () => {
       /acceptance|canonical|unique|snowflake/,
     )
   }
+  for (const roleAssignment of [
+    null,
+    { extra: true, kind: "none" },
+    {
+      acknowledgePersistentGrants: false,
+      kind: "grant",
+      roleIds: [GRANTED_ROLE_ID],
+    },
+    {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [],
+    },
+    {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [GRANTED_ROLE_ID, GRANTED_ROLE_ID],
+    },
+    {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: ["0"],
+    },
+    {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [`0${GRANTED_ROLE_ID}`],
+    },
+  ]) {
+    assert.throws(
+      () => normalizeInviteCreationRequest({
+        ...valid,
+        roleAssignment,
+      } as unknown as InviteCreationRequest),
+      /role assignment|role-assignment|canonical|unique|snowflake/,
+    )
+  }
+  assert.throws(
+    () => normalizeInviteCreationRequest({
+      ...valid,
+      roleAssignment: {
+        acknowledgePersistentGrants: true,
+        kind: "grant",
+        roleIds: [GRANTED_ROLE_ID],
+      },
+      temporaryMembership: true,
+    }),
+    /cannot claim temporary membership/,
+  )
+})
+
+test("invite role assignment fails closed on policy and Gateway evidence", async (context) => {
+  for (const [overrides, expected] of [
+    [roleGrantState({ allowInviteRoleAssignment: false }), /role assignment is disabled/],
+    [roleGrantState({ inviteRoleIds: [OTHER_GRANTED_ROLE_ID] }), /outside the invite role-assignment scope/],
+    [roleGrantState({ provideLayoutSource: false }), /requires Gateway channel-layout evidence/],
+    [roleGrantState({ layoutComplete: false }), /channel evidence is incomplete/],
+    [roleGrantState({ layoutState: "invalidated" }), /channel evidence is incomplete/],
+    [roleGrantState({ layoutObfuscated: true }), /complete metadata for every direct guild channel/],
+  ] as const) {
+    const setup = await fixture(context, overrides)
+    await assert.rejects(
+      () => setup.service.planCreation(
+        APPLICATION_ID,
+        BOT_ID,
+        request(setup.outputFile, {
+          roleAssignment: {
+            acknowledgePersistentGrants: true,
+            kind: "grant",
+            roleIds: [GRANTED_ROLE_ID],
+          },
+        }),
+      ),
+      expected,
+    )
+    assert.equal(setup.events.some((entry) => entry.startsWith("write:")), false)
+  }
+})
+
+test("invite role assignment enforces permission, hierarchy, and role evidence", async (context) => {
+  const grantedPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  const botPermissions = grantedPermissions
+    | DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+  const unknownPermission = 1n << 60n
+  const cases: Array<[Partial<FixtureState>, RegExp]> = [
+    [roleGrantState({
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, grantedPermissions | DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE, 10),
+        role(GRANTED_ROLE_ID, grantedPermissions, 5),
+      ],
+    }), /MANAGE_ROLES/],
+    [roleGrantState({
+      roles: [role(GUILD_ID, 0n, 0), role(BOT_ROLE_ID, botPermissions, 10)],
+    }), /omitted selected role/],
+    [roleGrantState({
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, botPermissions, 10),
+        { ...role(GRANTED_ROLE_ID, grantedPermissions, 5), managed: true },
+      ],
+    }), /standard unmanaged roles/],
+    [roleGrantState({
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, botPermissions, 10),
+        role(GRANTED_ROLE_ID, grantedPermissions, 10),
+      ],
+    }), /strictly below/],
+    [roleGrantState({
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, botPermissions, 10),
+        role(GRANTED_ROLE_ID, DISCORD_PERMISSIONS.ADMINISTRATOR, 5),
+      ],
+    }), /never grants ADMINISTRATOR/],
+    [roleGrantState({
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, botPermissions, 10),
+        role(GRANTED_ROLE_ID, unknownPermission, 5),
+      ],
+    }), /permissions unknown to this build/],
+    [roleGrantState({
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, botPermissions, 10),
+        role(GRANTED_ROLE_ID, DISCORD_PERMISSIONS.KICK_MEMBERS, 5),
+      ],
+    }), /cannot grant invite role/],
+    [roleGrantState({
+      channel: {
+        ...channel(),
+        permission_overwrites: [{
+          allow: unknownPermission.toString(),
+          deny: "0",
+          id: GRANTED_ROLE_ID,
+          type: 0,
+        }],
+      },
+    }), /unknown permissions|impact is incomplete/],
+    [roleGrantState({
+      channel: {
+        ...channel(),
+        permission_overwrites: [{
+          allow: DISCORD_PERMISSIONS.MANAGE_MESSAGES.toString(),
+          deny: "0",
+          id: GRANTED_ROLE_ID,
+          type: 0,
+        }],
+      },
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(
+          BOT_ROLE_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE
+            | DISCORD_PERMISSIONS.MANAGE_ROLES,
+          10,
+        ),
+        role(GRANTED_ROLE_ID, 0n, 5),
+      ],
+    }), /cannot grant channel permission MANAGE_MESSAGES/],
+  ]
+
+  for (const [overrides, expected] of cases) {
+    const setup = await fixture(context, overrides)
+    await assert.rejects(
+      () => setup.service.planCreation(
+        APPLICATION_ID,
+        BOT_ID,
+        request(setup.outputFile, {
+          roleAssignment: {
+            acknowledgePersistentGrants: true,
+            kind: "grant",
+            roleIds: [GRANTED_ROLE_ID],
+          },
+        }),
+      ),
+      expected,
+    )
+    assert.equal(setup.events.some((entry) => entry.startsWith("write:")), false)
+  }
+})
+
+test("invite role-assignment plans bind exact role and channel evidence", async (context) => {
+  const setup = await fixture(context, roleGrantState())
+  const input = request(setup.outputFile, {
+    roleAssignment: {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [GRANTED_ROLE_ID],
+    },
+  })
+  const first = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+  const selectedRole = setup.state.roles.find(({ id }) => id === GRANTED_ROLE_ID)
+  assert.ok(selectedRole)
+  selectedRole.position = 4
+  const changedRole = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+  assert.notEqual(changedRole.digest, first.digest)
+
+  setup.state.channel.permission_overwrites = [{
+    allow: "0",
+    deny: DISCORD_PERMISSIONS.SPEAK.toString(),
+    id: GUILD_ID,
+    type: 0,
+  }]
+  const changedChannel = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+  assert.notEqual(changedChannel.digest, changedRole.digest)
 })
 
 test("invite creation rejects incomplete permissions and unsupported channels before mutation", async (context) => {
@@ -850,6 +1270,7 @@ test("invite creation withholds capability when exact verification is uncertain"
       channelId: "500000000000000002",
       code: PRIVATE_CODE,
       guildId: GUILD_ID,
+      roleIds: [],
       type: 0,
     },
   })
@@ -880,6 +1301,56 @@ test("invite creation withholds capability when exact verification is uncertain"
   await assert.rejects(() => lstat(setup.outputFile), { code: "ENOENT" })
   assert.equal(setup.activities.at(-1)?.status, "uncertain")
   assert.doesNotMatch(JSON.stringify(setup.activities), new RegExp(PRIVATE_CODE))
+})
+
+test("invite role assignment requires exact mutation and independent role readback", async (context) => {
+  for (const overrides of [
+    roleGrantState({ created: createdInvite({ roleIds: [] }) }),
+    roleGrantState({
+      verification: {
+        channelId: CHANNEL_ID,
+        code: PRIVATE_CODE,
+        guildId: GUILD_ID,
+        roleIds: [],
+        type: 0,
+      },
+    }),
+  ]) {
+    const setup = await fixture(context, overrides)
+    const input = request(setup.outputFile, {
+      roleAssignment: {
+        acknowledgePersistentGrants: true,
+        kind: "grant",
+        roleIds: [GRANTED_ROLE_ID],
+      },
+    })
+    const plan = await setup.service.planCreation(APPLICATION_ID, BOT_ID, input)
+
+    await assert.rejects(
+      () => setup.service.executeCreation(
+        APPLICATION_ID,
+        BOT_ID,
+        input,
+        plan.digest,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof InviteCreationExecutionError)
+        const result = error.result as {
+          roleAssignment: unknown
+          status: string
+        }
+        assert.equal(result.status, "uncertain")
+        assert.deepEqual(result.roleAssignment, {
+          kind: "grant",
+          roleCount: 1,
+          roleIds: [GRANTED_ROLE_ID],
+        })
+        assert.doesNotMatch(JSON.stringify(error), new RegExp(PRIVATE_CODE))
+        return true
+      },
+    )
+    await assert.rejects(() => lstat(setup.outputFile), { code: "ENOENT" })
+  }
 })
 
 test("invite creation withholds exact-user capability after job or CSV failure", async (context) => {

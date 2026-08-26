@@ -3595,10 +3595,17 @@ function inviteCreationPlan(
   digest = DIGEST,
 ): InviteCreationPlan {
   const exactUsers = request.acceptance.kind === "exact-users"
+  const roleGrant = request.roleAssignment.kind === "grant"
+  const effectivePermissions = DISCORD_PERMISSIONS.CREATE_INSTANT_INVITE
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | (exactUsers ? DISCORD_PERMISSIONS.MANAGE_GUILD : 0n)
+    | (roleGrant ? DISCORD_PERMISSIONS.MANAGE_ROLES : 0n)
   return {
     access: {
       appliedRoleIds: [GUILD_ID],
       botAdministrator: false,
+      botHighestRoleIds: roleGrant ? [ROLE_ORDERING_ANCHOR_ID] : [GUILD_ID],
+      botHighestRolePosition: roleGrant ? 10 : 0,
       botIsGuildOwner: false,
       complete: true,
       createInstantInvite: true,
@@ -3606,13 +3613,16 @@ function inviteCreationPlan(
         "CREATE_INSTANT_INVITE",
         ...(exactUsers ? ["MANAGE_GUILD" as const] : []),
         "VIEW_CHANNEL",
+        ...(roleGrant ? ["MANAGE_ROLES" as const] : []),
       ],
-      effectivePermissions: exactUsers ? "1057" : "1025",
+      effectivePermissions: effectivePermissions.toString(),
       manageGuild: exactUsers,
+      manageRoles: roleGrant,
       requiredPermissions: [
         "CREATE_INSTANT_INVITE",
         ...(exactUsers ? ["MANAGE_GUILD" as const] : []),
         "VIEW_CHANNEL",
+        ...(roleGrant ? ["MANAGE_ROLES" as const] : []),
       ],
       unknownPermissionBits: "0",
       viewChannel: true,
@@ -3623,7 +3633,7 @@ function inviteCreationPlan(
     botId: BOT_ID,
     createdAt: "2026-08-24T00:00:00.000Z",
     delivery: {
-      format: "discord-invite-capability.v2",
+      format: "discord-invite-capability.v3",
       outputFile: request.outputFile,
       review: {
         canonicalPath: request.outputFile,
@@ -3642,6 +3652,7 @@ function inviteCreationPlan(
       acceptance: request.acceptance,
       maxAgeSeconds: request.maxAgeSeconds,
       maxUses: request.maxUses,
+      roleAssignment: request.roleAssignment,
       temporaryMembership: request.temporaryMembership,
       unique: true,
     },
@@ -3654,6 +3665,53 @@ function inviteCreationPlan(
     },
     schemaVersion: 1,
     status: "planned",
+    roleAssignment: request.roleAssignment.kind === "none"
+      ? { kind: "none" }
+      : {
+          acknowledgePersistentGrants: true,
+          assignedRoles: request.roleAssignment.roleIds.map((roleId, index) => ({
+            highRiskPermissions: [],
+            id: roleId,
+            name: `Private role ${index + 1}`,
+            permissionNames: ["VIEW_CHANNEL"],
+            permissions: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+            position: 5 - index,
+          })),
+          channelEvidence: {
+            gatewayChannelCount: 1,
+            httpChannelCount: 1,
+            httpMode: "complete",
+            layoutRevision: 1,
+            layoutUpdatedAt: "2026-08-24T00:00:00.000Z",
+            metadataCoverage: "complete",
+            obfuscatedChannelCount: 0,
+            trustedMetadataCount: 1,
+          },
+          highRiskPermissionGains: [],
+          impact: {
+            changedChannels: 1,
+            channels: [{
+              channelId: request.channelId,
+              channelName: "Private invite channel",
+              channelType: 0,
+              changes: [{
+                after: "allowed",
+                before: "denied",
+                permission: "VIEW_CHANNEL",
+              }],
+            }],
+            evaluatedChannels: 1,
+            guildPermissions: {
+              added: ["VIEW_CHANNEL"],
+              after: ["VIEW_CHANNEL"],
+              before: [],
+            },
+            projection: "minimum-new-member",
+          },
+          kind: "grant",
+          persistence: "manual-removal-required",
+          roleIds: [...request.roleAssignment.roleIds],
+        },
     target: {
       id: request.channelId,
       name: "Private invite channel",
@@ -3666,7 +3724,12 @@ function inviteCreationPlan(
       roleLimit: 250,
       roles: 1,
     },
-    warnings: ["The invite code and URL are private-file-only"],
+    warnings: [
+      "The invite code and URL are private-file-only",
+      ...(roleGrant
+        ? ["Granted roles persist after invite expiry or deletion"]
+        : []),
+    ],
   }
 }
 
@@ -7608,6 +7671,8 @@ function fixturePolicy(): PolicyDescription {
     inviteCreationEnabled: false,
     inviteDeletionsEnabled: false,
     inviteGuildIds: [],
+    inviteRoleAssignmentEnabled: false,
+    inviteRoleIds: [],
     memberDirectoryEnabled: true,
     memberDirectoryGuildIds: [GUILD_ID],
     nicknameChangesEnabled: false,
@@ -9350,6 +9415,13 @@ function serviceFixture(overrides: {
         operationKeyHash: OPERATION_KEY_HASH,
         outputFile: request.outputFile,
         planDigest,
+        roleAssignment: request.roleAssignment.kind === "none"
+          ? { kind: "none" as const, roleCount: 0 as const }
+          : {
+              kind: "grant" as const,
+              roleCount: request.roleAssignment.roleIds.length,
+              roleIds: [...request.roleAssignment.roleIds],
+            },
         schemaVersion: 1,
         status: "completed" as const,
         verified: true as const,
@@ -20371,6 +20443,7 @@ test("MCP invite creation plans require finite acknowledged private delivery", a
     maxUses: 1,
     operationKey: INVITE_CREATION_OPERATION_KEY,
     outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+    roleAssignment: { kind: "none" },
     temporaryMembership: false,
   }
   const planned = await client.callTool({
@@ -20457,6 +20530,81 @@ test("MCP invite creation plans require finite acknowledged private delivery", a
   assert.doesNotMatch(JSON.stringify(planned), new RegExp(PRIVATE_INVITE_CODE))
 })
 
+test("MCP invite creation reviews and signs persistent role grants", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const request = {
+    acceptance: { kind: "bearer" },
+    acknowledgeBearerCapability: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    maxAgeSeconds: 3_600,
+    maxUses: 1,
+    operationKey: INVITE_CREATION_OPERATION_KEY,
+    outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
+    roleAssignment: {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [ROLE_ID],
+    },
+    temporaryMembership: false,
+  }
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_invite_creation",
+  })
+  const invalidTemporary = await client.callTool({
+    arguments: { ...request, temporaryMembership: true },
+    name: "plan_invite_creation",
+  })
+  const duplicateRoles = await client.callTool({
+    arguments: {
+      ...request,
+      roleAssignment: { ...request.roleAssignment, roleIds: [ROLE_ID, ROLE_ID] },
+    },
+    name: "plan_invite_creation",
+  })
+  const planContent = structuredContent(planned)
+  assert.equal((planContent.roleAssignment as Record<string, unknown>).kind, "grant")
+  assert.equal(invalidTemporary.isError, true)
+  assert.equal(duplicateRoles.isError, true)
+  assert.equal(calls.inviteCreationPlan, 1)
+  const tools = await client.listTools()
+  const planTool = tools.tools.find(({ name }) => name === "plan_invite_creation")
+  const executeTool = tools.tools.find(({ name }) => name === "execute_invite_creation")
+  assert.match(planTool?.description || "", /persistent role assignment/)
+  assert.match(planTool?.description || "", /minimum new-member channel impact/)
+  assert.match(executeTool?.description || "", /selected-role exclusion/)
+  assert.match(executeTool?.description || "", /assigned-role verification/)
+
+  const executed = await client.callTool({
+    arguments: { ...request, planDigest: DIGEST },
+    name: "execute_invite_creation",
+  })
+
+  assert.deepEqual(structuredContent(executed).roleAssignment, {
+    kind: "grant",
+    roleCount: 1,
+    roleIds: [ROLE_ID],
+  })
+  assert.equal(calls.inviteCreationPlan, 2)
+  assert.equal(calls.inviteCreationExecute, 1)
+  assert.match(confirmationMessage, /Role assignment: grant/)
+  assert.match(confirmationMessage, new RegExp(ROLE_ID))
+  assert.match(confirmationMessage, /Persistent grants acknowledged: true/)
+  assert.match(confirmationMessage, /Role impact projection: minimum-new-member/)
+  assert.match(confirmationMessage, /Bot MANAGE_ROLES: true/)
+  assert.match(confirmationMessage, /Role persistence: manual-removal-required/)
+  assert.match(confirmationMessage, /remain on accepting users after the invite expires or is deleted/)
+  assert.doesNotMatch(JSON.stringify(executed), new RegExp(PRIVATE_INVITE_CODE))
+})
+
 test("MCP invite creation binds signed approval to exact private capability delivery", async (context) => {
   let confirmationMessage = ""
   const serverMessages: unknown[] = []
@@ -20482,6 +20630,7 @@ test("MCP invite creation binds signed approval to exact private capability deli
       operationKey: INVITE_CREATION_OPERATION_KEY,
       outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
       planDigest: DIGEST,
+      roleAssignment: { kind: "none" },
       temporaryMembership: false,
     },
     name: "execute_invite_creation",
@@ -20535,6 +20684,7 @@ test("MCP invite creation signed state rejects every changed intent field", asyn
     operationKey: INVITE_CREATION_OPERATION_KEY,
     outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
     planDigest: DIGEST,
+    roleAssignment: { kind: "none" },
     temporaryMembership: false,
   }
   const initial = await fixture.client.request({
@@ -20565,6 +20715,14 @@ test("MCP invite creation signed state rejects every changed intent field", asyn
     { ...request, operationKey: "invite-create-attempt-0002" },
     { ...request, outputFile: "/private/invite-created-2.json" },
     { ...request, planDigest: DIFFERENT_DIGEST },
+    {
+      ...request,
+      roleAssignment: {
+        acknowledgePersistentGrants: true as const,
+        kind: "grant" as const,
+        roleIds: [ROLE_ID],
+      },
+    },
     { ...request, temporaryMembership: true },
   ]) {
     const result = await fixture.client.request({
@@ -20604,6 +20762,7 @@ test("MCP invite creation stops on drift and exposes uncertain or one-shot confl
     operationKey: INVITE_CREATION_OPERATION_KEY,
     outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
     planDigest: DIGEST,
+    roleAssignment: { kind: "none" },
     temporaryMembership: false,
   }
   const declined = await connectedFixture(context, {
@@ -20681,6 +20840,7 @@ test("MCP invite creation stops on drift and exposes uncertain or one-shot confl
         operationKeyHash: OPERATION_KEY_HASH,
         outputFile: INVITE_CAPABILITY_OUTPUT_FILE,
         planDigest: DIGEST,
+        roleAssignment: { kind: "none", roleCount: 0 },
         schemaVersion: 1,
         status: "completed",
         verified: true,

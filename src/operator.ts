@@ -2433,10 +2433,13 @@ export async function diagnoseConnector(
         "Invite-creation toggle is enabled, but exact channel scope and a canonical private-file root are both required",
       ))
     } else {
+      const roleAssignmentSummary = config.allowInviteRoleAssignment
+        ? ` Persistent role assignment is constrained to ${config.inviteRoleIds.size} exact roles with complete Gateway channel evidence, MANAGE_ROLES, strict hierarchy, permission-subset checks, minimum new-member impact review, selected-role coordination, and explicit persistence acknowledgement.`
+        : " Persistent role assignment is disabled."
       checks.push(check(
         DOCTOR_CHECK_IDS.inviteCreationPolicy,
         "pass",
-        `Invite creation is constrained to ${config.inviteCreationChannelIds.size} exact channels and ${config.inviteCapabilityRoots.length} private-file roots with complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, conditional MANAGE_GUILD for exact-user acceptance, explicit finite acceptance, exclusive 0600 delivery after verification, and no invite capability in MCP results or lifecycle records`,
+        `Invite creation is constrained to ${config.inviteCreationChannelIds.size} exact channels and ${config.inviteCapabilityRoots.length} private-file roots with complete VIEW_CHANNEL and CREATE_INSTANT_INVITE evidence, conditional MANAGE_GUILD for exact-user acceptance, explicit finite acceptance, exclusive 0600 delivery after verification, and no invite capability in MCP results or lifecycle records.${roleAssignmentSummary}`,
       ))
     }
     if (!config.allowOnboardingAudit) {

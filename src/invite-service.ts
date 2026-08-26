@@ -13,6 +13,7 @@ import type {
   InviteDeletionActivityStatus,
 } from "./activity-log.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_INVITE_URL_PATTERN,
@@ -39,7 +40,15 @@ import {
   InviteDeletionOperationConflictError,
   InviteDeletionPlanChangedError,
   InviteEvidenceError,
+  errorMessage,
 } from "./errors.js"
+import type { GatewayChannelLayoutSource } from "./gateway-channel-layout.js"
+import {
+  collectGuildChannelEvidence,
+  DIRECT_GUILD_CHANNEL_TYPES,
+  GuildChannelEvidenceError,
+  type GuildChannelEvidenceView,
+} from "./guild-channel-evidence.js"
 import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
@@ -48,16 +57,20 @@ import {
 } from "./operation-store.js"
 import {
   ALL_KNOWN_PERMISSION_BITS,
+  DISCORD_CHANNEL_PERMISSION_NAMES,
   DISCORD_PERMISSION_NAMES,
+  DISCORD_PERMISSIONS,
   discordPermissionNames,
   evaluateBotChannelPermissions,
   evaluateGuildMemberPermissions,
+  evaluatePrincipalPermissions,
   hasGuildPermission,
   parseDiscordPermissionBits,
   unknownDiscordPermissionBits,
   type DiscordPermissionName,
   type BotChannelPermissionResult,
   type GuildMemberPermissionResult,
+  type PrincipalPermissionResult,
 } from "./permissions.js"
 import type { ScopePolicy } from "./policy.js"
 import {
@@ -90,8 +103,8 @@ const INVITE_CURSOR_PREFIX = "icur_hmac_sha256_"
 const STATE_UNAVAILABLE = "invite-state-unavailable"
 const CREATION_STATE_UNAVAILABLE = "invite-creation-state-unavailable"
 const DISCORD_INVITE_BASE_URL = "https://discord.gg"
-const INVITE_CAPABILITY_FILE_FORMAT = "discord-invite-capability.v2"
-const INVITE_CAPABILITY_FILE_SCHEMA_VERSION = 2
+const INVITE_CAPABILITY_FILE_FORMAT = "discord-invite-capability.v3"
+const INVITE_CAPABILITY_FILE_SCHEMA_VERSION = 3
 const INVITE_CREATION_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
   DISCORD_CHANNEL_TYPES.forum,
@@ -104,16 +117,19 @@ const INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS = Object.freeze([
   "CREATE_INSTANT_INVITE",
   "VIEW_CHANNEL",
 ] as const satisfies readonly DiscordPermissionName[])
-const INVITE_CREATION_EXACT_USER_REQUIRED_PERMISSIONS = Object.freeze([
-  "CREATE_INSTANT_INVITE",
-  "MANAGE_GUILD",
-  "VIEW_CHANNEL",
-] as const satisfies readonly DiscordPermissionName[])
 const HIGH_RISK_ROLE_PERMISSIONS: ReadonlySet<DiscordPermissionName> = new Set([
   "ADMINISTRATOR",
   "CREATE_INSTANT_INVITE",
   ...ROLE_CREATION_HIGH_RISK_PERMISSIONS,
 ])
+const INVITE_ROLE_IMPACT_PERMISSIONS = Object.freeze([
+  ...DISCORD_CHANNEL_PERMISSION_NAMES,
+])
+const INVITE_ROLE_CHANNEL_PERMISSION_MASK = DISCORD_CHANNEL_PERMISSION_NAMES.reduce(
+  (mask, permission) => mask | DISCORD_PERMISSIONS[permission],
+  0n,
+)
+const HYPOTHETICAL_INVITEE_ID = "0"
 
 export const INVITE_OMITTED_FIELDS = Object.freeze([
   "approximateCounts",
@@ -286,6 +302,13 @@ export interface InviteCreationRequest {
   maxUses: number
   operationKey: string
   outputFile: string
+  roleAssignment:
+    | { kind: "none" }
+    | {
+        acknowledgePersistentGrants: true
+        kind: "grant"
+        roleIds: string[]
+      }
   temporaryMembership: boolean
 }
 
@@ -302,12 +325,15 @@ export interface NormalizedInviteCreationRequest extends Omit<
 export interface InviteCreationAccessEvidence {
   appliedRoleIds: string[]
   botAdministrator: boolean
+  botHighestRoleIds: string[]
+  botHighestRolePosition: number
   botIsGuildOwner: boolean
   complete: true
   createInstantInvite: true
   effectivePermissionNames: DiscordPermissionName[]
   effectivePermissions: string
   manageGuild: boolean
+  manageRoles: boolean
   requiredPermissions: readonly DiscordPermissionName[]
   unknownPermissionBits: string
   viewChannel: true
@@ -334,6 +360,7 @@ export interface InviteCreationPlan {
     acceptance: NormalizedInviteCreationRequest["acceptance"]
     maxAgeSeconds: number
     maxUses: number
+    roleAssignment: NormalizedInviteCreationRequest["roleAssignment"]
     temporaryMembership: boolean
     unique: true
   }
@@ -344,6 +371,7 @@ export interface InviteCreationPlan {
     persistence: "content-free-lifecycle-only"
     rawDiscordPayloads: "omitted"
   }
+  roleAssignment: InviteRoleAssignmentReview
   schemaVersion: number
   status: "planned"
   target: InviteChannelProjection & {
@@ -371,6 +399,9 @@ export interface InviteCreationResult {
   operationKeyHash: string
   outputFile: string
   planDigest: string
+  roleAssignment:
+    | { kind: "none"; roleCount: 0 }
+    | { kind: "grant"; roleCount: number; roleIds: string[] }
   schemaVersion: number
   status: "completed"
   verified: true
@@ -395,6 +426,7 @@ export interface InviteServiceOptions {
   capabilityRoots?: readonly string[]
   client: InviteServiceClient
   clock?: () => Date
+  layoutSource?: GatewayChannelLayoutSource
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: Pick<
@@ -402,6 +434,7 @@ export interface InviteServiceOptions {
     | "assertGuildInviteAuditable"
     | "assertGuildInviteCreatable"
     | "assertGuildInviteDeletable"
+    | "assertInviteRoleAssignmentAllowed"
   >
   privateFileSystem?: PrivateCapabilityFileSystem
   randomId?: () => string
@@ -412,8 +445,65 @@ interface ValidatedRole {
   id: string
   managed: boolean
   name: string
+  permissionNames: DiscordPermissionName[]
   permissions: string
   position: number
+  unknownPermissionBits: string
+}
+
+type InviteRolePermissionDecision = "allowed" | "denied" | "ineffective"
+
+interface InviteRolePermissionChange {
+  after: InviteRolePermissionDecision
+  before: InviteRolePermissionDecision
+  permission: DiscordPermissionName
+}
+
+interface InviteRoleChannelImpact {
+  channelId: string
+  channelName: string
+  channelType: number
+  changes: InviteRolePermissionChange[]
+}
+
+interface InviteRoleGuildPermissionImpact {
+  added: DiscordPermissionName[]
+  after: DiscordPermissionName[]
+  before: DiscordPermissionName[]
+}
+
+interface InviteAssignedRoleProjection {
+  highRiskPermissions: DiscordPermissionName[]
+  id: string
+  name: string
+  permissionNames: DiscordPermissionName[]
+  permissions: string
+  position: number
+}
+
+type InviteRoleAssignmentReview =
+  | { kind: "none" }
+  | {
+      acknowledgePersistentGrants: true
+      assignedRoles: InviteAssignedRoleProjection[]
+      channelEvidence: GuildChannelEvidenceView
+      highRiskPermissionGains: DiscordPermissionName[]
+      impact: {
+        changedChannels: number
+        channels: InviteRoleChannelImpact[]
+        evaluatedChannels: number
+        guildPermissions: InviteRoleGuildPermissionImpact
+        projection: "minimum-new-member"
+      }
+      kind: "grant"
+      persistence: "manual-removal-required"
+      roleIds: string[]
+    }
+
+type InviteRoleImpactChannel = DiscordChannel & {
+  guild_id: string
+  name: string
+  permission_overwrites: DiscordPermissionOverwrite[]
 }
 
 interface InviteState {
@@ -429,6 +519,7 @@ interface InviteState {
 
 interface InviteCreationState {
   access: InviteCreationAccessEvidence
+  botMember: DiscordGuildMember
   channel: DiscordChannel & {
     guild_id: string
     name: string
@@ -436,6 +527,8 @@ interface InviteCreationState {
   }
   channels: InviteChannelProjection[]
   guild: DiscordGuild & { owner_id: string }
+  roleAssignment: InviteRoleAssignmentReview
+  roleGrantChannels: InviteRoleImpactChannel[]
   roles: ValidatedRole[]
 }
 
@@ -550,6 +643,7 @@ const INVITE_CREATION_REQUEST_KEYS: ReadonlySet<string> = new Set([
   "maxUses",
   "operationKey",
   "outputFile",
+  "roleAssignment",
   "temporaryMembership",
 ])
 
@@ -596,6 +690,45 @@ function normalizeInviteCreationAcceptance(
   }
 }
 
+function normalizeInviteRoleAssignment(
+  value: unknown,
+): NormalizedInviteCreationRequest["roleAssignment"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RangeError("Discord invite role assignment must be one exact object")
+  }
+  const assignment = value as Record<string, unknown>
+  if (assignment.kind === "none" && Object.keys(assignment).length === 1) {
+    return { kind: "none" }
+  }
+  if (
+    assignment.kind !== "grant"
+    || Object.keys(assignment).sort().join("\0")
+      !== "acknowledgePersistentGrants\0kind\0roleIds"
+    || assignment.acknowledgePersistentGrants !== true
+    || !Array.isArray(assignment.roleIds)
+    || assignment.roleIds.length < 1
+    || assignment.roleIds.length > INVITE_LIMITS.roleIds
+  ) {
+    throw new RangeError(
+      "Discord invite role assignment requires acknowledged bounded exact role IDs",
+    )
+  }
+  for (const roleId of assignment.roleIds) {
+    assertPositiveSnowflake(roleId, "Discord invite role-assignment role ID")
+    if (BigInt(roleId).toString() !== roleId) {
+      throw new RangeError("Discord invite role-assignment role IDs must be canonical")
+    }
+  }
+  if (new Set(assignment.roleIds).size !== assignment.roleIds.length) {
+    throw new RangeError("Discord invite role-assignment role IDs must be unique")
+  }
+  return {
+    acknowledgePersistentGrants: true,
+    kind: "grant",
+    roleIds: [...assignment.roleIds].sort(compareSnowflakes),
+  }
+}
+
 export function normalizeInviteCreationRequest(
   request: InviteCreationRequest,
 ): NormalizedInviteCreationRequest {
@@ -609,6 +742,7 @@ export function normalizeInviteCreationRequest(
     throw new RangeError("Discord invite creation request must be one exact object")
   }
   const acceptance = normalizeInviteCreationAcceptance(request.acceptance)
+  const roleAssignment = normalizeInviteRoleAssignment(request.roleAssignment)
   assertPositiveSnowflake(request.guildId, "Discord invite-creation guild ID")
   assertPositiveSnowflake(request.channelId, "Discord invite-creation channel ID")
   if (request.acknowledgeBearerCapability !== true) {
@@ -646,6 +780,11 @@ export function normalizeInviteCreationRequest(
       "Discord invite creation requires explicit temporary-membership intent",
     )
   }
+  if (roleAssignment.kind === "grant" && request.temporaryMembership) {
+    throw new RangeError(
+      "Discord invite role assignment cannot claim temporary membership because granted roles persist",
+    )
+  }
   if (typeof request.outputFile !== "string") {
     throw new RangeError("Discord invite capability output file must be a string")
   }
@@ -653,6 +792,7 @@ export function normalizeInviteCreationRequest(
     ...request,
     acceptance,
     operationKeyHash: operationKeyHash(request.operationKey),
+    roleAssignment,
   }
 }
 
@@ -746,12 +886,15 @@ function exactRoles(value: readonly DiscordRole[], guildId: string): ValidatedRo
       })
     }
     roleIds.add(role.id)
+    const unknownPermissionBits = unknownDiscordPermissionBits(permissions)
     roles.push({
       id: role.id,
       managed: role.managed,
       name: role.name,
+      permissionNames: discordPermissionNames(permissions),
       permissions: permissions.toString(),
       position: role.position,
+      unknownPermissionBits: unknownPermissionBits.toString(),
     })
   }
   const everyone = roles.find((role) => role.id === guildId)
@@ -878,6 +1021,449 @@ function exactInviteCreationChannel(
   }
 }
 
+function canonicalInviteRoleOverwrites(
+  channel: DiscordChannel,
+): Array<{ allow: bigint; deny: bigint; id: string; type: 0 | 1 }> {
+  if (
+    !Array.isArray(channel.permission_overwrites)
+    || channel.permission_overwrites.length > DISCORD_LIMITS.channelPermissionOverwrites
+  ) {
+    throw evidenceError(
+      "Discord invite role assignment requires complete bounded channel overwrite evidence",
+    )
+  }
+  const seen = new Set<string>()
+  const overwrites = channel.permission_overwrites.map((overwrite) => {
+    if (
+      !overwrite
+      || typeof overwrite !== "object"
+      || Array.isArray(overwrite)
+      || Object.keys(overwrite).some((key) => !INVITE_OVERWRITE_KEYS.has(key))
+      || Object.keys(overwrite).length !== INVITE_OVERWRITE_KEYS.size
+      || !positiveSnowflake(overwrite.id)
+      || (overwrite.type !== 0 && overwrite.type !== 1)
+      || typeof overwrite.allow !== "string"
+      || typeof overwrite.deny !== "string"
+    ) {
+      throw evidenceError("Discord returned invalid invite role-assignment overwrites")
+    }
+    const key = `${overwrite.type}\0${overwrite.id}`
+    if (seen.has(key)) {
+      throw evidenceError("Discord returned duplicate invite role-assignment overwrites")
+    }
+    seen.add(key)
+    let allow: bigint
+    let deny: bigint
+    try {
+      allow = parseDiscordPermissionBits(
+        overwrite.allow,
+        `invite role-assignment overwrite ${overwrite.id} allow`,
+      )
+      deny = parseDiscordPermissionBits(
+        overwrite.deny,
+        `invite role-assignment overwrite ${overwrite.id} deny`,
+      )
+    } catch (error) {
+      throw new InviteEvidenceError(
+        "Discord returned invalid invite role-assignment overwrite permissions",
+        { cause: error },
+      )
+    }
+    if ((allow & deny) !== 0n) {
+      throw evidenceError("Discord returned contradictory invite role-assignment overwrites")
+    }
+    if (((allow | deny) & ALL_KNOWN_PERMISSION_BITS
+      & ~INVITE_ROLE_CHANNEL_PERMISSION_MASK) !== 0n) {
+      throw evidenceError(
+        "Discord invite role-assignment overwrite contains known permissions that are not channel-scoped",
+      )
+    }
+    return {
+      allow,
+      deny,
+      id: overwrite.id,
+      type: overwrite.type as 0 | 1,
+    }
+  })
+  return overwrites.sort((left, right) => (
+    compareSnowflakes(left.id, right.id) || left.type - right.type
+  ))
+}
+
+function exactInviteRoleImpactChannels(
+  value: readonly DiscordChannel[],
+  guildId: string,
+  roles: readonly ValidatedRole[],
+): InviteRoleImpactChannel[] {
+  if (!Array.isArray(value) || value.length > DISCORD_LIMITS.guildChannels) {
+    throw evidenceError(
+      "Discord returned an invalid bounded invite role-assignment channel inventory",
+    )
+  }
+  const roleIds = new Set(roles.map((role) => role.id))
+  const channelIds = new Set<string>()
+  const channels = value.map((channel) => {
+    if (
+      !channel
+      || typeof channel !== "object"
+      || Array.isArray(channel)
+      || !positiveSnowflake(channel.id)
+      || channelIds.has(channel.id)
+      || channel.guild_id !== guildId
+      || !DIRECT_GUILD_CHANNEL_TYPES.has(channel.type)
+      || !validText(channel.name, DISCORD_LIMITS.channelNameCharacters)
+      || (
+        channel.parent_id !== undefined
+        && channel.parent_id !== null
+        && !positiveSnowflake(channel.parent_id)
+      )
+    ) {
+      throw evidenceError(
+        "Discord returned incomplete or mismatched invite role-assignment channel evidence",
+      )
+    }
+    channelIds.add(channel.id)
+    for (const overwrite of canonicalInviteRoleOverwrites(channel)) {
+      if (overwrite.type === 0 && !roleIds.has(overwrite.id)) {
+        throw evidenceError(
+          "Discord returned an unresolved invite role-assignment role overwrite",
+        )
+      }
+    }
+    return channel as InviteRoleImpactChannel
+  })
+  const channelsById = new Map(channels.map((channel) => [channel.id, channel]))
+  for (const channel of channels) {
+    if (channel.type === DISCORD_CHANNEL_TYPES.category && channel.parent_id) {
+      throw evidenceError("Discord returned a parented invite role-assignment category")
+    }
+    if (channel.parent_id) {
+      const parent = channelsById.get(channel.parent_id)
+      if (!parent || parent.type !== DISCORD_CHANNEL_TYPES.category) {
+        throw evidenceError(
+          "Discord returned an unresolved invite role-assignment channel parent",
+        )
+      }
+    }
+  }
+  return channels.sort((left, right) => compareSnowflakes(left.id, right.id))
+}
+
+function inviteRolePermissionDecision(
+  result: PrincipalPermissionResult,
+  permission: DiscordPermissionName,
+): InviteRolePermissionDecision {
+  if (result.missingPermissions.includes(permission)) return "denied"
+  if (result.ineffectivePermissions.includes(permission)) return "ineffective"
+  return "allowed"
+}
+
+function effectiveGuildPermissionNames(
+  result: GuildMemberPermissionResult,
+): DiscordPermissionName[] {
+  return result.administrator
+    ? [...DISCORD_PERMISSION_NAMES]
+    : [...result.effectivePermissionNames]
+}
+
+function inviteRoleGuildPermissionImpact(
+  before: GuildMemberPermissionResult,
+  after: GuildMemberPermissionResult,
+): InviteRoleGuildPermissionImpact {
+  const beforeNames = effectiveGuildPermissionNames(before)
+  const afterNames = effectiveGuildPermissionNames(after)
+  const beforeSet = new Set(beforeNames)
+  return {
+    added: afterNames.filter((permission) => !beforeSet.has(permission)),
+    after: afterNames,
+    before: beforeNames,
+  }
+}
+
+function inviteRoleChannelImpact(
+  guild: DiscordGuild & { owner_id: string },
+  roles: readonly ValidatedRole[],
+  channels: readonly InviteRoleImpactChannel[],
+  roleIds: readonly string[],
+): InviteRoleChannelImpact[] {
+  const beforeMember: DiscordGuildMember = { roles: [] }
+  const afterMember: DiscordGuildMember = { roles: [...roleIds] }
+  const impact: InviteRoleChannelImpact[] = []
+  for (const channel of channels) {
+    let before: PrincipalPermissionResult
+    let after: PrincipalPermissionResult
+    try {
+      before = evaluatePrincipalPermissions({
+        channel,
+        guildId: guild.id,
+        guildOwnerId: guild.owner_id,
+        permissionChannel: channel,
+        requestedPermissions: INVITE_ROLE_IMPACT_PERMISSIONS,
+        roles,
+        subject: {
+          id: HYPOTHETICAL_INVITEE_ID,
+          kind: "member",
+          member: beforeMember,
+        },
+      })
+      after = evaluatePrincipalPermissions({
+        channel,
+        guildId: guild.id,
+        guildOwnerId: guild.owner_id,
+        permissionChannel: channel,
+        requestedPermissions: INVITE_ROLE_IMPACT_PERMISSIONS,
+        roles,
+        subject: {
+          id: HYPOTHETICAL_INVITEE_ID,
+          kind: "member",
+          member: afterMember,
+        },
+      })
+    } catch (error) {
+      throw new InviteEvidenceError(
+        `Discord invite role-assignment channel impact is invalid: ${errorMessage(error)}`,
+        { cause: error },
+      )
+    }
+    if (before.confidence !== "complete" || after.confidence !== "complete") {
+      throw evidenceError(
+        `Discord invite role-assignment channel impact is incomplete for channel ${channel.id}`,
+      )
+    }
+    const changes = INVITE_ROLE_IMPACT_PERMISSIONS.flatMap((permission) => {
+      const beforeDecision = inviteRolePermissionDecision(before, permission)
+      const afterDecision = inviteRolePermissionDecision(after, permission)
+      return beforeDecision === afterDecision
+        ? []
+        : [{ after: afterDecision, before: beforeDecision, permission }]
+    })
+    if (changes.length > 0) {
+      impact.push({
+        channelId: channel.id,
+        channelName: channel.name,
+        channelType: channel.type,
+        changes,
+      })
+    }
+  }
+  if (impact.length > CONNECTOR_LIMITS.memberRoleImpactChannels) {
+    throw evidenceError(
+      `Discord invite role assignment affects more than ${CONNECTOR_LIMITS.memberRoleImpactChannels} direct channels`,
+    )
+  }
+  return impact
+}
+
+function assertInviteRoleChannelPermissionSubset(options: {
+  botMember: DiscordGuildMember
+  channels: readonly InviteRoleImpactChannel[]
+  guild: DiscordGuild & { owner_id: string }
+  impact: readonly InviteRoleChannelImpact[]
+  roleIds: readonly string[]
+  roles: readonly ValidatedRole[]
+}): void {
+  const selectedRoleIds = new Set(options.roleIds)
+  const impactByChannelId = new Map(
+    options.impact.map((entry) => [entry.channelId, entry]),
+  )
+  for (const channel of options.channels) {
+    const selectedAllows = new Set<DiscordPermissionName>()
+    for (const overwrite of canonicalInviteRoleOverwrites(channel)) {
+      if (overwrite.type !== 0 || !selectedRoleIds.has(overwrite.id)) continue
+      for (const permission of discordPermissionNames(overwrite.allow)) {
+        selectedAllows.add(permission)
+      }
+      if (unknownDiscordPermissionBits(overwrite.allow | overwrite.deny) !== 0n) {
+        throw evidenceError(
+          `Discord selected invite role overwrite contains unknown permissions in channel ${channel.id}`,
+        )
+      }
+    }
+    const gains = impactByChannelId.get(channel.id)?.changes.filter((change) => (
+      change.before !== "allowed" && change.after === "allowed"
+    )) ?? []
+    if (selectedAllows.size === 0 && gains.length === 0) continue
+    let botPermissions: PrincipalPermissionResult
+    try {
+      botPermissions = evaluatePrincipalPermissions({
+        channel,
+        guildId: options.guild.id,
+        guildOwnerId: options.guild.owner_id,
+        permissionChannel: channel,
+        requestedPermissions: INVITE_ROLE_IMPACT_PERMISSIONS,
+        roles: options.roles,
+        subject: {
+          id: options.botMember.user?.id as string,
+          kind: "member",
+          member: options.botMember,
+        },
+      })
+    } catch (error) {
+      throw new InviteEvidenceError(
+        `Discord connector invite role-assignment channel permissions are invalid: ${errorMessage(error)}`,
+        { cause: error },
+      )
+    }
+    if (botPermissions.confidence !== "complete") {
+      throw evidenceError(
+        `Discord connector invite role-assignment channel permissions are incomplete for channel ${channel.id}`,
+      )
+    }
+    const required = new Set([
+      ...selectedAllows,
+      ...gains.map((change) => change.permission),
+    ])
+    for (const permission of required) {
+      if (inviteRolePermissionDecision(botPermissions, permission) === "allowed") continue
+      throw evidenceError(
+        `Discord connector bot cannot grant channel permission ${permission} through invite role assignment in channel ${channel.id}`,
+      )
+    }
+  }
+}
+
+function inviteRoleChannelSnapshot(channels: readonly InviteRoleImpactChannel[]) {
+  return channels.map((channel) => ({
+    id: channel.id,
+    overwrites: canonicalInviteRoleOverwrites(channel).map((overwrite) => ({
+      allow: overwrite.allow.toString(),
+      deny: overwrite.deny.toString(),
+      id: overwrite.id,
+      type: overwrite.type,
+    })),
+    parentId: channel.parent_id ?? null,
+    type: channel.type,
+  }))
+}
+
+function buildInviteRoleAssignmentReview(options: {
+  botMember: DiscordGuildMember
+  channelEvidence: GuildChannelEvidenceView
+  channels: readonly InviteRoleImpactChannel[]
+  guild: DiscordGuild & { owner_id: string }
+  request: NormalizedInviteCreationRequest & {
+    roleAssignment: Extract<NormalizedInviteCreationRequest["roleAssignment"], { kind: "grant" }>
+  }
+  roles: readonly ValidatedRole[]
+}): InviteRoleAssignmentReview {
+  const botPermissions = completePermissions(
+    options.botMember,
+    options.guild.id,
+    options.roles,
+  )
+  if (botPermissions.highestRoleIds.length !== 1) {
+    throw evidenceError(
+      "Discord connector bot highest-role evidence is ambiguous for invite role assignment",
+    )
+  }
+  const selectedRoles = options.request.roleAssignment.roleIds.map((roleId) => {
+    const role = options.roles.find((candidate) => candidate.id === roleId)
+    if (!role) {
+      throw evidenceError(
+        `Discord invite role-assignment inventory omitted selected role ${roleId}`,
+      )
+    }
+    if (
+      role.id === options.guild.id
+      || role.managed
+      || role.position < 1
+    ) {
+      throw evidenceError(
+        "Discord invite role assignment requires standard unmanaged roles other than @everyone",
+      )
+    }
+    if (botPermissions.highestRolePosition <= role.position) {
+      throw evidenceError(
+        `Discord invite role ${role.id} must be strictly below the connector bot's highest role`,
+      )
+    }
+    const permissionBits = BigInt(role.permissions)
+    if ((permissionBits & DISCORD_PERMISSIONS.ADMINISTRATOR) !== 0n) {
+      throw evidenceError("Discord invite role assignment never grants ADMINISTRATOR")
+    }
+    if (BigInt(role.unknownPermissionBits) !== 0n) {
+      throw evidenceError(
+        `Discord invite role ${role.id} contains permissions unknown to this build`,
+      )
+    }
+    const botBits = BigInt(botPermissions.effectivePermissions)
+    const grantable = botPermissions.administrator
+      ? botBits | ALL_KNOWN_PERMISSION_BITS
+      : botBits
+    const unavailable = permissionBits & ~grantable
+    if (unavailable !== 0n) {
+      throw evidenceError(
+        `Discord connector bot cannot grant invite role ${role.id} permissions: ${discordPermissionNames(unavailable).join(", ") || unavailable.toString()}`,
+      )
+    }
+    return role
+  })
+  const beforePermissions = completePermissions(
+    { roles: [] },
+    options.guild.id,
+    options.roles,
+  )
+  const afterPermissions = completePermissions(
+    { roles: [...options.request.roleAssignment.roleIds] },
+    options.guild.id,
+    options.roles,
+  )
+  const guildPermissions = inviteRoleGuildPermissionImpact(
+    beforePermissions,
+    afterPermissions,
+  )
+  const impact = inviteRoleChannelImpact(
+    options.guild,
+    options.roles,
+    options.channels,
+    options.request.roleAssignment.roleIds,
+  )
+  assertInviteRoleChannelPermissionSubset({
+    botMember: options.botMember,
+    channels: options.channels,
+    guild: options.guild,
+    impact,
+    roleIds: options.request.roleAssignment.roleIds,
+    roles: options.roles,
+  })
+  const gains = new Set<DiscordPermissionName>(guildPermissions.added)
+  for (const channel of impact) {
+    for (const change of channel.changes) {
+      if (change.before !== "allowed" && change.after === "allowed") {
+        gains.add(change.permission)
+      }
+    }
+  }
+  const highRiskPermissionGains = DISCORD_PERMISSION_NAMES.filter((permission) => (
+    gains.has(permission) && HIGH_RISK_ROLE_PERMISSIONS.has(permission)
+  ))
+  return {
+    acknowledgePersistentGrants: true,
+    assignedRoles: selectedRoles.map((role) => ({
+      highRiskPermissions: role.permissionNames.filter((permission) => (
+        HIGH_RISK_ROLE_PERMISSIONS.has(permission)
+      )),
+      id: role.id,
+      name: role.name,
+      permissionNames: [...role.permissionNames],
+      permissions: role.permissions,
+      position: role.position,
+    })),
+    channelEvidence: options.channelEvidence,
+    highRiskPermissionGains,
+    impact: {
+      changedChannels: impact.length,
+      channels: impact,
+      evaluatedChannels: options.channels.length,
+      guildPermissions,
+      projection: "minimum-new-member",
+    },
+    kind: "grant",
+    persistence: "manual-removal-required",
+    roleIds: [...options.request.roleAssignment.roleIds],
+  }
+}
+
 function completePermissions(
   member: DiscordGuildMember,
   guildId: string,
@@ -904,6 +1490,7 @@ function inviteCreationAccessEvidence(
   roles: readonly ValidatedRole[],
   channel: InviteCreationState["channel"],
   acceptanceKind: NormalizedInviteCreationRequest["acceptance"]["kind"],
+  roleAssignmentKind: NormalizedInviteCreationRequest["roleAssignment"]["kind"],
 ): InviteCreationAccessEvidence {
   let permissions: BotChannelPermissionResult
   try {
@@ -933,9 +1520,13 @@ function inviteCreationAccessEvidence(
     : [...permissions.effectivePermissionNames]
   const guildPermissions = completePermissions(member, guild.id, roles)
   const manageGuild = botIsGuildOwner || hasGuildPermission(guildPermissions, "MANAGE_GUILD")
-  const requiredPermissions = acceptanceKind === "exact-users"
-    ? INVITE_CREATION_EXACT_USER_REQUIRED_PERMISSIONS
-    : INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS
+  const manageRoles = botIsGuildOwner || hasGuildPermission(guildPermissions, "MANAGE_ROLES")
+  const requiredPermissions: DiscordPermissionName[] = [
+    ...INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS,
+    ...(acceptanceKind === "exact-users" ? ["MANAGE_GUILD" as const] : []),
+    ...(roleAssignmentKind === "grant" ? ["MANAGE_ROLES" as const] : []),
+  ].sort((left, right) => DISCORD_PERMISSION_NAMES.indexOf(left)
+    - DISCORD_PERMISSION_NAMES.indexOf(right))
   for (const permission of INVITE_CREATION_BEARER_REQUIRED_PERMISSIONS) {
     if (!effectivePermissionNames.includes(permission)) {
       throw evidenceError(
@@ -948,15 +1539,23 @@ function inviteCreationAccessEvidence(
       "Discord connector bot lacks guild-level MANAGE_GUILD for exact-user invite creation",
     )
   }
+  if (roleAssignmentKind === "grant" && !manageRoles) {
+    throw evidenceError(
+      "Discord connector bot lacks guild-level MANAGE_ROLES for invite role assignment",
+    )
+  }
   return {
     appliedRoleIds: [...permissions.appliedRoleIds].sort(),
     botAdministrator: permissions.administrator,
+    botHighestRoleIds: [...guildPermissions.highestRoleIds],
+    botHighestRolePosition: guildPermissions.highestRolePosition,
     botIsGuildOwner,
     complete: true,
     createInstantInvite: true,
     effectivePermissionNames,
     effectivePermissions,
     manageGuild,
+    manageRoles,
     requiredPermissions,
     unknownPermissionBits: permissions.unknownPermissionBits,
     viewChannel: true,
@@ -1346,7 +1945,11 @@ function assertCreatedInvite(
     || invite.temporary !== request.temporaryMembership
     || invite.uses !== 0
     || invite.flags !== 0
-    || invite.roleIds.length !== 0
+    || stableString(invite.roleIds) !== stableString(
+      request.roleAssignment.kind === "grant"
+        ? request.roleAssignment.roleIds
+        : [],
+    )
     || invite.targetApplicationId !== null
     || invite.targetType !== null
     || invite.targetUserId !== null
@@ -1370,6 +1973,7 @@ function assertInviteVerification(
     || observed.guildId !== request.guildId
     || observed.channelId !== request.channelId
     || observed.code !== invite.code
+    || stableString(observed.roleIds) !== stableString(invite.roleIds)
   ) {
     throw evidenceError("Discord returned mismatched exact invite verification evidence")
   }
@@ -1386,6 +1990,18 @@ function inviteAcceptanceSummary(
   }
 }
 
+function inviteRoleAssignmentSummary(
+  request: NormalizedInviteCreationRequest,
+): InviteCreationResult["roleAssignment"] {
+  return request.roleAssignment.kind === "none"
+    ? { kind: "none", roleCount: 0 }
+    : {
+        kind: "grant",
+        roleCount: request.roleAssignment.roleIds.length,
+        roleIds: [...request.roleAssignment.roleIds],
+      }
+}
+
 function inviteCapabilityContent(
   invite: DiscordInviteSummary,
   request: NormalizedInviteCreationRequest,
@@ -1400,6 +2016,12 @@ function inviteCapabilityContent(
     kind: "discord-invite-capability",
     maxAgeSeconds: request.maxAgeSeconds,
     maxUses: request.maxUses,
+    roleAssignment: inviteRoleAssignmentSummary(request),
+    ...(request.roleAssignment.kind === "grant"
+      ? {
+          persistentRoleWarning: "Accepting this invite grants roles that remain after the invite expires or is deleted; role permissions and channel overwrites can change after this file is created or accepted",
+        }
+      : {}),
     schemaVersion: INVITE_CAPABILITY_FILE_SCHEMA_VERSION,
     temporaryMembership: request.temporaryMembership,
     url: `${DISCORD_INVITE_BASE_URL}/${encodeURIComponent(invite.code)}`,
@@ -1491,6 +2113,7 @@ export class InviteService {
   readonly #capabilityRoots: readonly string[]
   readonly #client: InviteServiceClient
   readonly #clock: () => Date
+  readonly #layoutSource: GatewayChannelLayoutSource | undefined
   readonly #operationStore: OperationStore
   readonly #planKey: Uint8Array
   readonly #policy: InviteServiceOptions["policy"]
@@ -1505,6 +2128,7 @@ export class InviteService {
     this.#capabilityRoots = options.capabilityRoots ?? []
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#layoutSource = options.layoutSource
     this.#operationStore = options.operationStore
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
@@ -1521,6 +2145,9 @@ export class InviteService {
   ): Promise<InviteCreationState> {
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     this.#policy.assertGuildInviteCreatable(request.guildId, request.channelId)
+    if (request.roleAssignment.kind === "grant") {
+      this.#policy.assertInviteRoleAssignmentAllowed(request.roleAssignment.roleIds)
+    }
     const receipt = await this.#operationStore.get(
       "invite-creation",
       request.operationKeyHash,
@@ -1528,12 +2155,69 @@ export class InviteService {
     if (receipt) {
       throw new InviteCreationOperationConflictError(receiptView(receipt))
     }
-    const [rawGuild, rawBotMember, rawRoles, rawChannels] = await Promise.all([
-      this.#client.getGuild(request.guildId, options),
-      this.#client.getGuildMember(request.guildId, botId, options),
-      this.#client.getGuildRoles(request.guildId, options),
-      this.#client.getGuildChannels(request.guildId, options),
-    ])
+    let rawGuild: DiscordGuild
+    let rawBotMember: DiscordGuildMember
+    let rawRoles: DiscordRole[]
+    let rawChannels: DiscordChannel[]
+    let channelEvidence: GuildChannelEvidenceView | undefined
+    if (request.roleAssignment.kind === "grant") {
+      if (!this.#layoutSource) {
+        throw evidenceError(
+          "Discord invite role assignment requires Gateway channel-layout evidence",
+        )
+      }
+      let supportingEvidence: {
+        botMember: DiscordGuildMember
+        guild: DiscordGuild
+        roles: DiscordRole[]
+      } | undefined
+      try {
+        const evidence = await collectGuildChannelEvidence({
+          guildId: request.guildId,
+          layoutSource: this.#layoutSource,
+          readChannels: async () => {
+            const [guild, botMember, roles, channels] = await Promise.all([
+              this.#client.getGuild(request.guildId, options),
+              this.#client.getGuildMember(request.guildId, botId, options),
+              this.#client.getGuildRoles(request.guildId, options),
+              this.#client.getGuildChannels(request.guildId, options),
+            ])
+            supportingEvidence = { botMember, guild, roles }
+            return channels
+          },
+        })
+        if (evidence.view.obfuscatedChannelCount > 0) {
+          throw evidenceError(
+            "Discord invite role assignment requires complete metadata for every direct guild channel",
+          )
+        }
+        if (!supportingEvidence) {
+          throw evidenceError(
+            "Discord invite role-assignment supporting evidence is unavailable",
+          )
+        }
+        rawGuild = supportingEvidence.guild
+        rawBotMember = supportingEvidence.botMember
+        rawRoles = supportingEvidence.roles
+        rawChannels = evidence.channels
+        channelEvidence = evidence.view
+      } catch (error) {
+        if (error instanceof GuildChannelEvidenceError) {
+          throw new InviteEvidenceError(
+            `Discord invite role-assignment channel evidence is incomplete: ${error.message}`,
+            { cause: error },
+          )
+        }
+        throw error
+      }
+    } else {
+      [rawGuild, rawBotMember, rawRoles, rawChannels] = await Promise.all([
+        this.#client.getGuild(request.guildId, options),
+        this.#client.getGuildMember(request.guildId, botId, options),
+        this.#client.getGuildRoles(request.guildId, options),
+        this.#client.getGuildChannels(request.guildId, options),
+      ])
+    }
     const guild = exactGuild(rawGuild, request.guildId)
     const botMember = exactBotMember(rawBotMember, request.guildId, botId)
     const roles = exactRoles(rawRoles, request.guildId)
@@ -1551,8 +2235,36 @@ export class InviteService {
       roles,
       channel,
       request.acceptance.kind,
+      request.roleAssignment.kind,
     )
-    return { access, channel, channels, guild, roles }
+    const roleGrantChannels = request.roleAssignment.kind === "grant"
+      ? exactInviteRoleImpactChannels(rawChannels, request.guildId, roles)
+      : []
+    const roleAssignment = request.roleAssignment.kind === "grant"
+      ? buildInviteRoleAssignmentReview({
+          botMember,
+          channelEvidence: channelEvidence as GuildChannelEvidenceView,
+          channels: roleGrantChannels,
+          guild,
+          request: request as NormalizedInviteCreationRequest & {
+            roleAssignment: Extract<
+              NormalizedInviteCreationRequest["roleAssignment"],
+              { kind: "grant" }
+            >
+          },
+          roles,
+        })
+      : { kind: "none" as const }
+    return {
+      access,
+      botMember,
+      channel,
+      channels,
+      guild,
+      roleAssignment,
+      roleGrantChannels,
+      roles,
+    }
   }
 
   async #verifyInviteAcceptance(
@@ -1656,6 +2368,7 @@ export class InviteService {
       acceptance: request.acceptance,
       maxAgeSeconds: request.maxAgeSeconds,
       maxUses: request.maxUses,
+      roleAssignment: request.roleAssignment,
       temporaryMembership: request.temporaryMembership,
       unique: true,
     }
@@ -1680,9 +2393,13 @@ export class InviteService {
     const warnings = [
       ...(state.access.botAdministrator
         ? [
-            request.acceptance.kind === "exact-users"
-              ? "Discord connector bot has ADMINISTRATOR; replace it with MANAGE_GUILD plus channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE"
-              : "Discord connector bot has ADMINISTRATOR; replace it with channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE",
+            request.roleAssignment.kind === "grant"
+              ? request.acceptance.kind === "exact-users"
+                ? "Discord connector bot has ADMINISTRATOR; replace it with MANAGE_GUILD, MANAGE_ROLES, and channel-scoped VIEW_CHANNEL plus CREATE_INSTANT_INVITE"
+                : "Discord connector bot has ADMINISTRATOR; replace it with MANAGE_ROLES and channel-scoped VIEW_CHANNEL plus CREATE_INSTANT_INVITE"
+              : request.acceptance.kind === "exact-users"
+                ? "Discord connector bot has ADMINISTRATOR; replace it with MANAGE_GUILD plus channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE"
+                : "Discord connector bot has ADMINISTRATOR; replace it with channel-scoped VIEW_CHANNEL and CREATE_INSTANT_INVITE",
           ]
         : []),
       ...(state.access.botIsGuildOwner
@@ -1703,13 +2420,24 @@ export class InviteService {
       "The one-shot operation key cannot be reused after reservation, including after an uncertain outcome",
       "Same-channel serialization is process-local; do not run overlapping invite creation in multiple connector processes",
       "Temporary-membership behavior remains subject to Discord's member and role lifecycle",
+      ...(state.roleAssignment.kind === "grant"
+        ? [
+            "Anyone who accepts the invite receives every reviewed role, including users who already belong to the guild",
+            "Granted roles persist after the invite expires or is deleted and require a separate manual or reviewed role-removal action",
+            "The permission impact is the minimum projection for a new ordinary member; existing members can retain additional permissions from other roles and member overwrites",
+            "The permission review is a point-in-time snapshot; later role or channel-overwrite changes can alter authority before or after invite acceptance",
+            ...(state.roleAssignment.highRiskPermissionGains.length > 0
+              ? [`Invite acceptance grants high-risk permissions: ${state.roleAssignment.highRiskPermissionGains.join(", ")}`]
+              : []),
+          ]
+        : []),
     ]
     const digest = reviewedPlanDigest(this.#planKey, {
       access: state.access,
       applicationId,
       botId,
       delivery,
-      domain: "discord-mcp-invite-creation-plan.v2",
+      domain: "discord-mcp-invite-creation-plan.v3",
       guild: {
         id: state.guild.id,
         name: state.guild.name,
@@ -1718,6 +2446,9 @@ export class InviteService {
       intent,
       operationKeyHash: request.operationKeyHash,
       privacy,
+      roleAssignment: state.roleAssignment,
+      roleGrantChannels: inviteRoleChannelSnapshot(state.roleGrantChannels),
+      roles: state.roles,
       request: {
         acknowledgeBearerCapability: request.acknowledgeBearerCapability,
         auditReason: request.auditReason,
@@ -1743,6 +2474,7 @@ export class InviteService {
         intent,
         operationKeyHash: request.operationKeyHash,
         privacy,
+        roleAssignment: state.roleAssignment,
         schemaVersion: SCHEMA_VERSION,
         status: "planned",
         target,
@@ -1800,6 +2532,7 @@ export class InviteService {
           operationKeyHash: normalized.operationKeyHash,
           outputFile: normalized.outputFile,
           planDigest: expectedDigest,
+          roleAssignment: inviteRoleAssignmentSummary(normalized),
           schemaVersion: SCHEMA_VERSION,
           status: "blocked-prior-uncertain",
         },
@@ -1848,6 +2581,7 @@ export class InviteService {
       operationKeyHash: request.operationKeyHash,
       outputFile: request.outputFile,
       planDigest: plan.digest,
+      roleAssignment: inviteRoleAssignmentSummary(request),
       schemaVersion: SCHEMA_VERSION,
     }
     const activityId = this.#randomId()
@@ -1913,6 +2647,9 @@ export class InviteService {
         {
           maxAgeSeconds: request.maxAgeSeconds,
           maxUses: request.maxUses,
+          roleIds: request.roleAssignment.kind === "grant"
+            ? request.roleAssignment.roleIds
+            : [],
           targetUserIds: request.acceptance.kind === "exact-users"
             ? request.acceptance.userIds
             : null,
@@ -2008,6 +2745,7 @@ export class InviteService {
       operationKeyHash: request.operationKeyHash,
       outputFile: request.outputFile,
       planDigest: plan.digest,
+      roleAssignment: inviteRoleAssignmentSummary(request),
       schemaVersion: SCHEMA_VERSION,
       status: "completed",
       verified: true,

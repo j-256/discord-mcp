@@ -178,6 +178,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "interactions",
   "inviteAudit",
   "inviteCreation",
+  "inviteRoleAssignment",
   "inviteDeletions",
   "memberDirectory",
   "nicknameChanges",
@@ -264,6 +265,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "integrationIds",
   "interactionChannelIds",
   "inviteCreationChannelIds",
+  "inviteRoleIds",
   "inviteGuildIds",
   "mentionUserIds",
   "memberDirectoryGuildIds",
@@ -415,6 +417,8 @@ const CHANNEL_METADATA_CAPABILITY_DESCRIPTION = "Enable reviewed channel metadat
 const CHANNEL_METADATA_SCOPE_DESCRIPTION = "Exact Discord ID allowlist for reviewed channel metadata and ordinary voice-channel status"
 const INVITE_CREATION_CAPABILITY_DESCRIPTION = "Enable reviewed finite invite creation with private-file capability delivery"
 const INVITE_CREATION_SCOPE_DESCRIPTION = "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
+const INVITE_ROLE_ASSIGNMENT_CAPABILITY_DESCRIPTION = "Enable reviewed persistent role assignment through finite privately delivered invites"
+const INVITE_ROLE_SCOPE_DESCRIPTION = "Exact role ID allowlist for reviewed persistent invite role assignment"
 const INVITE_CAPABILITY_ROOT_DESCRIPTION = "Canonical process-owned roots for exclusive private invite capability files"
 const APPLICATION_INTENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed additive application privileged-intent enablement"
 const APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-guild application-command creation, complete-state update, and exact-ID deletion"
@@ -461,6 +465,9 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "inviteCreation") {
     return INVITE_CREATION_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "inviteRoleAssignment") {
+    return INVITE_ROLE_ASSIGNMENT_CAPABILITY_DESCRIPTION
+  }
   if (documentKey === "guildPruneAudit") {
     return GUILD_PRUNE_AUDIT_CAPABILITY_DESCRIPTION
   }
@@ -506,6 +513,9 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "inviteCreationChannelIds") {
     return INVITE_CREATION_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "inviteRoleIds") {
+    return INVITE_ROLE_SCOPE_DESCRIPTION
   }
   if (documentKey === "bulkBanGuildIds") {
     return BULK_BAN_SCOPE_DESCRIPTION

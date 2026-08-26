@@ -236,6 +236,10 @@ function fixture(options: {
       policyCalls += 1
       basePolicy.assertGuildInviteCreatable(guildId, channelId)
     },
+    assertInviteRoleAssignmentAllowed(roleIds) {
+      policyCalls += 1
+      basePolicy.assertInviteRoleAssignmentAllowed(roleIds)
+    },
   }
   const client: InviteServiceOptions["client"] = {
     async createChannelInvite() {
@@ -254,6 +258,7 @@ function fixture(options: {
         channelId: target.channelId,
         code,
         guildId: target.guildId,
+        roleIds: [...target.roleIds],
         type: target.type,
       } satisfies DiscordDeletedInviteSummary
     },

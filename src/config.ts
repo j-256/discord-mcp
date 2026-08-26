@@ -99,6 +99,7 @@ export interface ConnectorConfig {
   allowInteractions: boolean
   allowInviteAudit: boolean
   allowInviteCreation: boolean
+  allowInviteRoleAssignment: boolean
   allowInviteDeletions: boolean
   allowMemberDirectory: boolean
   allowNicknameChanges: boolean
@@ -191,6 +192,7 @@ export interface ConnectorConfig {
   inviteCapabilityRoots: readonly string[]
   mcpReadResponseMaxBytes: number
   inviteCreationChannelIds: ReadonlySet<string>
+  inviteRoleIds: ReadonlySet<string>
   inviteGuildIds: ReadonlySet<string>
   mentionUserIds: ReadonlySet<string>
   memberDirectoryGuildIds: ReadonlySet<string>
@@ -502,6 +504,7 @@ export function loadConnectorConfigDocument(
   )
   const interactionChannelIds = configScope(document, "interactionChannelIds")
   const inviteCreationChannelIds = configScope(document, "inviteCreationChannelIds")
+  const inviteRoleIds = configScope(document, "inviteRoleIds")
   const pinChannelIds = configScope(document, "pinChannelIds")
   const permissionOverwriteChannelIds = configScope(document, "permissionOverwriteChannelIds")
   const pollChannelIds = configScope(document, "pollChannelIds")
@@ -933,6 +936,7 @@ export function loadConnectorConfigDocument(
   }
   const allowInviteAudit = configCapability(document, "inviteAudit")
   const allowInviteCreation = configCapability(document, "inviteCreation")
+  const allowInviteRoleAssignment = configCapability(document, "inviteRoleAssignment")
   const allowInviteDeletions = configCapability(document, "inviteDeletions")
   if (allowInviteDeletions && !allowInviteAudit) {
     throw new ConfigurationError(
@@ -942,6 +946,21 @@ export function loadConnectorConfigDocument(
   if (allowInviteCreation && inviteCreationChannelIds.size === 0) {
     throw new ConfigurationError(
       `${configPolicyPath("allowInviteCreation")} requires ${configPolicyPath("inviteCreationChannelIds")}`,
+    )
+  }
+  if (allowInviteRoleAssignment && !allowInviteCreation) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowInviteRoleAssignment")} requires ${configPolicyPath("allowInviteCreation")}`,
+    )
+  }
+  if (allowInviteRoleAssignment && inviteRoleIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowInviteRoleAssignment")} requires ${configPolicyPath("inviteRoleIds")}`,
+    )
+  }
+  if (allowInviteRoleAssignment && !allowGateway) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowInviteRoleAssignment")} requires ${configPolicyPath("allowGateway")}`,
     )
   }
   if (
@@ -1180,6 +1199,7 @@ export function loadConnectorConfigDocument(
     allowInteractions: configCapability(document, "interactions"),
     allowInviteAudit,
     allowInviteCreation,
+    allowInviteRoleAssignment,
     allowInviteDeletions,
     allowMemberDirectory: configCapability(document, "memberDirectory"),
     allowNicknameChanges,
@@ -1307,6 +1327,7 @@ export function loadConnectorConfigDocument(
       true,
     ),
     inviteCreationChannelIds,
+    inviteRoleIds,
     inviteGuildIds,
     mentionUserIds,
     memberDirectoryGuildIds,

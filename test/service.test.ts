@@ -2116,6 +2116,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         integrationAudit: true,
         integrationDeletions: true,
         inviteCreation: true,
+        inviteRoleAssignment: true,
         roleDeletionAudit: true,
         roleDeletions: true,
         roleOrderingAudit: true,
@@ -2150,6 +2151,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
         integrationIds: [INTEGRATION_ID],
         interactionChannelIds: [CHANNEL_ID],
         inviteCreationChannelIds: [CHANNEL_ID],
+        inviteRoleIds: [CREATED_ROLE_ID],
         roleDeletionIds: [CREATED_ROLE_ID],
         roleOrderingGuildIds: [GUILD_ID],
         announcementSubscriptionTargetChannelIds: [CHANNEL_ID],
@@ -2347,6 +2349,11 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     maxUses: 1,
     operationKey,
     outputFile: join(process.cwd(), "coordination-invite-capability.json"),
+    roleAssignment: {
+      acknowledgePersistentGrants: true,
+      kind: "grant",
+      roleIds: [CREATED_ROLE_ID],
+    },
     temporaryMembership: false,
   }, digest))
   await captured(() => service.executeMemberNicknameChange({
@@ -2677,6 +2684,7 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
       "invite-creation": [
         { id: CHANNEL_ID, kind: "channel" },
         { collection: "invites", guildId: GUILD_ID, kind: "guild-collection" },
+        { id: CREATED_ROLE_ID, kind: "role" },
       ],
       "member-nickname-change": [
         { id: MEMBER_USER_ID, kind: "member" },
@@ -3562,6 +3570,7 @@ test("service pins identity through capability-safe invite audit and revocation"
           channelId: CHANNEL_ID,
           code,
           guildId: GUILD_ID,
+          roleIds: [],
           type: 0,
         }
       },

@@ -107,6 +107,8 @@ export interface PolicyDescription {
   inviteCapabilityRootCount: number
   inviteCreationChannelIds: string[]
   inviteCreationEnabled: boolean
+  inviteRoleAssignmentEnabled: boolean
+  inviteRoleIds: string[]
   inviteDeletionsEnabled: boolean
   inviteGuildIds: string[]
   memberDirectoryEnabled: boolean
@@ -257,6 +259,7 @@ export class ScopePolicy {
   readonly #allowInteractions: boolean
   readonly #allowInviteAudit: boolean
   readonly #allowInviteCreation: boolean
+  readonly #allowInviteRoleAssignment: boolean
   readonly #allowInviteDeletions: boolean
   readonly #allowMemberDirectory: boolean
   readonly #allowNicknameChanges: boolean
@@ -352,6 +355,7 @@ export class ScopePolicy {
   readonly #interactionMinWriteIntervalMs: number
   readonly #inviteCapabilityRoots: readonly string[]
   readonly #inviteCreationChannelIds: ReadonlySet<string>
+  readonly #inviteRoleIds: ReadonlySet<string>
   readonly #inviteGuildIds: ReadonlySet<string>
   readonly #gatewayEventBufferSize: number
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
@@ -466,6 +470,7 @@ export class ScopePolicy {
     | "allowForumTagChanges"
     | "allowInviteAudit"
     | "allowInviteCreation"
+    | "allowInviteRoleAssignment"
     | "allowInviteDeletions"
     | "allowMemberDirectory"
     | "allowNicknameChanges"
@@ -560,6 +565,7 @@ export class ScopePolicy {
     | "integrationIds"
     | "inviteCapabilityRoots"
     | "inviteCreationChannelIds"
+    | "inviteRoleIds"
     | "inviteGuildIds"
     | "memberDirectoryGuildIds"
     | "nicknameGuildIds"
@@ -642,6 +648,7 @@ export class ScopePolicy {
     this.#allowInteractions = config.allowInteractions
     this.#allowInviteAudit = config.allowInviteAudit ?? false
     this.#allowInviteCreation = config.allowInviteCreation ?? false
+    this.#allowInviteRoleAssignment = config.allowInviteRoleAssignment ?? false
     this.#allowInviteDeletions = config.allowInviteDeletions ?? false
     this.#allowMemberDirectory = config.allowMemberDirectory ?? false
     this.#allowNicknameChanges = config.allowNicknameChanges ?? false
@@ -740,6 +747,7 @@ export class ScopePolicy {
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
     this.#inviteCapabilityRoots = config.inviteCapabilityRoots ?? []
     this.#inviteCreationChannelIds = config.inviteCreationChannelIds ?? new Set()
+    this.#inviteRoleIds = config.inviteRoleIds ?? new Set()
     this.#inviteGuildIds = config.inviteGuildIds ?? new Set()
     this.#gatewayEventBufferSize = config.gatewayEventBufferSize
       ?? GATEWAY_DEFAULTS.eventBufferSize
@@ -970,6 +978,12 @@ export class ScopePolicy {
       inviteCreationEnabled: this.#allowInviteCreation
         && this.#inviteCreationChannelIds.size > 0
         && this.#inviteCapabilityRoots.length > 0,
+      inviteRoleAssignmentEnabled: this.#allowInviteCreation
+        && this.#allowInviteRoleAssignment
+        && this.#inviteCreationChannelIds.size > 0
+        && this.#inviteRoleIds.size > 0
+        && this.#inviteCapabilityRoots.length > 0,
+      inviteRoleIds: [...this.#inviteRoleIds].sort(),
       inviteDeletionsEnabled: this.#allowInviteAudit
         && this.#allowInviteDeletions
         && this.#inviteGuildIds.size > 0,
@@ -1428,6 +1442,25 @@ export class ScopePolicy {
     }
     if (this.#inviteCapabilityRoots.length === 0) {
       throw new PolicyError("Discord invite creation requires a private capability root")
+    }
+  }
+
+  assertInviteRoleAssignmentAllowed(roleIds: readonly string[]): void {
+    if (!this.#allowInviteRoleAssignment) {
+      throw new PolicyError(
+        "Discord invite role assignment is disabled by connector configuration",
+      )
+    }
+    if (this.#inviteRoleIds.size === 0) {
+      throw new PolicyError(
+        "Discord invite role assignment requires an exact role allowlist",
+      )
+    }
+    const rejected = roleIds.find((roleId) => !this.#inviteRoleIds.has(roleId))
+    if (rejected) {
+      throw new PolicyError(
+        `Discord role ${rejected} is outside the invite role-assignment scope`,
+      )
     }
   }
 
