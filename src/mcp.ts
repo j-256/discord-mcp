@@ -151,11 +151,17 @@ import {
   BAN_AUDIT_LIMITS,
   CHANNEL_CREATION_KINDS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
+  CONNECTOR_DESCRIPTION,
+  CONNECTOR_ICON_MIME_TYPE,
+  CONNECTOR_ICON_SIZES,
+  CONNECTOR_ICON_URL,
   CONNECTOR_LIMITS,
   CONTENT_FREE_ERROR_PATTERN,
   CONTENT_FREE_IDENTIFIER_PATTERN,
   CONNECTOR_NAME,
+  CONNECTOR_TITLE,
   CONNECTOR_VERSION,
+  CONNECTOR_WEBSITE_URL,
   DISCORD_LIMITS,
   DISCORD_LOCALES,
   DISCORD_SNOWFLAKE_MAX,
@@ -16796,8 +16802,16 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     ]
   const server = new McpServer(
     {
+      description: CONNECTOR_DESCRIPTION,
+      icons: [{
+        mimeType: CONNECTOR_ICON_MIME_TYPE,
+        sizes: [...CONNECTOR_ICON_SIZES],
+        src: CONNECTOR_ICON_URL,
+      }],
       name: CONNECTOR_NAME,
+      title: CONNECTOR_TITLE,
       version: CONNECTOR_VERSION,
+      websiteUrl: CONNECTOR_WEBSITE_URL,
     },
     {
       cacheHints: {

@@ -476,6 +476,8 @@ npx --yes @j-256/discord-mcp@0.1.0 help
 
 Pinning the version keeps the executable stable across restarts. The MCP Registry manifest uses the same exact npm version.
 
+Operational and credential-free catalog connections advertise the same complete public MCP server identity during initialization: machine name, display title, exact release version, description, repository website, and one release-tagged HTTPS PNG icon with its media type and intrinsic size. No credential, local path, policy, profile, or Discord identity enters this metadata. The server does not fetch the icon, and its operation does not depend on client presentation behavior.
+
 The same exact release is available as a multi-architecture OCI image for `linux/amd64` and `linux/arm64`. Its default command is the credential-free catalog, so merely starting the image does not contact Discord:
 
 ```sh

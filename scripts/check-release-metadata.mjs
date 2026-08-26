@@ -18,10 +18,13 @@ import { containsSpecificReference } from "./neutrality.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const MCP_NAME = "io.github.j-256/discord-mcp"
+const MCP_TITLE = "Discord MCP"
 const MCP_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
 const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
 const REPOSITORY_ID = "1334461127"
 const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2ca15de"
+const ICON_MIME_TYPE = "image/png"
+const ICON_SIZE = "1254x1254"
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
@@ -278,7 +281,15 @@ async function checkPackageAndLock() {
 async function checkSourceIdentity(packageJson) {
   const source = await readFile(join(REPOSITORY_ROOT, "src/constants.ts"), "utf8")
   const connectorName = source.match(/export const CONNECTOR_NAME = "([^"]+)"/)?.[1]
+  const connectorTitle = source.match(/export const CONNECTOR_TITLE = "([^"]+)"/)?.[1]
   const connectorVersion = source.match(/export const CONNECTOR_VERSION = "([^"]+)"/)?.[1]
+  const connectorDescription = source.match(/export const CONNECTOR_DESCRIPTION = "([^"]+)"/)?.[1]
+  const connectorWebsiteUrl = source.match(/export const CONNECTOR_WEBSITE_URL = "([^"]+)"/)?.[1]
+  const connectorIconUrl = source.match(/export const CONNECTOR_ICON_URL = `([^`]+)`/)?.[1]
+  const connectorIconMimeType = source.match(/export const CONNECTOR_ICON_MIME_TYPE = "([^"]+)"/)?.[1]
+  const connectorIconSize = source.match(
+    /export const CONNECTOR_ICON_SIZES = Object\.freeze\(\["([^"]+)"\] as const\)/,
+  )?.[1]
   const configSelector = source.match(
     /export const CONFIG_FILE_ENVIRONMENT_VARIABLE = "([^"]+)"/,
   )?.[1]
@@ -292,7 +303,16 @@ async function checkSourceIdentity(packageJson) {
     ),
   ].sort()
   invariant(connectorName === "discord-mcp", "source connector name is out of sync")
+  invariant(connectorTitle === MCP_TITLE, "source connector title is out of sync")
   invariant(connectorVersion === packageJson.version, "source connector version is out of sync")
+  invariant(connectorDescription === MCP_DESCRIPTION, "source connector description is out of sync")
+  invariant(connectorWebsiteUrl === REPOSITORY_URL, "source connector website is out of sync")
+  invariant(
+    connectorIconUrl === "https://raw.githubusercontent.com/j-256/discord-mcp/v${CONNECTOR_VERSION}/assets/discord-mcp-icon.png",
+    "source connector icon URL is out of sync",
+  )
+  invariant(connectorIconMimeType === ICON_MIME_TYPE, "source connector icon media type is out of sync")
+  invariant(connectorIconSize === ICON_SIZE, "source connector icon size is out of sync")
   invariant(
     configSelector === "DISCORD_MCP_CONFIG_FILE",
     "source configuration selector is out of sync",
@@ -498,7 +518,7 @@ async function checkRegistryManifest(packageJson) {
   const server = await readJson(join(REPOSITORY_ROOT, "server.json"))
   invariant(server.$schema === REGISTRY_SCHEMA, "registry manifest schema is invalid")
   invariant(server.name === MCP_NAME, "registry server name is invalid")
-  invariant(server.title === "Discord MCP", "registry server title is invalid")
+  invariant(server.title === MCP_TITLE, "registry server title is invalid")
   invariant(server.version === packageJson.version, "registry server version is out of sync")
   invariant(server.description === MCP_DESCRIPTION, "registry description is invalid")
   invariant(server.description.length <= 100, "registry description must contain at most 100 characters")
@@ -511,12 +531,13 @@ async function checkRegistryManifest(packageJson) {
   invariant(server.icons?.length === 1, "registry manifest must declare one project icon")
   const icon = server.icons[0]
   invariant(icon.src === `https://raw.githubusercontent.com/j-256/discord-mcp/v${packageJson.version}/assets/discord-mcp-icon.png`, "registry icon URL must use the exact release tag")
-  invariant(icon.mimeType === "image/png", "registry icon media type is invalid")
+  invariant(icon.mimeType === ICON_MIME_TYPE, "registry icon media type is invalid")
   const iconBytes = await readFile(join(REPOSITORY_ROOT, "assets/discord-mcp-icon.png"))
   const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   invariant(iconBytes.subarray(0, pngSignature.length).equals(pngSignature), "project icon is not a PNG")
   invariant(sha256(iconBytes) === ICON_SHA256, "project icon checksum changed")
   const iconSize = `${iconBytes.readUInt32BE(16)}x${iconBytes.readUInt32BE(20)}`
+  invariant(iconSize === ICON_SIZE, "project icon dimensions changed")
   assertEqual(icon.sizes, [iconSize], "registry icon size does not match the PNG")
 
   invariant(server.packages?.length === 2, "registry manifest must declare npm and OCI packages")

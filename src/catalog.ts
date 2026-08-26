@@ -26,8 +26,14 @@ import {
 import { loadConnectorConfigDocument } from "./config.js"
 import { createConnectorConfigDocument } from "./config-document.js"
 import {
+  CONNECTOR_DESCRIPTION,
+  CONNECTOR_ICON_MIME_TYPE,
+  CONNECTOR_ICON_SIZES,
+  CONNECTOR_ICON_URL,
   CONNECTOR_NAME,
+  CONNECTOR_TITLE,
   CONNECTOR_VERSION,
+  CONNECTOR_WEBSITE_URL,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
@@ -265,6 +271,25 @@ function jsonValue(value: unknown, label: string): unknown {
   return JSON.parse(encoded) as unknown
 }
 
+function assertServerIdentity(value: unknown): void {
+  const expected = {
+    description: CONNECTOR_DESCRIPTION,
+    icons: [{
+      mimeType: CONNECTOR_ICON_MIME_TYPE,
+      sizes: [...CONNECTOR_ICON_SIZES],
+      src: CONNECTOR_ICON_URL,
+    }],
+    name: CONNECTOR_NAME,
+    title: CONNECTOR_TITLE,
+    version: CONNECTOR_VERSION,
+    websiteUrl: CONNECTOR_WEBSITE_URL,
+  }
+  catalogInvariant(
+    stableString(jsonValue(value, "server identity")) === stableString(expected),
+    "server identity does not match public release metadata",
+  )
+}
+
 function sha256Digest(value: unknown, label: string): string {
   return `sha256:${createHash("sha256")
     .update(stableString(jsonValue(value, label)))
@@ -475,6 +500,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
   try {
     await server.connect(serverTransport)
     await client.connect(clientTransport)
+    assertServerIdentity(client.getServerVersion())
     const [toolsResult, promptsResult, resourcesResult, templatesResult] = await Promise.all([
       client.listTools(),
       client.listPrompts(),

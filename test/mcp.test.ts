@@ -25,6 +25,14 @@ import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  CONNECTOR_DESCRIPTION,
+  CONNECTOR_ICON_MIME_TYPE,
+  CONNECTOR_ICON_SIZES,
+  CONNECTOR_ICON_URL,
+  CONNECTOR_NAME,
+  CONNECTOR_TITLE,
+  CONNECTOR_VERSION,
+  CONNECTOR_WEBSITE_URL,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
@@ -516,6 +524,18 @@ const PROGRESSIVE_TOOL_SURFACE_CONFIG: FixtureConfigOverrides = {
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
 const LIST_CHANGED_TIMEOUT_MS = 2_000
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
+const EXPECTED_SERVER_IDENTITY = {
+  description: CONNECTOR_DESCRIPTION,
+  icons: [{
+    mimeType: CONNECTOR_ICON_MIME_TYPE,
+    sizes: [...CONNECTOR_ICON_SIZES],
+    src: CONNECTOR_ICON_URL,
+  }],
+  name: CONNECTOR_NAME,
+  title: CONNECTOR_TITLE,
+  version: CONNECTOR_VERSION,
+  websiteUrl: CONNECTOR_WEBSITE_URL,
+}
 const GUILD_ID = "100000000000000001"
 const OTHER_GUILD_ID = "100000000000000002"
 const APPLICATION_ID = "110000000000000001"
@@ -12095,6 +12115,15 @@ async function settleNotifications(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve))
   await new Promise<void>((resolve) => setImmediate(resolve))
 }
+
+test("MCP server advertises complete public identity in both protocol eras", async (context) => {
+  const legacy = await connectedFixture(context)
+  const modern = await connectedModernStdioFixture(context)
+
+  assert.deepEqual(legacy.client.getServerVersion(), EXPECTED_SERVER_IDENTITY)
+  assert.deepEqual(modern.client.getServerVersion(), EXPECTED_SERVER_IDENTITY)
+  assert.equal(modern.client.getProtocolEra(), "modern")
+})
 
 test("MCP server advertises bounded tools with accurate write annotations", async (context) => {
   const { client } = await connectedFixture(context)

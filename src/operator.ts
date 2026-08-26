@@ -34,9 +34,15 @@ import {
   writeConnectorConfigDocumentFile,
 } from "./config-operator.js"
 import {
+  CONNECTOR_DESCRIPTION,
+  CONNECTOR_ICON_MIME_TYPE,
+  CONNECTOR_ICON_SIZES,
+  CONNECTOR_ICON_URL,
   CONNECTOR_LIMITS,
   CONNECTOR_NAME,
+  CONNECTOR_TITLE,
   CONNECTOR_VERSION,
+  CONNECTOR_WEBSITE_URL,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -4001,8 +4007,20 @@ async function inspectSmokeClient(
   const expectedToolNames = [...selectedToolNames, MCP_DISCOVERY_TOOL_NAME]
   const protocolVersion = client.getNegotiatedProtocolVersion()
   const server = client.getServerVersion()
-  if (!protocolVersion || !server?.name || !server.version) {
-    throw new Error("MCP smoke check found incomplete negotiated server identity")
+  const icon = server?.icons?.[0]
+  if (
+    !protocolVersion
+    || server?.description !== CONNECTOR_DESCRIPTION
+    || server.icons?.length !== 1
+    || icon?.mimeType !== CONNECTOR_ICON_MIME_TYPE
+    || JSON.stringify(icon.sizes) !== JSON.stringify(CONNECTOR_ICON_SIZES)
+    || icon.src !== CONNECTOR_ICON_URL
+    || server.name !== CONNECTOR_NAME
+    || server.title !== CONNECTOR_TITLE
+    || server.version !== CONNECTOR_VERSION
+    || server.websiteUrl !== CONNECTOR_WEBSITE_URL
+  ) {
+    throw new Error("MCP smoke check found an invalid negotiated server identity")
   }
   let listed = await client.listTools()
   if (config.mcpToolSurface === "progressive") {

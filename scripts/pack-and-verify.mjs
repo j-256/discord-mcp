@@ -252,6 +252,18 @@ const CHANNEL_ID = "400000000000000001"
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
+const expectedServerIdentity = {
+  description: connector.CONNECTOR_DESCRIPTION,
+  icons: [{
+    mimeType: connector.CONNECTOR_ICON_MIME_TYPE,
+    sizes: [...connector.CONNECTOR_ICON_SIZES],
+    src: connector.CONNECTOR_ICON_URL,
+  }],
+  name: connector.CONNECTOR_NAME,
+  title: connector.CONNECTOR_TITLE,
+  version,
+  websiteUrl: connector.CONNECTOR_WEBSITE_URL,
+}
 assert.equal(typeof connector.AutoModerationService, "function")
 assert.equal(typeof connector.ChannelCloneService, "function")
 assert.equal(typeof connector.ChannelMetadataService, "function")
@@ -297,6 +309,7 @@ const catalogTransport = new StdioClientTransport({
 const catalogClient = new Client({ name: "installed-catalog-verifier", version: "1.0.0" }, { capabilities: {} })
 try {
   await catalogClient.connect(catalogTransport)
+  assert.deepEqual(catalogClient.getServerVersion(), expectedServerIdentity)
   const [tools, resources, templates, prompts] = await Promise.all([
     catalogClient.listTools(),
     catalogClient.listResources(),
@@ -346,6 +359,7 @@ const modernCatalogClient = new Client(
 )
 try {
   await modernCatalogClient.connect(modernCatalogTransport)
+  assert.deepEqual(modernCatalogClient.getServerVersion(), expectedServerIdentity)
   const guard = await modernCatalogClient.callTool({
     arguments: {},
     name: "read_messages",
@@ -376,6 +390,7 @@ const transport = new StdioClientTransport({
 const client = new Client({ name: "installed-package-verifier", version: "1.0.0" }, { capabilities: {} })
 try {
   await client.connect(transport)
+  assert.deepEqual(client.getServerVersion(), expectedServerIdentity)
   const [initialTools, resources, templates, prompts] = await Promise.all([
     client.listTools(),
     client.listResources(),
@@ -433,6 +448,7 @@ const modernClient = new Client(
 )
 try {
   await modernClient.connect(modernTransport)
+  assert.deepEqual(modernClient.getServerVersion(), expectedServerIdentity)
   const completion = await modernClient.complete({
     argument: { name: "guildId", value: "300" },
     ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
