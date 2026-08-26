@@ -1,3 +1,5 @@
+import { isMainModule } from "./entrypoint.js"
+
 export * from "./activity-log.js"
 export * from "./activity-review.js"
 export * from "./announcement-crosspost-service.js"
@@ -108,3 +110,10 @@ export * from "./widget-settings-service.js"
 export * from "./guild-settings-service.js"
 export * from "./guild-community-service.js"
 export type * from "./types.js"
+
+if (isMainModule(import.meta.url)) {
+  process.stderr.write(
+    "[discord-mcp] The package library entrypoint does not run an MCP server. Use `discord-mcp serve --config FILE` or `node dist/cli.js serve --config FILE`.\n",
+  )
+  process.exitCode = 1
+}

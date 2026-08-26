@@ -7,5 +7,9 @@ export function isMainModule(
   entrypoint: string | undefined = process.argv[1],
 ): boolean {
   if (!entrypoint) return false
-  return realpathSync(resolve(entrypoint)) === realpathSync(fileURLToPath(metaUrl))
+  try {
+    return realpathSync(resolve(entrypoint)) === realpathSync(fileURLToPath(metaUrl))
+  } catch {
+    return false
+  }
 }

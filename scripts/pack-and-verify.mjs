@@ -500,6 +500,14 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     { cwd: consumer, env: environment },
   )
   const entrypoint = join(consumer, "node_modules", "@j-256", "discord-mcp", "dist", "cli.js")
+  const libraryEntrypoint = join(
+    consumer,
+    "node_modules",
+    "@j-256",
+    "discord-mcp",
+    "dist",
+    "index.js",
+  )
   const bin = join(consumer, "node_modules", ".bin", "discord-mcp")
   const versionResult = await run(bin, ["version"], {
     capture: true,
@@ -513,6 +521,23 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     env: environment,
   })
   assert.match(helpResult.stdout, /Run the stdio MCP server/)
+  const libraryResult = await run(process.execPath, [libraryEntrypoint], {
+    allowedExitCodes: [1],
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  assert.equal(libraryResult.stdout, "")
+  assert.match(
+    libraryResult.stderr,
+    /package library entrypoint does not run an MCP server/u,
+  )
+  assert.match(libraryResult.stderr, /discord-mcp serve --config FILE/u)
+  assert.match(libraryResult.stderr, /node dist\/cli\.js serve --config FILE/u)
+  invariant(
+    !libraryResult.stderr.includes(DUMMY_TOKEN),
+    "installed library-entrypoint diagnostic exposed the credential",
+  )
   const configHelpResult = await run(bin, ["config", "--help"], {
     capture: true,
     cwd: consumer,

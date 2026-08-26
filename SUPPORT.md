@@ -12,6 +12,8 @@ discord-mcp doctor --config FILE
 discord-mcp catalog --check --json
 ```
 
+If an MCP host reports that the connection closed during initialization, inspect the exact command it launched. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/cli.js serve --config FILE`, while an installed package should run `discord-mcp serve --config FILE`. Then run `discord-mcp smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output.
+
 Run `doctor --online` or another live probe only with a bot and guild you control and only when its documented Discord reads are acceptable. Do not publish raw probe output.
 
 ## Choose a route

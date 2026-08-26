@@ -566,7 +566,7 @@ npm test
 npm run build
 ```
 
-The source build's CLI entrypoint is `dist/cli.js`. The npm and source entrypoints select `serve` when no command is supplied, then fail closed unless a configuration file or schema-v2 profile is selected. The OCI image deliberately defaults to the safe catalog and requires an explicit `serve` command plus its mounted configuration for Discord access.
+The source build's CLI entrypoint is `dist/cli.js`. The package's `dist/index.js` is its import-only library entrypoint; executing it directly fails with a fixed credential-free correction to use `discord-mcp serve --config FILE` or `node dist/cli.js serve --config FILE` instead of closing silently during MCP initialization. The npm and source CLI entrypoints select `serve` when no command is supplied, then fail closed unless a configuration file or schema-v2 profile is selected. The OCI image deliberately defaults to the safe catalog and requires an explicit `serve` command plus its mounted configuration for Discord access.
 
 ## Operator CLI
 
