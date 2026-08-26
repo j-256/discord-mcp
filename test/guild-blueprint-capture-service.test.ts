@@ -12,6 +12,7 @@ import {
   normalizeGuildBlueprintCaptureRequest,
 } from "../src/guild-blueprint-capture-service.js"
 import { normalizeGuildBlueprintRequest } from "../src/guild-blueprint-service.js"
+import type { GuildCommunityAuditResult } from "../src/guild-community-service.js"
 import { ScopePolicy } from "../src/policy.js"
 import type {
   DiscordChannel,
@@ -51,10 +52,68 @@ const AUDIT_REASON = "Restore the reviewed caller-retained guild blueprint"
 interface CapturePass {
   autoModerationRules: DiscordAutoModerationRuleSummary[]
   channels: DiscordChannel[]
+  community: GuildCommunityAuditResult | "unavailable"
   guild: DiscordGuild
   onboarding: DiscordGuildOnboarding
   roles: DiscordRole[]
   welcomeScreen: DiscordGuildWelcomeScreen | null
+}
+
+function communityAudit(
+  enabled = false,
+  overrides: Partial<GuildCommunityAuditResult["configuration"]> = {},
+): GuildCommunityAuditResult {
+  const rulesChannelId = enabled ? CHANNEL_ID : null
+  const publicUpdatesChannelId = enabled ? SECOND_CHANNEL_ID : null
+  return {
+    access: {} as never,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: {
+      communityEnabled: enabled,
+      featureCount: enabled ? 2 : 1,
+      featureDigest: `sha256:${"1".repeat(64)}`,
+      issues: [],
+      publicUpdatesChannel: enabled
+        ? {
+            channelId: SECOND_CHANNEL_ID,
+            direct: true,
+            everyoneCanSend: null,
+            everyoneCanView: null,
+            exists: true,
+            parentId: null,
+            type: DISCORD_CHANNEL_TYPES.text,
+            unknownPermissionBitsPresent: null,
+          }
+        : null,
+      publicUpdatesChannelId,
+      rulesChannel: enabled
+        ? {
+            channelId: CHANNEL_ID,
+            direct: true,
+            everyoneCanSend: false,
+            everyoneCanView: true,
+            exists: true,
+            parentId: null,
+            type: DISCORD_CHANNEL_TYPES.text,
+            unknownPermissionBitsPresent: false,
+          }
+        : null,
+      rulesChannelId,
+      safetyAlertsChannel: null,
+      safetyAlertsChannelId: null,
+      stateDigest: `sha256:${"2".repeat(64)}`,
+      ...overrides,
+    },
+    guildId: GUILD_ID,
+    inventory: {} as never,
+    localConstraints: {} as never,
+    privacy: {} as never,
+    schemaVersion: 1,
+    status: "ok",
+    verificationBoundary: {} as never,
+    warnings: [],
+  }
 }
 
 function everyoneRole(): DiscordRole {
@@ -154,6 +213,7 @@ function capturePass(overrides: Partial<CapturePass> = {}): CapturePass {
   return {
     autoModerationRules: [],
     channels: [textChannel()],
+    community: communityAudit(),
     guild: {
       afk_channel_id: null,
       afk_timeout: 300,
@@ -162,7 +222,7 @@ function capturePass(overrides: Partial<CapturePass> = {}): CapturePass {
       description: "A private community",
       discovery_splash: null,
       explicit_content_filter: 2,
-      features: ["COMMUNITY", "WELCOME_SCREEN_ENABLED"],
+      features: ["WELCOME_SCREEN_ENABLED"],
       icon: null,
       id: GUILD_ID,
       name: "Private source guild",
@@ -215,6 +275,7 @@ function capturePass(overrides: Partial<CapturePass> = {}): CapturePass {
 
 function policy(capabilities: Record<string, boolean> = {
   automodAudit: true,
+  guildCommunityAudit: true,
   guildProfileAudit: true,
   guildSettingsAudit: true,
   onboardingAudit: true,
@@ -230,6 +291,7 @@ function policy(capabilities: Record<string, boolean> = {
     name: "capture-test",
     scopes: {
       automodGuildIds: [GUILD_ID],
+      guildCommunityGuildIds: [GUILD_ID],
       guildProfileGuildIds: [GUILD_ID],
       guildSettingsGuildIds: [GUILD_ID],
       onboardingGuildIds: [GUILD_ID],
@@ -251,6 +313,7 @@ function fixture(
   const calls = {
     autoModerationRules: 0,
     channels: 0,
+    community: 0,
     guild: 0,
     onboarding: 0,
     roles: 0,
@@ -296,6 +359,16 @@ function fixture(
       ]
       return () => values.shift() ?? new Date("2026-08-24T00:00:01.000Z")
     })(),
+    community: {
+      async get() {
+        calls.community += 1
+        const community = current().community
+        if (community === "unavailable") {
+          throw new Error("Community evidence unavailable")
+        }
+        return structuredClone(community)
+      },
+    },
     policy: selectedPolicy,
   })
   return { calls, service }
@@ -332,6 +405,7 @@ test("guild blueprint capture returns one strict planner-ready caller-retained i
   assert.deepEqual(calls, {
     autoModerationRules: 2,
     channels: 2,
+    community: 2,
     guild: 2,
     onboarding: 2,
     roles: 2,
@@ -339,7 +413,7 @@ test("guild blueprint capture returns one strict planner-ready caller-retained i
   })
   assert.equal(result.captureWindow.stable, true)
   assert.equal(result.privacy.messageContent, "not-read")
-  assert.equal(result.privacy.memberProfiles, "not-read")
+  assert.equal(result.privacy.memberProfiles, "connector-bot-identity-only")
   assert.equal(result.privacy.serverPersistence, "none")
   assert.ok(result.blueprint)
   assert.doesNotThrow(() => normalizeGuildBlueprintRequest(result.blueprint!))
@@ -375,6 +449,151 @@ test("guild blueprint capture returns no torn blueprint when the second pass cha
   assert.deepEqual(result.omissions, [])
   assert.deepEqual(result.blockers.map((entry) => entry.code), ["CAPTURE_CHANGED"])
   assert.doesNotMatch(JSON.stringify(result), /Changed during capture/u)
+})
+
+test("guild blueprint capture retains complete enabled Community routing", async () => {
+  const base = capturePass()
+  const pass = capturePass({
+    channels: [
+      textChannel(),
+      textChannel(SECOND_CHANNEL_ID, {
+        name: "community-updates",
+        position: 1,
+      }),
+    ],
+    community: communityAudit(true),
+    guild: {
+      ...base.guild,
+      features: ["COMMUNITY", "WELCOME_SCREEN_ENABLED"],
+    },
+  })
+  const result = await fixture([pass, pass]).service.capture(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.equal(result.status, "review-required")
+  assert.deepEqual(result.coverage?.community, {
+    captured: true,
+    evidence: "complete",
+    liveEnabled: true,
+  })
+  assert.deepEqual(result.blueprint?.community, {
+    acknowledgeCommunityEnablement: true,
+    publicUpdatesChannel: {
+      key: `channel-${SECOND_CHANNEL_ID}`,
+      kind: "scaffold",
+    },
+    rulesChannel: {
+      key: `channel-${CHANNEL_ID}`,
+      kind: "scaffold",
+    },
+    safetyAlertsChannel: null,
+  })
+  assert.equal(
+    result.omissions.some((entry) => entry.code === "COMMUNITY_EVIDENCE_OMITTED"),
+    false,
+  )
+})
+
+test("guild blueprint capture omits unavailable Community evidence without guessing", async () => {
+  const pass = capturePass({ community: "unavailable" })
+  const result = await fixture([pass, pass]).service.capture(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.equal(result.status, "review-required")
+  assert.equal(result.blueprint?.community, undefined)
+  assert.deepEqual(result.coverage?.community, {
+    captured: false,
+    evidence: "unavailable",
+    liveEnabled: null,
+  })
+  assert.equal(
+    result.omissions.some((entry) => entry.code === "COMMUNITY_EVIDENCE_OMITTED"),
+    true,
+  )
+})
+
+test("guild blueprint capture includes Community routing in two-pass stability", async () => {
+  const base = capturePass()
+  const channels = [
+    textChannel(),
+    textChannel(SECOND_CHANNEL_ID, { name: "updates", position: 1 }),
+    textChannel(THIRD_CHANNEL_ID, { name: "news", position: 2 }),
+  ]
+  const guild = {
+    ...base.guild,
+    features: ["COMMUNITY", "WELCOME_SCREEN_ENABLED"],
+  }
+  const first = capturePass({
+    channels,
+    community: communityAudit(true),
+    guild,
+  })
+  const current = communityAudit(true)
+  const second = capturePass({
+    channels,
+    community: communityAudit(true, {
+      publicUpdatesChannel: {
+        ...current.configuration.publicUpdatesChannel!,
+        channelId: THIRD_CHANNEL_ID,
+      },
+      publicUpdatesChannelId: THIRD_CHANNEL_ID,
+    }),
+    guild,
+  })
+  const result = await fixture([first, second]).service.capture(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.equal(result.status, "changed-during-capture")
+  assert.equal(result.captureWindow.stable, false)
+  assert.equal(result.blueprint, null)
+  assert.equal(result.captureDigest, null)
+})
+
+test("guild blueprint capture omits unsafe enabled Community routing", async () => {
+  const base = capturePass()
+  const current = communityAudit(true)
+  const pass = capturePass({
+    channels: [
+      textChannel(),
+      textChannel(SECOND_CHANNEL_ID, { name: "updates", position: 1 }),
+    ],
+    community: communityAudit(true, {
+      rulesChannel: {
+        ...current.configuration.rulesChannel!,
+        everyoneCanView: false,
+      },
+    }),
+    guild: {
+      ...base.guild,
+      features: ["COMMUNITY", "WELCOME_SCREEN_ENABLED"],
+    },
+  })
+  const result = await fixture([pass, pass]).service.capture(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.equal(result.status, "review-required")
+  assert.equal(result.blueprint?.community, undefined)
+  assert.deepEqual(result.coverage?.community, {
+    captured: false,
+    evidence: "incomplete",
+    liveEnabled: true,
+  })
+  assert.equal(
+    result.omissions.some((entry) => entry.code === "COMMUNITY_EVIDENCE_OMITTED"),
+    true,
+  )
 })
 
 test("guild blueprint capture retains complete exact-ID AutoMod policy with scaffold references", async () => {
@@ -896,6 +1115,7 @@ test("guild blueprint capture reports bounded truncation without silent complete
 test("guild blueprint capture composes every existing audit policy before Discord reads", async () => {
   const pass = capturePass()
   const { calls, service } = fixture([pass, pass], policy({
+    guildCommunityAudit: true,
     guildProfileAudit: true,
     guildSettingsAudit: true,
     onboardingAudit: true,
@@ -909,6 +1129,7 @@ test("guild blueprint capture composes every existing audit policy before Discor
   assert.deepEqual(calls, {
     autoModerationRules: 0,
     channels: 0,
+    community: 0,
     guild: 0,
     onboarding: 0,
     roles: 0,
@@ -920,6 +1141,7 @@ test("guild blueprint capture requires AutoMod audit policy before Discord reads
   const pass = capturePass()
   const { calls, service } = fixture([pass, pass], policy({
     automodAudit: false,
+    guildCommunityAudit: true,
     guildProfileAudit: true,
     guildSettingsAudit: true,
     onboardingAudit: true,
@@ -933,6 +1155,7 @@ test("guild blueprint capture requires AutoMod audit policy before Discord reads
   assert.deepEqual(calls, {
     autoModerationRules: 0,
     channels: 0,
+    community: 0,
     guild: 0,
     onboarding: 0,
     roles: 0,

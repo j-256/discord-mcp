@@ -5016,6 +5016,28 @@ const guildBlueprintSettingsSchema = z.strictObject({
   (value) => Object.keys(value).length > 0,
   { message: "Select at least one guild setting to change" },
 )
+const guildBlueprintCommunitySchema = z.strictObject({
+  acknowledgeCommunityEnablement: z.literal(true)
+    .describe("Explicit acknowledgement that this phase may enable Discord Community"),
+  publicUpdatesChannel: guildBlueprintChannelReferenceSchema
+    .describe("Exact channel ID or requested scaffold text-channel key"),
+  rulesChannel: guildBlueprintChannelReferenceSchema
+    .describe("Distinct exact channel ID or requested scaffold text-channel key"),
+  safetyAlertsChannel: guildBlueprintChannelReferenceSchema
+    .nullable()
+    .describe("Exact channel ID, requested scaffold text-channel key, or null"),
+}).refine(
+  (value) => {
+    const rules = value.rulesChannel.kind === "exact"
+      ? `exact:${value.rulesChannel.channelId}`
+      : `scaffold:${value.rulesChannel.key}`
+    const updates = value.publicUpdatesChannel.kind === "exact"
+      ? `exact:${value.publicUpdatesChannel.channelId}`
+      : `scaffold:${value.publicUpdatesChannel.key}`
+    return rules !== updates
+  },
+  { message: "Community rules and public-updates channel references must be distinct" },
+)
 const guildBlueprintWelcomeScreenSchema = z.strictObject({
   channels: z.array(z.strictObject({
     channel: guildBlueprintChannelReferenceSchema,
@@ -5257,6 +5279,7 @@ const guildBlueprintPublicationsSchema = z.array(guildBlueprintPublicationSchema
 const guildBlueprintFields = {
   auditReason: auditReasonSchema,
   autoModerationRules: guildBlueprintAutoModerationRulesSchema.optional(),
+  community: guildBlueprintCommunitySchema.optional(),
   guildId: positiveSnowflakeSchema.describe("Exact guild blueprint target guild ID"),
   onboarding: guildBlueprintOnboardingSchema.optional(),
   operationKey: z.string()
@@ -5289,6 +5312,11 @@ function guildBlueprintRules(
       exemptChannels: readonly { key?: string; kind: string }[]
       exemptRoles: readonly { key?: string; kind: string }[]
     }[] | undefined
+    community?: {
+      publicUpdatesChannel: { key?: string; kind: string }
+      rulesChannel: { key?: string; kind: string }
+      safetyAlertsChannel: { key?: string; kind: string } | null
+    } | undefined
     onboarding?: {
       defaultChannels: readonly { key?: string; kind: string }[]
       prompts: readonly {
@@ -5319,6 +5347,7 @@ function guildBlueprintRules(
 ): void {
   if (
     input.autoModerationRules === undefined
+    && input.community === undefined
     && input.onboarding === undefined
     && input.profile === undefined
     && input.publications === undefined
@@ -5327,8 +5356,30 @@ function guildBlueprintRules(
   ) {
     context.addIssue({
       code: "custom",
-      message: "guild blueprint requires a profile, settings, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
+      message: "guild blueprint requires a profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
     })
+  }
+  const communityReferences = input.community === undefined
+    ? []
+    : [
+        ["publicUpdatesChannel", input.community.publicUpdatesChannel] as const,
+        ["rulesChannel", input.community.rulesChannel] as const,
+        ...(input.community.safetyAlertsChannel === null
+          ? []
+          : [["safetyAlertsChannel", input.community.safetyAlertsChannel] as const]),
+      ]
+  for (const [field, reference] of communityReferences) {
+    if (reference.kind !== "scaffold") continue
+    const requested = input.scaffold.channels.find(
+      (channel) => channel.key === reference.key,
+    )
+    if (requested?.kind !== "text") {
+      context.addIssue({
+        code: "custom",
+        message: "guild blueprint Community phase must reference a requested text channel",
+        path: ["community", field, "key"],
+      })
+    }
   }
   for (const [ruleIndex, rule] of (input.autoModerationRules ?? []).entries()) {
     for (const [actionIndex, action] of rule.actions.entries()) {
@@ -16399,6 +16450,16 @@ function guildBlueprintRequest(
             trigger: guildBlueprintAutoModerationTrigger(rule.trigger),
           })),
         }),
+    ...(input.community === undefined
+      ? {}
+      : {
+          community: {
+            acknowledgeCommunityEnablement: true as const,
+            publicUpdatesChannel: input.community.publicUpdatesChannel,
+            rulesChannel: input.community.rulesChannel,
+            safetyAlertsChannel: input.community.safetyAlertsChannel,
+          },
+        }),
     guildId: input.guildId,
     ...(input.onboarding === undefined
       ? {}
@@ -16555,13 +16616,15 @@ function guildBlueprintConfirmationMessage(plan: GuildBlueprintPlan): string {
       ? guildProfileConfirmationMessage(plan.frontier.plan)
       : plan.frontier.kind === "settings"
         ? guildSettingsConfirmationMessage(plan.frontier.plan)
-        : plan.frontier.kind === "welcome-screen"
-          ? welcomeScreenConfirmationMessage(plan.frontier.plan)
-          : plan.frontier.kind === "onboarding"
-            ? onboardingConfirmationMessage(plan.frontier.plan)
-            : plan.frontier.kind === "auto-moderation"
-              ? autoModerationConfirmationMessage(plan.frontier.plan)
-              : componentMessageConfirmationMessage(plan.frontier.plan)
+        : plan.frontier.kind === "community"
+          ? guildCommunityConfirmationMessage(plan.frontier.plan)
+          : plan.frontier.kind === "welcome-screen"
+            ? welcomeScreenConfirmationMessage(plan.frontier.plan)
+            : plan.frontier.kind === "onboarding"
+              ? onboardingConfirmationMessage(plan.frontier.plan)
+              : plan.frontier.kind === "auto-moderation"
+                ? autoModerationConfirmationMessage(plan.frontier.plan)
+                : componentMessageConfirmationMessage(plan.frontier.plan)
   return [
     "Approve exactly one reviewed Discord guild blueprint frontier?",
     "The exact blueprint manifest remains caller-retained and is not persisted or copied into confirmation state.",
@@ -17458,7 +17521,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Thread creation uses a separate exact parent-channel scope: call plan_thread_creation for a message-anchored, standalone public, or standalone private thread, review the exact source preview when present, resolved settings, complete permission evidence, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_thread_creation with identical inputs and the digest. A source message that already owns a thread produces a no-op without approval or durable records. Writes are never automatically retried, and forum or media parents, lifecycle changes, membership changes, and starter messages are excluded.",
       "Thread governance uses separate exact guild, thread, and optional member allowlists and never enumerates members. For one rename, archive, unarchive, lock, unlock, auto-archive, slowmode, invitation-policy, add-member, or remove-member change, call plan_thread_change, review the exact guild, parent, thread and optional member, minimized current and desired state, complete inherited permissions, action-specific MANAGE_THREADS, membership, send, or private-thread ownership authority, privacy projection, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_thread_change with identical inputs and the digest. Each execution performs one non-retried write and exact readback, never combines metadata fields or rolls back, and an uncertain outcome blocks later same-thread changes in the process.",
       "Forum-post creation uses a separate exact forum-channel scope: call plan_forum_post, review the exact title, starter content, tags, settings, notifications, audit reason, complete permission evidence, one-shot operation key hash, warnings, and keyed digest, then call execute_forum_post with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed structure, profile, settings, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publication sequence. Requested scaffold resources may become exact onboarding, AutoMod, Welcome Screen, system-channel, or publication references only after complete exact scaffold evidence. Every AutoMod rule and publication has a stable key and separate derived operation identity. Unbound AutoMod rules never adopt by name: only a matching content-free request-bound creation receipt can recover their exact rule ID. New rules are created disabled, and enabled policy changes advance through separately reviewed disable, configure, and enable stages. Publication recovery likewise verifies a content-free receipt and one exact receipt-bound message without scanning history. Blocked or drifting receipt evidence stops later phases without writing. Call plan_guild_blueprint with the unchanged manifest and master operation key, review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
+      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed structure, profile, settings, monotonic Community, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publication sequence. Requested scaffold resources may become exact Community, onboarding, AutoMod, Welcome Screen, system-channel, or publication references only after complete exact scaffold evidence. Community enablement requires explicit acknowledgement and temporary guild ownership or complete Administrator authority, preserves every existing feature, and remains separate from routing-only Manage Guild authority. An enabled Welcome Screen or onboarding request is blocked before downstream planning when Community is disabled and no Community phase can establish it. Every AutoMod rule and publication has a stable key and separate derived operation identity. Unbound AutoMod rules never adopt by name: only a matching content-free request-bound creation receipt can recover their exact rule ID. New rules are created disabled, and enabled policy changes advance through separately reviewed disable, configure, and enable stages. Publication recovery likewise verifies a content-free receipt and one exact receipt-bound message without scanning history. Blocked or drifting receipt evidence stops later phases without writing. Call plan_guild_blueprint with the unchanged manifest and master operation key, review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
       "Guild scaffolds use a dedicated exact guild scope: call plan_guild_scaffold, review the verified application, bot, guild, exact additive role and channel graph, resolved parents, permissions, capacities, durable operation binding, ready frontier, step limit, warnings, and keyed digest, then call execute_guild_scaffold with identical inputs and the digest. Execution durably claims both guild role and channel collections; a normal verified pause releases the claims, while interruption or uncertain pending evidence requires review. Reuse the same operation key only for an intentional paused resume; an uncertain or drifting step permanently blocks it. After completion, call verify_guild_scaffold with the same caller-retained request and operation key for fresh content-free completion evidence.",
       "Member nickname changes use a self-only safe default and a second gate for other members. Call plan_member_nickname_change with the current-bot target or one exact member ID plus a strict nickname or explicit null, review the exact transient current and desired names, CHANGE_NICKNAME or MANAGE_NICKNAMES evidence, protected-target boundary, hierarchy where applicable, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_member_nickname_change with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, pending content-free records, one non-retried PATCH, and exact readback. Names are never transformed or persisted, and no mutation is retried or rolled back.",
       "Member-role changes use separate exact guild and role allowlists plus complete continuity-stable direct-channel metadata: call plan_member_role_change, review the exact member and selected role, channel evidence, current and proposed role IDs, guild-level permission delta, bot and target hierarchy, permission-escalation and unknown-bit evidence, every changed direct-channel permission decision, thread-coverage warning, audit reason, one-shot operation key hash, and keyed digest, then call execute_member_role_change with identical inputs and the digest. Any obfuscated channel blocks both add and remove. Both actions are destructive reviewed changes. Never replace a member's complete role array or retry after reservation or uncertainty.",
@@ -25996,7 +26059,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "capture_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. Returns a strict planner-ready blueprint or an explicit blocker, with stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, complete exact-ID AutoMod policy, exact-bound references, unknown evidence, and capacity limits. Reads no messages, members, webhooks, invites, attachments, embeds, components, AutoMod execution events, or audit logs, and persists no snapshot, policy content, operation, or activity record. A capture is an authoring and same-guild recovery aid, not a complete backup; review every omission before calling plan_guild_blueprint.",
+      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. Returns a strict planner-ready blueprint or an explicit blocker, with stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, trusted Community routing, complete exact-ID AutoMod policy, exact-bound references, unknown evidence, and capacity limits. Reads no messages, member directories or non-bot member profiles, webhooks, invites, attachments, embeds, components, AutoMod execution events, or audit logs, and persists no snapshot, policy content, operation, or activity record. Community evidence uses only the connector member required for complete permissions and omits all profile fields. A capture is an authoring and same-guild recovery aid, not a complete backup; review every omission before calling plan_guild_blueprint.",
       inputSchema: guildBlueprintCaptureInputSchema,
       outputSchema: toolOutputSchema,
       title: "Capture caller-retained Discord guild blueprint",
@@ -26024,7 +26087,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare the next process-bound frontier of one caller-retained declarative Discord guild blueprint. Structure, profile, settings, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publications delegate to their existing complete-evidence domains in a fixed order. Unbound AutoMod creation recovers identity only from a matching content-free request-bound receipt, never a name scan; exact existing rules use exact IDs, and policy changes advance through separate disable, configure, and enable reviews. Publication recovery uses content-free keyed receipts and one exact receipt-bound message read, never a history scan. Requested scaffold channel and role keys become exact domain references only where permitted. Returns one transient frontier or content-free AutoMod or publication blocker while persisting neither the manifest nor its content.",
+      description: "Prepare the next process-bound frontier of one caller-retained declarative Discord guild blueprint. Structure, profile, settings, monotonic Community enablement and routing, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publications delegate to their existing complete-evidence domains in a fixed order. A requested enabled Welcome Screen or onboarding phase is blocked early when Community is disabled and no acknowledged Community phase can establish it. Unbound AutoMod creation recovers identity only from a matching content-free request-bound receipt, never a name scan; exact existing rules use exact IDs, and policy changes advance through separate disable, configure, and enable reviews. Publication recovery uses content-free keyed receipts and one exact receipt-bound message read, never a history scan. Requested scaffold channel and role keys become exact domain references only where permitted. Returns one transient frontier or content-free Community, AutoMod, or publication blocker while persisting neither the manifest nor its content.",
       inputSchema: guildBlueprintPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan Discord guild blueprint frontier",
@@ -26040,7 +26103,9 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       const summary = result.status === "blocked" && result.blocker !== null
         ? result.blocker.kind === "auto-moderation"
           ? `Discord guild blueprint ${result.digest} is blocked at AutoMod rule ${result.blocker.index + 1} in guild ${result.guild.id}`
-          : `Discord guild blueprint ${result.digest} is blocked at publication ${result.blocker.index + 1} in guild ${result.guild.id}`
+          : result.blocker.kind === "publication"
+            ? `Discord guild blueprint ${result.digest} is blocked at publication ${result.blocker.index + 1} in guild ${result.guild.id}`
+            : `Discord guild blueprint ${result.digest} requires an acknowledged Community phase before ${result.blocker.requiredBy.join(" and ")} in guild ${result.guild.id}`
         : result.frontier === null
           ? `Discord guild blueprint ${result.digest} is already current in guild ${result.guild.id}`
           : `Discord guild blueprint ${result.digest} has reviewed ${result.frontier.kind} frontier in guild ${result.guild.id}`
@@ -26052,7 +26117,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_guild_blueprint",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
-      description: "Execute exactly one fresh reviewed frontier of a caller-retained Discord guild blueprint after signed interactive approval when a write is required. Signed state contains only request and aggregate plan digests. The coordinator derives phase-, AutoMod-rule-stage-, or publication-key-separated operation keys and delegates to the existing scaffold, profile, settings, Welcome Screen, onboarding, AutoMod, or component-message executor, preserving every domain reservation, pending audit, limiter, non-retry, readback, conflict, and uncertainty-quarantine invariant. A content-free AutoMod or publication blocker returns without elicitation or a write. Plan again before any later phase.",
+      description: "Execute exactly one fresh reviewed frontier of a caller-retained Discord guild blueprint after signed interactive approval when a write is required. Signed state contains only request and aggregate plan digests. The coordinator derives phase-, AutoMod-rule-stage-, or publication-key-separated operation keys and delegates to the existing scaffold, profile, settings, Community, Welcome Screen, onboarding, AutoMod, or component-message executor, preserving every domain reservation, pending audit, limiter, non-retry, readback, conflict, and uncertainty-quarantine invariant. A content-free Community, AutoMod, or publication blocker returns without elicitation or a write. Plan again before any later phase.",
       inputSchema: guildBlueprintExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord guild blueprint frontier",

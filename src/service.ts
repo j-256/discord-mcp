@@ -2000,6 +2000,7 @@ export class ConnectorService {
       domains: {
         automod: this.#automodService,
         component: this.#componentMessageService,
+        community: this.#guildCommunityService,
         onboarding: this.#onboardingService,
         profile: this.#guildProfileService,
         scaffold: this.#guildScaffoldService,
@@ -2010,6 +2011,7 @@ export class ConnectorService {
     })
     this.#guildBlueprintCaptureService = new GuildBlueprintCaptureService({
       client: this.#client,
+      community: this.#guildCommunityService,
       policy: this.#policy,
       ...options.guildBlueprintCaptureOptions,
     })
@@ -4994,6 +4996,13 @@ export class ConnectorService {
         ),
         executeComponent: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeComponentMessage(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeCommunity: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeGuildCommunityChange(
             nestedRequest,
             nestedDigest,
             nestedOptions,

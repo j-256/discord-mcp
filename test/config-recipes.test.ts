@@ -88,9 +88,12 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   ])
   assert.equal(guildBuilder.capabilities.includes("automodAudit"), true)
   assert.equal(guildBuilder.capabilities.includes("automodChanges"), true)
+  assert.equal(guildBuilder.capabilities.includes("guildCommunityAudit"), true)
+  assert.equal(guildBuilder.capabilities.includes("guildCommunityChanges"), true)
   assert.deepEqual(guildBuilder.requirements.scope.targets, [
     "$.scopes.automodGuildIds",
     "$.scopes.guildScaffoldGuildIds",
+    "$.scopes.guildCommunityGuildIds",
     "$.scopes.guildProfileGuildIds",
     "$.scopes.guildSettingsGuildIds",
     "$.scopes.onboardingGuildIds",
@@ -110,7 +113,15 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     false,
   )
   assert.equal(
+    guildBuilder.requirements.botPermissions.includes("ADMINISTRATOR"),
+    false,
+  )
+  assert.equal(
     guildBuilder.warnings.some((warning) => warning.includes("MODERATE_MEMBERS")),
+    true,
+  )
+  assert.equal(
+    guildBuilder.warnings.some((warning) => warning.includes("Administrator")),
     true,
   )
 

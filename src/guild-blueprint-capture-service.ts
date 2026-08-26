@@ -43,6 +43,7 @@ import {
   type GuildBlueprintAutoModerationActionInput,
   type GuildBlueprintAutoModerationRuleInput,
   type GuildBlueprintChannelReference,
+  type GuildBlueprintCommunityInput,
   type GuildBlueprintOnboardingInput,
   type GuildBlueprintOnboardingPromptInput,
   type GuildBlueprintRequest,
@@ -50,6 +51,10 @@ import {
   type GuildBlueprintWelcomeScreenInput,
   normalizeGuildBlueprintRequest,
 } from "./guild-blueprint-service.js"
+import type {
+  GuildCommunityAuditResult,
+  GuildCommunityChannelReferenceView,
+} from "./guild-community-service.js"
 import { stableString } from "./normalize.js"
 import type { OnboardingEmojiRequest } from "./onboarding-service.js"
 import { operationKeyHash } from "./operation-store.js"
@@ -73,6 +78,7 @@ const CAPTURE_REQUEST_KEYS = Object.freeze([
   "operationKey",
 ] as const)
 const CAPTURE_DIGEST_PREFIX = "sha256:"
+const COMMUNITY_FEATURE = "COMMUNITY"
 const WELCOME_SCREEN_ENABLED_FEATURE = "WELCOME_SCREEN_ENABLED"
 const SUPPORTED_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.category,
@@ -144,6 +150,7 @@ export type GuildBlueprintCaptureFindingCode =
   | "CHANNEL_UNREPRESENTABLE"
   | "CHANNEL_UNSUPPORTED_TYPE"
   | "CHANNEL_UNKNOWN_EVIDENCE"
+  | "COMMUNITY_EVIDENCE_OMITTED"
   | "CHANNEL_REFERENCE_UNRESOLVED"
   | "EXACT_CHANNEL_REFERENCE_RETAINED"
   | "EXACT_ROLE_REFERENCE_RETAINED"
@@ -168,7 +175,7 @@ export interface GuildBlueprintCaptureFinding {
   code: GuildBlueprintCaptureFindingCode
   message: string
   resourceId: string | null
-  resourceType: "auto-moderation" | "capture" | "channel" | "role"
+  resourceType: "auto-moderation" | "capture" | "channel" | "community" | "role"
 }
 
 export interface GuildBlueprintCaptureRequest {
@@ -193,10 +200,16 @@ export interface GuildBlueprintCaptureCoverage {
     returned: number
     visibility: "discord-and-policy-bounded"
   }
+  community: {
+    captured: boolean
+    evidence: "complete" | "incomplete" | "unavailable"
+    liveEnabled: boolean | null
+  }
   domains: readonly [
     "structure",
     "profile",
     "settings",
+    "community",
     "welcome-screen",
     "onboarding",
     "auto-moderation",
@@ -214,7 +227,7 @@ export interface GuildBlueprintCapturePrivacy {
   attachments: "not-read"
   autoModerationExecutionEvents: "not-read"
   components: "not-read"
-  memberProfiles: "not-read"
+  memberProfiles: "connector-bot-identity-only"
   messageContent: "not-read"
   rawPayloads: "omitted"
   returnedText: "transient-caller-retained"
@@ -293,12 +306,17 @@ export type GuildBlueprintCaptureResult =
 interface GuildBlueprintCapturePass {
   autoModerationRules: DiscordAutoModerationRuleSummary[]
   channels: DiscordChannel[]
+  community: GuildBlueprintCaptureCommunityEvidence
   guild: DiscordGuild
   onboarding: DiscordGuildOnboarding
   profile: DiscordGuildProfile
   roles: DiscordRole[]
   welcomeScreen: DiscordGuildWelcomeScreen | null
 }
+
+type GuildBlueprintCaptureCommunityEvidence =
+  | { audit: GuildCommunityAuditResult; status: "available" }
+  | { status: "unavailable" }
 
 interface ValidatedGuildSettings {
   afkChannelId: string | null
@@ -338,6 +356,14 @@ export interface GuildBlueprintCaptureServiceOptions {
     | "listGuildAutoModerationRules"
   >
   clock?: () => Date
+  community: {
+    get(
+      applicationId: string,
+      botId: string,
+      guildId: string,
+      options?: RequestOptions,
+    ): Promise<GuildCommunityAuditResult>
+  }
   policy: ScopePolicy
 }
 
@@ -736,15 +762,126 @@ function canonicalRoleProjection(role: NormalizedDiscordRole): unknown {
   }
 }
 
+function communityChannelSourceProjection(
+  view: GuildCommunityChannelReferenceView | null,
+): unknown {
+  if (view === null) return null
+  return {
+    channelId: view.channelId,
+    direct: view.direct,
+    everyoneCanSend: view.everyoneCanSend,
+    everyoneCanView: view.everyoneCanView,
+    exists: view.exists,
+    parentId: view.parentId,
+    type: view.type,
+    unknownPermissionBitsPresent: view.unknownPermissionBitsPresent,
+  }
+}
+
+function communitySourceProjection(
+  evidence: GuildBlueprintCaptureCommunityEvidence,
+): unknown {
+  if (evidence.status === "unavailable") return { status: "unavailable" }
+  const configuration = evidence.audit.configuration
+  return {
+    applicationId: evidence.audit.applicationId,
+    botId: evidence.audit.botId,
+    configuration: {
+      communityEnabled: configuration.communityEnabled,
+      featureCount: configuration.featureCount,
+      featureDigest: configuration.featureDigest,
+      publicUpdatesChannel: communityChannelSourceProjection(
+        configuration.publicUpdatesChannel,
+      ),
+      publicUpdatesChannelId: configuration.publicUpdatesChannelId,
+      rulesChannel: communityChannelSourceProjection(configuration.rulesChannel),
+      rulesChannelId: configuration.rulesChannelId,
+      safetyAlertsChannel: communityChannelSourceProjection(
+        configuration.safetyAlertsChannel,
+      ),
+      safetyAlertsChannelId: configuration.safetyAlertsChannelId,
+      stateDigest: configuration.stateDigest,
+    },
+    guildId: evidence.audit.guildId,
+    schemaVersion: evidence.audit.schemaVersion,
+    status: evidence.audit.status,
+  }
+}
+
+function communityChannelEvidenceMatches(
+  channelId: string,
+  view: GuildCommunityChannelReferenceView | null,
+  rulesChannel: boolean,
+): boolean {
+  return view !== null
+    && view.channelId === channelId
+    && view.direct === true
+    && view.exists === true
+    && (
+      view.type === DISCORD_CHANNEL_TYPES.text
+      || view.type === DISCORD_CHANNEL_TYPES.announcement
+    )
+    && (rulesChannel
+      ? view.everyoneCanView === true
+        && view.unknownPermissionBitsPresent === false
+      : view.unknownPermissionBitsPresent === null)
+}
+
+function completeCommunityConfiguration(
+  audit: GuildCommunityAuditResult,
+): boolean {
+  const configuration = audit.configuration
+  return configuration.communityEnabled === true
+    && positiveSnowflake(configuration.rulesChannelId)
+    && positiveSnowflake(configuration.publicUpdatesChannelId)
+    && configuration.rulesChannelId !== configuration.publicUpdatesChannelId
+    && communityChannelEvidenceMatches(
+      configuration.rulesChannelId,
+      configuration.rulesChannel,
+      true,
+    )
+    && communityChannelEvidenceMatches(
+      configuration.publicUpdatesChannelId,
+      configuration.publicUpdatesChannel,
+      false,
+    )
+    && (
+      configuration.safetyAlertsChannelId === null
+        ? configuration.safetyAlertsChannel === null
+        : positiveSnowflake(configuration.safetyAlertsChannelId)
+          && communityChannelEvidenceMatches(
+            configuration.safetyAlertsChannelId,
+            configuration.safetyAlertsChannel,
+            false,
+          )
+    )
+}
+
 function projectPass(
   pass: GuildBlueprintCapturePass,
   request: NormalizedGuildBlueprintCaptureRequest,
+  applicationId: string,
+  botId: string,
 ): ProjectedCapturePass {
   const blockers: GuildBlueprintCaptureFinding[] = []
   const omissions: GuildBlueprintCaptureFinding[] = []
   const settings = validateGuildSettings(pass.guild, request.guildId)
   if (pass.profile.id !== request.guildId || pass.onboarding.guildId !== request.guildId) {
     throw new RangeError("Discord returned mismatched guild blueprint capture evidence")
+  }
+  if (
+    pass.community.status === "available"
+    && (
+      pass.community.audit.applicationId !== applicationId
+      || pass.community.audit.botId !== botId
+      || pass.community.audit.guildId !== request.guildId
+      || pass.community.audit.schemaVersion !== SCHEMA_VERSION
+      || pass.community.audit.status !== "ok"
+    )
+  ) {
+    throw new RangeError(
+      "Discord returned mismatched guild Community capture evidence",
+    )
   }
   const roles = normalizeDiscordRoleInventory(pass.roles, request.guildId)
   assertGuildChannelInventory(pass.channels, request.guildId)
@@ -1104,6 +1241,78 @@ function projectPass(
 
   const exactChannelReferences = new Set<string>()
   const exactRoleReferences = new Set<string>()
+  let community: GuildBlueprintCommunityInput | undefined
+  let communityCoverage: GuildBlueprintCaptureCoverage["community"]
+  if (pass.community.status === "unavailable") {
+    communityCoverage = {
+      captured: false,
+      evidence: "unavailable",
+      liveEnabled: null,
+    }
+    omissions.push(finding(
+      "COMMUNITY_EVIDENCE_OMITTED",
+      "Guild Community state could not be proven from complete trusted routing evidence and was omitted",
+      "community",
+    ))
+  } else if (
+    pass.community.audit.configuration.communityEnabled
+      !== settings.features.includes(COMMUNITY_FEATURE)
+  ) {
+    communityCoverage = {
+      captured: false,
+      evidence: "incomplete",
+      liveEnabled: pass.community.audit.configuration.communityEnabled,
+    }
+    omissions.push(finding(
+      "COMMUNITY_EVIDENCE_OMITTED",
+      "Guild Community feature and routing evidence disagreed within the capture pass and was omitted",
+      "community",
+    ))
+  } else if (!pass.community.audit.configuration.communityEnabled) {
+    communityCoverage = {
+      captured: false,
+      evidence: "complete",
+      liveEnabled: false,
+    }
+  } else if (!completeCommunityConfiguration(pass.community.audit)) {
+    communityCoverage = {
+      captured: false,
+      evidence: "incomplete",
+      liveEnabled: true,
+    }
+    omissions.push(finding(
+      "COMMUNITY_EVIDENCE_OMITTED",
+      "Enabled Guild Community routing was incomplete or unsafe to reproduce and was omitted",
+      "community",
+    ))
+  } else {
+    const configuration = pass.community.audit.configuration
+    community = {
+      acknowledgeCommunityEnablement: true,
+      publicUpdatesChannel: referenceForChannel(
+        configuration.publicUpdatesChannelId as string,
+        selectedChannelKeys,
+        exactChannelReferences,
+      ),
+      rulesChannel: referenceForChannel(
+        configuration.rulesChannelId as string,
+        selectedChannelKeys,
+        exactChannelReferences,
+      ),
+      safetyAlertsChannel: configuration.safetyAlertsChannelId === null
+        ? null
+        : referenceForChannel(
+            configuration.safetyAlertsChannelId,
+            selectedChannelKeys,
+            exactChannelReferences,
+          ),
+    }
+    communityCoverage = {
+      captured: true,
+      evidence: "complete",
+      liveEnabled: true,
+    }
+  }
   const autoModerationRuleInputs = autoModerationRules.map((rule) => (
     capturedAutoModerationRule(
       rule,
@@ -1286,10 +1495,12 @@ function projectPass(
       returned: channels.length,
       visibility: "discord-and-policy-bounded",
     },
+    community: communityCoverage,
     domains: [
       "structure",
       "profile",
       "settings",
+      "community",
       "welcome-screen",
       "onboarding",
       "auto-moderation",
@@ -1309,6 +1520,7 @@ function projectPass(
       ...(autoModerationRuleInputs.length === 0
         ? {}
         : { autoModerationRules: autoModerationRuleInputs }),
+      ...(community === undefined ? {} : { community }),
       guildId: request.guildId,
       ...(onboarding === undefined ? {} : { onboarding }),
       operationKey: request.operationKey,
@@ -1346,6 +1558,7 @@ function projectPass(
     source: {
       autoModerationRules,
       channels: channels.map(sourceChannelProjection),
+      community: communitySourceProjection(pass.community),
       guild: settings,
       onboarding: pass.onboarding,
       profile: pass.profile,
@@ -1382,7 +1595,7 @@ const PRIVACY: GuildBlueprintCapturePrivacy = Object.freeze({
   attachments: "not-read",
   autoModerationExecutionEvents: "not-read",
   components: "not-read",
-  memberProfiles: "not-read",
+  memberProfiles: "connector-bot-identity-only",
   messageContent: "not-read",
   rawPayloads: "omitted",
   returnedText: "transient-caller-retained",
@@ -1401,11 +1614,13 @@ const LIMITATIONS: GuildBlueprintCaptureLimitations = Object.freeze({
 export class GuildBlueprintCaptureService {
   readonly #client: GuildBlueprintCaptureServiceOptions["client"]
   readonly #clock: () => Date
+  readonly #community: GuildBlueprintCaptureServiceOptions["community"]
   readonly #policy: ScopePolicy
 
   constructor(options: GuildBlueprintCaptureServiceOptions) {
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
+    this.#community = options.community
     this.#policy = options.policy
   }
 
@@ -1414,12 +1629,15 @@ export class GuildBlueprintCaptureService {
     this.#policy.assertGuildAllowed(normalized.guildId)
     this.#policy.assertGuildProfileAuditable(normalized.guildId)
     this.#policy.assertGuildSettingsAuditable(normalized.guildId)
+    this.#policy.assertGuildCommunityAuditable(normalized.guildId)
     this.#policy.assertGuildWelcomeScreenAuditable(normalized.guildId)
     this.#policy.assertGuildOnboardingAuditable(normalized.guildId)
     this.#policy.assertAutomodAuditable(normalized.guildId)
   }
 
   async #pass(
+    applicationId: string,
+    botId: string,
     guildId: string,
     options: RequestOptions,
   ): Promise<GuildBlueprintCapturePass> {
@@ -1430,6 +1648,7 @@ export class GuildBlueprintCaptureService {
       onboarding,
       welcomeScreen,
       autoModerationRules,
+      community,
     ] = await Promise.all([
       this.#client.getGuild(guildId, options),
       this.#client.getGuildRoles(guildId, options),
@@ -1437,10 +1656,20 @@ export class GuildBlueprintCaptureService {
       this.#client.getGuildOnboarding(guildId, options),
       this.#client.getGuildWelcomeScreen(guildId, options),
       this.#client.listGuildAutoModerationRules(guildId, options),
+      this.#community.get(applicationId, botId, guildId, options)
+        .then((audit): GuildBlueprintCaptureCommunityEvidence => ({
+          audit,
+          status: "available",
+        }))
+        .catch((error): GuildBlueprintCaptureCommunityEvidence => {
+          if (options.signal?.aborted) throw error
+          return { status: "unavailable" }
+        }),
     ])
     return {
       autoModerationRules,
       channels: this.#policy.filterChannels(channels),
+      community,
       guild,
       onboarding,
       profile: projectGuildProfile(guild, guildId),
@@ -1463,12 +1692,16 @@ export class GuildBlueprintCaptureService {
 
     const startedAt = this.#clock().toISOString()
     const first = projectPass(
-      await this.#pass(normalized.guildId, options),
+      await this.#pass(applicationId, botId, normalized.guildId, options),
       normalized,
+      applicationId,
+      botId,
     )
     const second = projectPass(
-      await this.#pass(normalized.guildId, options),
+      await this.#pass(applicationId, botId, normalized.guildId, options),
       normalized,
+      applicationId,
+      botId,
     )
     const completedAt = this.#clock().toISOString()
     const base = {

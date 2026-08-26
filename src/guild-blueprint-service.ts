@@ -46,6 +46,13 @@ import {
   normalizeGuildProfileChangeRequest,
 } from "./guild-profile-service.js"
 import {
+  type GuildCommunityAuditResult,
+  type GuildCommunityChangePlan,
+  type GuildCommunityChangeRequest,
+  type GuildCommunityChangeResult,
+  normalizeGuildCommunityChangeRequest,
+} from "./guild-community-service.js"
+import {
   type GuildScaffoldPlan,
   type GuildScaffoldRequest,
   type GuildScaffoldResult,
@@ -85,6 +92,7 @@ const BLUEPRINT_REQUEST_DIGEST_PREFIX = "hmac-sha256:"
 const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "auditReason",
   "autoModerationRules",
+  "community",
   "guildId",
   "onboarding",
   "operationKey",
@@ -93,6 +101,12 @@ const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "scaffold",
   "settings",
   "welcomeScreen",
+] as const)
+const BLUEPRINT_COMMUNITY_KEYS = Object.freeze([
+  "acknowledgeCommunityEnablement",
+  "publicUpdatesChannel",
+  "rulesChannel",
+  "safetyAlertsChannel",
 ] as const)
 const BLUEPRINT_AUTOMOD_RULE_KEYS = Object.freeze([
   "actions",
@@ -201,6 +215,7 @@ export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "structure",
   "profile",
   "settings",
+  "community",
   "welcome-screen",
   "onboarding",
   "auto-moderation",
@@ -306,6 +321,13 @@ export type GuildBlueprintSettingsInput = Omit<
   systemChannel?: GuildBlueprintChannelReference | null
 }
 
+export interface GuildBlueprintCommunityInput {
+  acknowledgeCommunityEnablement: true
+  publicUpdatesChannel: GuildBlueprintChannelReference
+  rulesChannel: GuildBlueprintChannelReference
+  safetyAlertsChannel: GuildBlueprintChannelReference | null
+}
+
 export interface GuildBlueprintWelcomeScreenChannelInput extends Omit<
   WelcomeScreenChangeRequest["channels"][number],
   "channelId"
@@ -368,6 +390,7 @@ export type GuildBlueprintPublicationInput =
 export interface GuildBlueprintRequest {
   auditReason: string
   autoModerationRules?: readonly GuildBlueprintAutoModerationRuleInput[]
+  community?: GuildBlueprintCommunityInput
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
@@ -400,6 +423,7 @@ export type NormalizedGuildBlueprintPublicationInput = {
 export interface NormalizedGuildBlueprintRequest {
   auditReason: string
   autoModerationRules?: NormalizedGuildBlueprintAutoModerationRuleInput[]
+  community?: GuildBlueprintCommunityInput
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
@@ -422,6 +446,7 @@ const AFK_CHANNEL_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>()
 const SYSTEM_CHANNEL_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "text",
 ])
+const COMMUNITY_CHANNEL_SCAFFOLD_KINDS = SYSTEM_CHANNEL_SCAFFOLD_KINDS
 const TEXT_OR_FORUM_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "forum",
   "text",
@@ -502,8 +527,16 @@ export interface GuildBlueprintAutoModerationBlocker {
   verificationStatus: AutoModerationVerificationResult["status"] | null
 }
 
+export interface GuildBlueprintCommunityBlocker {
+  kind: "community"
+  operationKeyHash: string
+  requiredBy: Array<"onboarding" | "welcome-screen">
+  verificationReason: "community-phase-required"
+}
+
 export type GuildBlueprintBlocker =
   | GuildBlueprintAutoModerationBlocker
+  | GuildBlueprintCommunityBlocker
   | GuildBlueprintPublicationBlocker
 
 export type GuildBlueprintFrontier =
@@ -513,6 +546,11 @@ export type GuildBlueprintFrontier =
       kind: "auto-moderation"
       plan: AutoModerationPlan
       stage: GuildBlueprintAutoModerationStage
+      writeRequired: true
+    }
+  | {
+      kind: "community"
+      plan: GuildCommunityChangePlan
       writeRequired: true
     }
   | {
@@ -578,6 +616,7 @@ export interface GuildBlueprintPlan {
 export type GuildBlueprintNestedResult =
   | AutoModerationResult
   | ComponentMessageResult
+  | GuildCommunityChangeResult
   | OnboardingChangeResult
   | GuildProfileChangeResult
   | GuildScaffoldResult
@@ -691,6 +730,20 @@ export interface GuildBlueprintDomainServices {
       options?: RequestOptions,
     ): Promise<ComponentMessageVerificationResult>
   }
+  community: {
+    get(
+      applicationId: string,
+      botId: string,
+      guildId: string,
+      options?: RequestOptions,
+    ): Promise<GuildCommunityAuditResult>
+    plan(
+      applicationId: string,
+      botId: string,
+      request: GuildCommunityChangeRequest,
+      options?: RequestOptions,
+    ): Promise<GuildCommunityChangePlan>
+  }
   onboarding: {
     plan(
       applicationId: string,
@@ -744,6 +797,11 @@ export interface GuildBlueprintExecutors {
     planDigest: string,
     options?: RequestOptions,
   ): Promise<ComponentMessageResult>
+  executeCommunity(
+    request: GuildCommunityChangeRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<GuildCommunityChangeResult>
   executeOnboarding(
     request: OnboardingChangeRequest,
     planDigest: string,
@@ -782,6 +840,10 @@ type GuildBlueprintFrontierRequest =
       index: number
       kind: "auto-moderation"
       request: AutoModerationChangeRequest
+    }
+  | {
+      kind: "community"
+      request: GuildCommunityChangeRequest
     }
   | {
       kind: "onboarding"
@@ -1475,6 +1537,88 @@ function canonicalSettingsInput(
   }
 }
 
+function canonicalCommunityInput(
+  request: GuildBlueprintRequest,
+  operationKey: string,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+): GuildBlueprintCommunityInput | undefined {
+  if (request.community === undefined) return undefined
+  exactObject(
+    request.community,
+    BLUEPRINT_COMMUNITY_KEYS,
+    "Discord guild blueprint Community phase must be an exact object",
+  )
+  if (request.community.acknowledgeCommunityEnablement !== true) {
+    throw new RangeError(
+      "Discord guild blueprint Community phase requires explicit enablement acknowledgement",
+    )
+  }
+  const rulesChannel = normalizeChannelReference(
+    request.community.rulesChannel,
+    channelKinds,
+    COMMUNITY_CHANNEL_SCAFFOLD_KINDS,
+    "Discord guild blueprint Community rules channel",
+  )
+  const publicUpdatesChannel = normalizeChannelReference(
+    request.community.publicUpdatesChannel,
+    channelKinds,
+    COMMUNITY_CHANNEL_SCAFFOLD_KINDS,
+    "Discord guild blueprint Community public-updates channel",
+  )
+  const safetyAlertsChannel = normalizeChannelReference(
+    request.community.safetyAlertsChannel,
+    channelKinds,
+    COMMUNITY_CHANNEL_SCAFFOLD_KINDS,
+    "Discord guild blueprint Community safety-alerts channel",
+  )
+  if (rulesChannel === null || publicUpdatesChannel === null) {
+    throw new RangeError(
+      "Discord guild blueprint Community rules and public-updates channels are required",
+    )
+  }
+  if (channelReferenceKey(rulesChannel) === channelReferenceKey(publicUpdatesChannel)) {
+    throw new RangeError(
+      "Discord guild blueprint Community rules and public-updates channels must be distinct",
+    )
+  }
+  const usedIds = new Set(
+    [rulesChannel, publicUpdatesChannel, safetyAlertsChannel].flatMap((reference) => (
+      reference?.kind === "exact" ? [reference.channelId] : []
+    )),
+  )
+  const temporaryIds = new Map<string, string>()
+  let temporaryId = DISCORD_SNOWFLAKE_MAX
+  function resolvedForValidation(reference: GuildBlueprintChannelReference): string {
+    if (reference.kind === "exact") return reference.channelId
+    const key = channelReferenceKey(reference)
+    const existing = temporaryIds.get(key)
+    if (existing !== undefined) return existing
+    while (usedIds.has(temporaryId.toString())) temporaryId -= 1n
+    const result = temporaryId.toString()
+    usedIds.add(result)
+    temporaryIds.set(key, result)
+    temporaryId -= 1n
+    return result
+  }
+  normalizeGuildCommunityChangeRequest({
+    acknowledgeCommunityEnablement: true,
+    auditReason: request.auditReason,
+    guildId: request.guildId,
+    operationKey,
+    publicUpdatesChannelId: resolvedForValidation(publicUpdatesChannel),
+    rulesChannelId: resolvedForValidation(rulesChannel),
+    safetyAlertsChannelId: safetyAlertsChannel === null
+      ? null
+      : resolvedForValidation(safetyAlertsChannel),
+  })
+  return {
+    acknowledgeCommunityEnablement: true,
+    publicUpdatesChannel,
+    rulesChannel,
+    safetyAlertsChannel,
+  }
+}
+
 function canonicalWelcomeScreenInput(
   request: GuildBlueprintRequest,
   operationKey: string,
@@ -1860,6 +2004,7 @@ export function normalizeGuildBlueprintRequest(
   positiveSnowflake(request.guildId, "Discord guild blueprint guild ID")
   if (
     request.autoModerationRules === undefined
+    && request.community === undefined
     && request.onboarding === undefined
     && request.profile === undefined
     && request.publications === undefined
@@ -1867,7 +2012,7 @@ export function normalizeGuildBlueprintRequest(
     && request.welcomeScreen === undefined
   ) {
     throw new RangeError(
-      "Discord guild blueprint requires a profile, settings, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
+      "Discord guild blueprint requires a profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
     )
   }
   const operationKeyHashValue = operationKeyHash(request.operationKey)
@@ -1881,6 +2026,11 @@ export function normalizeGuildBlueprintRequest(
     request,
     channelKinds,
     scaffoldRoleKeys,
+  )
+  const community = canonicalCommunityInput(
+    request,
+    derivedOperationKey(request.operationKey, "community"),
+    channelKinds,
   )
   const onboarding = canonicalOnboardingInput(
     request,
@@ -1906,6 +2056,7 @@ export function normalizeGuildBlueprintRequest(
   return {
     auditReason: scaffold.auditReason,
     ...(autoModerationRules === undefined ? {} : { autoModerationRules }),
+    ...(community === undefined ? {} : { community }),
     guildId: scaffold.guildId,
     ...(onboarding === undefined ? {} : { onboarding }),
     operationKey: request.operationKey,
@@ -1935,6 +2086,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
     ...(request.autoModerationRules === undefined
       ? {}
       : { autoModerationRules: request.autoModerationRules }),
+    ...(request.community === undefined ? {} : { community: request.community }),
     guildId: request.guildId,
     ...(request.onboarding === undefined ? {} : { onboarding: request.onboarding }),
     operationKeyHash: request.operationKeyHash,
@@ -1952,7 +2104,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v5\0")
+    .update("discord-mcp-guild-blueprint-request.v6\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -2060,6 +2212,48 @@ function settingsRequest(
       : {}),
   }
   normalizeGuildSettingsChangeRequest(resolved)
+  return resolved
+}
+
+function communityRequest(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+): GuildCommunityChangeRequest | undefined {
+  if (request.community === undefined) return undefined
+  const rulesChannelId = resolveChannelReference(
+    request.community.rulesChannel,
+    bindings,
+    "Discord guild blueprint Community rules channel",
+  )
+  const publicUpdatesChannelId = resolveChannelReference(
+    request.community.publicUpdatesChannel,
+    bindings,
+    "Discord guild blueprint Community public-updates channel",
+  )
+  const safetyAlertsChannelId = resolveChannelReference(
+    request.community.safetyAlertsChannel,
+    bindings,
+    "Discord guild blueprint Community safety-alerts channel",
+  )
+  if (
+    typeof rulesChannelId !== "string"
+    || typeof publicUpdatesChannelId !== "string"
+    || !(safetyAlertsChannelId === null || typeof safetyAlertsChannelId === "string")
+  ) {
+    throw new RangeError(
+      "Discord guild blueprint Community channel reference is unresolved",
+    )
+  }
+  const resolved: GuildCommunityChangeRequest = {
+    acknowledgeCommunityEnablement: true,
+    auditReason: request.auditReason,
+    guildId: request.guildId,
+    operationKey: derivedOperationKey(request.operationKey, "community"),
+    publicUpdatesChannelId,
+    rulesChannelId,
+    safetyAlertsChannelId,
+  }
+  normalizeGuildCommunityChangeRequest(resolved)
   return resolved
 }
 
@@ -2742,6 +2936,46 @@ function assertNestedPlanBinding(
   }
 }
 
+function assertCommunityAuditBinding(
+  applicationId: string,
+  botId: string,
+  guildId: string,
+  audit: GuildCommunityAuditResult,
+): void {
+  assertNestedIdentity(applicationId, botId, guildId, audit)
+  if (
+    audit.schemaVersion !== SCHEMA_VERSION
+    || audit.status !== "ok"
+    || typeof audit.configuration?.communityEnabled !== "boolean"
+  ) {
+    throw new RangeError(
+      "Discord guild blueprint Community dependency evidence changed",
+    )
+  }
+}
+
+function assertCommunityPlanBinding(
+  applicationId: string,
+  botId: string,
+  request: GuildCommunityChangeRequest,
+  plan: GuildCommunityChangePlan,
+): void {
+  assertNestedIdentity(applicationId, botId, request.guildId, plan)
+  assertNestedPlanBinding(request.operationKey, plan)
+  const statusMatchesWrite = plan.status === "planned"
+    ? plan.writeRequired === true
+    : plan.status === "already-current" && plan.writeRequired === false
+  if (
+    plan.acknowledgeCommunityEnablement !== true
+    || plan.desired.publicUpdatesChannelId !== request.publicUpdatesChannelId
+    || plan.desired.rulesChannelId !== request.rulesChannelId
+    || plan.desired.safetyAlertsChannelId !== request.safetyAlertsChannelId
+    || !statusMatchesWrite
+  ) {
+    throw new RangeError("Discord guild blueprint Community plan target changed")
+  }
+}
+
 function assertComponentVerificationBinding(
   guildId: string,
   request: ComponentMessageRequest,
@@ -3000,6 +3234,7 @@ export class GuildBlueprintService {
       frontierRequest = { kind: "structure", request: structureRequest }
       if (request.profile !== undefined) steps.push(waitingStep(request, "profile"))
       if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
+      if (request.community !== undefined) steps.push(waitingStep(request, "community"))
       if (request.welcomeScreen !== undefined) {
         steps.push(waitingStep(request, "welcome-screen"))
       }
@@ -3032,6 +3267,9 @@ export class GuildBlueprintService {
           frontier = { kind: "profile", plan: profilePlan, writeRequired: true }
           frontierRequest = { kind: "profile", request: requestedProfile }
           if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
+          if (request.community !== undefined) {
+            steps.push(waitingStep(request, "community"))
+          }
           if (request.welcomeScreen !== undefined) {
             steps.push(waitingStep(request, "welcome-screen"))
           }
@@ -3065,6 +3303,9 @@ export class GuildBlueprintService {
           if (!settingsSatisfied) {
             frontier = { kind: "settings", plan: settingsPlan, writeRequired: true }
             frontierRequest = { kind: "settings", request: requestedSettings }
+            if (request.community !== undefined) {
+              steps.push(waitingStep(request, "community"))
+            }
             if (request.welcomeScreen !== undefined) {
               steps.push(waitingStep(request, "welcome-screen"))
             }
@@ -3078,6 +3319,97 @@ export class GuildBlueprintService {
       }
 
       if (frontier === null) {
+        const requestedCommunity = communityRequest(
+          request,
+          bindingMap(bindings),
+        )
+        if (requestedCommunity !== undefined) {
+          const communityPlan = await this.#domains.community.plan(
+            applicationId,
+            botId,
+            requestedCommunity,
+            options,
+          )
+          assertCommunityPlanBinding(
+            applicationId,
+            botId,
+            requestedCommunity,
+            communityPlan,
+          )
+          const communitySatisfied = !communityPlan.writeRequired
+          steps.push({
+            kind: "community",
+            nestedPlanDigest: communityPlan.digest,
+            operationKeyHash: communityPlan.operationKeyHash,
+            state: communitySatisfied ? "satisfied" : "ready",
+            writeRequired: !communitySatisfied,
+          })
+          if (!communitySatisfied) {
+            frontier = {
+              kind: "community",
+              plan: communityPlan,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              kind: "community",
+              request: requestedCommunity,
+            }
+            if (request.welcomeScreen !== undefined) {
+              steps.push(waitingStep(request, "welcome-screen"))
+            }
+            if (request.onboarding !== undefined) {
+              steps.push(waitingStep(request, "onboarding"))
+            }
+            appendWaitingAutoModerationSteps(request, steps)
+            appendWaitingPublications(request, steps)
+          }
+        }
+      }
+
+      if (
+        frontier === null
+        && request.community === undefined
+        && (
+          request.welcomeScreen?.enabled === true
+          || request.onboarding?.enabled === true
+        )
+      ) {
+        const audit = await this.#domains.community.get(
+          applicationId,
+          botId,
+          request.guildId,
+          options,
+        )
+        assertCommunityAuditBinding(applicationId, botId, request.guildId, audit)
+        if (!audit.configuration.communityEnabled) {
+          const requiredBy: GuildBlueprintCommunityBlocker["requiredBy"] = []
+          if (request.welcomeScreen?.enabled === true) requiredBy.push("welcome-screen")
+          if (request.onboarding?.enabled === true) requiredBy.push("onboarding")
+          blocker = {
+            kind: "community",
+            operationKeyHash: phaseOperationKeyHash(request, "community"),
+            requiredBy,
+            verificationReason: "community-phase-required",
+          }
+          steps.push({
+            kind: "community",
+            nestedPlanDigest: null,
+            operationKeyHash: blocker.operationKeyHash,
+            state: "blocked",
+            writeRequired: false,
+          })
+          if (request.welcomeScreen !== undefined) {
+            steps.push(waitingStep(request, "welcome-screen"))
+          }
+          if (request.onboarding !== undefined) {
+            steps.push(waitingStep(request, "onboarding"))
+          }
+          appendWaitingAutoModerationSteps(request, steps)
+          appendWaitingPublications(request, steps)
+        }
+      }
+
+      if (frontier === null && blocker === null) {
         const requestedWelcomeScreen = welcomeScreenRequest(
           request,
           bindingMap(bindings),
@@ -3126,7 +3458,7 @@ export class GuildBlueprintService {
         }
       }
 
-      if (frontier === null) {
+      if (frontier === null && blocker === null) {
         const requestedOnboarding = onboardingRequest(
           request,
           bindingMap(bindings),
@@ -3164,7 +3496,11 @@ export class GuildBlueprintService {
         }
       }
 
-      if (frontier === null && request.autoModerationRules !== undefined) {
+      if (
+        frontier === null
+        && blocker === null
+        && request.autoModerationRules !== undefined
+      ) {
         const bindingsByKey = bindingMap(bindings)
         for (const [index, manifestRule] of request.autoModerationRules.entries()) {
           const rule = resolvedAutoModerationRule(request, bindingsByKey, index)
@@ -3674,7 +4010,7 @@ export class GuildBlueprintService {
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v5",
+      version: "guild-blueprint-plan.v6",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -3704,6 +4040,7 @@ export class GuildBlueprintService {
         "The exact blueprint manifest and master operation key remain caller-retained and are not persisted by the connector",
         "One execution call can run only this fresh reviewed frontier; plan again before any later phase",
         "A failed, drifting, or uncertain nested operation remains quarantined under its existing domain workflow",
+        "Community enablement requires temporary guild ownership or complete Administrator authority; routing-only changes require Manage Guild",
         "Unbound AutoMod identity recovery uses only an exact request-bound receipt; names and singleton trigger types are never adopted",
         "AutoMod rules are created disabled and advance through at most one disable, configure, or enable frontier per call",
         "Publication recovery uses only exact receipt-bound message reads and never scans channel history",
@@ -3773,6 +4110,12 @@ export class GuildBlueprintService {
     let nestedResult: GuildBlueprintNestedResult
     if (built.frontierRequest.kind === "auto-moderation") {
       nestedResult = await executors.executeAutoModeration(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else if (built.frontierRequest.kind === "community") {
+      nestedResult = await executors.executeCommunity(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,

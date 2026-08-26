@@ -7315,6 +7315,7 @@ function guildBlueprintPlan(
   publicationFrontier = false,
   blocked = false,
   autoModerationFrontier = false,
+  communityFrontier = false,
 ): GuildBlueprintPlan {
   const requestDigest = `hmac-sha256:${"b".repeat(64)}`
   const nested = guildScaffoldPlan({
@@ -7342,6 +7343,25 @@ function guildBlueprintPlan(
         enabled: request.welcomeScreen.enabled,
         guildId: request.guildId,
         operationKey: request.operationKey,
+      })
+  const desiredCommunity = request.community === undefined
+    ? null
+    : guildCommunityPlan({
+        acknowledgeCommunityEnablement: true,
+        auditReason: request.auditReason,
+        guildId: request.guildId,
+        operationKey: request.operationKey,
+        publicUpdatesChannelId: request.community.publicUpdatesChannel.kind === "exact"
+          ? request.community.publicUpdatesChannel.channelId
+          : CHANNEL_ID,
+        rulesChannelId: request.community.rulesChannel.kind === "exact"
+          ? request.community.rulesChannel.channelId
+          : CHANNEL_ID,
+        safetyAlertsChannelId: request.community.safetyAlertsChannel === null
+          ? null
+          : request.community.safetyAlertsChannel.kind === "exact"
+            ? request.community.safetyAlertsChannel.channelId
+            : CHANNEL_ID,
       })
   const desiredOnboarding = request.onboarding === undefined
     ? null
@@ -7464,6 +7484,9 @@ function guildBlueprintPlan(
   const useWelcomeScreenFrontier = writeRequired
     && welcomeScreenFrontier
     && desiredWelcomeScreen !== null
+  const useCommunityFrontier = writeRequired
+    && communityFrontier
+    && desiredCommunity !== null
   const useOnboardingFrontier = writeRequired
     && onboardingFrontier
     && desiredOnboarding !== null
@@ -7489,7 +7512,11 @@ function guildBlueprintPlan(
         verificationStatus: "blocked" as const,
       }
     : null
-  const postPhase = request.onboarding !== undefined
+  const postPhase = request.community !== undefined
+    && request.profile === undefined
+    && request.settings === undefined
+    ? "community"
+    : request.onboarding !== undefined
     && request.profile === undefined
     && request.settings === undefined
     && request.welcomeScreen === undefined
@@ -7503,6 +7530,7 @@ function guildBlueprintPlan(
     applicationId: APPLICATION_ID,
     bindings: writeRequired
       && !useWelcomeScreenFrontier
+      && !useCommunityFrontier
       && !useOnboardingFrontier
       && !useAutoModerationFrontier
       && !usePublicationFrontier
@@ -7526,7 +7554,9 @@ function guildBlueprintPlan(
     frontier: publicationBlocker !== null
       ? null
       : writeRequired
-      ? useOnboardingFrontier
+      ? useCommunityFrontier
+        ? { kind: "community", plan: desiredCommunity, writeRequired: true }
+        : useOnboardingFrontier
         ? { kind: "onboarding", plan: desiredOnboarding, writeRequired: true }
         : useWelcomeScreenFrontier
           ? { kind: "welcome-screen", plan: desiredWelcomeScreen, writeRequired: true }
@@ -7590,7 +7620,21 @@ function guildBlueprintPlan(
           writeRequired: false,
         }]
       : writeRequired
-      ? useOnboardingFrontier
+      ? useCommunityFrontier
+        ? [{
+            kind: "structure",
+            nestedPlanDigest: nested.digest,
+            operationKeyHash: OPERATION_KEY_HASH,
+            state: "satisfied",
+            writeRequired: false,
+          }, {
+            kind: "community",
+            nestedPlanDigest: desiredCommunity.digest,
+            operationKeyHash: OPERATION_KEY_HASH,
+            state: "ready",
+            writeRequired: true,
+          }]
+        : useOnboardingFrontier
         ? [{
             kind: "structure",
             nestedPlanDigest: nested.digest,
@@ -7685,6 +7729,8 @@ function guildBlueprintPlan(
             ? desiredOnboarding?.digest ?? DIGEST
             : postPhase === "welcome-screen"
               ? desiredWelcomeScreen?.digest ?? DIGEST
+              : postPhase === "community"
+                ? desiredCommunity?.digest ?? DIGEST
               : DIGEST,
           operationKeyHash: OPERATION_KEY_HASH,
           state: "satisfied",
@@ -7728,10 +7774,16 @@ function guildBlueprintCaptureResult(
         returned: 1,
         visibility: "discord-and-policy-bounded",
       },
+      community: {
+        captured: false,
+        evidence: "complete",
+        liveEnabled: false,
+      },
       domains: [
         "structure",
         "profile",
         "settings",
+        "community",
         "welcome-screen",
         "onboarding",
         "auto-moderation",
@@ -7759,7 +7811,7 @@ function guildBlueprintCaptureResult(
       attachments: "not-read",
       autoModerationExecutionEvents: "not-read",
       components: "not-read",
-      memberProfiles: "not-read",
+      memberProfiles: "connector-bot-identity-only",
       messageContent: "not-read",
       rawPayloads: "omitted",
       returnedText: "transient-caller-retained",
@@ -7808,6 +7860,28 @@ function guildBlueprintWelcomeScreenToolInput(planDigest?: string) {
       }],
       description: WELCOME_SCREEN_DESCRIPTION,
       enabled: true,
+    },
+  }
+}
+
+function guildBlueprintCommunityToolInput(planDigest?: string) {
+  const { settings: _settings, ...input } = guildBlueprintToolInput(planDigest)
+  return {
+    ...input,
+    community: {
+      acknowledgeCommunityEnablement: true as const,
+      publicUpdatesChannel: {
+        channelId: GUILD_COMMUNITY_UPDATES_CHANNEL_ID,
+        kind: "exact" as const,
+      },
+      rulesChannel: {
+        channelId: GUILD_COMMUNITY_RULES_CHANNEL_ID,
+        kind: "exact" as const,
+      },
+      safetyAlertsChannel: {
+        channelId: GUILD_COMMUNITY_SAFETY_CHANNEL_ID,
+        kind: "exact" as const,
+      },
     },
   }
 }
@@ -8193,6 +8267,7 @@ function serviceFixture(overrides: {
   guildBlueprintAutoModerationFrontier?: boolean
   guildBlueprintBlocked?: boolean
   guildBlueprintCaptureResult?: GuildBlueprintCaptureResult
+  guildBlueprintCommunityFrontier?: boolean
   guildBlueprintOnboardingFrontier?: boolean
   guildBlueprintPlanDigest?: string
   guildBlueprintPublicationFrontier?: boolean
@@ -10902,6 +10977,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintPublicationFrontier ?? false,
         overrides.guildBlueprintBlocked ?? false,
         overrides.guildBlueprintAutoModerationFrontier ?? false,
+        overrides.guildBlueprintCommunityFrontier ?? false,
       )
       const result: GuildBlueprintResult = {
         blocker: planned.blocker,
@@ -12171,6 +12247,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintPublicationFrontier ?? false,
         overrides.guildBlueprintBlocked ?? false,
         overrides.guildBlueprintAutoModerationFrontier ?? false,
+        overrides.guildBlueprintCommunityFrontier ?? false,
       )
     },
     async verifyGuildBlueprint(request) {
@@ -12184,6 +12261,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintPublicationFrontier ?? false,
         overrides.guildBlueprintBlocked ?? false,
         overrides.guildBlueprintAutoModerationFrontier ?? false,
+        overrides.guildBlueprintCommunityFrontier ?? false,
       )
       const result: GuildBlueprintVerification = {
         applicationId: planned.applicationId,
@@ -28678,7 +28756,7 @@ test("MCP guild blueprint capture returns one strict planner-compatible draft", 
     attachments: "not-read",
     autoModerationExecutionEvents: "not-read",
     components: "not-read",
-    memberProfiles: "not-read",
+    memberProfiles: "connector-bot-identity-only",
     messageContent: "not-read",
     rawPayloads: "omitted",
     returnedText: "transient-caller-retained",
@@ -28792,6 +28870,10 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     arguments: guildBlueprintWelcomeScreenToolInput(),
     name: "plan_guild_blueprint",
   })
+  const plannedCommunity = await client.callTool({
+    arguments: guildBlueprintCommunityToolInput(),
+    name: "plan_guild_blueprint",
+  })
   const plannedOnboarding = await client.callTool({
     arguments: guildBlueprintOnboardingToolInput(),
     name: "plan_guild_blueprint",
@@ -28842,6 +28924,37 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
           description: WELCOME_SCREEN_CHANNEL_DESCRIPTION,
           emoji: { kind: "none" },
         }],
+      },
+    },
+    name: "plan_guild_blueprint",
+  })
+  const unacknowledgedCommunity = await client.callTool({
+    arguments: {
+      ...guildBlueprintCommunityToolInput(),
+      community: {
+        ...guildBlueprintCommunityToolInput().community,
+        acknowledgeCommunityEnablement: false,
+      },
+    },
+    name: "plan_guild_blueprint",
+  })
+  const duplicateCommunityChannel = await client.callTool({
+    arguments: {
+      ...guildBlueprintCommunityToolInput(),
+      community: {
+        ...guildBlueprintCommunityToolInput().community,
+        publicUpdatesChannel:
+          guildBlueprintCommunityToolInput().community.rulesChannel,
+      },
+    },
+    name: "plan_guild_blueprint",
+  })
+  const incompatibleCommunityChannel = await client.callTool({
+    arguments: {
+      ...guildBlueprintCommunityToolInput(),
+      community: {
+        ...guildBlueprintCommunityToolInput().community,
+        rulesChannel: { key: "review-category", kind: "scaffold" },
       },
     },
     name: "plan_guild_blueprint",
@@ -28989,6 +29102,7 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
 
   assert.equal(structuredContent(planned).status, "planned")
   assert.equal(structuredContent(plannedWelcomeScreen).status, "planned")
+  assert.equal(structuredContent(plannedCommunity).status, "planned")
   assert.equal(structuredContent(plannedOnboarding).status, "planned")
   assert.equal(structuredContent(plannedAutoModeration).status, "planned")
   assert.equal(structuredContent(plannedPublication).status, "planned")
@@ -28997,6 +29111,9 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(unknownManifestField.isError, true)
   assert.equal(incompatibleSystemChannel.isError, true)
   assert.equal(incompatibleWelcomeScreenChannel.isError, true)
+  assert.equal(unacknowledgedCommunity.isError, true)
+  assert.equal(duplicateCommunityChannel.isError, true)
+  assert.equal(incompatibleCommunityChannel.isError, true)
   assert.equal(duplicateWelcomeScreenChannel.isError, true)
   assert.equal(incompatibleOnboardingChannel.isError, true)
   assert.equal(missingOnboardingRole.isError, true)
@@ -29009,7 +29126,7 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(duplicatePublicationKey.isError, true)
   assert.equal(createPublicationMessageId.isError, true)
   assert.equal(publicationReply.isError, true)
-  assert.equal(calls.guildBlueprintPlan, 5)
+  assert.equal(calls.guildBlueprintPlan, 6)
 })
 
 test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
@@ -29114,6 +29231,33 @@ test("MCP guild blueprints review and execute a Welcome Screen frontier", async 
   assert.match(confirmationMessage, new RegExp(WELCOME_SCREEN_CHANNEL_DESCRIPTION))
   assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
   assert.match(confirmationMessage, /MANAGE_GUILD/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
+})
+
+test("MCP guild blueprints review and execute a Community frontier", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintCommunityFrontier: true },
+  })
+  const result = await client.callTool({
+    arguments: guildBlueprintCommunityToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(result).executedPhase, "community")
+  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(calls.guildBlueprintExecute, 1)
+  assert.match(confirmationMessage, /Frontier phase: community/u)
+  assert.match(confirmationMessage, /reviewed monotonic Discord Community change/u)
+  assert.match(confirmationMessage, new RegExp(GUILD_COMMUNITY_RULES_CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_COMMUNITY_UPDATES_CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_COMMUNITY_SAFETY_CHANNEL_ID))
+  assert.match(confirmationMessage, /Required permission: ADMINISTRATOR/u)
+  assert.match(confirmationMessage, /Community enablement acknowledgement: true/u)
   assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
 })
 
@@ -29304,6 +29448,10 @@ test("MCP guild blueprint signed state rejects every changed manifest binding", 
     {
       ...request,
       onboarding: guildBlueprintOnboardingToolInput().onboarding,
+    },
+    {
+      ...request,
+      community: guildBlueprintCommunityToolInput().community,
     },
     {
       ...request,

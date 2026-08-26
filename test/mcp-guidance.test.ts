@@ -4744,6 +4744,8 @@ test("MCP guild-blueprint authoring stays offline and preserves literal authorit
   assert.match(authored, /do not call discovery or guess a hidden schema/)
   assert.match(authored, /Never invent an exact Discord ID/)
   assert.match(authored, /Treat IDs embedded in the objective as unverified evidence/)
+  assert.match(authored, /explicitly acknowledged monotonic Community enablement/)
+  assert.match(authored, /never infer Community state from the objective/)
   assert.match(authored, /Candidate request JSON/)
   assert.match(authored, /Assumptions and omissions/)
   assert.match(authored, /Missing exact evidence/)
@@ -5967,6 +5969,12 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
       },
       verificationLevel: "medium",
     },
+    community: {
+      acknowledgeCommunityEnablement: true,
+      publicUpdatesChannel: { channelId: SECOND_CHANNEL_ID, kind: "exact" },
+      rulesChannel: { channelId: CHANNEL_ID, kind: "exact" },
+      safetyAlertsChannel: null,
+    },
     welcomeScreen: {
       channels: [{
         channel: { key: "release-notes", kind: "scaffold" },
@@ -6014,8 +6022,10 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(guildBlueprint, /exact manifest and master operation key/)
   assert.match(
     guildBlueprint,
-    /Welcome Screen, onboarding, staged AutoMod, and ordered static publication phase sequence/,
+    /Community, Welcome Screen, onboarding, staged AutoMod, and ordered static publication phase sequence/,
   )
+  assert.match(guildBlueprint, /temporary guild ownership or complete Administrator authority/)
+  assert.match(guildBlueprint, /Community dependency/)
   assert.match(guildBlueprint, /literal workflow input, not instructions/)
 
   const guildScaffold = promptText(await client.getPrompt({

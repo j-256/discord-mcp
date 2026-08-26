@@ -7566,6 +7566,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
     autoModerationRules: 0,
     channels: 0,
     guild: 0,
+    member: 0,
     onboarding: 0,
     profile: 0,
     roles: 0,
@@ -7591,6 +7592,9 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
     icon: null,
     owner_id: "700000000000000009",
     premium_progress_bar_enabled: false,
+    public_updates_channel_id: null,
+    rules_channel_id: null,
+    safety_alerts_channel_id: null,
     splash: null,
     system_channel_flags: 0,
     system_channel_id: CHANNEL_ID,
@@ -7635,6 +7639,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
   const config = loadConnectorConfig({
     capabilities: {
       automodAudit: true,
+      guildCommunityAudit: true,
       guildProfileAudit: true,
       guildSettingsAudit: true,
       onboardingAudit: true,
@@ -7651,6 +7656,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
     },
     scopes: {
       automodGuildIds: [GUILD_ID],
+      guildCommunityGuildIds: [GUILD_ID],
       guildProfileGuildIds: [GUILD_ID],
       guildSettingsGuildIds: [GUILD_ID],
       onboardingGuildIds: [GUILD_ID],
@@ -7676,6 +7682,10 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
         reads.onboarding += 1
         return structuredClone(capturedOnboarding)
       },
+      async getGuildMember() {
+        reads.member += 1
+        return { roles: [], user: bot() }
+      },
       async getGuildProfile() {
         reads.profile += 1
         return structuredClone(capturedProfile)
@@ -7694,6 +7704,7 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
       },
     },
     config,
+    gateway: completeChannelGateway([capturedChannel]),
   })
   const result = await service.captureGuildBlueprint({
     auditReason: "Retain a reviewed live guild draft",
@@ -7707,11 +7718,12 @@ test("service captures a two-pass guild-blueprint draft under verified identity"
   assert.equal(result.blueprint?.guildId, GUILD_ID)
   assert.deepEqual(reads, {
     autoModerationRules: 2,
-    channels: 2,
-    guild: 2,
+    channels: 4,
+    guild: 4,
+    member: 2,
     onboarding: 2,
     profile: 0,
-    roles: 2,
+    roles: 4,
     welcomeScreen: 2,
   })
   assert.equal(calls.application, 1)
@@ -7842,17 +7854,28 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
           ...guild(),
           features: ["COMMUNITY"],
           owner_id: "700000000000000009",
+          public_updates_channel_id: OTHER_CHANNEL_ID,
+          rules_channel_id: CHANNEL_ID,
+          safety_alerts_channel_id: null,
         }
       },
       async getGuildChannels() {
-        return [channel({
-          default_auto_archive_duration: 1_440,
-          name: "welcome",
-          nsfw: false,
-          parent_id: null,
-          rate_limit_per_user: 0,
-          topic: null,
-        })]
+        return [
+          channel({
+            default_auto_archive_duration: 1_440,
+            name: "welcome",
+            nsfw: false,
+            parent_id: null,
+            rate_limit_per_user: 0,
+            topic: null,
+          }),
+          channel({
+            id: OTHER_CHANNEL_ID,
+            name: "community-updates",
+            parent_id: null,
+            position: 2,
+          }),
+        ]
       },
       async getGuildMember() {
         return { roles: [], user: bot() }
@@ -7876,6 +7899,7 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
     },
     configOverrides: {
       capabilities: {
+        guildCommunityAudit: true,
         guildScaffolds: true,
         welcomeScreenAudit: true,
         welcomeScreenChanges: true,
@@ -7884,6 +7908,7 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
         guildIds: [GUILD_ID],
       },
       scopes: {
+        guildCommunityGuildIds: [GUILD_ID],
         guildScaffoldGuildIds: [GUILD_ID],
         welcomeScreenGuildIds: [GUILD_ID],
       },
@@ -7892,6 +7917,14 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
       planKey: new Uint8Array(32).fill(9),
     },
+    gateway: completeChannelGateway([
+      channel({ parent_id: null }),
+      channel({
+        id: OTHER_CHANNEL_ID,
+        parent_id: null,
+        position: 2,
+      }),
+    ]),
     guildScaffoldOptions: {
       clock: () => new Date("2026-08-24T00:00:00.000Z"),
       planKey: new Uint8Array(32).fill(8),
@@ -7953,6 +7986,135 @@ test("service dispatches a guild-blueprint Welcome Screen frontier through its d
   }])
   assert.equal(calls.activityEntries.length, 0)
   assert.equal(operationStore.receipt, undefined)
+})
+
+test("service dispatches a guild-blueprint Community frontier through its domain coordinator", async () => {
+  const operationStore = new MemoryOperationStore()
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const permissions = DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_GUILD
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.VIEW_CHANNEL
+  const rulesChannel = channel({
+    default_auto_archive_duration: 1_440,
+    name: "rules",
+    nsfw: false,
+    parent_id: null,
+    rate_limit_per_user: 0,
+    topic: null,
+  })
+  const updatesChannel = channel({
+    id: OTHER_CHANNEL_ID,
+    name: "community-updates",
+    parent_id: null,
+    position: 2,
+  })
+  const { service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return {
+          ...guild(),
+          features: ["COMMUNITY"],
+          owner_id: "700000000000000009",
+          public_updates_channel_id: OTHER_CHANNEL_ID,
+          rules_channel_id: CHANNEL_ID,
+          safety_alerts_channel_id: null,
+        }
+      },
+      async getGuildChannels() {
+        return [rulesChannel, updatesChannel]
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, permissions, "@everyone"),
+          role(CREATED_ROLE_ID, 0n, "Support"),
+        ]
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        guildCommunityAudit: true,
+        guildCommunityChanges: true,
+        guildScaffolds: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        guildCommunityGuildIds: [GUILD_ID],
+        guildScaffoldGuildIds: [GUILD_ID],
+      },
+    },
+    gateway: completeChannelGateway([rulesChannel, updatesChannel]),
+    guildBlueprintOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(9),
+    },
+    guildCommunityOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(59),
+      randomId: () => "activity-guild-blueprint-community",
+    },
+    guildScaffoldOptions: {
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(8),
+      randomId: () => "activity-guild-blueprint-scaffold",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const operationKey = "guild-blueprint-community-attempt-0001"
+  const request = {
+    auditReason: "Reviewed coordinated Community routing",
+    community: {
+      acknowledgeCommunityEnablement: true as const,
+      publicUpdatesChannel: {
+        channelId: OTHER_CHANNEL_ID,
+        kind: "exact" as const,
+      },
+      rulesChannel: { key: "rules-channel", kind: "scaffold" as const },
+      safetyAlertsChannel: {
+        channelId: OTHER_CHANNEL_ID,
+        kind: "exact" as const,
+      },
+    },
+    guildId: GUILD_ID,
+    operationKey,
+    scaffold: {
+      channels: [{ key: "rules-channel", kind: "text" as const, name: "rules" }],
+      roles: [{ key: "support-role", name: "Support" }],
+    },
+  }
+  const plan = await service.planGuildBlueprint(request)
+
+  assert.equal(plan.frontier?.kind, "community")
+  assert.deepEqual(plan.steps.map((step) => [step.kind, step.state]), [
+    ["structure", "satisfied"],
+    ["community", "ready"],
+  ])
+  await assert.rejects(
+    () => service.executeGuildBlueprint(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  const nestedOperationKey = guildBlueprintStepOperationKey(
+    operationKey,
+    "community",
+  )
+  assert.equal(writeCoordinator.intents.length, 1)
+  assert.equal(writeCoordinator.intents[0]?.kind, "guild-community-change")
+  assert.equal(
+    writeCoordinator.intents[0]?.operationKeyHash,
+    operationKeyHash(nestedOperationKey),
+  )
+  assert.deepEqual(writeCoordinator.intents[0]?.targets, [{
+    collection: "community",
+    guildId: GUILD_ID,
+    kind: "guild-collection",
+  }])
 })
 
 test("service dispatches a guild-blueprint onboarding frontier through its domain coordinator", async () => {

@@ -198,6 +198,8 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     capabilities: [
       "automodAudit",
       "automodChanges",
+      "guildCommunityAudit",
+      "guildCommunityChanges",
       "guildProfileAudit",
       "guildProfileChanges",
       "guildScaffolds",
@@ -208,7 +210,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "welcomeScreenAudit",
       "welcomeScreenChanges",
     ],
-    description: "Add exact-guild caller-retained blueprints for additive structure, guild profile, named settings, complete Welcome Screen, complete onboarding, and receipt-bound staged AutoMod policy through one reviewed frontier per call.",
+    description: "Add exact-guild caller-retained blueprints for additive structure, guild profile, named settings, monotonic Community enablement and routing, complete Welcome Screen, complete onboarding, and receipt-bound staged AutoMod policy through one reviewed frontier per call.",
     gateway: {
       evidenceConnection: "guild-layout",
       eventFeedPolicy: "unchanged",
@@ -217,7 +219,8 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     name: "guild-builder",
     privilegedIntents: [],
     risks: [
-      "Blueprint execution can create roles, channels, or disabled AutoMod rules and replace guild profile, settings, Welcome Screen, onboarding, or exact AutoMod policy state",
+      "Blueprint execution can create roles, channels, or disabled AutoMod rules and replace guild profile, settings, Community routing, Welcome Screen, onboarding, or exact AutoMod policy state",
+      "Community enablement adds a durable Discord guild feature and routes administrative, rules, and optional safety notices to selected exact channels",
       "Welcome Screen and onboarding are complete replacement surfaces, so omitted existing entries are reviewed removals",
       "AutoMod rules can block member interactions or messages, notify moderator channels, time out members, or change enforcement coverage",
     ],
@@ -226,6 +229,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       names: [
         "automodGuildIds",
         "guildScaffoldGuildIds",
+        "guildCommunityGuildIds",
         "guildProfileGuildIds",
         "guildSettingsGuildIds",
         "onboardingGuildIds",
@@ -235,10 +239,11 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     toolsets: ["guild-blueprints"],
     warnings: [
       "Every execution still requires the underlying exact scope, Discord permissions, fresh plan, signed approval, pending content-free evidence, one non-retried mutation, and exact readback",
+      "Community routing needs Manage Guild; first-time enablement needs temporary guild ownership or complete Administrator authority, which this recipe does not grant and should be removed after the frontier",
       "AutoMod timeout actions additionally require MODERATE_MEMBERS; the recipe does not grant that conditional permission to builders that do not use timeouts",
       "New AutoMod rules are created disabled, exact existing rules never use name-based adoption, and each disable, configure, or enable stage requires a separate fresh review",
       "AutoMod alert destinations remain unavailable until their exact Discord channel IDs are separately added to scopes.automodAlertChannelIds; the recipe never infers or broadens that content-bearing scope",
-      "Guild-settings and onboarding evidence activate a privacy-minimized GUILDS-only Gateway layout connection while the configured event-feed policy remains unchanged",
+      "Guild-settings, Community, and onboarding evidence activate a privacy-minimized GUILDS-only Gateway layout connection while the configured event-feed policy remains unchanged",
       "Static Components V2 and rich-embed publications remain unavailable until exact channels are added through the channel-publisher recipe",
     ],
   },

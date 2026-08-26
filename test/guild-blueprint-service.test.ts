@@ -37,6 +37,12 @@ import type {
   GuildProfileChangeResult,
 } from "../src/guild-profile-service.js"
 import type {
+  GuildCommunityAuditResult,
+  GuildCommunityChangePlan,
+  GuildCommunityChangeRequest,
+  GuildCommunityChangeResult,
+} from "../src/guild-community-service.js"
+import type {
   GuildScaffoldPlan,
   GuildScaffoldRequest,
   GuildScaffoldResult,
@@ -143,6 +149,21 @@ function welcomeScreen(): NonNullable<GuildBlueprintRequest["welcomeScreen"]> {
     }],
     description: WELCOME_DESCRIPTION,
     enabled: true,
+  }
+}
+
+function community(): NonNullable<GuildBlueprintRequest["community"]> {
+  return {
+    acknowledgeCommunityEnablement: true,
+    publicUpdatesChannel: {
+      channelId: PUBLICATION_CHANNEL_ID,
+      kind: "exact",
+    },
+    rulesChannel: {
+      key: "private-system-channel",
+      kind: "scaffold",
+    },
+    safetyAlertsChannel: null,
   }
 }
 
@@ -435,6 +456,38 @@ function settingsPlan(
   } as GuildSettingsChangePlan
 }
 
+function communityAudit(enabled: boolean): GuildCommunityAuditResult {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    configuration: { communityEnabled: enabled },
+    guildId: GUILD_ID,
+    schemaVersion: 1,
+    status: "ok",
+  } as GuildCommunityAuditResult
+}
+
+function communityPlan(
+  value: GuildCommunityChangeRequest,
+  writeRequired: boolean,
+): GuildCommunityChangePlan {
+  return {
+    acknowledgeCommunityEnablement: true,
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    desired: {
+      publicUpdatesChannelId: value.publicUpdatesChannelId,
+      rulesChannelId: value.rulesChannelId,
+      safetyAlertsChannelId: value.safetyAlertsChannelId,
+    },
+    digest: `hmac-sha256:${(writeRequired ? "a" : "b").repeat(64)}`,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as GuildCommunityChangePlan
+}
+
 function welcomeScreenPlan(
   value: WelcomeScreenChangeRequest,
   writeRequired: boolean,
@@ -579,6 +632,15 @@ interface FixtureOptions {
     index: number,
   ) => ComponentMessageVerificationResult
   componentWrite?: boolean
+  communityAuditTransform?: (
+    audit: GuildCommunityAuditResult,
+  ) => GuildCommunityAuditResult
+  communityEnabled?: boolean
+  communityPlanTransform?: (
+    plan: GuildCommunityChangePlan,
+    request: GuildCommunityChangeRequest,
+  ) => GuildCommunityChangePlan
+  communityWrite?: boolean
   onboardingWrite?: boolean
   profileWrite?: boolean
   scaffoldTransform?: (plan: GuildScaffoldPlan) => GuildScaffoldPlan
@@ -592,6 +654,7 @@ function fixture(options: FixtureOptions = {}) {
   const resolvedAutoModeration: AutoModerationChangeRequest[] = []
   let resolvedOnboarding: OnboardingChangeRequest | null = null
   const resolvedPublications: ComponentMessageRequest[] = []
+  let resolvedCommunity: GuildCommunityChangeRequest | null = null
   let resolvedSettings: GuildSettingsChangeRequest | null = null
   let resolvedWelcomeScreen: WelcomeScreenChangeRequest | null = null
   const domains: GuildBlueprintDomainServices = {
@@ -709,6 +772,19 @@ function fixture(options: FixtureOptions = {}) {
           ?? componentVerification(value)
       },
     },
+    community: {
+      async get() {
+        calls.push("get-community")
+        const audit = communityAudit(options.communityEnabled ?? true)
+        return options.communityAuditTransform?.(audit) ?? audit
+      },
+      async plan(_applicationId, _botId, value) {
+        calls.push("plan-community")
+        resolvedCommunity = value
+        const plan = communityPlan(value, options.communityWrite ?? false)
+        return options.communityPlanTransform?.(plan, value) ?? plan
+      },
+    },
     onboarding: {
       async plan(_applicationId, _botId, value) {
         calls.push("plan-onboarding")
@@ -795,6 +871,9 @@ function fixture(options: FixtureOptions = {}) {
     get resolvedPublications() {
       return resolvedPublications
     },
+    get resolvedCommunity() {
+      return resolvedCommunity
+    },
     get resolvedSettings() {
       return resolvedSettings
     },
@@ -843,6 +922,21 @@ function executors(calls: string[]): GuildBlueprintExecutors {
         status: "completed",
         url: `https://discord.com/channels/${GUILD_ID}/${value.channelId}/${PUBLICATION_MESSAGE_ID}`,
       } as ComponentMessageResult
+    },
+    async executeCommunity(value, planDigest) {
+      calls.push(`execute-community:${planDigest}`)
+      return {
+        activityId: "activity-community",
+        changedFields: ["communityEnabled"],
+        enablementRequired: true,
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        verification: "match",
+        warnings: [],
+      } as GuildCommunityChangeResult
     },
     async executeOnboarding(value, planDigest) {
       calls.push(`execute-onboarding:${planDigest}`)
@@ -925,6 +1019,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   )
   const structureKey = guildBlueprintStepOperationKey(OPERATION_KEY, "structure")
   const profileKey = guildBlueprintStepOperationKey(OPERATION_KEY, "profile")
+  const communityKey = guildBlueprintStepOperationKey(OPERATION_KEY, "community")
   const automodKey = guildBlueprintAutoModerationOperationKey(
     OPERATION_KEY,
     AUTOMOD_KEY,
@@ -932,6 +1027,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   )
   assert.equal(structureKey, guildBlueprintStepOperationKey(OPERATION_KEY, "structure"))
   assert.notEqual(structureKey, profileKey)
+  assert.notEqual(communityKey, profileKey)
   assert.notEqual(automodKey, structureKey)
   assert.notEqual(
     automodKey,
@@ -951,7 +1047,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   delete noPostPhase.settings
   assert.throws(
     () => normalizeGuildBlueprintRequest(noPostPhase),
-    /requires a profile, settings, Welcome Screen, onboarding, AutoMod, or publication phase/u,
+    /requires a profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase/u,
   )
   const unknownReference = request({
     settings: {
@@ -994,6 +1090,36 @@ test("guild blueprint validation is strict and binds deterministic phase identit
       },
     })),
     /system channel scaffold key is not a compatible requested channel/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      community: {
+        ...community(),
+        acknowledgeCommunityEnablement: false,
+      } as never,
+    })),
+    /requires explicit enablement acknowledgement/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      community: {
+        ...community(),
+        publicUpdatesChannel: {
+          key: "private-system-channel",
+          kind: "scaffold",
+        },
+      },
+    })),
+    /must be distinct/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      community: {
+        ...community(),
+        rulesChannel: { key: "private-category", kind: "scaffold" },
+      },
+    })),
+    /not a compatible requested channel/u,
   )
   assert.throws(
     () => normalizeGuildBlueprintRequest(request({
@@ -1259,8 +1385,10 @@ test("guild blueprint publication blockers stop without planning or writing", as
   const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
   assert.equal(plan.status, "blocked")
   assert.equal(plan.frontier, null)
-  assert.equal(plan.blocker?.index, 0)
-  assert.equal(plan.blocker?.verificationStatus, "blocked")
+  assert.equal(plan.blocker?.kind, "publication")
+  if (plan.blocker?.kind !== "publication") assert.fail("Expected publication blocker")
+  assert.equal(plan.blocker.index, 0)
+  assert.equal(plan.blocker.verificationStatus, "blocked")
   assert.equal(state.calls.includes("plan-publication"), false)
   assert.deepEqual(
     plan.steps.filter((step) => step.kind === "publication")
@@ -1689,6 +1817,169 @@ test("guild blueprint resolves settings only from exact scaffold evidence", asyn
   assert.equal(state.resolvedWelcomeScreen, null)
 })
 
+test("guild blueprint resolves and executes Community before dependent phases", async () => {
+  const state = fixture({ communityWrite: true })
+  const manifest = request({
+    community: community(),
+    onboarding: { ...onboarding(), enabled: true },
+    welcomeScreen: welcomeScreen(),
+  })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+
+  assert.equal(plan.frontier?.kind, "community")
+  assert.deepEqual(state.calls, [
+    "plan-structure",
+    "plan-profile",
+    "plan-settings",
+    "plan-community",
+  ])
+  assert.equal(state.resolvedCommunity?.rulesChannelId, CHANNEL_ID)
+  assert.equal(
+    state.resolvedCommunity?.publicUpdatesChannelId,
+    PUBLICATION_CHANNEL_ID,
+  )
+  assert.equal(
+    state.resolvedCommunity?.operationKey,
+    guildBlueprintStepOperationKey(OPERATION_KEY, "community"),
+  )
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "satisfied"],
+      ["profile", "satisfied"],
+      ["settings", "satisfied"],
+      ["community", "ready"],
+      ["welcome-screen", "waiting"],
+      ["onboarding", "waiting"],
+    ],
+  )
+
+  const executionCalls: string[] = []
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(executionCalls),
+  )
+  assert.equal(result.status, "frontier-executed")
+  assert.equal(result.executedPhase, "community")
+  assert.equal(result.nestedResult?.status, "completed")
+  assert.equal(executionCalls.length, 1)
+  assert.match(executionCalls[0] as string, /^execute-community:hmac-sha256:/u)
+})
+
+test("guild blueprint advances past an already-current Community phase", async () => {
+  const state = fixture({ communityWrite: false, welcomeScreenWrite: true })
+  const plan = await state.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request({ community: community(), welcomeScreen: welcomeScreen() }),
+  )
+
+  assert.equal(plan.frontier?.kind, "welcome-screen")
+  assert.deepEqual(state.calls, [
+    "plan-structure",
+    "plan-profile",
+    "plan-settings",
+    "plan-community",
+    "plan-welcome-screen",
+  ])
+  assert.equal(
+    plan.steps.find((step) => step.kind === "community")?.state,
+    "satisfied",
+  )
+})
+
+test("guild blueprint rejects malformed Community plan bindings", async () => {
+  const transforms: Array<NonNullable<FixtureOptions["communityPlanTransform"]>> = [
+    (plan) => ({
+      ...plan,
+      desired: {
+        ...plan.desired,
+        publicUpdatesChannelId: CHANNEL_ID,
+      },
+    }),
+    (plan) => ({
+      ...plan,
+      status: "future-status",
+      writeRequired: false,
+    } as unknown as GuildCommunityChangePlan),
+  ]
+  for (const communityPlanTransform of transforms) {
+    const state = fixture({ communityPlanTransform })
+    await assert.rejects(
+      state.service.plan(
+        APPLICATION_ID,
+        BOT_ID,
+        request({ community: community() }),
+      ),
+      /Community plan target changed/u,
+    )
+  }
+})
+
+test("guild blueprint rejects mismatched Community dependency identity", async () => {
+  const state = fixture({
+    communityAuditTransform(audit) {
+      return { ...audit, botId: "300000000000000002" }
+    },
+  })
+  await assert.rejects(
+    state.service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({ welcomeScreen: welcomeScreen() }),
+    ),
+    /nested plan identity changed/u,
+  )
+})
+
+test("guild blueprint blocks Community-dependent enablement before downstream planning", async () => {
+  const state = fixture({ communityEnabled: false })
+  const manifest = request({
+    onboarding: { ...onboarding(), enabled: true },
+    welcomeScreen: welcomeScreen(),
+  })
+  const plan = await state.service.plan(APPLICATION_ID, BOT_ID, manifest)
+
+  assert.equal(plan.status, "blocked")
+  assert.equal(plan.frontier, null)
+  assert.equal(plan.blocker?.kind, "community")
+  if (plan.blocker?.kind !== "community") assert.fail("Expected Community blocker")
+  assert.deepEqual(plan.blocker.requiredBy, ["welcome-screen", "onboarding"])
+  assert.equal(plan.blocker.verificationReason, "community-phase-required")
+  assert.deepEqual(state.calls, [
+    "plan-structure",
+    "plan-profile",
+    "plan-settings",
+    "get-community",
+  ])
+  assert.deepEqual(
+    plan.steps.map((step) => [step.kind, step.state]),
+    [
+      ["structure", "satisfied"],
+      ["profile", "satisfied"],
+      ["settings", "satisfied"],
+      ["community", "blocked"],
+      ["welcome-screen", "waiting"],
+      ["onboarding", "waiting"],
+    ],
+  )
+
+  const executionCalls: string[] = []
+  const result = await state.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    manifest,
+    plan.digest,
+    executors(executionCalls),
+  )
+  assert.equal(result.status, "blocked")
+  assert.equal(result.nextAction, "inspect")
+  assert.deepEqual(executionCalls, [])
+})
+
 test("guild blueprint resolves and plans Welcome Screen only after earlier phases", async () => {
   const state = fixture({ welcomeScreenWrite: true })
   const manifest = request({
@@ -1701,6 +1992,7 @@ test("guild blueprint resolves and plans Welcome Screen only after earlier phase
     "plan-structure",
     "plan-profile",
     "plan-settings",
+    "get-community",
     "plan-welcome-screen",
   ])
   assert.equal(state.resolvedWelcomeScreen?.channels[0]?.channelId, CHANNEL_ID)
@@ -1754,6 +2046,7 @@ test("guild blueprint resolves and plans onboarding only after earlier phases", 
     "plan-structure",
     "plan-profile",
     "plan-settings",
+    "get-community",
     "plan-welcome-screen",
     "plan-onboarding",
   ])
