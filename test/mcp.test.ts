@@ -467,6 +467,7 @@ import {
   MCP_PLAN_REVIEW_APP_URI,
   MCP_PLAN_REVIEW_TOOL_META,
 } from "../src/mcp-plan-review-app.js"
+import { MCP_OPERATIONAL_INSTRUCTION_PREAMBLE } from "../src/mcp-instructions.js"
 import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { serializedMcpResultBytes } from "../src/mcp-output.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
@@ -32471,6 +32472,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
   })
 
   await client.connect(transport)
+  assert.ok(client.getInstructions()?.startsWith(`${MCP_OPERATIONAL_INSTRUCTION_PREAMBLE} `))
   const [tools, prompts, resources, templates, safety, planReviewApp] = await Promise.all([
     client.listTools(),
     client.listPrompts(),
@@ -32564,6 +32566,7 @@ test("MCP stdio entrypoint completes policy IDs for legacy clients", async (cont
   })
 
   await client.connect(transport)
+  assert.ok(client.getInstructions()?.startsWith(`${MCP_OPERATIONAL_INSTRUCTION_PREAMBLE} `))
   const [guildCompletion, channelCompletion] = await Promise.all([
     client.complete({
       argument: { name: "guildId", value: "100" },

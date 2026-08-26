@@ -15,6 +15,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Production requests always target Discord API v10 at a fixed origin
 - Direct-message channels are rejected
 - Discord names, topics, forum tags, thread names, message bodies, embeds, components, filenames, and URLs are treated as untrusted data rather than instructions
+- The leading MCP instruction preamble keeps exact scope, untrusted-data, exact-ID targeting, direct-write boundaries, reviewed approval, no-retry, and policy-refusal rules together before domain detail, so clients that present only a bounded prefix retain the cross-tool contract
 - Resource discovery is content-free; live resource templates require exact IDs and never enumerate messages
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
 - Credential-free catalog mode advertises the exact production tools, prompts, resources, and templates while a fixed guard rejects every tool call before argument validation or execution

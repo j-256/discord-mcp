@@ -253,6 +253,15 @@ const EXPECTED_MCP_TOOL_PROGRESS = [
   { message: "Discord request round started", progress: 0, total: 1 },
   { message: "Discord request round finished", progress: 1, total: 1 },
 ]
+function assertOperationalInstructions(client) {
+  const instructions = client.getInstructions()
+  assert.equal(typeof instructions, "string")
+  assert.ok(instructions.startsWith(connector.MCP_OPERATIONAL_INSTRUCTION_PREAMBLE + " "))
+  assert.ok(
+    new TextEncoder().encode(connector.MCP_OPERATIONAL_INSTRUCTION_PREAMBLE).byteLength
+      <= connector.MCP_INSTRUCTION_PREAMBLE_MAX_BYTES,
+  )
+}
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
@@ -395,6 +404,7 @@ const client = new Client({ name: "installed-package-verifier", version: "1.0.0"
 try {
   await client.connect(transport)
   assert.deepEqual(client.getServerVersion(), expectedServerIdentity)
+  assertOperationalInstructions(client)
   const [initialTools, resources, templates, prompts] = await Promise.all([
     client.listTools(),
     client.listResources(),
@@ -457,6 +467,7 @@ const modernClient = new Client(
 try {
   await modernClient.connect(modernTransport)
   assert.deepEqual(modernClient.getServerVersion(), expectedServerIdentity)
+  assertOperationalInstructions(modernClient)
   const progress = []
   await modernClient.callTool({
     arguments: { query: REVIEWED_DELETION_TOOLS[0] },
