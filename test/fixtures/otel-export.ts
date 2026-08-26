@@ -12,6 +12,12 @@ metrics.setGlobalMeterProvider(preloadedMeterProvider)
 
 const privateValue = process.env.TEST_PRIVATE_VALUE || "private-value"
 const privateToken = process.env.TEST_PRIVATE_TOKEN || "private-token"
+const remoteParent = Object.freeze({
+  isRemote: true,
+  spanId: "00f067aa0ba902b7",
+  traceFlags: 1,
+  traceId: "0af7651916cd43dd8448eb211c80319c",
+})
 const telemetry = new OperationalTelemetry({
   config: loadObservabilityDocumentConfig({
     ...(process.env.TEST_OTLP_ENDPOINT
@@ -30,7 +36,7 @@ const telemetry = new OperationalTelemetry({
 
 try {
   telemetry.start()
-  const tool = telemetry.startTool("get_message")
+  const tool = telemetry.startTool("get_message", remoteParent)
   await tool.run(async () => {
     const rest = telemetry.startDiscordRequest("get_message")
     await rest.run(async () => {

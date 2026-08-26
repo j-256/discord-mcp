@@ -23,6 +23,9 @@ interface TraceSpan {
   traceId: string
 }
 
+const REMOTE_PARENT_SPAN_ID = "00f067aa0ba902b7"
+const REMOTE_TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
+
 function readVarint(buffer: Uint8Array, start: number): [bigint, number] {
   let offset = start
   let shift = 0n
@@ -191,11 +194,14 @@ test("OTLP runtime keeps privacy-safe protobuf export and parent context isolate
   assert.ok(tool)
   assert.ok(rest)
   assert.ok(unknown)
-  assert.equal(tool.parentSpanId, "")
+  assert.equal(tool.parentSpanId, REMOTE_PARENT_SPAN_ID)
+  assert.equal(tool.traceId, REMOTE_TRACE_ID)
   assert.equal(rest.traceId, tool.traceId)
   assert.equal(rest.parentSpanId, tool.spanId)
   assert.equal(rest.spanId.length, 16)
   assert.equal(tool.traceId.length, 32)
+  assert.equal(unknown.parentSpanId, "")
+  assert.notEqual(unknown.traceId, REMOTE_TRACE_ID)
 
   const metricWire = Buffer.concat(metrics.map(({ body }) => body)).toString("utf8")
   assert.match(metricWire, /mcp\.tool\.calls/)

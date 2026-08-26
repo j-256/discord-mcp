@@ -420,6 +420,7 @@ import { registerDiscordGatewayMcp } from "./mcp-gateway.js"
 import { registerDiscordGuidance } from "./mcp-guidance.js"
 import { registerDiscordNativeInteractionMcp } from "./mcp-native-interactions.js"
 import { registerDiscordObservabilityMcp } from "./mcp-observability.js"
+import { extractMcpRemoteSpanContext } from "./mcp-trace-context.js"
 import {
   budgetMcpToolResult,
   redactMcpValue,
@@ -10238,7 +10239,10 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
     ) => {
       let observation: OperationObservation | undefined
       try {
-        observation = observability.startTool(name)
+        observation = observability.startTool(
+          name,
+          extractMcpRemoteSpanContext(context.mcpReq._meta),
+        )
       } catch {}
       try {
         const invoke = () => handler(input, context)

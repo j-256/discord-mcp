@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks"
 
 import {
   context,
+  ROOT_CONTEXT,
   SpanKind,
   SpanStatusCode,
   trace,
@@ -11,6 +12,7 @@ import {
   type Histogram,
   type Meter,
   type Span,
+  type SpanContext,
   type Tracer,
 } from "@opentelemetry/api"
 
@@ -108,7 +110,7 @@ export interface OperationObservation {
 export interface OperationalObserver {
   getObservabilityStatus(): ObservabilitySnapshot
   startDiscordRequest(operation: string): OperationObservation
-  startTool(name: string): OperationObservation
+  startTool(name: string, remoteParent?: SpanContext): OperationObservation
 }
 
 export interface ObservabilityRuntime extends OperationalObserver {
@@ -483,6 +485,7 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
     kind: OperationalKind
     method?: string
     operation: string
+    remoteParent?: SpanContext
     risk?: McpToolRiskClass | "unknown"
   }): OperationObservation {
     const aggregate = this.#operation(options.kind, options.operation)
@@ -499,7 +502,9 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
         if (options.method) attributes["http.request.method"] = options.method
         if (options.risk) attributes["mcp.tool.risk"] = options.risk
         if (this.#tracer) {
-          const parentContext = this.#contextManager?.active() || context.active()
+          const parentContext = options.remoteParent
+            ? trace.setSpanContext(ROOT_CONTEXT, options.remoteParent)
+            : this.#contextManager?.active() || context.active()
           span = this.#tracer.startSpan(
             options.kind === "mcp-tool"
               ? `mcp.tool.${options.operation}`
@@ -611,7 +616,7 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
     }
   }
 
-  startTool(name: string): OperationObservation {
+  startTool(name: string, remoteParent?: SpanContext): OperationObservation {
     const operation: McpToolName | "unknown" = Object.hasOwn(MCP_TOOL_RISK_CLASSES, name)
       ? name as McpToolName
       : "unknown"
@@ -619,6 +624,7 @@ export class OperationalTelemetry implements ObservabilityRuntime, OtlpHealthSin
     return this.#startObservation({
       kind: "mcp-tool",
       operation,
+      ...(remoteParent ? { remoteParent } : {}),
       risk,
     })
   }

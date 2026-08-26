@@ -19,6 +19,7 @@ import {
   withInputRequired,
 } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
+import type { SpanContext } from "@opentelemetry/api"
 
 import {
   AUDIT_LOG_LIMITS,
@@ -460,7 +461,10 @@ import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
 import { serializedMcpResultBytes } from "../src/mcp-output.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityDocumentConfig } from "../src/observability-config.js"
-import { OperationalTelemetry } from "../src/observability.js"
+import {
+  OperationalTelemetry,
+  type OperationalObserver,
+} from "../src/observability.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import {
   DISCORD_PERMISSIONS,
@@ -11900,6 +11904,7 @@ async function connectedFixture(
     serviceOverrides?: Parameters<typeof serviceFixture>[0]
     gateway?: GatewayEventSource
     nativeInteractions?: NativeInteractionSource
+    observability?: OperationalObserver
     runtimeMcpReadResponseMaxBytes?: number
   } = {},
 ) {
@@ -11923,6 +11928,7 @@ async function connectedFixture(
     ...(options.nativeInteractions
       ? { nativeInteractions: options.nativeInteractions }
       : {}),
+    ...(options.observability ? { observability: options.observability } : {}),
     requestStateKey: new Uint8Array(32).fill(9),
     service: serviceData.service,
   })
@@ -12021,6 +12027,7 @@ function inProcessStdioClientTransport(
 async function connectedModernStdioFixture(
   context: TestContext,
   serviceOverrides?: Parameters<typeof serviceFixture>[0],
+  observability?: OperationalObserver,
 ) {
   const serviceData = serviceFixture(serviceOverrides)
   const serverInput = new PassThrough()
@@ -12032,7 +12039,7 @@ async function connectedModernStdioFixture(
     environment: {
       DISCORD_BOT_TOKEN: TOKEN,
     },
-    observability: new OperationalTelemetry({
+    observability: observability || new OperationalTelemetry({
       config: loadObservabilityDocumentConfig({}, {}, [TOKEN]),
     }),
     requestStateKey: new Uint8Array(32).fill(9),
@@ -12884,6 +12891,56 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     })
   }
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("MCP tools continue only strict trace context from request metadata", async (context) => {
+  const delegate = new OperationalTelemetry({
+    config: loadObservabilityDocumentConfig({}, {}, [TOKEN]),
+  })
+  const remoteParents: Array<SpanContext | undefined> = []
+  const observability: OperationalObserver = {
+    getObservabilityStatus: () => delegate.getObservabilityStatus(),
+    startDiscordRequest: (operation) => delegate.startDiscordRequest(operation),
+    startTool(name, remoteParent) {
+      remoteParents.push(remoteParent)
+      return delegate.startTool(name, remoteParent)
+    },
+  }
+  const { client } = await connectedModernStdioFixture(
+    context,
+    undefined,
+    observability,
+  )
+  const traceId = "0af7651916cd43dd8448eb211c80319c"
+  const spanId = "00f067aa0ba902b7"
+  const privateBaggage = "private-user=999999999999999999,message=private-content"
+
+  await client.callTool({
+    _meta: {
+      baggage: privateBaggage,
+      traceparent: `00-${traceId}-${spanId}-01`,
+      tracestate: "vendor=value",
+    },
+    arguments: {},
+    name: "get_connector_status",
+  })
+  await client.callTool({
+    _meta: {
+      baggage: privateBaggage,
+      traceparent: `00-${"0".repeat(32)}-${spanId}-01`,
+    },
+    arguments: {},
+    name: "get_connector_status",
+  })
+
+  assert.equal(remoteParents.length, 2)
+  assert.equal(remoteParents[0]?.traceId, traceId)
+  assert.equal(remoteParents[0]?.spanId, spanId)
+  assert.equal(remoteParents[0]?.traceFlags, 1)
+  assert.equal(remoteParents[0]?.isRemote, true)
+  assert.equal(remoteParents[0]?.traceState?.serialize(), "vendor=value")
+  assert.equal(JSON.stringify(remoteParents[0]).includes(privateBaggage), false)
+  assert.equal(remoteParents[1], undefined)
 })
 
 test("MCP read-response budget refuses whole tool, resource, and prompt results", async (context) => {
