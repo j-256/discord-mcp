@@ -231,7 +231,7 @@ async function inspectImage(image, packageJson, revision) {
   )
   const expectedLabels = {
     "io.modelcontextprotocol.server.name": MCP_NAME,
-    "org.opencontainers.image.description": "Least-privilege Discord reads, privacy-safe audits, and reviewed administration",
+    "org.opencontainers.image.description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
     "org.opencontainers.image.documentation": `${REPOSITORY_URL}/blob/v${packageJson.version}/README.md`,
     "org.opencontainers.image.licenses": "AGPL-3.0-only",
     "org.opencontainers.image.revision": revision,

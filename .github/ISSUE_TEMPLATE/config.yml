@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/j-256/discord-mcp/security/advisories/new
+    about: Report vulnerabilities privately without credentials or Discord data
+  - name: Operator and capability reference
+    url: https://github.com/j-256/discord-mcp/blob/main/docs/reference.md
+    about: Review setup, policy, tools, safety boundaries, and recovery guidance

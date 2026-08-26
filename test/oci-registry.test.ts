@@ -77,7 +77,7 @@ function validIndex(): object {
   const arm64 = imageDescriptor("arm64", "b")
   return {
     annotations: {
-      "org.opencontainers.image.description": "Least-privilege Discord reads, privacy-safe audits, and reviewed administration",
+      "org.opencontainers.image.description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
       "org.opencontainers.image.source": "https://github.com/j-256/discord-mcp",
     },
     manifests: [
@@ -106,7 +106,7 @@ function validConfig(): object {
       ],
       Labels: {
         "io.modelcontextprotocol.server.name": "io.github.j-256/discord-mcp",
-        "org.opencontainers.image.description": "Least-privilege Discord reads, privacy-safe audits, and reviewed administration",
+        "org.opencontainers.image.description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
         "org.opencontainers.image.documentation": `https://github.com/j-256/discord-mcp/blob/v${VERSION}/README.md`,
         "org.opencontainers.image.licenses": "AGPL-3.0-only",
         "org.opencontainers.image.revision": REVISION,

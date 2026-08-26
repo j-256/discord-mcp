@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server for reading and safely administering Discord guilds and separately allowlisted one-to-one conversations through a caller-owned bot. It combines broad, typed Discord coverage with exact scope, privacy-minimized results, reviewed writes, durable content-free evidence, and explicit uncertain-outcome handling.
+Discord MCP is a local stdio Model Context Protocol server for safely reading and administering Discord guilds and separately allowlisted one-to-one conversations through a caller-owned bot. It combines broad typed coverage with exact scope, privacy-minimized results, reviewed writes, durable content-free evidence, and explicit ambiguity handling.
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
@@ -13,12 +13,12 @@ Discord MCP is a local stdio Model Context Protocol server for reading and safel
 | Concern | Enforced behavior |
 | --- | --- |
 | Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, a separate exact-user private-message scope, risk-separated toolsets, and read-only setup presets |
-| Exact targeting | One complete canonical Discord jump link or official typed mention can be converted locally into typed exact IDs without name lookup, Discord contact, input echo, persistence, or downstream authorization |
+| Exact targeting | Canonical Discord jump links and official typed mentions convert locally into exact IDs without name lookup, Discord contact, input echo, persistence, or downstream authority |
 | Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, and no private-channel discovery or scope inheritance |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence, non-retried writes, exact readback, durable coordination, ambiguity quarantine, and bounded local invalid-request pressure |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
-| Plan review | Every canonical plan tool retains a complete text and structured result and can add a display-only, authority-free interactive review in MCP Apps hosts |
+| Plan review | Every plan tool returns complete text and structured evidence and can add display-only, authority-free review in MCP Apps hosts |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
 
 The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and known limitation.
@@ -276,7 +276,7 @@ The release workflow rebuilds candidates from source, packs them twice, installs
 
 The stdio transport, Discord REST client, scope policy, domain services, reviewed planning, durable coordination, activity log, observability, Gateway, and MCP adapter remain separate. Production uses native `fetch`, TypeScript ESM, and a small exactly pinned dependency set.
 
-This separation keeps Discord transport behavior, permission evidence, local authority, destructive planning, persistent records, and MCP presentation independently testable. New capabilities must fit those boundaries instead of bypassing them through a generic Discord dispatcher.
+This keeps transport, permission evidence, local authority, reviewed writes, persistence, and MCP presentation independently testable. New capabilities must fit those boundaries rather than add a generic Discord dispatcher.
 
 ## Documentation
 
@@ -288,7 +288,7 @@ This separation keeps Discord transport behavior, permission evidence, local aut
 
 ## Development
 
-The default tests use injected transports and do not contact Discord:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for changes and [SUPPORT.md](SUPPORT.md) for setup and operator questions. Default tests use injected transports and do not contact Discord:
 
 ```sh
 npm run metadata:check

@@ -2,17 +2,32 @@
 
 Discord MCP uses deliberately separate release operations for one-time npm bootstrap, normal staged npm publication, immutable OCI publication, and MCP Registry registration. No operation contacts Discord or needs a Discord bot token.
 
+## Public-source preflight
+
+Changing the repository from private to public exposes its reachable Git history and Actions history, permits public forks, publishes repository activity, and disables existing push rulesets. Treat the change as an irreversible disclosure even though GitHub permits a later visibility change.
+
+Before changing visibility:
+
+1. Create a mirror clone of the exact private remote outside the working repository. Enumerate every advertised ref, run strict Git object verification, and retain the mirror until the public transition and protections are verified.
+2. Run a reviewed credential scanner in full-redaction mode across every reachable commit, the selected current tree, every retained Actions log, and every retained artifact including nested archives. Classify every candidate from rule, path, and redacted context without printing the matched value. Rotate any real credential before proceeding.
+3. Inspect commit author metadata, historical filenames, repository issues, pull requests, releases, deployments, Actions variables and secret names, environments, and public-facing repository metadata. Confirm that no private identity, path, discussion, artifact, or log should remain hidden.
+4. Scan the current tree and every retained package for machine-local paths and model-, vendor-, client-, or harness-specific branding. Decide explicitly whether transparent historical references are acceptable. A zero-history-reference policy requires a separately authorized history rewrite with an external mirror backup and credential rotation where applicable.
+5. Run the complete release metadata, test, coverage, build, package, dependency, and container gates on the exact commit intended for public exposure. Require the remote CI gate to pass as well.
+6. Confirm that `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`, privacy-safe issue forms including operator questions, the pull-request template, `SECURITY.md`, CODEOWNERS, and the release runbook are present and protected.
+
 ## Repository prerequisites
 
 Before any publication:
 
 1. Make `j-256/discord-mcp` public. npm provenance and public GitHub attestations fail for a private source repository, and the workflow enforces this boundary.
-2. Keep `main` protected and require the `CI gate` and CodeQL checks. Require CODEOWNERS review for workflows, package metadata, registry metadata, release scripts, and security policy.
-3. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
-4. Enable two-factor authentication on the npm maintainer account.
-5. Confirm that the npm maintainer controls the `@j-256` scope.
-6. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
-7. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first package version is created by the protected workflow and requires one explicit visibility review before it can be made public.
+2. Set the repository description exactly to `Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration`. Replace its topics with the exact model- and harness-neutral topic set `ai-agents`, `automation`, `community-management`, `discord`, `discord-api`, `discord-bot`, `discord-mcp`, `least-privilege`, `mcp`, `mcp-server`, `model-context-protocol`, `moderation`, `security`, and `typescript`. Keep Issues enabled. Leave Discussions, Projects, and the wiki disabled until each has an owned maintenance purpose, and leave the homepage unset until a durable project-owned documentation location exists. Topic names are public even for a private repository, so apply this profile only after the visibility decision.
+3. Create or re-enable protection for `main` after the visibility change and require the `CI gate` and CodeQL checks. Require CODEOWNERS review for workflows, package metadata, registry metadata, release scripts, security policy, and community files.
+4. Enable private vulnerability reporting and its maintainer notifications. Enable and verify Dependabot alerts, secret scanning, push protection, and code scanning; a skipped private-repository CodeQL run is not public-release evidence.
+5. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
+6. Enable two-factor authentication on the npm maintainer account.
+7. Confirm that the npm maintainer controls the `@j-256` scope.
+8. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
+9. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first package version is created by the protected workflow and requires one explicit visibility review before it can be made public.
 
 The workflow must be dispatched at the same tag supplied as its input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. The workflow accepts only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version.
 
@@ -200,6 +215,9 @@ The exact registry response is also available from `https://registry.modelcontex
 - [npm staged publishing](https://docs.npmjs.com/staged-publishing/)
 - [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/)
 - [GitHub workflow event refs and SHAs](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
+- [GitHub repository visibility consequences](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility)
+- [GitHub private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
+- [GitHub security and analysis settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-security-and-analysis-settings-for-your-repository)
 - [GitHub artifact and SBOM attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 - [GitHub container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
 - [GitHub package visibility and access](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)

@@ -18,7 +18,7 @@ import { containsSpecificReference } from "./neutrality.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const MCP_NAME = "io.github.j-256/discord-mcp"
-const MCP_DESCRIPTION = "Least-privilege Discord reads, privacy-safe audits, and reviewed administration"
+const MCP_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
 const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
 const REPOSITORY_ID = "1334461127"
 const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2ca15de"
@@ -31,6 +31,7 @@ const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3c
 const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
 const SBOM_GENERATOR_IMAGE = "docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
 const README_MAX_BYTES = 32 * 1024
+const COMMUNITY_FILE_MAX_BYTES = 12 * 1024
 const README_REQUIRED_HEADINGS = Object.freeze([
   "## Why this connector",
   "## Quick start",
@@ -193,7 +194,7 @@ async function checkPackageAndLock() {
   invariant(packageJson.name === PACKAGE_NAME, "package name does not match the release identity")
   invariant(STABLE_SEMVER.test(packageJson.version), "package version must be stable semantic versioning")
   invariant(packageJson.private === undefined, "publishable package must not be private")
-  invariant(packageJson.description === "A least-privilege MCP server for safely accessing and moderating Discord guilds", "package description is invalid")
+  invariant(packageJson.description === MCP_DESCRIPTION, "package description is invalid")
   invariant(packageJson.author === "j-256", "package author is invalid")
   invariant(packageJson.mcpName === MCP_NAME, "package mcpName does not match the registry identity")
   invariant(packageJson.license === "AGPL-3.0-only", "package license does not match LICENSE")
@@ -314,6 +315,7 @@ async function checkSourceIdentity(packageJson) {
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
   const security = await readFile(join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")
+  const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
@@ -365,9 +367,130 @@ async function checkDocumentation(packageJson) {
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
+  invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
+  invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
+  invariant(releasing.includes(`description exactly to \`${MCP_DESCRIPTION}\``), "release runbook lacks the canonical repository description")
+  invariant(releasing.includes("exact model- and harness-neutral topic set"), "release runbook lacks the repository topic policy")
+  for (const topic of [
+    "ai-agents",
+    "automation",
+    "community-management",
+    "discord",
+    "discord-api",
+    "discord-bot",
+    "discord-mcp",
+    "least-privilege",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "moderation",
+    "security",
+    "typescript",
+  ]) {
+    invariant(releasing.includes(`\`${topic}\``), `release runbook lacks the ${topic} repository topic`)
+  }
   invariant(reference.length > readme.length, "complete reference must retain the detailed contract")
   for (const heading of REFERENCE_REQUIRED_HEADINGS) {
     invariant(reference.includes(heading), `complete reference is missing ${heading}`)
+  }
+}
+
+async function checkCommunityFiles() {
+  const contributing = await readFile(join(REPOSITORY_ROOT, "CONTRIBUTING.md"), "utf8")
+  const conduct = await readFile(join(REPOSITORY_ROOT, "CODE_OF_CONDUCT.md"), "utf8")
+  const support = await readFile(join(REPOSITORY_ROOT, "SUPPORT.md"), "utf8")
+  const issueDirectory = join(REPOSITORY_ROOT, ".github/ISSUE_TEMPLATE")
+  const bugReport = await readFile(join(issueDirectory, "bug_report.yml"), "utf8")
+  const featureRequest = await readFile(join(issueDirectory, "feature_request.yml"), "utf8")
+  const operatorQuestion = await readFile(join(issueDirectory, "operator_question.yml"), "utf8")
+  const issueConfig = await readFile(join(issueDirectory, "config.yml"), "utf8")
+  const pullRequest = await readFile(
+    join(REPOSITORY_ROOT, ".github/pull_request_template.md"),
+    "utf8",
+  )
+  const files = new Map([
+    ["CONTRIBUTING.md", contributing],
+    ["CODE_OF_CONDUCT.md", conduct],
+    ["SUPPORT.md", support],
+    [".github/ISSUE_TEMPLATE/bug_report.yml", bugReport],
+    [".github/ISSUE_TEMPLATE/feature_request.yml", featureRequest],
+    [".github/ISSUE_TEMPLATE/operator_question.yml", operatorQuestion],
+    [".github/ISSUE_TEMPLATE/config.yml", issueConfig],
+    [".github/pull_request_template.md", pullRequest],
+  ])
+  for (const [path, contents] of files) {
+    invariant(contents.length > 0, `${path} must not be empty`)
+    invariant(
+      Buffer.byteLength(contents) <= COMMUNITY_FILE_MAX_BYTES,
+      `${path} must remain concise`,
+    )
+  }
+  invariant(contributing.startsWith("# Contributing\n"), "contributor guide heading is invalid")
+  for (const required of [
+    "Never include a bot token",
+    "Do not publish Discord message content",
+    "private GitHub Security Advisory",
+    "npm run metadata:check",
+    "npm run test:coverage",
+    "One safety gate is never a reason to remove another",
+    "AGPL-3.0-only license",
+  ]) {
+    invariant(contributing.includes(required), `contributor guide is missing ${required}`)
+  }
+  invariant(
+    conduct.startsWith("# Contributor Covenant Code of Conduct\n"),
+    "code of conduct heading is invalid",
+  )
+  for (const required of [
+    "Publishing credentials, private Discord identifiers or content",
+    "GitHub Support",
+    "private GitHub Security Advisory",
+  ]) {
+    invariant(conduct.includes(required), `code of conduct is missing ${required}`)
+  }
+  invariant(support.startsWith("# Support\n"), "support guide heading is invalid")
+  for (const required of [
+    "do not operate a shared bot",
+    "Start with offline evidence",
+    "Share only privacy-safe evidence",
+    "Never post a bot token",
+    "private GitHub Security Advisory",
+    "no response-time guarantee",
+  ]) {
+    invariant(support.includes(required), `support guide is missing ${required}`)
+  }
+  for (const [name, form] of [
+    ["bug report", bugReport],
+    ["feature proposal", featureRequest],
+    ["operator question", operatorQuestion],
+  ]) {
+    invariant(form.startsWith("name: "), `${name} form heading is invalid`)
+    invariant(form.includes("type: checkboxes"), `${name} form lacks its privacy acknowledgement`)
+    invariant(form.includes("required: true"), `${name} form lacks required evidence`)
+    invariant(
+      !/^\s+id:\s*(?:token|credential|content|guild_id|channel_id|user_id|message_id)\s*$/imu.test(form),
+      `${name} form requests prohibited private input`,
+    )
+  }
+  invariant(bugReport.includes("Do not paste bot tokens"), "bug form lacks its credential warning")
+  invariant(bugReport.includes("Minimal synthetic reproduction"), "bug form lacks synthetic reproduction guidance")
+  invariant(featureRequest.includes("No Discord content"), "feature form lacks its privacy warning")
+  invariant(featureRequest.includes("Freshness and failure safety"), "feature form lacks reviewed-write analysis")
+  invariant(operatorQuestion.includes("Read SUPPORT.md"), "operator form lacks its support guide route")
+  invariant(operatorQuestion.includes("do not paste a configuration document"), "operator form lacks its configuration privacy boundary")
+  invariant(operatorQuestion.includes("Exact question"), "operator form lacks a bounded question field")
+  invariant(issueConfig.startsWith("blank_issues_enabled: false\n"), "blank issues must remain disabled")
+  invariant(issueConfig.includes(`${REPOSITORY_URL}/security/advisories/new`), "issue routing lacks private vulnerability reporting")
+  invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/reference.md`), "issue routing lacks the operator reference")
+  invariant(pullRequest.startsWith("## Summary\n"), "pull-request template heading is invalid")
+  for (const required of [
+    "## Authority and privacy impact",
+    "## Failure and recovery impact",
+    "No bot token, bearer credential, Discord content",
+    "Every write retains planning",
+    "Dependencies and external actions remain minimal, exactly pinned, and justified",
+  ]) {
+    invariant(pullRequest.includes(required), `pull-request template is missing ${required}`)
   }
 }
 
@@ -515,7 +638,7 @@ async function checkAutomation() {
     "container-evidence.json",
     "ghcr.io/j-256/discord-mcp:$version",
     "linux/amd64,linux/arm64",
-    "index:org.opencontainers.image.description=Least-privilege Discord reads, privacy-safe audits, and reviewed administration",
+    `index:org.opencontainers.image.description=${MCP_DESCRIPTION}`,
     "npm run container:verify",
     "npm run container:index:verify",
     "--expect-oci matching",
@@ -560,6 +683,8 @@ async function checkAutomation() {
     "/.dockerignore",
     "/.npmrc",
     "/assets/",
+    "/CODE_OF_CONDUCT.md",
+    "/CONTRIBUTING.md",
     "/docs/",
     "/Dockerfile",
     "/package.json",
@@ -567,6 +692,7 @@ async function checkAutomation() {
     "/server.json",
     "/scripts/",
     "/SECURITY.md",
+    "/SUPPORT.md",
   ]) {
     invariant(codeowners.includes(`${path} @j-256`), `CODEOWNERS does not protect ${path}`)
   }
@@ -576,6 +702,7 @@ const packageJson = await checkPackageAndLock()
 await checkNeutrality()
 await checkSourceIdentity(packageJson)
 await checkDocumentation(packageJson)
+await checkCommunityFiles()
 await checkRegistryManifest(packageJson)
 await checkContainerSource(packageJson)
 await checkAutomation()

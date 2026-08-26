@@ -17,7 +17,7 @@ ARG VERSION=0.1.0
 ARG REVISION=local
 
 LABEL org.opencontainers.image.title="Discord MCP" \
-  org.opencontainers.image.description="Least-privilege Discord reads, privacy-safe audits, and reviewed administration" \
+  org.opencontainers.image.description="Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration" \
   org.opencontainers.image.url="https://github.com/j-256/discord-mcp" \
   org.opencontainers.image.source="https://github.com/j-256/discord-mcp" \
   org.opencontainers.image.documentation="https://github.com/j-256/discord-mcp/blob/v${VERSION}/README.md" \

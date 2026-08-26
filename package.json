@@ -1,7 +1,7 @@
 {
   "name": "@j-256/discord-mcp",
   "version": "0.1.0",
-  "description": "A least-privilege MCP server for safely accessing and moderating Discord guilds",
+  "description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
   "license": "AGPL-3.0-only",
   "author": "j-256",
   "homepage": "https://github.com/j-256/discord-mcp#readme",
