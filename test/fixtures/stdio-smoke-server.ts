@@ -1,7 +1,11 @@
 import { loadConnectorConfigDocument } from "../../src/config.js"
 import { createConnectorConfigDocument } from "../../src/config-document.js"
 import { runDiscordMcpServer } from "../../src/mcp.js"
-import { ConnectorService } from "../../src/service.js"
+import {
+  CONNECTOR_STATUS_PRIVACY,
+  CONNECTOR_STATUS_SCHEMA_VERSION,
+  ConnectorService,
+} from "../../src/service.js"
 
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
@@ -32,11 +36,19 @@ if (config.token === "spawned-stdio-private-token") {
 const service = new ConnectorService({ config })
 service.getStatus = async () => {
   return {
-    application: { id: APPLICATION_ID },
+    application: {
+      guildMembersIntent: "enabled",
+      id: APPLICATION_ID,
+      messageContentIntent: "enabled",
+    },
+    applicationPosture: {},
     bot: { id: BOT_ID },
     guildPage: { accessible: 1, inScope: 1 },
-    schemaVersion: 1,
+    policy: {},
+    privacy: CONNECTOR_STATUS_PRIVACY,
+    schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
     status: "ok",
+    writeCoordination: {},
   } as Awaited<ReturnType<ConnectorService["getStatus"]>>
 }
 

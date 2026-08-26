@@ -67,6 +67,8 @@ import type {
 } from "../src/operation-store.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import {
+  CONNECTOR_STATUS_PRIVACY,
+  CONNECTOR_STATUS_SCHEMA_VERSION,
   ConnectorService,
   type ConnectorServiceOptions,
   type DiscordServiceClient,
@@ -111,6 +113,9 @@ const AUTOMOD_RULE_ID = "910000000000000001"
 const SCHEDULED_EVENT_ID = "930000000000000001"
 const SOUNDBOARD_SOUND_ID = "935000000000000001"
 const STAGE_INSTANCE_ID = "940000000000000001"
+const PRIVATE_APPLICATION_PROFILE_TEXT = "private-application-profile"
+const PRIVATE_BOT_PROFILE_TEXT = "private-bot-profile"
+const PRIVATE_ACTIVITY_FILE = "/private/connector/activity.jsonl"
 
 const PASSTHROUGH_WRITE_COORDINATOR: WriteCoordinator = {
   run(_intent, operation) {
@@ -341,6 +346,7 @@ function serviceFixture(overrides: {
   componentMessageOptions?: ConnectorServiceOptions["componentMessageOptions"]
   channel?: DiscordChannel
   client?: Partial<DiscordServiceClient>
+  currentUser?: DiscordUser
   forumPostOptions?: ConnectorServiceOptions["forumPostOptions"]
   forumTagOptions?: ConnectorServiceOptions["forumTagOptions"]
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
@@ -620,7 +626,7 @@ function serviceFixture(overrides: {
     },
     async getCurrentUser() {
       calls.user += 1
-      return bot()
+      return overrides.currentUser || bot()
     },
     async getGuild() {
       return {
@@ -8712,20 +8718,46 @@ test("service pins identity through audited and reviewed role ordering", async (
 })
 
 test("service verifies identity once and reports scope without message reads", async () => {
-  const { calls, service } = serviceFixture()
+  const privateApplication = application()
+  privateApplication.name = PRIVATE_APPLICATION_PROFILE_TEXT
+  privateApplication.description = PRIVATE_APPLICATION_PROFILE_TEXT
+  if (privateApplication.bot) {
+    privateApplication.bot.username = PRIVATE_BOT_PROFILE_TEXT
+  }
+  const { calls, service } = serviceFixture({
+    application: privateApplication,
+    currentUser: {
+      ...bot(),
+      username: PRIVATE_BOT_PROFILE_TEXT,
+    },
+    configOverrides: {
+      storage: { auditFile: PRIVATE_ACTIVITY_FILE },
+    },
+  })
 
   const status = await service.getStatus()
   const posture = await service.getApplicationPosture()
   const guilds = await service.listGuilds({ limit: 10 })
 
-  assert.equal(status.application.id, APPLICATION_ID)
-  assert.equal(status.application.guildMembersIntent, "disabled")
-  assert.equal(status.application.messageContentIntent, "enabled")
+  assert.deepEqual(status.application, {
+    guildMembersIntent: "disabled",
+    id: APPLICATION_ID,
+    messageContentIntent: "enabled",
+  })
   assert.deepEqual(status.applicationPosture, posture)
   assert.deepEqual(posture.findingCounts, { blockers: 0, warnings: 0 })
   assert.equal(posture.installation.guild.supported, true)
-  assert.equal(status.bot.id, BOT_ID)
+  assert.deepEqual(status.bot, { id: BOT_ID })
   assert.equal(status.guildPage.accessible, 1)
+  assert.deepEqual(status.privacy, CONNECTOR_STATUS_PRIVACY)
+  assert.equal(status.schemaVersion, CONNECTOR_STATUS_SCHEMA_VERSION)
+  assert.equal("auditFile" in status, false)
+  assert.equal("name" in status.application, false)
+  assert.equal("username" in status.bot, false)
+  const serializedStatus = JSON.stringify(status)
+  assert.equal(serializedStatus.includes(PRIVATE_APPLICATION_PROFILE_TEXT), false)
+  assert.equal(serializedStatus.includes(PRIVATE_BOT_PROFILE_TEXT), false)
+  assert.equal(serializedStatus.includes(PRIVATE_ACTIVITY_FILE), false)
   assert.deepEqual(status.writeCoordination, {
     coverage: "receipt-backed-reviewed-writes",
     excludedWorkflows: ["ordinary-message-interactions"],

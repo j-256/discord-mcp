@@ -1342,6 +1342,17 @@ export function applicationPostureRequirementsForConfig(
   }
 }
 
+export const CONNECTOR_STATUS_SCHEMA_VERSION = 2
+
+export const CONNECTOR_STATUS_PRIVACY = Object.freeze({
+  applicationProfileText: "omitted" as const,
+  botProfileText: "omitted" as const,
+  localPaths: "omitted" as const,
+  persistence: "none" as const,
+  rawPayloads: "omitted" as const,
+  text: "fixed-derived-only" as const,
+})
+
 export class ConnectorService {
   readonly #administrationService: AdministrationService
   readonly #activityStore: ActivityStore
@@ -2029,20 +2040,18 @@ export class ConnectorService {
         guildMembersIntent: applicationPosture.privilegedIntents.guildMembers,
         id: identity.application.id,
         messageContentIntent: applicationPosture.privilegedIntents.messageContent,
-        name: identity.application.name,
       },
       applicationPosture,
-      auditFile: this.#config.auditFile,
       bot: {
         id: identity.bot.id,
-        username: identity.bot.username,
       },
       guildPage: {
         accessible: guilds.length,
         inScope: scopedGuilds.length,
       },
       policy: this.describePolicy(),
-      schemaVersion: SCHEMA_VERSION,
+      privacy: CONNECTOR_STATUS_PRIVACY,
+      schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
       status: "ok",
       writeCoordination: {
         coverage: "receipt-backed-reviewed-writes",

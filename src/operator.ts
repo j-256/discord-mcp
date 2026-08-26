@@ -85,6 +85,8 @@ import {
 } from "./profile.js"
 import {
   applicationPostureRequirementsForConfig,
+  CONNECTOR_STATUS_PRIVACY,
+  CONNECTOR_STATUS_SCHEMA_VERSION,
   ConnectorService,
 } from "./service.js"
 import {
@@ -103,6 +105,23 @@ const DOCTOR_DIAGNOSTIC_CREDENTIAL_VALUE = "credential-unavailable"
 const SMOKE_PROTOCOL_VERSION = "2026-07-28"
 const STDIO_SMOKE_STDERR_CAPTURE_BYTES = 16 * 1024
 const STDIO_SMOKE_STDERR_REPORT_BYTES = 8 * 1024
+const CONNECTOR_STATUS_APPLICATION_KEYS = Object.freeze([
+  "guildMembersIntent",
+  "id",
+  "messageContentIntent",
+])
+const CONNECTOR_STATUS_BOT_KEYS = Object.freeze(["id"])
+const CONNECTOR_STATUS_KEYS = Object.freeze([
+  "application",
+  "applicationPosture",
+  "bot",
+  "guildPage",
+  "policy",
+  "privacy",
+  "schemaVersion",
+  "status",
+  "writeCoordination",
+])
 
 // A subclass keeps modern discovery on the observed process so startup stderr remains available
 class SmokeStdioClientTransport extends StdioClientTransport {}
@@ -3949,6 +3968,25 @@ function numberProperty(value: unknown, property: string): number | undefined {
   return typeof record?.[property] === "number" ? record[property] : undefined
 }
 
+function matchesExactStringRecord(
+  value: unknown,
+  expected: Readonly<Record<string, string>>,
+): boolean {
+  const record = objectValue(value)
+  const entries = Object.entries(expected)
+  return record !== undefined
+    && Object.keys(record).length === entries.length
+    && entries.every(([key, expectedValue]) => record[key] === expectedValue)
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  return Object.keys(value).length === expected.length
+    && expected.every((key) => key in value)
+}
+
 function assertExactCatalog(
   actual: readonly string[],
   expected: readonly string[],
@@ -4239,17 +4277,30 @@ async function inspectSmokeClient(
       throw new Error("Discord connector identity smoke call failed")
     }
   }
-  const applicationId = stringProperty(structured.application, "id")
-  const botId = stringProperty(structured.bot, "id")
+  const application = objectValue(structured.application)
+  const bot = objectValue(structured.bot)
+  const applicationId = stringProperty(application, "id")
+  const botId = stringProperty(bot, "id")
   const guildsAccessible = numberProperty(structured.guildPage, "accessible")
   const guildsInScope = numberProperty(structured.guildPage, "inScope")
   if (
-    !applicationId
+    !application
+    || !bot
+    || !applicationId
     || !botId
     || guildsAccessible === undefined
     || guildsInScope === undefined
   ) {
     throw new Error("MCP get_connector_status returned an invalid identity report")
+  }
+  if (
+    structured.schemaVersion !== CONNECTOR_STATUS_SCHEMA_VERSION
+    || !hasExactKeys(structured, CONNECTOR_STATUS_KEYS)
+    || !hasExactKeys(application, CONNECTOR_STATUS_APPLICATION_KEYS)
+    || !hasExactKeys(bot, CONNECTOR_STATUS_BOT_KEYS)
+    || !matchesExactStringRecord(structured.privacy, CONNECTOR_STATUS_PRIVACY)
+  ) {
+    throw new Error("MCP get_connector_status returned an invalid privacy report")
   }
   if (guildsInScope < 1) {
     throw new Error("MCP get_connector_status found no accessible guilds inside local scope")

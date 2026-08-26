@@ -478,6 +478,10 @@ import {
 } from "../src/observability.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import {
+  CONNECTOR_STATUS_PRIVACY,
+  CONNECTOR_STATUS_SCHEMA_VERSION,
+} from "../src/service.js"
+import {
   DISCORD_PERMISSIONS,
   discordPermissionBitfield,
   discordPermissionNames,
@@ -11136,14 +11140,13 @@ function serviceFixture(overrides: {
           guildMembersIntent: "enabled" as const,
           id: "500000000000000001",
           messageContentIntent: "enabled" as const,
-          name: "Connector",
         },
         applicationPosture,
-        auditFile: "/memory/activity.jsonl",
-        bot: { id: "600000000000000001", username: "bot" },
+        bot: { id: "600000000000000001" },
         guildPage: { accessible: 1, inScope: 1 },
         policy: fixturePolicy(),
-        schemaVersion: 1,
+        privacy: CONNECTOR_STATUS_PRIVACY,
+        schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
         status: "ok",
         writeCoordination: {
           coverage: "receipt-backed-reviewed-writes",
@@ -15526,6 +15529,15 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     arguments: {},
     name: "get_connector_status",
   }))
+  assert.deepEqual(status.application, {
+    guildMembersIntent: "enabled",
+    id: "500000000000000001",
+    messageContentIntent: "enabled",
+  })
+  assert.deepEqual(status.bot, { id: "600000000000000001" })
+  assert.deepEqual(status.privacy, CONNECTOR_STATUS_PRIVACY)
+  assert.equal(status.schemaVersion, CONNECTOR_STATUS_SCHEMA_VERSION)
+  assert.equal("auditFile" in status, false)
   assert.deepEqual(status.writeCoordination, {
     coverage: "receipt-backed-reviewed-writes",
     excludedWorkflows: ["ordinary-message-interactions"],

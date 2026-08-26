@@ -41,7 +41,11 @@ import {
   loadProfile,
 } from "../src/profile.js"
 import { getSetupPreset } from "../src/setup-presets.js"
-import type { ConnectorService } from "../src/service.js"
+import {
+  CONNECTOR_STATUS_PRIVACY,
+  CONNECTOR_STATUS_SCHEMA_VERSION,
+  type ConnectorService,
+} from "../src/service.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import {
   fixtureConfigInput,
@@ -190,13 +194,10 @@ function status(
       guildMembersIntent,
       id: APPLICATION_ID,
       messageContentIntent,
-      name: "Connector",
     },
     applicationPosture,
-    auditFile: "/test/activity.jsonl",
     bot: {
       id: BOT_ID,
-      username: "connector-bot",
     },
     guildPage: {
       accessible: 2,
@@ -398,7 +399,8 @@ function status(
       widgetSettingsChangesEnabled: false,
       widgetSettingsGuildIds: [],
     },
-    schemaVersion: 1,
+    privacy: CONNECTOR_STATUS_PRIVACY,
+    schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
     status: "ok",
     writeCoordination: {
       coverage: "receipt-backed-reviewed-writes",
@@ -419,7 +421,9 @@ function statusProvider(inScope = 1): StatusProvider {
   }
 }
 
-function toolService(): DiscordToolService {
+function toolService(
+  connectorStatus: Awaited<ReturnType<ConnectorService["getStatus"]>> = status(),
+): DiscordToolService {
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected smoke service call")
   }
@@ -583,7 +587,7 @@ function toolService(): DiscordToolService {
     getMessage: unexpected,
     getRole: unexpected,
     async getStatus() {
-      return status()
+      return connectorStatus
     },
     listActivity: unexpected,
     listActiveThreads: unexpected,
@@ -5853,4 +5857,43 @@ test("MCP smoke expands a progressive subset without broadening configured tools
     "read_messages",
     "search_messages",
   ])
+})
+
+test("MCP smoke rejects connector status disclosure and altered privacy evidence", async () => {
+  const safeStatus = status()
+  const unsafeStatuses = [
+    {
+      ...safeStatus,
+      application: {
+        ...safeStatus.application,
+        name: "private-application-profile",
+      },
+      auditFile: "/private/connector/activity.jsonl",
+      bot: {
+        ...safeStatus.bot,
+        username: "private-bot-profile",
+      },
+    },
+    {
+      ...safeStatus,
+      privacy: {
+        ...safeStatus.privacy,
+        localPaths: "included",
+      },
+    },
+    {
+      ...safeStatus,
+      privacy: undefined,
+    },
+  ] as unknown as Array<Awaited<ReturnType<ConnectorService["getStatus"]>>>
+
+  for (const connectorStatus of unsafeStatuses) {
+    await assert.rejects(
+      () => smokeConnector({
+        configOverrides: fixturePolicy(),
+        service: toolService(connectorStatus),
+      }),
+      /get_connector_status returned an invalid privacy report/u,
+    )
+  }
 })
