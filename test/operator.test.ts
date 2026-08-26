@@ -5483,6 +5483,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
+    "author_guild_blueprint",
     "find_guild_members",
     "inspect_guild_ban",
     "review_announcement_crosspost",

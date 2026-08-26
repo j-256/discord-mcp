@@ -124,6 +124,21 @@ function restoreEnvironment(
   }
 }
 
+test("guild-blueprint prompts share one explicit toolset boundary", () => {
+  assert.deepEqual(
+    selectedMcpPromptNames(new Set(["guild-blueprints"])).sort(),
+    [
+      MCP_PROMPT_NAMES.authorGuildBlueprint,
+      MCP_PROMPT_NAMES.reviewGuildBlueprint,
+    ].sort(),
+  )
+  assert.equal(
+    selectedMcpPromptNames(new Set(["messages"]))
+      .includes(MCP_PROMPT_NAMES.authorGuildBlueprint),
+    false,
+  )
+})
+
 test("credential-free catalog exposes every exact production contract with complete metadata", async () => {
   await withCatalogClient(async (client) => {
     const [tools, prompts, resources, templates] = await Promise.all([

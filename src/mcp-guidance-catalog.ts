@@ -125,6 +125,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
+  authorGuildBlueprint: "author_guild_blueprint",
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
   reviewApplicationCommands: "review_application_commands",
@@ -195,6 +196,7 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
 ]
 
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
+  [MCP_PROMPT_NAMES.authorGuildBlueprint]: "guild-blueprints",
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.inspectGuildBan]: "bans",
   [MCP_PROMPT_NAMES.reviewAnnouncementCrosspost]: "announcement-crossposts",
