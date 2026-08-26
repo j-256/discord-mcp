@@ -324,6 +324,9 @@ try {
   assert.deepEqual(unknownGuard, listedGuard)
   assert.equal(listedGuard.isError, true)
   assert.equal(listedGuard.structuredContent.error.code, "CATALOG_ONLY")
+  assert.equal(listedGuard.content.length, 2)
+  assert.match(listedGuard.content[1].text, /^DISCORD_MCP_RECEIPT /)
+  assert.match(listedGuard.content[1].text, /CATALOG_ONLY/)
   const catalogSafety = await catalogClient.readResource({ uri: "${STATIC_RESOURCE_URI}" })
   assert.equal(catalogSafety.contents.length, 1)
 } finally {
@@ -343,11 +346,18 @@ const modernCatalogClient = new Client(
 )
 try {
   await modernCatalogClient.connect(modernCatalogTransport)
+  const guard = await modernCatalogClient.callTool({
+    arguments: {},
+    name: "read_messages",
+  })
   const completion = await modernCatalogClient.complete({
     argument: { name: "channelId", value: "" },
     ref: { name: "summarize_channel", type: "ref/prompt" },
   })
   assert.equal(modernCatalogClient.getProtocolEra(), "modern")
+  assert.equal(guard.content.length, 2)
+  assert.match(guard.content[1].text, /^DISCORD_MCP_RECEIPT /)
+  assert.match(guard.content[1].text, /CATALOG_ONLY/)
   assert.deepEqual(modernCatalogClient.getServerCapabilities().completions, {})
   assert.deepEqual(completion.completion.values, [])
 } finally {

@@ -43,6 +43,7 @@ import {
   MCP_PLAN_REVIEW_TOOL_NAMES,
   isPlanReviewToolName,
 } from "../src/mcp-plan-review-app.js"
+import { DISCORD_MCP_RECEIPT_PREFIX } from "../src/mcp-output.js"
 import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
 import { stableString } from "../src/normalize.js"
 import {
@@ -207,6 +208,13 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
       schemaVersion: 1,
       status: "catalog-only",
     })
+    assert.equal(results[0]?.content.length, 2)
+    const receipt = results[0]?.content[1]
+    assert.equal(receipt?.type, "text")
+    if (receipt?.type === "text") {
+      assert.ok(receipt.text.startsWith(DISCORD_MCP_RECEIPT_PREFIX))
+      assert.equal(receipt.text.includes(CATALOG_ONLY_ERROR_CODE), true)
+    }
   })
 })
 

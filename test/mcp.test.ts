@@ -12072,6 +12072,19 @@ function structuredContent(result: { structuredContent?: unknown }): Record<stri
   return result.structuredContent as Record<string, unknown>
 }
 
+function assertContentFreeToolReceipt(result: {
+  content?: Array<{ text?: string; type: string }>
+  structuredContent?: unknown
+}): void {
+  assert.ok(result.structuredContent)
+  assert.equal(result.content?.[0]?.type, "text")
+  assert.equal(result.content?.[1]?.type, "text")
+  assert.match(
+    result.content?.[1]?.text || "",
+    /^DISCORD_MCP_RECEIPT \{"receiptSchema":"discord-mcp-result-receipt\.v1"/,
+  )
+}
+
 function listedTool(tools: readonly Tool[], name: string): Tool {
   const tool = tools.find((entry) => entry.name === name)
   assert.ok(tool, `Expected MCP tool ${name}`)
@@ -12891,6 +12904,35 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     })
   }
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
+})
+
+test("MCP reviewed results expose content-free text receipts in both protocol eras", async (context) => {
+  const legacy = await connectedFixture(context)
+  const modern = await connectedModernStdioFixture(context)
+  const request = {
+    action: "kick" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_MODERATION_OPERATION_KEY,
+    userId: USER_ID,
+  }
+
+  const results = await Promise.all([
+    legacy.client.callTool({ arguments: request, name: "plan_member_moderation" }),
+    modern.client.callTool({ arguments: request, name: "plan_member_moderation" }),
+  ])
+
+  for (const result of results) {
+    assertContentFreeToolReceipt(result)
+    assert.equal(JSON.stringify(result).includes(TOKEN), false)
+    const receipt = result.content?.[1]
+    assert.equal(receipt?.type, "text")
+    assert.doesNotMatch(
+      receipt?.type === "text" ? receipt.text : "",
+      new RegExp(AUDIT_REASON),
+    )
+  }
+  assert.equal(modern.client.getProtocolEra(), "modern")
 })
 
 test("MCP tools continue only strict trace context from request metadata", async (context) => {
@@ -19724,6 +19766,7 @@ test("MCP webhook deletion binds signed approval to exact redacted evidence", as
   })
 
   assert.equal(structuredContent(result).status, "completed")
+  assertContentFreeToolReceipt(result)
   assert.match(
     (result.content?.[0] as { text?: string } | undefined)?.text || "",
     /credential cleanup removed/,

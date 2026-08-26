@@ -454,6 +454,8 @@ async function verifyMcp(image, catalog) {
     const guard = await client.callTool({ arguments: {}, name: "read_messages" })
     invariant(guard.isError === true, "container catalog allowed a Discord tool call")
     invariant(guard.structuredContent?.error?.code === "CATALOG_ONLY", "container catalog returned the wrong execution guard")
+    invariant(guard.content.length === 2, "container catalog omitted the content-free receipt")
+    invariant(guard.content[1]?.type === "text" && guard.content[1].text.startsWith("DISCORD_MCP_RECEIPT ") && guard.content[1].text.includes("CATALOG_ONLY"), "container catalog returned an invalid content-free receipt")
     const safety = await client.readResource({ uri: SAFETY_RESOURCE_URI })
     invariant(safety.contents.length === 1, "container safety resource changed")
     return {

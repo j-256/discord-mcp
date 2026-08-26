@@ -48,6 +48,10 @@ import {
   type DiscordToolService,
 } from "./mcp.js"
 import {
+  DISCORD_MCP_RECEIPT_PREFIX,
+  DISCORD_MCP_RECEIPT_SCHEMA,
+} from "./mcp-output.js"
+import {
   MCP_APP_EXTENSION_ID,
   MCP_PLAN_REVIEW_APP_HTML,
   MCP_PLAN_REVIEW_APP_MIME_TYPE,
@@ -418,7 +422,7 @@ function assertPlanReviewAppHtml(html: string): void {
 
 function assertCatalogOnlyResult(result: CallToolResult): void {
   catalogInvariant(result.isError === true, "execution guard did not return a tool error")
-  catalogInvariant(result.content.length === 1, "execution guard content changed")
+  catalogInvariant(result.content.length === 2, "execution guard content changed")
   const content = result.content[0]
   catalogInvariant(
     content?.type === "text" && content.text === CATALOG_ONLY_MESSAGE,
@@ -432,6 +436,21 @@ function assertCatalogOnlyResult(result: CallToolResult): void {
   catalogInvariant(error?.code === CATALOG_ONLY_ERROR_CODE, "execution guard code changed")
   catalogInvariant(error?.recoveryHint === CATALOG_ONLY_RECOVERY, "execution guard recovery changed")
   catalogInvariant(error?.retriable === false, "execution guard became retriable")
+  const fallback = result.content[1]
+  catalogInvariant(
+    fallback?.type === "text"
+    && fallback.text === `${DISCORD_MCP_RECEIPT_PREFIX}${JSON.stringify({
+      receiptSchema: DISCORD_MCP_RECEIPT_SCHEMA,
+      schemaVersion: SCHEMA_VERSION,
+      status: CATALOG_ONLY_STATUS,
+      error: {
+        category: "client",
+        code: CATALOG_ONLY_ERROR_CODE,
+        retriable: false,
+      },
+    })}`,
+    "execution guard content-free receipt changed",
+  )
 }
 
 export function createDiscordCatalogServer(): McpServer {

@@ -424,6 +424,7 @@ import { extractMcpRemoteSpanContext } from "./mcp-trace-context.js"
 import {
   budgetMcpToolResult,
   redactMcpValue,
+  withContentFreeToolReceipt,
 } from "./mcp-output.js"
 import {
   attachPlanReviewApp,
@@ -10248,10 +10249,13 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
         const invoke = () => handler(input, context)
         const result = observation ? await observation.run(invoke) : await invoke()
         const redacted = redactMcpValue(result, secrets)
+        const compatible = isInputRequiredResult(redacted)
+          ? redacted
+          : withContentFreeToolReceipt(redacted)
         const bounded = budgetMcpToolResult(
-          redacted,
+          compatible,
           mcpReadResponseMaxBytes,
-          mutationCapable && !isInputRequiredResult(redacted),
+          mutationCapable && !isInputRequiredResult(compatible),
         )
         try {
           observation?.end({
@@ -10274,7 +10278,7 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
           secrets,
         )
         return budgetMcpToolResult(
-          redacted,
+          withContentFreeToolReceipt(redacted),
           mcpReadResponseMaxBytes,
           mutationCapable,
         )

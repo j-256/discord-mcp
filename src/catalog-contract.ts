@@ -1,6 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/server"
 
 import { SCHEMA_VERSION } from "./constants.js"
+import { withContentFreeToolReceipt } from "./mcp-output.js"
 
 export const CATALOG_ONLY_ERROR_CODE = "CATALOG_ONLY"
 export const CATALOG_ONLY_MESSAGE = "Tool execution is disabled in credential-free catalog mode"
@@ -8,7 +9,7 @@ export const CATALOG_ONLY_RECOVERY = "Use discord-mcp serve with credentialed co
 export const CATALOG_ONLY_STATUS = "catalog-only"
 
 export function catalogOnlyResult(): CallToolResult {
-  return {
+  return withContentFreeToolReceipt({
     content: [{
       text: CATALOG_ONLY_MESSAGE,
       type: "text",
@@ -24,5 +25,5 @@ export function catalogOnlyResult(): CallToolResult {
       schemaVersion: SCHEMA_VERSION,
       status: CATALOG_ONLY_STATUS,
     },
-  }
+  })
 }
